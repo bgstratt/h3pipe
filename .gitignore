@@ -41,3 +41,10 @@ tests/local/
 
 # Claude Code agent worktrees
 .claude/worktrees/
+
+# Editor UI (web/): sources and the mock's media are committed, build junk isn't.
+# The built extension, comfy_nodes/web/h3pipe-editor.js, is committed on purpose.
+web/node_modules/
+web/dist-dev/
+web/*.tsbuildinfo
+!web/mock/media/**
