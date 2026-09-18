@@ -1,0 +1,384 @@
+import { memo, useMemo, useState, type MouseEvent } from "react";
+import {
+  build, loadEpisodes, openMenu, openViewer, pickTake, refreshEpisode, renderShots, saveRoots,
+  select, selectEpisode, setPass, toggleExpanded, toggleSequence,
+} from "../actions";
+import { host } from "../host";
+import {
+  cutTake, fmtSeconds, fmtWhen, groupBySequence, realStale, shotBadges, staleTitle, tn,
+} from "../lib/format";
+import { renderingTakes, statusKey, store, useApp } from "../store";
+import type { Pass, ShotStatus, TakeSummary } from "../types";
+import { aspectOf, useStatus } from "./hooks";
+import { Badges, Progress, Thumb, statusClass } from "./Thumb";
+
+export function PassToggle() {
+  const pass = useApp((s) => s.pass);
+  return (
+    <span className="h3-seg" title="Which pass to show and render">
+      {(["proxy", "final"] as Pass[]).map((p) => (
+        <button key={p} className={pass === p ? "h3-on" : ""} onClick={() => setPass(p)}>
+          {p}
+        </button>
+      ))}
+    </span>
+  );
+}
+
+function RootsEditor({ onDone }: { onDone?: () => void }) {
+  const config = useApp((s) => s.config);
+  const busy = useApp((s) => !!s.busy.config);
+  const [text, setText] = useState(() => (config?.roots ?? []).join("\n"));
+  const roots = text.split(/\r?\n/).map((r) => r.trim()).filter(Boolean);
+  return (
+    <div className="h3-col">
+      <textarea
+        className="h3-in"
+        rows={3}
+        placeholder={"C:\\Users\\you\\Shows"}
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+      />
+      <div className="h3-row">
+        <span className="h3-muted h3-small h3-grow">One folder per line. Episodes are found up to two levels below.</span>
+        {onDone && <button className="h3-btn" onClick={onDone}>Cancel</button>}
+        <button
+          className="h3-btn h3-primary"
+          disabled={busy || !roots.length}
+          onClick={async () => {
+            if (await saveRoots(roots)) onDone?.();
+          }}
+        >
+          Save
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function EpisodeHeader() {
+  const episodes = useApp((s) => s.episodes);
+  const episodesError = useApp((s) => s.episodesError);
+  const config = useApp((s) => s.config);
+  const configError = useApp((s) => s.configError);
+  const ep = useApp((s) => s.ep);
+  const [editRoots, setEditRoots] = useState(false);
+
+  if (configError && !config) {
+    return (
+      <div className="h3-pad h3-col">
+        <div className="h3-note h3-note-err">Can't read the h3pipe config: {configError}</div>
+        <button className="h3-btn" onClick={() => void loadEpisodes()}>Retry</button>
+      </div>
+    );
+  }
+  if (config && !config.roots.length) {
+    return (
+      <div className="h3-pad h3-col">
+        <div className="h3-title">Welcome to h3pipe</div>
+        <div className="h3-muted">
+          Tell the editor where your shows live: a folder that holds episode folders (each with a
+          <span className="h3-mono"> series.json</span> and a script).
+        </div>
+        <RootsEditor />
+      </div>
+    );
+  }
+  return (
+    <div className="h3-pad h3-col" style={{ gap: 4 }}>
+      <div className="h3-row">
+        <select
+          className="h3-in h3-grow"
+          value={ep ?? ""}
+          onChange={(e) => selectEpisode(e.target.value || null)}
+          title={ep ?? ""}
+        >
+          {!episodes?.length && <option value="">{episodes ? "No episodes found" : "Loading…"}</option>}
+          {episodes?.map((e) => (
+            <option key={e.ep} value={e.ep} title={e.ep}>
+              {e.series ? `${e.series} · ` : ""}{e.name}{e.title && e.title !== e.series ? ` — ${e.title}` : ""}
+              {!e.built.proxy && !e.built.final ? " (not built)" : ""}
+            </option>
+          ))}
+        </select>
+        <button className="h3-btn h3-icon" title="Rescan the project roots" onClick={() => void loadEpisodes()}>
+          <i className="pi pi-refresh" />
+        </button>
+        <button className={`h3-btn h3-icon${editRoots ? " h3-on" : ""}`} title="Project roots" onClick={() => setEditRoots(!editRoots)}>
+          <i className="pi pi-folder" />
+        </button>
+      </div>
+      {episodesError && <div className="h3-note h3-note-err">{episodesError}</div>}
+      {editRoots && <RootsEditor onDone={() => setEditRoots(false)} />}
+      {episodes && !episodes.length && !editRoots && (
+        <div className="h3-muted h3-small">
+          No episode folders under {config?.roots.join(", ")}. An episode needs a series.json (here or in its parent) and a script.
+        </div>
+      )}
+    </div>
+  );
+}
+
+function BuildBar() {
+  const ep = useApp((s) => s.ep);
+  const b = useApp((s) => s.build);
+  const pass = useApp((s) => s.pass);
+  const st = useStatus();
+  const renderBusy = useApp((s) => Object.keys(s.busy).some((k) => k.startsWith("render|")));
+  const [open, setOpen] = useState(true);
+  if (!ep) return null;
+  const missing = st?.shots.filter((s) => !s.orphan && !s.takes.some((t) => t.status === "ok" || t.status === "queued")) ?? [];
+  const failed = b.result && !b.result.ok;
+  return (
+    <div className="h3-pad h3-col" style={{ gap: 4, paddingTop: 0 }}>
+      <div className="h3-row h3-wrap">
+        <PassToggle />
+        <button className="h3-btn" disabled={b.busy} onClick={() => void build()} title="Run h3build for both passes from the script and bible">
+          <i className={b.busy ? "pi pi-spin pi-spinner" : "pi pi-cog"} /> {b.busy ? "Building…" : "Build"}
+        </button>
+        <button
+          className="h3-btn"
+          disabled={!missing.length || renderBusy}
+          title={missing.length ? `Queue a ${pass} take for each shot without one: ${missing.map((s) => s.shot).join(", ")}` : "Every shot has a take"}
+          onClick={() => {
+            if (missing.length > 8 && !confirm(`Queue ${missing.length} ${pass} renders?`)) return;
+            void renderShots(missing.map((s) => s.shot), false);
+          }}
+        >
+          <i className="pi pi-play" /> Render missing{missing.length ? ` (${missing.length})` : ""}
+        </button>
+      </div>
+      {(b.result || b.error) && (
+        <div className={`h3-note ${failed || b.error ? "h3-note-err" : "h3-note-info"}`}>
+          <div className="h3-row">
+            <span className="h3-grow">{b.error ? "Build didn't run" : failed ? "Build failed" : "Built"}</span>
+            <button className="h3-link" onClick={() => setOpen(!open)}>{open ? "hide" : "show"}</button>
+            <button className="h3-link" onClick={() => store.set({ build: { busy: false, result: null, error: null } })}>✕</button>
+          </div>
+          {open && b.error && <div className="h3-err">{b.error}</div>}
+          {open && b.result && (["final", "proxy"] as Pass[]).map((p) => {
+            const r = b.result!.passes[p];
+            if (!r) return null;
+            return (
+              <div key={p}>
+                <div className="h3-h">{p} {r.ok ? "ok" : "failed"}</div>
+                {r.error && <pre className="h3-pre h3-err">{r.error}</pre>}
+                {r.report && <pre className="h3-pre" style={{ maxHeight: 140 }}>{r.report}</pre>}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+const TakeRow = memo(function TakeRow({ ep, pass, s, t, aspect, selected, rendering, progress }: {
+  ep: string; pass: Pass; s: ShotStatus; t: TakeSummary; aspect: number; selected: boolean; rendering: boolean;
+  progress?: { value: number; max: number };
+}) {
+  const isCut = !s.cut.placeholder && s.cut.take === t.take;
+  const stale = realStale(t);
+  const usable = t.status === "ok" && t.has_video;
+  const pickBusy = useApp((st) => !!st.busy[`pick|${s.shot}`]);
+  const onMenu = (e: MouseEvent) => {
+    e.preventDefault();
+    openMenu(e.clientX, e.clientY, s.shot, t.take, pass);
+  };
+  return (
+    <div
+      className={`h3-take${selected ? " h3-sel" : ""}`}
+      onClick={() => select(s.shot, t.take)}
+      onDoubleClick={() => t.mp4 && openViewer(s.shot, t.take, null, "single", pass)}
+      onContextMenu={onMenu}
+    >
+      <Thumb ep={ep} pass={pass} shot={s.shot} take={t} height={40} aspect={aspect} />
+      <div className="h3-take-info">
+        <div className="h3-row">
+          <span className={`h3-dot ${statusClass(t.status, rendering)}`} />
+          <b>{tn(t.take)}</b>
+          <span className="h3-muted">{rendering ? "rendering" : t.status}</span>
+          {isCut && <span className="h3-badge h3-b-cut" title={s.cut.picked ? "Picked in cut.json" : "The latest usable take"}>{s.cut.picked ? "cut (picked)" : "cut"}</span>}
+          <span className="h3-grow" />
+          {usable && !isCut && (
+            <button className="h3-btn" disabled={pickBusy} title="Use this take in the cut" onClick={(e) => { e.stopPropagation(); void pickTake(s.shot, t.take); }}>
+              Use
+            </button>
+          )}
+          <button className="h3-btn h3-icon" title="More" onClick={(e) => { e.stopPropagation(); onMenu(e); }}>⋯</button>
+        </div>
+        {rendering && progress && <Progress value={progress.value} max={progress.max} />}
+        <div className="h3-row h3-small">
+          <span className="h3-mono h3-ell" title={t.seed ?? "no sidecar"}>{t.seed != null ? `seed ${t.seed}` : "no sidecar"}</span>
+          {t.seed_source && <span className="h3-muted">{t.seed_source}</span>}
+        </div>
+        {(stale.length > 0 || t.overrides.length > 0) && (
+          <div className="h3-badges">
+            {stale.map((r) => <span key={r} className="h3-badge h3-b-stale" title={staleTitle([r])}>stale: {r}</span>)}
+            {t.overrides.length > 0 && <span className="h3-badge h3-b-override" title={`Rendered with an override of: ${t.overrides.join(", ")}`}>ovr: {t.overrides.join(",")}</span>}
+          </div>
+        )}
+        {t.note && <div className="h3-small h3-ell" title={t.note}>“{t.note}”</div>}
+        {t.status === "failed" && t.save_notes && <div className="h3-small h3-err">{t.save_notes}</div>}
+        {t.finished && <div className="h3-small h3-muted">{fmtWhen(t.finished)}</div>}
+      </div>
+    </div>
+  );
+});
+
+function ShotRow({ ep, pass, s, aspect }: { ep: string; pass: Pass; s: ShotStatus; aspect: number }) {
+  const selected = useApp((st) => st.shot === s.shot);
+  const selTake = useApp((st) => (st.shot === s.shot ? st.take : null));
+  const expanded = useApp((st) => !!st.expanded[s.shot]);
+  const running = useApp((st) => st.running);
+  const prompts = useApp((st) => st.prompts);
+  const progress = useApp((st) => st.progress);
+  const rendering = useMemo(() => renderingTakes({ running, prompts }, ep, pass, s.shot), [running, prompts, ep, pass, s.shot]);
+  const badges = useMemo(() => shotBadges(s, rendering), [s, rendering]);
+  const ct = cutTake(s);
+  const runPid = running && prompts[running]?.shot === s.shot && prompts[running]?.pass === pass ? running : null;
+  const prog = runPid ? progress[runPid] : undefined;
+  const n = s.takes.length;
+  return (
+    <div className={`h3-shot${selected ? " h3-sel" : ""}`}>
+      <div
+        className="h3-shot-row"
+        onClick={() => select(s.shot, ct?.take ?? null)}
+        onDoubleClick={() => (ct ? openViewer(s.shot, ct.take, null, "single", pass) : toggleExpanded(s.shot))}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          openMenu(e.clientX, e.clientY, s.shot, ct?.take ?? null, pass);
+        }}
+      >
+        <span
+          className="h3-chev"
+          title={expanded ? "Hide takes" : "Show takes"}
+          onClick={(e) => {
+            e.stopPropagation();
+            toggleExpanded(s.shot);
+          }}
+        >
+          {expanded ? "▼" : "▶"}
+        </span>
+        <Thumb ep={ep} pass={pass} shot={s.shot} take={ct} height={28} aspect={aspect} />
+        <div className="h3-col h3-grow" style={{ gap: 1 }}>
+          <div className="h3-row">
+            <b>{s.shot}</b>
+            <span className="h3-muted h3-small">{fmtSeconds(s.seconds)}{s.size ? ` · ${s.size}` : ""}</span>
+            <span className="h3-grow" />
+            <span className="h3-muted h3-small" title={`${n} take(s)${ct ? `; the cut uses ${tn(ct.take)}` : ""}`}>
+              {n ? `${n} take${n > 1 ? "s" : ""}` : ""}{ct ? ` · ${tn(ct.take)}` : ""}
+            </span>
+          </div>
+          {badges.length > 0 && <Badges badges={badges} />}
+          {prog && <Progress value={prog.value} max={prog.max} />}
+        </div>
+      </div>
+      {expanded && (
+        <div className="h3-takes">
+          {!s.takes.length && (
+            <div className="h3-row h3-small">
+              <span className="h3-muted h3-grow">No takes in {pass}.</span>
+              <button className="h3-btn" onClick={() => void renderShots([s.shot], false)}>Render</button>
+            </div>
+          )}
+          {[...s.takes].reverse().map((t) => (
+            <TakeRow
+              key={t.take}
+              ep={ep}
+              pass={pass}
+              s={s}
+              t={t}
+              aspect={aspect}
+              selected={selected && selTake === t.take}
+              rendering={rendering.has(t.take)}
+              progress={runPid ? progress[runPid] : undefined}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ShotBin() {
+  const ep = useApp((s) => s.ep);
+  const pass = useApp((s) => s.pass);
+  const st = useStatus();
+  const err = useApp((s) => (s.ep ? s.statusError[statusKey(s.ep, s.pass)] : undefined));
+  const loading = useApp((s) => (s.ep ? !!s.statusLoading[statusKey(s.ep, s.pass)] : false));
+  const collapsed = useApp((s) => s.collapsedSeq);
+  const [filter, setFilter] = useState("");
+  const groups = useMemo(() => groupBySequence(st?.shots ?? []), [st]);
+  if (!ep) return null;
+  if (err && !st) {
+    return (
+      <div className="h3-pad h3-col">
+        <div className="h3-note h3-note-err">{err}</div>
+        <div className="h3-row">
+          <button className="h3-btn" onClick={() => void refreshEpisode()}>Retry</button>
+          <span className="h3-muted h3-small">If the {pass} pass isn't built yet, press Build.</span>
+        </div>
+      </div>
+    );
+  }
+  if (!st) return <div className="h3-empty-state">{loading ? "Loading…" : ""}</div>;
+  const aspect = aspectOf(st);
+  const f = filter.trim().toLowerCase();
+  const withTakes = st.shots.filter((s) => s.takes.some((t) => t.status === "ok")).length;
+  const queued = st.shots.reduce((n, s) => n + s.takes.filter((t) => t.status === "queued").length, 0);
+  return (
+    <>
+      <div className="h3-row h3-pad" style={{ paddingTop: 0 }}>
+        <input className="h3-in h3-grow" placeholder="Filter shots (id, size, subject)" value={filter} onChange={(e) => setFilter(e.target.value)} />
+        <span className="h3-muted h3-small" title={`${withTakes} of ${st.shots.length} shots have a finished take; ${queued} queued`}>
+          {withTakes}/{st.shots.length}{queued ? ` · ${queued}q` : ""}
+        </span>
+        {loading && <i className="pi pi-spin pi-spinner h3-muted" />}
+      </div>
+      {err && <div className="h3-pad"><div className="h3-note h3-note-err">{err}</div></div>}
+      <div className="h3-scroll h3-sep">
+        {groups.map((g) => {
+          const key = `${g.sequence}@${g.start}`;
+          const shots = f
+            ? g.shots.filter((s) => [s.shot, s.size ?? "", ...s.subjects, s.sequence ?? ""].some((x) => x.toLowerCase().includes(f)))
+            : g.shots;
+          if (!shots.length) return null;
+          const isCollapsed = !!collapsed[key] && !f;
+          return (
+            <div key={key} className="h3-seq">
+              <div className="h3-seq-head" onClick={() => toggleSequence(key)}>
+                <span className="h3-chev">{isCollapsed ? "▶" : "▼"}</span>
+                <b>{g.sequence}</b>
+                <span className="h3-muted h3-small">{g.shots.length} shot{g.shots.length > 1 ? "s" : ""} · {fmtSeconds(g.seconds)}</span>
+              </div>
+              {!isCollapsed && shots.map((s) => <ShotRow key={s.shot} ep={ep} pass={pass} s={s} aspect={aspect} />)}
+            </div>
+          );
+        })}
+        {!st.shots.length && <div className="h3-empty-state">The {pass} shotlist has no shots.</div>}
+      </div>
+    </>
+  );
+}
+
+export function ShotsTab() {
+  const ep = useApp((s) => s.ep);
+  return (
+    <div className="h3-surface">
+      <div className="h3-bar" style={{ justifyContent: "space-between" }}>
+        <span className="h3-title">Shots</span>
+        {ep && (
+          <span className="h3-row">
+            <button className="h3-btn h3-icon" title="Open the inspector" onClick={() => host().show("inspector")}><i className="pi pi-sliders-h" /></button>
+            <button className="h3-btn h3-icon" title="Open the timeline" onClick={() => host().show("timeline")}><i className="pi pi-images" /></button>
+            <button className="h3-btn h3-icon" title="Refresh" onClick={() => void refreshEpisode()}><i className="pi pi-refresh" /></button>
+          </span>
+        )}
+      </div>
+      <EpisodeHeader />
+      <BuildBar />
+      <ShotBin />
+    </div>
+  );
+}
