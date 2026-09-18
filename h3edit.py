@@ -181,6 +181,7 @@ def episode_status(root: str, pass_: str, folder: str | None = None) -> dict:
                 "strip": rel(root, t.paths.strip),
                 "mp4": rel(root, t.paths.mp4),
                 "queued": (t.sidecar or {}).get("queued"),
+                "comfy_prompt_id": (t.sidecar or {}).get("comfy_prompt_id"),
                 "finished": (t.sidecar or {}).get("finished"),
                 "save_notes": (t.sidecar or {}).get("save_notes", ""),
             } for t in takes],

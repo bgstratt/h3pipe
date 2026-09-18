@@ -66,6 +66,7 @@ queued takes whose ComfyUI job is gone (`h3takes.sweep_queued`, with `as_of` tak
               "strip": "renders_proxy/sh020/sh020_t01_strip.jpg",
               "mp4": "renders_proxy/sh020/sh020_t01.mp4",
               "queued": "2026-09-18T18:00:16-05:00", "finished": "…",
+              "comfy_prompt_id": "…",
               "save_notes": "…"}]
  }]}
 ```
