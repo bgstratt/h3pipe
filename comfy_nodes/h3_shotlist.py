@@ -753,8 +753,33 @@ class H3SaveShot:
                     thumb=thumb, strip=strip)
             except Exception as exc:
                 notes.append(f"sidecar update failed: {exc}")
+            else:
+                self._notify_take(project_root, subfolder, shot_dir, shot_id, take,
+                                  "ok" if mp4_ok else "failed", thumb)
 
         return (shot_dir, f"{stem}: " + "; ".join(notes))
+
+    # -- live update -------------------------------------------------------
+
+    @staticmethod
+    def _notify_take(project_root: str, subfolder: str, shot_dir: str, shot_id: str,
+                     take: int, status: str, thumb) -> None:
+        """Tell open h3pipe editors this take is closed (the `h3pipe.take`
+        event of docs/API.md). Only inside ComfyUI; never affects saving."""
+        try:
+            from server import PromptServer
+            server = getattr(PromptServer, "instance", None)
+            if server is None:
+                return
+            ep = os.path.abspath(project_root)
+            last = os.path.basename(os.path.normpath(subfolder or ""))
+            thumb_rel = (os.path.relpath(os.path.join(shot_dir, thumb), ep).replace(os.sep, "/")
+                         if thumb else None)
+            server.send_sync("h3pipe.take", {
+                "ep": ep, "pass": "proxy" if last == "renders_proxy" else "final",
+                "shot": shot_id, "take": int(take), "status": status, "thumb": thumb_rel})
+        except Exception:
+            pass
 
     # -- sidecar -----------------------------------------------------------
 

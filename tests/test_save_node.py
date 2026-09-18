@@ -265,6 +265,40 @@ class SaveNodeTest(unittest.TestCase):
         self.assertIn("sidecar update failed: locked", status)
         self.assertEqual(T.read_json(t.paths.sidecar)["status"], "queued")
 
+    # -- the h3pipe.take event (docs/API.md) -------------------------------
+
+    def fake_server(self, send_sync):
+        server = type(sys)("server")
+        server.PromptServer = type("PromptServer", (), {})
+        server.PromptServer.instance = mock.Mock(send_sync=send_sync)
+        return mock.patch.dict(sys.modules, {"server": server})
+
+    def test_take_event_after_the_sidecar_closes(self):
+        t = T.reserve_take(self.root, "proxy", "sh020", {"status": "queued"})
+        sent = mock.Mock()
+        with self.fake_server(sent), mock.patch.object(
+                N.H3SaveShot, "_encode", staticmethod(lambda *a: "mp4 written (mute)")):
+            open(t.paths.mp4, "wb").close()
+            self.save(clip(6), subfolder="renders_proxy", sidecar=t.paths.sidecar)
+        sent.assert_called_once_with("h3pipe.take", {
+            "ep": os.path.abspath(self.root), "pass": "proxy", "shot": "sh020", "take": 1,
+            "status": "ok", "thumb": "renders_proxy/sh020/sh020_t01.jpg"})
+
+    def test_take_event_never_affects_saving(self):
+        t = self.reserve()
+        with self.fake_server(mock.Mock(side_effect=RuntimeError("socket gone"))), \
+                mock.patch.object(N.H3SaveShot, "_encode",
+                                  staticmethod(lambda *a: "ffmpeg not found - mp4 skipped")):
+            _, status = self.save(clip(3), sidecar=t.paths.sidecar)
+        self.assertEqual(T.read_json(t.paths.sidecar)["status"], "failed")
+        self.assertNotIn("socket", status)
+        # no sidecar, no event
+        sent = mock.Mock()
+        with self.fake_server(sent), mock.patch.object(
+                N.H3SaveShot, "_encode", staticmethod(lambda *a: "mp4 written (mute)")):
+            self.save(clip(3), take=2)
+        sent.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

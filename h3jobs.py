@@ -250,11 +250,24 @@ class Comfy:
             raise RuntimeError(json.dumps(r["node_errors"])[:1500])
         return r["prompt_id"]
 
+    def queue_ids(self) -> tuple[set[str], set[str]]:
+        """(running, pending) prompt ids, from one /queue snapshot."""
+        q = self._json("/queue", timeout=10)
+        return tuple({item[1] for item in q.get(key, []) if len(item) > 1}
+                     for key in ("queue_running", "queue_pending"))
+
     def alive(self) -> set[str]:
         """Prompt ids ComfyUI still has pending or running."""
-        q = self._json("/queue", timeout=10)
-        return {item[1] for key in ("queue_running", "queue_pending")
-                for item in q.get(key, []) if len(item) > 1}
+        running, pending = self.queue_ids()
+        return running | pending
+
+    def history(self, pid: str) -> dict | None:
+        """ComfyUI's history entry for one prompt, or None if it has none (yet)."""
+        return self._json(f"/history/{pid}", timeout=10).get(pid)
+
+    def delete_queued(self, pids) -> None:
+        """Drop pending prompts from the queue (a running one is not affected)."""
+        self._json("/queue", {"delete": list(pids)}, timeout=10)
 
     def wait(self, pid: str, timeout: int) -> dict:
         t0 = time.time()
@@ -271,11 +284,28 @@ class Comfy:
             time.sleep(3)
         raise TimeoutError(f"no result after {timeout}s")
 
-    def interrupt(self):
+    def interrupt(self, prompt_id: str | None = None):
+        """Stop the running job (only if it is `prompt_id`, when given)."""
         try:
-            self._json("/interrupt", {})
+            self._json("/interrupt", {"prompt_id": prompt_id} if prompt_id else {})
         except Exception:
             pass
+
+
+def execution_error(entry: dict | None) -> str | None:
+    """The exception message of a failed job's /history entry; None if it didn't fail."""
+    st = (entry or {}).get("status") or {}
+    if st.get("status_str") != "error":
+        return None
+    msgs = [m for m in st.get("messages", []) if m and m[0] == "execution_error"]
+    detail = (msgs[-1][1].get("exception_message", "") if msgs else "") or json.dumps(st)
+    return detail.strip()[:800]
+
+
+def execution_done(entry: dict | None) -> bool:
+    """True if a /history entry says the job finished without an error."""
+    st = (entry or {}).get("status") or {}
+    return st.get("status_str") == "success" and st.get("completed", True)
 
 
 # ---------------------------------------------------------------------------
