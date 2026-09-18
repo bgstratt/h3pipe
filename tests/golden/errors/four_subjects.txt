@@ -1,0 +1,4 @@
+exit 1
+
+  error in four_subjects.md: shot sh010: 4 subjects (ada, bo, cy, kettle) but only 3 slots — slot 4 is the background. Drop 1 from `with:`, or describe 1 in the action text instead of referencing it.
+

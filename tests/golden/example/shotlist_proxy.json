@@ -1,0 +1,293 @@
+{
+  "episode": "ep01",
+  "title": "The Gold Path",
+  "prompt_prefix": "",
+  "defaults": {
+    "width": 448,
+    "height": 256,
+    "steps": 4,
+    "model": "minimax_h3_ref2va_pruned_int8_convrot.safetensors",
+    "lora": "minimax_h3_ref2v_lightx2v_turbo_4step_v0.1_resized_avg_rank_20_bf16.safetensors",
+    "sheet_panels": 4,
+    "audio_policy": "generate",
+    "master_track": "audio/ep01_dialogue_mix.wav"
+  },
+  "subjects": {
+    "huey": {
+      "kind": "character",
+      "sheet": "refs/huey/huey_sheet_4panel.png",
+      "voice_sample": "audio/voices/huey_sample.wav"
+    },
+    "riley": {
+      "kind": "character",
+      "sheet": "refs/riley/riley_sheet_4panel.png",
+      "voice_sample": "audio/voices/riley_sample.wav"
+    },
+    "mom": {
+      "kind": "character",
+      "sheet": "refs/mom/mom_sheet_4panel.png",
+      "voice_sample": "audio/voices/mom_sample.wav"
+    },
+    "backpack": {
+      "kind": "prop",
+      "sheet": "refs/props/backpack.png",
+      "voice_sample": ""
+    },
+    "bike": {
+      "kind": "vehicle",
+      "sheet": "refs/props/bike.png",
+      "voice_sample": ""
+    }
+  },
+  "shots": [
+    {
+      "id": "sh010",
+      "sequence": "sq01",
+      "subjects": [
+        "huey"
+      ],
+      "background": "refs/_bg/street.png",
+      "size": "wide",
+      "panels": 1,
+      "panel_view": "body",
+      "length": 90,
+      "seed": 6290346879385008131,
+      "steps": 4,
+      "audio_policy": "generate",
+      "audio_retention": "",
+      "voices": [],
+      "voice_subject": "",
+      "voice_refs": [],
+      "prompt": [
+        "subject_definitions:\n<Subject 1> is Huey, defined by <Picture 1> — a single reference image of ONE character, a three-quarter view of the whole body. Exactly one person appears in that image. Exactly one person appears in this shot. Preserve the exact reference styling: a ten-year-old boy with a rounded afro, a red long-sleeve shirt, dark blue jeans, and white sneakers, drawn with thick confident outlines.\n<Subject 2> is the location, defined by <Picture 4> — a background plate of a late-afternoon suburban street edge with a dense treeline beyond, warm low sun and long shadows. It establishes the layout, color palette, lighting direction and depth of the space, not a fixed camera framing.",
+        "summary:\n[reference generation] Huey stands near the edge of the yard, small in the frame, watching the empty street.",
+        "retention_analysis:\n<Subject 1> (appears in [Shot 1]): fully_preserved - facial identity, hairstyle, body proportions, wardrobe and colors are retained from <Picture 1> while allowing natural poses and expressions.\n<Subject 2> (appears in [Shot 1]): partially_preserved - the layout, color palette and lighting direction of the location are retained while the camera framing and visible portion of the space differ from the plate.",
+        "detailed_description:\nThe target video is a 2D hand-drawn cartoon animation with flat 2D illustration, clean black line art, flat solid colors, and cel-shaded artwork.\n[Shot 1] The scene takes place in <Subject 2>, a late-afternoon suburban street edge with a dense treeline beyond, warm low sun and long shadows. Huey stands near the edge of the yard, small in the frame, watching the empty street. The camera holds a static wide shot.",
+        "overall_soundscape: Late-afternoon suburban ambience with distant birds and a faint breeze through the treeline.",
+        "non_diegetic_music: N/A"
+      ],
+      "audio_in": 0.0,
+      "audio_out": 3.1
+    },
+    {
+      "id": "sh020",
+      "sequence": "sq01",
+      "subjects": [
+        "riley",
+        "huey"
+      ],
+      "background": "refs/_bg/street.png",
+      "size": "medium",
+      "panels": 1,
+      "panel_view": "body",
+      "length": 107,
+      "seed": 4538968757674556470,
+      "steps": 4,
+      "audio_policy": "dub_keep_foley",
+      "audio_retention": "partially_copy",
+      "voices": [
+        "riley",
+        "huey"
+      ],
+      "voice_subject": "riley",
+      "voice_refs": [],
+      "prompt": [
+        "subject_definitions:\n<Subject 1> is Riley, defined by <Picture 1> — a single reference image of ONE character, a three-quarter view of the whole body. Exactly one person appears in that image. Exactly one person appears in this shot. Preserve the exact reference styling: an eight-year-old boy with cornrow braids, an oversized yellow hoodie, baggy grey shorts, and worn high-top sneakers, drawn with thick confident outlines.\n<Subject 2> is Huey, defined by <Picture 2> — a single reference image of ONE character, a three-quarter view of the whole body. Exactly one person appears in that image. Exactly one person appears in this shot. Preserve the exact reference styling: a ten-year-old boy with a rounded afro, a red long-sleeve shirt, dark blue jeans, and white sneakers, drawn with thick confident outlines.\n<Subject 3> is the location, defined by <Picture 4> — a background plate of a late-afternoon suburban street edge with a dense treeline beyond, warm low sun and long shadows. It establishes the layout, color palette, lighting direction and depth of the space, not a fixed camera framing.\n<Audio 1> is the recorded dialogue for this shot, spoken by <Subject 1> (S1), <Subject 2> (S2); its exact words, voices and timing are reused.",
+        "summary:\n[reference generation + audio reuse] Riley runs into frame from the left and stops hard beside Huey, breathing fast. Huey does not turn his head.",
+        "retention_analysis:\n<Subject 1> (appears in [Shot 1]): fully_preserved - facial identity, hairstyle, body proportions, wardrobe and colors are retained from <Picture 1> while allowing natural poses and expressions.\n<Subject 2> (appears in [Shot 1]): fully_preserved - facial identity, hairstyle, body proportions, wardrobe and colors are retained from <Picture 2> while allowing natural poses and expressions.\n<Subject 3> (appears in [Shot 1]): partially_preserved - the layout, color palette and lighting direction of the location are retained while the camera framing and visible portion of the space differ from the plate.\n<Audio 1>: partially_copy - the dialogue of <Audio 1> is copied exactly in words, voices and timing, and the mouth movement of <Subject 1> and <Subject 2> is synchronized only to their own lines in it; the ambience and action sounds described below are added around it.",
+        "detailed_description:\nThe target video is a 2D hand-drawn cartoon animation with flat 2D illustration, clean black line art, flat solid colors, and cel-shaded artwork.\n[Shot 1] The scene takes place in <Subject 3>, a late-afternoon suburban street edge with a dense treeline beyond, warm low sun and long shadows. Riley runs into frame from the left and stops hard beside Huey, breathing fast. Huey does not turn his head. The camera pushes in with small amplitude at slow speed on the two of them.\n<Subject 1>, with a voice that is fast, bright, always slightly too loud, (S1) says, in the recorded voice from <Audio 1>, breathless and certain, <d>[English] There's gold at the end of the path.</d>\n<Subject 2>, with a voice that is measured, serious, low for his age, (S2) says, in the recorded voice from <Audio 1>, flat, <d>[English] There is not.</d>",
+        "overall_soundscape: Running footsteps on grass, fabric movement, and continuing suburban ambience, laid under the copied dialogue from <Audio 1>.",
+        "non_diegetic_music: N/A"
+      ],
+      "audio_in": 3.1,
+      "audio_out": 7.4
+    },
+    {
+      "id": "sh030",
+      "sequence": "sq01",
+      "subjects": [
+        "riley"
+      ],
+      "background": "refs/_bg/street.png",
+      "size": "close",
+      "panels": 1,
+      "panel_view": "face",
+      "length": 73,
+      "seed": 64029435477416833,
+      "steps": 4,
+      "audio_policy": "dub_keep_foley",
+      "audio_retention": "partially_copy",
+      "voices": [
+        "riley"
+      ],
+      "voice_subject": "riley",
+      "voice_refs": [],
+      "prompt": [
+        "subject_definitions:\n<Subject 1> is Riley, defined by <Picture 1> — a single reference image of ONE character, a head-and-shoulders facial close-up. Exactly one person appears in that image. Exactly one person appears in this shot. Preserve the exact reference styling: an eight-year-old boy with cornrow braids, an oversized yellow hoodie, baggy grey shorts, and worn high-top sneakers, drawn with thick confident outlines.\n<Subject 2> is the location, defined by <Picture 4> — a background plate of a late-afternoon suburban street edge with a dense treeline beyond, warm low sun and long shadows. It establishes the layout, color palette, lighting direction and depth of the space, not a fixed camera framing.\n<Audio 1> is the recorded dialogue for this shot, spoken by <Subject 1> (S1); its exact words, voices and timing are reused.",
+        "summary:\n[reference generation + audio reuse] A closer framing on Riley's face and shoulders, the treeline soft and out of focus behind him. His eyes fix on the woods and he starts to back away toward the house.",
+        "retention_analysis:\n<Subject 1> (appears in [Shot 1]): fully_preserved - facial identity, hairstyle, body proportions, wardrobe and colors are retained from <Picture 1> while allowing natural poses and expressions.\n<Subject 2> (appears in [Shot 1]): weak_reference - only the color palette, lighting direction and material character of the location are retained; the layout of the space is not reproduced and most of it falls outside the frame.\n<Audio 1>: partially_copy - the dialogue of <Audio 1> is copied exactly in words, voices and timing, and the mouth movement of <Subject 1> is synchronized to its speech; the ambience and action sounds described below are added around it.",
+        "detailed_description:\nThe target video is a 2D hand-drawn cartoon animation with flat 2D illustration, clean black line art, flat solid colors, and cel-shaded artwork.\n[Shot 1] The scene takes place in <Subject 2>, a late-afternoon suburban street edge with a dense treeline beyond, warm low sun and long shadows. A closer framing on Riley's face and shoulders, the treeline soft and out of focus behind him. His eyes fix on the woods and he starts to back away toward the house. The camera holds static as he exits frame right.\n<Subject 1>, with a voice that is fast, bright, always slightly too loud, (S1) says, in the recorded voice from <Audio 1>, already turning, <d>[English] I've got to pack.</d>",
+        "overall_soundscape: Sneakers scuffing dry grass over steady outdoor ambience, laid under the copied dialogue from <Audio 1>.",
+        "non_diegetic_music: N/A"
+      ],
+      "audio_in": 7.4,
+      "audio_out": 10.0
+    },
+    {
+      "id": "sh040",
+      "sequence": "sq02",
+      "subjects": [
+        "riley",
+        "backpack"
+      ],
+      "background": "refs/_bg/bedroom.png",
+      "size": "medium",
+      "panels": 1,
+      "panel_view": "body",
+      "length": 73,
+      "seed": 4402831686581949911,
+      "steps": 4,
+      "audio_policy": "generate",
+      "audio_retention": "",
+      "voices": [],
+      "voice_subject": "",
+      "voice_refs": [],
+      "prompt": [
+        "subject_definitions:\n<Subject 1> is Riley, defined by <Picture 1> — a single reference image of ONE character, a three-quarter view of the whole body. Exactly one person appears in that image. Exactly one person appears in this shot. Preserve the exact reference styling: an eight-year-old boy with cornrow braids, an oversized yellow hoodie, baggy grey shorts, and worn high-top sneakers, drawn with thick confident outlines.\n<Subject 2> is Riley's backpack, defined by <Picture 2> — a single reference image of the object on a plain background. Preserve its exact design, colors and proportions: a battered olive-green canvas backpack with two front buckles, a broken zipper pull replaced with a shoelace, and a faded patch on the flap.\n<Subject 3> is the location, defined by <Picture 4> — a background plate of a cluttered kids' bedroom with bunk beds, posters peeling at the corners, and late-afternoon light through half-closed blinds. It establishes the layout, color palette, lighting direction and depth of the space, not a fixed camera framing.",
+        "summary:\n[reference generation] Riley drags the backpack off the bunk and starts stuffing it with everything within reach.",
+        "retention_analysis:\n<Subject 1> (appears in [Shot 1]): fully_preserved - facial identity, hairstyle, body proportions, wardrobe and colors are retained from <Picture 1> while allowing natural poses and expressions.\n<Subject 2> (appears in [Shot 1]): fully_preserved - the object's design, colors, materials and proportions are retained from <Picture 2> while it is handled and moved naturally.\n<Subject 3> (appears in [Shot 1]): partially_preserved - the layout, color palette and lighting direction of the location are retained while the camera framing and visible portion of the space differ from the plate.",
+        "detailed_description:\nThe target video is a 2D hand-drawn cartoon animation with flat 2D illustration, clean black line art, flat solid colors, and cel-shaded artwork.\n[Shot 1] The scene takes place in <Subject 3>, a cluttered kids' bedroom with bunk beds, posters peeling at the corners, and late-afternoon light through half-closed blinds. Riley drags the backpack off the bunk and starts stuffing it with everything within reach. The camera holds static.",
+        "overall_soundscape: Zippers, fabric, objects hitting the bottom of a bag.",
+        "non_diegetic_music: N/A"
+      ],
+      "duration": 3.04
+    },
+    {
+      "id": "sh050",
+      "sequence": "sq02",
+      "subjects": [
+        "huey",
+        "riley"
+      ],
+      "background": "refs/_bg/bedroom.png",
+      "size": "wide",
+      "panels": 1,
+      "panel_view": "body",
+      "length": 107,
+      "seed": 5710969569724578113,
+      "steps": 4,
+      "audio_policy": "dub_keep_foley",
+      "audio_retention": "partially_copy",
+      "voices": [
+        "huey",
+        "riley"
+      ],
+      "voice_subject": "huey",
+      "voice_refs": [],
+      "prompt": [
+        "subject_definitions:\n<Subject 1> is Huey, defined by <Picture 1> — a single reference image of ONE character, a three-quarter view of the whole body. Exactly one person appears in that image. Exactly one person appears in this shot. Preserve the exact reference styling: a ten-year-old boy with a rounded afro, a red long-sleeve shirt, dark blue jeans, and white sneakers, drawn with thick confident outlines.\n<Subject 2> is Riley, defined by <Picture 2> — a single reference image of ONE character, a three-quarter view of the whole body. Exactly one person appears in that image. Exactly one person appears in this shot. Preserve the exact reference styling: an eight-year-old boy with cornrow braids, an oversized yellow hoodie, baggy grey shorts, and worn high-top sneakers, drawn with thick confident outlines.\n<Subject 3> is the location, defined by <Picture 4> — a background plate of a cluttered kids' bedroom with bunk beds, posters peeling at the corners, and late-afternoon light through half-closed blinds. It establishes the layout, color palette, lighting direction and depth of the space, not a fixed camera framing.\n<Audio 1> is the recorded dialogue for this shot, spoken by <Subject 1> (S1), <Subject 2> (S2); its exact words, voices and timing are reused.",
+        "summary:\n[reference generation + audio reuse] Huey appears in the doorway and watches Riley pack without moving to help.",
+        "retention_analysis:\n<Subject 1> (appears in [Shot 1]): fully_preserved - facial identity, hairstyle, body proportions, wardrobe and colors are retained from <Picture 1> while allowing natural poses and expressions.\n<Subject 2> (appears in [Shot 1]): fully_preserved - facial identity, hairstyle, body proportions, wardrobe and colors are retained from <Picture 2> while allowing natural poses and expressions.\n<Subject 3> (appears in [Shot 1]): partially_preserved - the layout, color palette and lighting direction of the location are retained while the camera framing and visible portion of the space differ from the plate.\n<Audio 1>: partially_copy - the dialogue of <Audio 1> is copied exactly in words, voices and timing, and the mouth movement of <Subject 1> and <Subject 2> is synchronized only to their own lines in it; the ambience and action sounds described below are added around it.",
+        "detailed_description:\nThe target video is a 2D hand-drawn cartoon animation with flat 2D illustration, clean black line art, flat solid colors, and cel-shaded artwork.\n[Shot 1] The scene takes place in <Subject 3>, a cluttered kids' bedroom with bunk beds, posters peeling at the corners, and late-afternoon light through half-closed blinds. Huey appears in the doorway and watches Riley pack without moving to help. The camera holds a static wide shot from the hallway.\n<Subject 1>, with a voice that is measured, serious, low for his age, (S1) says, in the recorded voice from <Audio 1>, unimpressed, <d>[English] You don't even know where it is.</d>\n<Subject 2>, with a voice that is fast, bright, always slightly too loud, (S2) says, in the recorded voice from <Audio 1>, <d>[English] I'll know when I see it.</d>",
+        "overall_soundscape: Continuing packing sounds, a floorboard creak from the doorway, laid under the copied dialogue from <Audio 1>.",
+        "non_diegetic_music: N/A"
+      ],
+      "audio_in": 12.2,
+      "audio_out": 16.5
+    },
+    {
+      "id": "sh055",
+      "sequence": "sq02",
+      "subjects": [
+        "riley"
+      ],
+      "background": "refs/_bg/bedroom.png",
+      "size": "medium",
+      "panels": 1,
+      "panel_view": "body",
+      "length": 107,
+      "seed": 3552324802797259485,
+      "steps": 4,
+      "audio_policy": "dub_keep_foley",
+      "audio_retention": "partially_copy",
+      "voices": [
+        "mom",
+        "riley"
+      ],
+      "voice_subject": "mom",
+      "voice_refs": [],
+      "prompt": [
+        "subject_definitions:\n<Subject 1> is Riley, defined by <Picture 1> — a single reference image of ONE character, a three-quarter view of the whole body. Exactly one person appears in that image. Exactly one person appears in this shot. Preserve the exact reference styling: an eight-year-old boy with cornrow braids, an oversized yellow hoodie, baggy grey shorts, and worn high-top sneakers, drawn with thick confident outlines.\n<Subject 2> is the location, defined by <Picture 4> — a background plate of a cluttered kids' bedroom with bunk beds, posters peeling at the corners, and late-afternoon light through half-closed blinds. It establishes the layout, color palette, lighting direction and depth of the space, not a fixed camera framing.\n<Audio 1> is the recorded dialogue for this shot, spoken by an off-screen voice that is warm but unimpressed, carrying from another room (S1), <Subject 1> (S2); its exact words, voices and timing are reused.",
+        "summary:\n[reference generation + audio reuse] Riley freezes with a fistful of socks halfway to the bag.",
+        "retention_analysis:\n<Subject 1> (appears in [Shot 1]): fully_preserved - facial identity, hairstyle, body proportions, wardrobe and colors are retained from <Picture 1> while allowing natural poses and expressions.\n<Subject 2> (appears in [Shot 1]): partially_preserved - the layout, color palette and lighting direction of the location are retained while the camera framing and visible portion of the space differ from the plate.\n<Audio 1>: partially_copy - the dialogue of <Audio 1> is copied exactly in words, voices and timing, and the mouth movement of <Subject 1> is synchronized only to their own lines in it; the ambience and action sounds described below are added around it.",
+        "detailed_description:\nThe target video is a 2D hand-drawn cartoon animation with flat 2D illustration, clean black line art, flat solid colors, and cel-shaded artwork.\n[Shot 1] The scene takes place in <Subject 2>, a cluttered kids' bedroom with bunk beds, posters peeling at the corners, and late-afternoon light through half-closed blinds. Riley freezes with a fistful of socks halfway to the bag. The camera holds static.\nAn off-screen voice that is warm but unimpressed, carrying from another room (S1) says in an off-screen voiceover in the recorded voice from <Audio 1>: from downstairs, <d>[English] Riley! Shoes off in the house!</d>\n<Subject 1>, with a voice that is fast, bright, always slightly too loud, (S2) says, in the recorded voice from <Audio 1>, caught, <d>[English] I'm not even outside!</d>",
+        "overall_soundscape: Muffled television from another room, laid under the copied dialogue from <Audio 1>.",
+        "non_diegetic_music: N/A"
+      ],
+      "audio_in": 16.5,
+      "audio_out": 20.6
+    },
+    {
+      "id": "sh060",
+      "sequence": "sq03",
+      "subjects": [
+        "huey",
+        "riley",
+        "backpack"
+      ],
+      "background": "refs/_bg/path.png",
+      "size": "medium",
+      "panels": 1,
+      "panel_view": "body",
+      "length": 294,
+      "seed": 5859695908610845705,
+      "steps": 4,
+      "audio_policy": "generate",
+      "audio_retention": "",
+      "voices": [],
+      "voice_subject": "",
+      "voice_refs": [],
+      "prompt": [
+        "subject_definitions:\n<Subject 1> is Huey, defined by <Picture 1> — a single reference image of ONE character, a three-quarter view of the whole body. Exactly one person appears in that image. Exactly one person appears in this shot. Preserve the exact reference styling: a ten-year-old boy with a rounded afro, a red long-sleeve shirt, dark blue jeans, and white sneakers, drawn with thick confident outlines.\n<Subject 2> is Riley, defined by <Picture 2> — a single reference image of ONE character, a three-quarter view of the whole body. Exactly one person appears in that image. Exactly one person appears in this shot. Preserve the exact reference styling: an eight-year-old boy with cornrow braids, an oversized yellow hoodie, baggy grey shorts, and worn high-top sneakers, drawn with thick confident outlines.\n<Subject 3> is Riley's backpack, defined by <Picture 3> — a single reference image of the object on a plain background. Preserve its exact design, colors and proportions: a battered olive-green canvas backpack with two front buckles, a broken zipper pull replaced with a shoelace, and a faded patch on the flap.\n<Subject 4> is the location, defined by <Picture 4> — a background plate of a narrow dirt path running into dense woods, low golden light breaking through the branches. It establishes the layout, color palette, lighting direction and depth of the space, not a fixed camera framing.",
+        "summary:\n[reference generation] Riley leads down the dirt path at a fast walk with the backpack half-zipped. Huey trails two steps behind with his hands in his pockets. Branches slide past in the foreground.",
+        "retention_analysis:\n<Subject 1> (appears in [Shot 1]): fully_preserved - facial identity, hairstyle, body proportions, wardrobe and colors are retained from <Picture 1> while allowing natural poses and expressions.\n<Subject 2> (appears in [Shot 1]): fully_preserved - facial identity, hairstyle, body proportions, wardrobe and colors are retained from <Picture 2> while allowing natural poses and expressions.\n<Subject 3> (appears in [Shot 1]): fully_preserved - the object's design, colors, materials and proportions are retained from <Picture 3> while it is handled and moved naturally.\n<Subject 4> (appears in [Shot 1]): partially_preserved - the layout, color palette and lighting direction of the location are retained while the camera framing and visible portion of the space differ from the plate.",
+        "detailed_description:\nThe target video is a 2D hand-drawn cartoon animation with flat 2D illustration, clean black line art, flat solid colors, and cel-shaded artwork.\n[Shot 1] The scene takes place in <Subject 4>, a narrow dirt path running into dense woods, low golden light breaking through the branches. Riley leads down the dirt path at a fast walk with the backpack half-zipped. Huey trails two steps behind with his hands in his pockets. Branches slide past in the foreground. The camera tracks backward ahead of them at their pace, holding both in frame.",
+        "overall_soundscape: Footsteps on packed dirt, backpack buckles ticking, dense woodland ambience with layered insects.",
+        "non_diegetic_music: N/A"
+      ],
+      "duration": 12.0
+    },
+    {
+      "id": "sh070",
+      "sequence": "sq03",
+      "subjects": [
+        "huey",
+        "riley"
+      ],
+      "background": "refs/_bg/path.png",
+      "size": "medium",
+      "panels": 1,
+      "panel_view": "body",
+      "length": 294,
+      "seed": 2646422064901768602,
+      "steps": 4,
+      "audio_policy": "dub_keep_foley",
+      "audio_retention": "partially_copy",
+      "voices": [
+        "riley"
+      ],
+      "voice_subject": "riley",
+      "voice_refs": [],
+      "prompt": [
+        "subject_definitions:\n<Subject 1> is Huey, defined by <Picture 1> — a single reference image of ONE character, a three-quarter view of the whole body. Exactly one person appears in that image. Exactly one person appears in this shot. Preserve the exact reference styling: a ten-year-old boy with a rounded afro, a red long-sleeve shirt, dark blue jeans, and white sneakers, drawn with thick confident outlines.\n<Subject 2> is Riley, defined by <Picture 2> — a single reference image of ONE character, a three-quarter view of the whole body. Exactly one person appears in that image. Exactly one person appears in this shot. Preserve the exact reference styling: an eight-year-old boy with cornrow braids, an oversized yellow hoodie, baggy grey shorts, and worn high-top sneakers, drawn with thick confident outlines.\n<Subject 3> is the location, defined by <Picture 4> — a background plate of a narrow dirt path running into dense woods, low golden light breaking through the branches. It establishes the layout, color palette, lighting direction and depth of the space, not a fixed camera framing.\n<Audio 1> is the recorded dialogue for this shot, spoken by <Subject 2> (S1); its exact words, voices and timing are reused.",
+        "summary:\n[reference generation + audio reuse] The path narrows and the canopy thickens overhead, dropping the light. Riley slows without stopping and glances back over his shoulder. Huey closes the gap.",
+        "retention_analysis:\n<Subject 1> (appears in [Shot 1]): fully_preserved - facial identity, hairstyle, body proportions, wardrobe and colors are retained from <Picture 1> while allowing natural poses and expressions.\n<Subject 2> (appears in [Shot 1]): fully_preserved - facial identity, hairstyle, body proportions, wardrobe and colors are retained from <Picture 2> while allowing natural poses and expressions.\n<Subject 3> (appears in [Shot 1]): partially_preserved - the layout, color palette and lighting direction of the location are retained while the camera framing and visible portion of the space differ from the plate.\n<Audio 1>: partially_copy - the dialogue of <Audio 1> is copied exactly in words, voices and timing, and the mouth movement of <Subject 2> is synchronized to its speech; the ambience and action sounds described below are added around it.",
+        "detailed_description:\nThe target video is a 2D hand-drawn cartoon animation with flat 2D illustration, clean black line art, flat solid colors, and cel-shaded artwork.\n[Shot 1] The scene takes place in <Subject 3>, a narrow dirt path running into dense woods, low golden light breaking through the branches. The path narrows and the canopy thickens overhead, dropping the light. Riley slows without stopping and glances back over his shoulder. Huey closes the gap. The camera continues its backward track and arcs slightly to the right without breaking. Continue the incoming action, pose, camera movement, lighting and object states from the previous segment without resetting them.\n<Subject 2>, with a voice that is fast, bright, always slightly too loud, (S1) says, in the recorded voice from <Audio 1>, quieter now, <d>[English] It's further than I thought.</d>",
+        "overall_soundscape: Continuing footsteps on dirt and thickening woodland ambience with fewer birds, laid under the copied dialogue from <Audio 1>.",
+        "non_diegetic_music: N/A"
+      ],
+      "audio_in": 20.6,
+      "audio_out": 32.6
+    }
+  ]
+}

@@ -1,0 +1,5 @@
+exit 1
+
+  error in bad_size.md: line 4: size 'extreme' must be one of ['close', 'cu', 'medium', 'ms', 'wide', 'ws']
+    | size: extreme
+

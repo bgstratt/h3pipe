@@ -1,0 +1,5 @@
+exit 1
+
+  error in shot_before_sequence.md: line 2: shot appears before any `# sequence`
+    | ## sh010
+

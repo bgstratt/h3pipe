@@ -1,0 +1,481 @@
+{
+  "episode": "ks01",
+  "title": "Kitchen Sink",
+  "prompt_prefix": "",
+  "defaults": {
+    "width": 1344,
+    "height": 768,
+    "steps": 6,
+    "model": "series_model.safetensors",
+    "lora": "series_turbo_8step.safetensors",
+    "sheet_panels": 4,
+    "audio_policy": "generate",
+    "master_track": "audio/ks01_mix.wav"
+  },
+  "subjects": {
+    "ada": {
+      "kind": "character",
+      "sheet": "refs/ada/ada_sheet_4panel.png",
+      "voice_sample": "audio/voices/ada_sample.wav"
+    },
+    "bo": {
+      "kind": "character",
+      "sheet": "refs/bo/bo_sheet_4panel.png",
+      "voice_sample": "audio/voices/bo_sample.wav"
+    },
+    "cy": {
+      "kind": "character",
+      "sheet": "refs/cy/cy_sheet_4panel.png",
+      "voice_sample": "audio/voices/cy_sample.wav"
+    },
+    "rex": {
+      "kind": "character",
+      "sheet": "refs/rex/rex_sheet_4panel.png",
+      "voice_sample": ""
+    },
+    "narrator": {
+      "kind": "character",
+      "sheet": "refs/narrator/narrator_sheet_4panel.png",
+      "voice_sample": "audio/voices/narrator_sample.wav"
+    },
+    "kettle": {
+      "kind": "prop",
+      "sheet": "refs/props/kettle.png",
+      "voice_sample": ""
+    },
+    "van": {
+      "kind": "vehicle",
+      "sheet": "refs/props/van.png",
+      "voice_sample": ""
+    }
+  },
+  "shots": [
+    {
+      "id": "sh010",
+      "sequence": "sq01",
+      "subjects": [
+        "ada"
+      ],
+      "background": "refs/_bg/kitchen.png",
+      "size": "ws",
+      "panels": 1,
+      "panel_view": "body",
+      "length": 73,
+      "seed": 8828384270954910346,
+      "steps": 6,
+      "audio_policy": "generate",
+      "audio_retention": "",
+      "voices": [],
+      "voice_subject": "",
+      "voice_refs": [],
+      "prompt": [
+        "subject_definitions:\n<Subject 1> is Ada, defined by <Picture 1> — a single reference image of ONE character, a three-quarter view of the whole body. Exactly one person appears in that image. Exactly one person appears in this shot. Preserve the exact reference styling: a tall woman in her thirties with a short grey bob, a mustard apron over a striped shirt, and round red glasses.\n<Subject 2> is the location, defined by <Picture 4> — a background plate of a cramped diner kitchen with steel counters, a hanging ticket rail and cold fluorescent light from overhead. It establishes the layout, color palette, lighting direction and depth of the space, not a fixed camera framing.",
+        "summary:\n[reference generation] Ada slams the walk-in door shut and turns to face the kitchen.",
+        "retention_analysis:\n<Subject 1> (appears in [Shot 1]): fully_preserved - facial identity, hairstyle, body proportions, wardrobe and colors are retained from <Picture 1> while allowing natural poses and expressions.\n<Subject 2> (appears in [Shot 1]): partially_preserved - the layout, color palette and lighting direction of the location are retained while the camera framing and visible portion of the space differ from the plate.",
+        "detailed_description:\nThe target video is a flat vector cartoon with thick even outlines and a limited pastel palette.\n[Shot 1] The scene takes place in <Subject 2>, a cramped diner kitchen with steel counters, a hanging ticket rail and cold fluorescent light from overhead. Ada slams the walk-in door shut and turns to face the kitchen. The camera pushes in on Ada with small amplitude at slow speed.\nVisible on-screen text reads \"OPEN 24 HOURS\".",
+        "overall_soundscape: The compressor hum of the walk-in, a door latch clanking.",
+        "non_diegetic_music: a plucky ukulele sting"
+      ],
+      "duration": 2.5
+    },
+    {
+      "id": "sh020",
+      "sequence": "sq01",
+      "subjects": [
+        "ada",
+        "bo",
+        "kettle"
+      ],
+      "background": "refs/_bg/kitchen.png",
+      "size": "ms",
+      "panels": 1,
+      "panel_view": "body",
+      "length": 90,
+      "seed": 2769191069994745345,
+      "steps": 6,
+      "audio_policy": "clone",
+      "audio_retention": "reference",
+      "voices": [
+        "ada",
+        "bo"
+      ],
+      "voice_subject": "ada",
+      "voice_refs": [
+        {
+          "subject": "ada",
+          "sample": "audio/voices/ada_sample.wav"
+        },
+        {
+          "subject": "bo",
+          "sample": "audio/voices/bo_sample.wav"
+        }
+      ],
+      "prompt": [
+        "subject_definitions:\n<Subject 1> is Ada, defined by <Picture 1> — a single reference image of ONE character, a three-quarter view of the whole body. Exactly one person appears in that image. This character appears exactly once in the shot. The other people in frame are two customers at the counter seen through the window, backs to camera: unnamed background figures who must look nothing like this character and are never duplicates of them. Preserve the exact reference styling: a tall woman in her thirties with a short grey bob, a mustard apron over a striped shirt, and round red glasses.\n<Subject 2> is Bo, defined by <Picture 2> — a single reference image of ONE character, a three-quarter view of the whole body. Exactly one person appears in that image. This character appears exactly once in the shot. The other people in frame are two customers at the counter seen through the window, backs to camera: unnamed background figures who must look nothing like this character and are never duplicates of them. Preserve the exact reference styling: a stocky teenage boy with a shaved head, an oversized green bomber jacket and orange high-tops.\n<Subject 3> is the diner kettle, defined by <Picture 3> — a single reference image of the object on a plain background. Preserve its exact design, colors and proportions: a dented chrome kettle with a black bakelite handle and a whistle cap on a chain.\n<Subject 4> is the location, defined by <Picture 4> — a background plate of a cramped diner kitchen with steel counters, a hanging ticket rail and cold fluorescent light from overhead. It establishes the layout, color palette, lighting direction and depth of the space, not a fixed camera framing.\n<Audio 1> is the voice-timbre reference for <Subject 1>, with a voice that is dry, quick and precise, (S1).\n<Audio 2> is the voice-timbre reference for <Subject 2>, with a voice that is slow and cracking, (S2).",
+        "summary:\n[reference generation + audio reference] Bo sets the kettle down on the burner and flicks the gas on.",
+        "retention_analysis:\n<Subject 1> (appears in [Shot 1]): fully_preserved - facial identity, hairstyle, body proportions, wardrobe and colors are retained from <Picture 1> while allowing natural poses and expressions.\n<Subject 2> (appears in [Shot 1]): fully_preserved - facial identity, hairstyle, body proportions, wardrobe and colors are retained from <Picture 2> while allowing natural poses and expressions.\n<Subject 3> (appears in [Shot 1]): fully_preserved - the object's design, colors, materials and proportions are retained from <Picture 3> while it is handled and moved naturally.\n<Subject 4> (appears in [Shot 1]): partially_preserved - the layout, color palette and lighting direction of the location are retained while the camera framing and visible portion of the space differ from the plate.\n<Audio 1>: reference - (S1) follows its voice timbre and delivery without copying the original signal.\n<Audio 2>: reference - (S2) follows its voice timbre and delivery without copying the original signal.",
+        "detailed_description:\nThe target video is a flat vector cartoon with thick even outlines and a limited pastel palette.\n[Shot 1] The scene takes place in <Subject 4>, a cramped diner kitchen with steel counters, a hanging ticket rail and cold fluorescent light from overhead. Bo sets the kettle down on the burner and flicks the gas on. The camera holds a static shot with fixed composition.\n<Subject 1> (S1) says, warmly, <d>[English] You know that one whistles.</d>\n<Subject 2> (S2) says, <d>[English] I know.</d>\n<Subject 2> (S2) says, whispering, <d>[English] That's the point.</d>",
+        "overall_soundscape: Continuous room tone and environmental ambience with synchronized physical action sounds.",
+        "non_diegetic_music: N/A"
+      ],
+      "duration": 3.6
+    },
+    {
+      "id": "sh030",
+      "sequence": "sq01",
+      "subjects": [
+        "ada"
+      ],
+      "background": "refs/_bg/kitchen.png",
+      "size": "cu",
+      "panels": 1,
+      "panel_view": "face",
+      "length": 39,
+      "seed": 9049780455082391214,
+      "steps": 6,
+      "audio_policy": "clone",
+      "audio_retention": "reference",
+      "voices": [
+        "ada"
+      ],
+      "voice_subject": "ada",
+      "voice_refs": [
+        {
+          "subject": "ada",
+          "sample": "audio/voices/ada_sample.wav"
+        }
+      ],
+      "prompt": [
+        "subject_definitions:\n<Subject 1> is Ada, defined by <Picture 1> — a single reference image of ONE character, a head-and-shoulders facial close-up. Exactly one person appears in that image. Exactly one person appears in this shot. Preserve the exact reference styling: a tall woman in her thirties with a short grey bob, a mustard apron over a striped shirt, and round red glasses.\n<Subject 2> is the location, defined by <Picture 4> — a background plate of a cramped diner kitchen with steel counters, a hanging ticket rail and cold fluorescent light from overhead. It establishes the layout, color palette, lighting direction and depth of the space, not a fixed camera framing.\n<Audio 1> is the voice-timbre reference for <Subject 1>, with a voice that is dry, quick and precise, (S1).",
+        "summary:\n[reference generation + audio reference] Ada's eyes narrow at the kettle.",
+        "retention_analysis:\n<Subject 1> (appears in [Shot 1]): fully_preserved - facial identity, hairstyle, body proportions, wardrobe and colors are retained from <Picture 1> while allowing natural poses and expressions.\n<Subject 2> (appears in [Shot 1]): weak_reference - only the color palette, lighting direction and material character of the location are retained; the layout of the space is not reproduced and most of it falls outside the frame.\n<Audio 1>: reference - (S1) follows its voice timbre and delivery without copying the original signal.",
+        "detailed_description:\nThe target video is a flat vector cartoon with thick even outlines and a limited pastel palette.\n[Shot 1] The scene takes place in <Subject 2>, a cramped diner kitchen with steel counters, a hanging ticket rail and cold fluorescent light from overhead. Ada's eyes narrow at the kettle. The camera holds a static shot with fixed composition.\n<Subject 1> (S1) says in an off-screen voiceover: <d>[English] Not today.</d> while her lips remain completely closed.",
+        "overall_soundscape: Continuous room tone and environmental ambience with synchronized physical action sounds.",
+        "non_diegetic_music: N/A"
+      ],
+      "duration": 1.62
+    },
+    {
+      "id": "sh040",
+      "sequence": "sq01",
+      "subjects": [
+        "bo",
+        "van",
+        "kettle"
+      ],
+      "background": "refs/_bg/kitchen.png",
+      "size": "close",
+      "panels": 1,
+      "panel_view": "body",
+      "length": 73,
+      "seed": 2765843861826537092,
+      "steps": 10,
+      "audio_policy": "generate",
+      "audio_retention": "",
+      "voices": [
+        "bo",
+        "narrator"
+      ],
+      "voice_subject": "bo",
+      "voice_refs": [],
+      "prompt": [
+        "subject_definitions:\n<Subject 1> is Bo, defined by <Picture 1> — a single reference image of ONE character, a three-quarter view of the whole body. Exactly one person appears in that image. Exactly one person appears in this shot. Preserve the exact reference styling: a stocky teenage boy with a shaved head, an oversized green bomber jacket and orange high-tops.\n<Subject 2> is the delivery van, defined by <Picture 2> — a single reference image of the object on a plain background. Preserve its exact design, colors and proportions: a boxy white delivery van with a sky-blue stripe and a cracked left headlight.\n<Subject 3> is the diner kettle, defined by <Picture 3> — a single reference image of the object on a plain background. Preserve its exact design, colors and proportions: a dented chrome kettle with a black bakelite handle and a whistle cap on a chain.\n<Subject 4> is the location, defined by <Picture 4> — a background plate of a cramped diner kitchen with steel counters, a hanging ticket rail and cold fluorescent light from overhead. It establishes the layout, color palette, lighting direction and depth of the space, not a fixed camera framing.",
+        "summary:\n[reference generation] Bo leans out of the back door as the van reverses toward it, kettle in hand.",
+        "retention_analysis:\n<Subject 1> (appears in [Shot 1]): fully_preserved - facial identity, hairstyle, body proportions, wardrobe and colors are retained from <Picture 1> while allowing natural poses and expressions.\n<Subject 2> (appears in [Shot 1]): fully_preserved - the object's design, colors, materials and proportions are retained from <Picture 2> while it is handled and moved naturally.\n<Subject 3> (appears in [Shot 1]): fully_preserved - the object's design, colors, materials and proportions are retained from <Picture 3> while it is handled and moved naturally.\n<Subject 4> (appears in [Shot 1]): weak_reference - only the color palette, lighting direction and material character of the location are retained; the layout of the space is not reproduced and most of it falls outside the frame.",
+        "detailed_description:\nThe target video is a flat vector cartoon with thick even outlines and a limited pastel palette.\n[Shot 1] The scene takes place in <Subject 4>, a cramped diner kitchen with steel counters, a hanging ticket rail and cold fluorescent light from overhead. Bo leans out of the back door as the van reverses toward it, kettle in hand. The camera holds a static shot with fixed composition.\n<Subject 1>, with a voice that is slow and cracking, (S1) says from off-screen, outside the frame, <d>[English] Left! Left!</d>\nAn off-screen voice that is warm, older, unhurried (S2) says in an off-screen voiceover: into phone, <d>[English] Nobody ever goes left.</d>",
+        "overall_soundscape: Continuous room tone and environmental ambience with synchronized physical action sounds.",
+        "non_diegetic_music: N/A"
+      ],
+      "model": "shot_model.safetensors",
+      "lora": "none",
+      "duration": 3.04
+    },
+    {
+      "id": "sh050",
+      "sequence": "sq01",
+      "subjects": [
+        "cy",
+        "rex"
+      ],
+      "background": "refs/_bg/kitchen.png",
+      "size": "medium",
+      "panels": 1,
+      "panel_view": "body",
+      "length": 39,
+      "seed": 4412217473130868673,
+      "steps": 6,
+      "audio_policy": "clone",
+      "audio_retention": "reference",
+      "voices": [
+        "cy",
+        "rex"
+      ],
+      "voice_subject": "cy",
+      "voice_refs": [
+        {
+          "subject": "cy",
+          "sample": "audio/voices/cy_sample.wav"
+        },
+        {
+          "subject": "rex",
+          "sample": ""
+        }
+      ],
+      "prompt": [
+        "subject_definitions:\n<Subject 1> is Cy, defined by <Picture 1> — a single reference image of ONE character, a three-quarter view of the whole body. Exactly one person appears in that image. Exactly one person appears in this shot. Preserve the exact reference styling: a small girl with two puffball pigtails, a purple raincoat and yellow rubber boots.\n<Subject 2> is Rex, defined by <Picture 2> — a single reference image of ONE character, a three-quarter view of the whole body. Exactly one person appears in that image. Exactly one person appears in this shot. Preserve the exact reference styling: a scruffy brown terrier with one white ear and a red collar.\n<Subject 3> is the location, defined by <Picture 4> — a background plate of a cramped diner kitchen with steel counters, a hanging ticket rail and cold fluorescent light from overhead. It establishes the layout, color palette, lighting direction and depth of the space, not a fixed camera framing.\n<Audio 1> is the voice-timbre reference for <Subject 1> (S1).\n<Audio 2> is the voice-timbre reference for <Subject 2>, with a voice that is a gravelly bark of a voice, (S2).",
+        "summary:\n[reference generation + audio reference] Cy bursts in from the back with Rex at her heels.",
+        "retention_analysis:\n<Subject 1> (appears in [Shot 1]): fully_preserved - facial identity, hairstyle, body proportions, wardrobe and colors are retained from <Picture 1> while allowing natural poses and expressions.\n<Subject 2> (appears in [Shot 1]): fully_preserved - facial identity, hairstyle, body proportions, wardrobe and colors are retained from <Picture 2> while allowing natural poses and expressions.\n<Subject 3> (appears in [Shot 1]): partially_preserved - the layout, color palette and lighting direction of the location are retained while the camera framing and visible portion of the space differ from the plate.\n<Audio 1>: reference - (S1) follows its voice timbre and delivery without copying the original signal.\n<Audio 2>: reference - (S2) follows its voice timbre and delivery without copying the original signal.",
+        "detailed_description:\nThe target video is a flat vector cartoon with thick even outlines and a limited pastel palette.\n[Shot 1] The scene takes place in <Subject 3>, a cramped diner kitchen with steel counters, a hanging ticket rail and cold fluorescent light from overhead. Cy bursts in from the back with Rex at her heels. The camera holds a static shot with fixed composition.\n<Subject 1> (S1) says, <d>[English] Absolutely everybody in this entire neighbourhood is waiting outside for breakfast!</d>\n<Subject 2> (S2) says, <d>[English] Woof.</d>",
+        "overall_soundscape: Continuous room tone and environmental ambience with synchronized physical action sounds.",
+        "non_diegetic_music: N/A"
+      ],
+      "duration": 1.62
+    },
+    {
+      "id": "sh060",
+      "sequence": "sq01",
+      "subjects": [
+        "bo"
+      ],
+      "background": "refs/_bg/kitchen.png",
+      "size": "medium",
+      "panels": 1,
+      "panel_view": "body",
+      "length": 73,
+      "seed": 7624922143456421625,
+      "steps": 6,
+      "audio_policy": "clone",
+      "audio_retention": "reference",
+      "voices": [
+        "bo",
+        "cy"
+      ],
+      "voice_subject": "bo",
+      "voice_refs": [
+        {
+          "subject": "bo",
+          "sample": "audio/voices/bo_sample.wav"
+        },
+        {
+          "subject": "cy",
+          "sample": "audio/voices/cy_sample.wav"
+        }
+      ],
+      "prompt": [
+        "subject_definitions:\n<Subject 1> is Bo, defined by <Picture 1> — a single reference image of ONE character, a three-quarter view of the whole body. Exactly one person appears in that image. Exactly one person appears in this shot. Preserve the exact reference styling: a stocky teenage boy with a shaved head, an oversized green bomber jacket and orange high-tops.\n<Subject 2> is the location, defined by <Picture 4> — a background plate of a cramped diner kitchen with steel counters, a hanging ticket rail and cold fluorescent light from overhead. It establishes the layout, color palette, lighting direction and depth of the space, not a fixed camera framing.\n<Audio 1> is the voice-timbre reference for <Subject 1>, with a voice that is slow and cracking, (S1).\n<Audio 2> is the voice-timbre reference for The same off-screen voice (S2).",
+        "summary:\n[reference generation + audio reference] Bo stares at the ticket rail as it fills with orders.",
+        "retention_analysis:\n<Subject 1> (appears in [Shot 1]): fully_preserved - facial identity, hairstyle, body proportions, wardrobe and colors are retained from <Picture 1> while allowing natural poses and expressions.\n<Subject 2> (appears in [Shot 1]): partially_preserved - the layout, color palette and lighting direction of the location are retained while the camera framing and visible portion of the space differ from the plate.\n<Audio 1>: reference - (S1) follows its voice timbre and delivery without copying the original signal.\n<Audio 2>: reference - (S2) follows its voice timbre and delivery without copying the original signal.",
+        "detailed_description:\nThe target video is a flat vector cartoon with thick even outlines and a limited pastel palette.\n[Shot 1] The scene takes place in <Subject 2>, a cramped diner kitchen with steel counters, a hanging ticket rail and cold fluorescent light from overhead. Bo stares at the ticket rail as it fills with orders. The camera holds a static shot with fixed composition.\n<Subject 1> (S1) says in an off-screen voiceover: <d>[English] Here we go again, then, everybody.</d> while their lips remain completely closed.\nThe same off-screen voice (S2) says from off-screen, outside the frame, <d>[English] Bo!</d>",
+        "overall_soundscape: Continuous room tone and environmental ambience with synchronized physical action sounds.",
+        "non_diegetic_music: N/A"
+      ],
+      "duration": 3.04
+    },
+    {
+      "id": "sh110",
+      "sequence": "sq02",
+      "subjects": [
+        "ada",
+        "bo",
+        "cy"
+      ],
+      "background": "refs/_bg/street.png",
+      "size": "wide",
+      "panels": 1,
+      "panel_view": "body",
+      "length": 73,
+      "seed": 3054841815674432230,
+      "steps": 12,
+      "audio_policy": "dub",
+      "audio_retention": "fully_copy",
+      "voices": [
+        "ada",
+        "bo",
+        "cy"
+      ],
+      "voice_subject": "ada",
+      "voice_refs": [],
+      "prompt": [
+        "subject_definitions:\n<Subject 1> is Ada, defined by <Picture 1> — a single reference image of ONE character, a three-quarter view of the whole body. Exactly one person appears in that image. Exactly one person appears in this shot. Preserve the exact reference styling: a tall woman in her thirties with a short grey bob, a mustard apron over a striped shirt, and round red glasses.\n<Subject 2> is Bo, defined by <Picture 2> — a single reference image of ONE character, a three-quarter view of the whole body. Exactly one person appears in that image. Exactly one person appears in this shot. Preserve the exact reference styling: a stocky teenage boy with a shaved head, an oversized green bomber jacket and orange high-tops.\n<Subject 3> is Cy, defined by <Picture 3> — a single reference image of ONE character, a three-quarter view of the whole body. Exactly one person appears in that image. Exactly one person appears in this shot. Preserve the exact reference styling: a small girl with two puffball pigtails, a purple raincoat and yellow rubber boots.\n<Subject 4> is the location, defined by <Picture 4> — a background plate of a wet night street outside the diner, neon sign reflected in the puddles, light from the left. It establishes the layout, color palette, lighting direction and depth of the space, not a fixed camera framing.\n<Audio 1> is the recorded dialogue for this shot, spoken by <Subject 1> (S1), <Subject 2> (S2), <Subject 3> (S3); its exact words, voices and timing are reused.",
+        "summary:\n[reference generation + audio reuse] Ada, Bo and Cy spill out of the diner door into the rain.",
+        "retention_analysis:\n<Subject 1> (appears in [Shot 1]): fully_preserved - facial identity, hairstyle, body proportions, wardrobe and colors are retained from <Picture 1> while allowing natural poses and expressions.\n<Subject 2> (appears in [Shot 1]): fully_preserved - facial identity, hairstyle, body proportions, wardrobe and colors are retained from <Picture 2> while allowing natural poses and expressions.\n<Subject 3> (appears in [Shot 1]): fully_preserved - facial identity, hairstyle, body proportions, wardrobe and colors are retained from <Picture 3> while allowing natural poses and expressions.\n<Subject 4> (appears in [Shot 1]): partially_preserved - the layout, color palette and lighting direction of the location are retained while the camera framing and visible portion of the space differ from the plate.\n<Audio 1>: fully_copy - <Audio 1> is reused 1:1 as the target video's complete final audio track, and the mouth movement of <Subject 1> and <Subject 2> and <Subject 3> is synchronized only to their own lines in it.",
+        "detailed_description:\nThe target video is a flat vector cartoon with thick even outlines and a limited pastel palette.\n[Shot 1] The scene takes place in <Subject 4>, a wet night street outside the diner, neon sign reflected in the puddles, light from the left. Ada, Bo and Cy spill out of the diner door into the rain. The camera holds a static shot with fixed composition.\n<Subject 1>, with a voice that is dry, quick and precise, (S1) says, in the recorded voice from <Audio 1>, <d>[English] Van.</d>\n<Subject 2>, with a voice that is slow and cracking, (S2) says, in the recorded voice from <Audio 1>, <d>[English] Where?</d>\n<Subject 3> (S3) says, in the recorded voice from <Audio 1>, <d>[English] There!</d>",
+        "overall_soundscape: The only audio is the copied dialogue track from <Audio 1>; no ambience, effects or music are added.",
+        "non_diegetic_music: N/A"
+      ],
+      "model": "seq_model.safetensors",
+      "audio_in": 1.0,
+      "audio_out": 3.5
+    },
+    {
+      "id": "sh120",
+      "sequence": "sq02",
+      "subjects": [
+        "ada"
+      ],
+      "background": "refs/_bg/street.png",
+      "size": "medium",
+      "panels": 1,
+      "panel_view": "body",
+      "length": 39,
+      "seed": 985161046565145751,
+      "steps": 12,
+      "audio_policy": "dub_keep_foley",
+      "audio_retention": "fully_copy",
+      "voices": [
+        "ada"
+      ],
+      "voice_subject": "ada",
+      "voice_refs": [],
+      "prompt": [
+        "subject_definitions:\n<Subject 1> is Ada, defined by <Picture 1> — a single reference image of ONE character, a three-quarter view of the whole body. Exactly one person appears in that image. Exactly one person appears in this shot. Preserve the exact reference styling: a tall woman in her thirties with a short grey bob, a mustard apron over a striped shirt, and round red glasses.\n<Subject 2> is the location, defined by <Picture 4> — a background plate of a wet night street outside the diner, neon sign reflected in the puddles, light from the left. It establishes the layout, color palette, lighting direction and depth of the space, not a fixed camera framing.\n<Audio 1> is the recorded dialogue for this shot, spoken by <Subject 1> (S1); its exact words, voices and timing are reused.",
+        "summary:\n[reference generation + audio reuse] Ada sprints along the kerb after the van.",
+        "retention_analysis:\n<Subject 1> (appears in [Shot 1]): fully_preserved - facial identity, hairstyle, body proportions, wardrobe and colors are retained from <Picture 1> while allowing natural poses and expressions.\n<Subject 2> (appears in [Shot 1]): partially_preserved - the layout, color palette and lighting direction of the location are retained while the camera framing and visible portion of the space differ from the plate.\n<Audio 1>: fully_copy - <Audio 1> is reused 1:1 as the target video's complete final audio track, and the mouth movement of <Subject 1> is synchronized to its speech.",
+        "detailed_description:\nThe target video is a flat vector cartoon with thick even outlines and a limited pastel palette.\n[Shot 1] The scene takes place in <Subject 2>, a wet night street outside the diner, neon sign reflected in the puddles, light from the left. Ada sprints along the kerb after the van. The camera holds a static shot with fixed composition. Continue the incoming action, pose, camera movement, lighting and object states from the previous segment without resetting them.\n<Subject 1>, with a voice that is dry, quick and precise, (S1) says, in the recorded voice from <Audio 1>, <d>[English] Stop!</d>",
+        "overall_soundscape: The only audio is the copied dialogue track from <Audio 1>; no ambience, effects or music are added.",
+        "non_diegetic_music: N/A"
+      ],
+      "model": "seq_model.safetensors",
+      "audio_in": 3.5,
+      "audio_out": 5.0
+    },
+    {
+      "id": "sh130",
+      "sequence": "sq02",
+      "subjects": [
+        "bo"
+      ],
+      "background": "refs/_bg/kitchen_window.png",
+      "size": "medium",
+      "panels": 1,
+      "panel_view": "body",
+      "length": 56,
+      "seed": 1964752148325355590,
+      "steps": 12,
+      "audio_policy": "dub_keep_foley",
+      "audio_retention": "partially_copy",
+      "voices": [
+        "bo"
+      ],
+      "voice_subject": "bo",
+      "voice_refs": [],
+      "prompt": [
+        "subject_definitions:\n<Subject 1> is Bo, defined by <Picture 1> — a single reference image of ONE character, a three-quarter view of the whole body. Exactly one person appears in that image. Exactly one person appears in this shot. Preserve the exact reference styling: a stocky teenage boy with a shaved head, an oversized green bomber jacket and orange high-tops.\n<Subject 2> is the location, defined by <Picture 4> — a background plate of the diner's pass-through window looking out to the counter, warm tungsten light spilling in from the dining room. It establishes the layout, color palette, lighting direction and depth of the space, not a fixed camera framing.\n<Audio 1> is the recorded dialogue for this shot, spoken by <Subject 1> (S1); its exact words, voices and timing are reused.",
+        "summary:\n[reference generation + audio reuse] Bo ducks back inside and leans through the pass-through window.",
+        "retention_analysis:\n<Subject 1> (appears in [Shot 1]): fully_preserved - facial identity, hairstyle, body proportions, wardrobe and colors are retained from <Picture 1> while allowing natural poses and expressions.\n<Subject 2> (appears in [Shot 1]): partially_preserved - the layout, color palette and lighting direction of the location are retained while the camera framing and visible portion of the space differ from the plate.\n<Audio 1>: partially_copy - the dialogue of <Audio 1> is copied exactly in words, voices and timing; the ambience and action sounds described below are added around it.",
+        "detailed_description:\nThe target video is a flat vector cartoon with thick even outlines and a limited pastel palette.\n[Shot 1] The scene takes place in <Subject 2>, the diner's pass-through window looking out to the counter, warm tungsten light spilling in from the dining room. Bo ducks back inside and leans through the pass-through window. The camera holds a static shot with fixed composition. Continue the incoming action, pose, camera movement, lighting and object states from the previous segment without resetting them.\n<Subject 1>, with a voice that is slow and cracking, (S1) says from off-screen, outside the frame, in the recorded voice from <Audio 1>, <d>[English] She's never catching that.</d>",
+        "overall_soundscape: Rain drumming on the awning, laid under the copied dialogue from <Audio 1>.",
+        "non_diegetic_music: N/A"
+      ],
+      "model": "seq_model.safetensors",
+      "audio_in": 5.0,
+      "audio_out": 7.2
+    },
+    {
+      "id": "sh140",
+      "sequence": "sq02",
+      "subjects": [],
+      "background": "refs/_bg/street.png",
+      "size": "medium",
+      "panels": 1,
+      "panel_view": "body",
+      "length": 56,
+      "seed": 5738520875936942780,
+      "steps": 12,
+      "audio_policy": "dub",
+      "audio_retention": "reference",
+      "voices": [
+        "narrator"
+      ],
+      "voice_subject": "narrator",
+      "voice_refs": [],
+      "prompt": [
+        "subject_definitions:\n<Subject 1> is the location, defined by <Picture 4> — a background plate of a wet night street outside the diner, neon sign reflected in the puddles, light from the left. It establishes the layout, color palette, lighting direction and depth of the space, not a fixed camera framing.\n<Audio 1> is the voice and timing reference for the spoken lines below.",
+        "summary:\n[reference generation + audio reference] The street empties; the neon sign flickers once and goes dark.",
+        "retention_analysis:\n<Subject 1> (appears in [Shot 1]): partially_preserved - the layout, color palette and lighting direction of the location are retained while the camera framing and visible portion of the space differ from the plate.\n<Audio 1>: reference - its vocal delivery, phrasing and timing guide the delivery and timing of the spoken lines without copying the original signal.",
+        "detailed_description:\nThe target video is a flat vector cartoon with thick even outlines and a limited pastel palette.\n[Shot 1] The scene takes place in <Subject 1>, a wet night street outside the diner, neon sign reflected in the puddles, light from the left. The street empties; the neon sign flickers once and goes dark. The camera holds a static shot with fixed composition. Continue the incoming action, pose, camera movement, lighting and object states from the previous segment without resetting them.\nAn off-screen voice that is warm, older, unhurried (S1) says in an off-screen voiceover: <d>[English] And that was the last anyone saw of the kettle.</d>",
+        "overall_soundscape: Continuous room tone and environmental ambience with synchronized physical action sounds.",
+        "non_diegetic_music: N/A"
+      ],
+      "model": "seq_model.safetensors",
+      "audio_in": 7.2,
+      "audio_out": 9.0
+    },
+    {
+      "id": "sh150",
+      "sequence": "sq02",
+      "subjects": [
+        "ada"
+      ],
+      "background": "refs/_bg/street.png",
+      "size": "medium",
+      "panels": 1,
+      "panel_view": "body",
+      "length": 39,
+      "seed": 5193023516762493768,
+      "steps": 12,
+      "audio_policy": "generate",
+      "audio_retention": "",
+      "voices": [],
+      "voice_subject": "",
+      "voice_refs": [],
+      "prompt": [
+        "subject_definitions:\n<Subject 1> is Ada, defined by <Picture 1> — a single reference image of ONE character, a three-quarter view of the whole body. Exactly one person appears in that image. Exactly one person appears in this shot. Preserve the exact reference styling: a tall woman in her thirties with a short grey bob, a mustard apron over a striped shirt, and round red glasses.\n<Subject 2> is the location, defined by <Picture 4> — a background plate of a wet night street outside the diner, neon sign reflected in the puddles, light from the left. It establishes the layout, color palette, lighting direction and depth of the space, not a fixed camera framing.",
+        "summary:\n[reference generation] Ada stops dead in the middle of the road, soaked, and starts to laugh.",
+        "retention_analysis:\n<Subject 1> (appears in [Shot 1]): fully_preserved - facial identity, hairstyle, body proportions, wardrobe and colors are retained from <Picture 1> while allowing natural poses and expressions.\n<Subject 2> (appears in [Shot 1]): partially_preserved - the layout, color palette and lighting direction of the location are retained while the camera framing and visible portion of the space differ from the plate.",
+        "detailed_description:\nThe target video is a flat vector cartoon with thick even outlines and a limited pastel palette.\n[Shot 1] The scene takes place in <Subject 2>, a wet night street outside the diner, neon sign reflected in the puddles, light from the left. Ada stops dead in the middle of the road, soaked, and starts to laugh. The camera holds a static shot with fixed composition. Continue the incoming action, pose, camera movement, lighting and object states from the previous segment without resetting them.",
+        "overall_soundscape: Continuous room tone and environmental ambience with synchronized physical action sounds.",
+        "non_diegetic_music: N/A"
+      ],
+      "model": "seq_model.safetensors",
+      "duration": 1.0
+    },
+    {
+      "id": "sh210",
+      "sequence": "sq03",
+      "subjects": [
+        "ada",
+        "bo"
+      ],
+      "background": "refs/_bg/kitchen_window.png",
+      "size": "medium",
+      "panels": 1,
+      "panel_view": "body",
+      "length": 90,
+      "seed": 1998322879969458948,
+      "steps": 6,
+      "audio_policy": "clone",
+      "audio_retention": "reference",
+      "voices": [
+        "ada",
+        "bo",
+        "narrator"
+      ],
+      "voice_subject": "ada",
+      "voice_refs": [
+        {
+          "subject": "ada",
+          "sample": "audio/voices/ada_sample.wav"
+        },
+        {
+          "subject": "bo",
+          "sample": "audio/voices/bo_sample.wav"
+        },
+        {
+          "subject": "narrator",
+          "sample": "audio/voices/narrator_sample.wav"
+        }
+      ],
+      "prompt": [
+        "subject_definitions:\n<Subject 1> is Ada, defined by <Picture 1> — a single reference image of ONE character, a three-quarter view of the whole body. Exactly one person appears in that image. Exactly one person appears in this shot. Preserve the exact reference styling: a tall woman in her thirties with a short grey bob, a mustard apron over a striped shirt, and round red glasses.\n<Subject 2> is Bo, defined by <Picture 2> — a single reference image of ONE character, a three-quarter view of the whole body. Exactly one person appears in that image. Exactly one person appears in this shot. Preserve the exact reference styling: a stocky teenage boy with a shaved head, an oversized green bomber jacket and orange high-tops.\n<Subject 3> is the location, defined by <Picture 4> — a background plate of the diner's pass-through window looking out to the counter, warm tungsten light spilling in from the dining room. It establishes the layout, color palette, lighting direction and depth of the space, not a fixed camera framing.\n<Audio 1> is the voice-timbre reference for <Subject 1>, with a voice that is dry, quick and precise, (S1).\n<Audio 2> is the voice-timbre reference for <Subject 2>, with a voice that is slow and cracking, (S2).\n<Audio 3> is the voice-timbre reference for An off-screen voice that is warm, older, unhurried (S3).",
+        "summary:\n[reference generation + audio reference] Ada and Bo lean on the counter, dripping, as the kettle finally whistles.",
+        "retention_analysis:\n<Subject 1> (appears in [Shot 1]): fully_preserved - facial identity, hairstyle, body proportions, wardrobe and colors are retained from <Picture 1> while allowing natural poses and expressions.\n<Subject 2> (appears in [Shot 1]): fully_preserved - facial identity, hairstyle, body proportions, wardrobe and colors are retained from <Picture 2> while allowing natural poses and expressions.\n<Subject 3> (appears in [Shot 1]): partially_preserved - the layout, color palette and lighting direction of the location are retained while the camera framing and visible portion of the space differ from the plate.\n<Audio 1>: reference - (S1) follows its voice timbre and delivery without copying the original signal.\n<Audio 2>: reference - (S2) follows its voice timbre and delivery without copying the original signal.\n<Audio 3>: reference - (S3) follows its voice timbre and delivery without copying the original signal.",
+        "detailed_description:\nThe target video is a flat vector cartoon with thick even outlines and a limited pastel palette.\n[Shot 1] The scene takes place in <Subject 3>, the diner's pass-through window looking out to the counter, warm tungsten light spilling in from the dining room. Ada and Bo lean on the counter, dripping, as the kettle finally whistles. The camera holds a static shot with fixed composition.\n<Subject 1> (S1) says, <d>[English] Well.</d>\n<Subject 2> (S2) says, <d>[English] Well what?</d>\n<Subject 1> (S1) says, <d>[English] Put the tea on.</d>\nThe same off-screen voice (S3) says in an off-screen voiceover: <d>[English] They did.</d>",
+        "overall_soundscape: Continuous room tone and environmental ambience with synchronized physical action sounds.",
+        "non_diegetic_music: N/A"
+      ],
+      "lora": "seq_lora.safetensors",
+      "duration": 3.595
+    }
+  ]
+}

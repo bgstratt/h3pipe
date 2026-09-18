@@ -1,0 +1,4 @@
+exit 1
+
+  error in dub_without_window.md: shot sh010: policy dub needs an `audio: in-out` window on the recorded track (h3align.py writes these).
+

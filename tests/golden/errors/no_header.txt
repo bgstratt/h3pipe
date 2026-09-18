@@ -1,0 +1,5 @@
+exit 1
+
+  error in no_header.md: line 1: script needs an episode header: `= ep01  Title`
+    | 
+

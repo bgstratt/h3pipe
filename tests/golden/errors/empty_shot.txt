@@ -1,0 +1,5 @@
+exit 1
+
+  error in empty_shot.md: line 3: shot 'sh010' has no action and no dialogue
+    | ## sh010
+

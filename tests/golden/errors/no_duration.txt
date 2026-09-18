@@ -1,0 +1,4 @@
+exit 1
+
+  error in no_duration.md: shot sh010: needs `audio: 3.10-7.40`, `dur: 3.04`, or `dur: auto`
+

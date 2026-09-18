@@ -1,0 +1,34 @@
+
+  ks01  Kitchen Sink   [proxy]  448x256  4 steps
+  model        series_model.safetensors
+  lora         proxy_turbo_4step.safetensors
+  ------------------------------------------------------------
+  3 sequences, 12 shots
+  runtime      0:30.83  (scripted 0:28.00, +68f grid pad)
+  audio        2x dub, 2x dub_keep_foley, 8x generate
+  references   0/9 on disk, 9 to make
+    ! sh010: dur 2.50s snaps up to 3.04s, wasting 13 frames. Writing it as 3.04s costs the same render.
+    ! sh050: CRAMMED — 26 syllables in 1.62s forces 38.5 syl/s (ceiling 5.8). This window holds about 3. Either `dur: 5.88` (+4.25s), cut ~23 syllables, or split the shot.
+    ! sh060: tight — 12 syllables in 3.04s forces 5.7 syl/s against a slow pace of 3.6. `dur: 4.46` gives it room, or add `pace: fast` if the rush is the joke.
+    ! sh120: fully_copy makes the recording the whole soundtrack, so H3 adds no foley and dub_keep_foley's foley bed will be near-empty. Use `retention: partially_copy` to keep foley.
+    ! sh120: continuous chaining costs 22 of 39 frames (56%). Shots this short are cheaper as separate cuts.
+    ! sh130: continuous chaining costs 22 of 56 frames (39%). Shots this short are cheaper as separate cuts.
+    ! sh140: CRAMMED — 12 syllables in 2.33s forces 7.1 syl/s (ceiling 5.8). This window holds about 7. Either `dur: 3.75` (+1.42s), cut ~5 syllables, or split the shot.
+    ! sh140: continuous chaining costs 22 of 56 frames (39%). Shots this short are cheaper as separate cuts.
+    ! sh150: continuous chaining costs 22 of 39 frames (56%). Shots this short are cheaper as separate cuts.
+    ! sh150: dur 1.00s snaps up to 1.62s, wasting 15 frames. Writing it as 1.62s costs the same render.
+    ! sh040 overrides lora: none
+    ! sh040 overrides model: shot_model.safetensors
+    ! sh040 overrides steps: 10
+    ! sh110 overrides model: seq_model.safetensors
+    ! sh110 overrides steps: 12
+    ! sh120 overrides model: seq_model.safetensors
+    ! sh120 overrides steps: 12
+    ! sh130 overrides model: seq_model.safetensors
+    ! sh130 overrides steps: 12
+    ! sh140 overrides model: seq_model.safetensors
+    ! sh140 overrides steps: 12
+    ! sh150 overrides model: seq_model.safetensors
+    ! sh150 overrides steps: 12
+    ! sh210 overrides lora: seq_lora.safetensors
+

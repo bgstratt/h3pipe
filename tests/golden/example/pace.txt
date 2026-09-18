@@ -1,0 +1,15 @@
+
+  shot         held  syl  forced   fits  verdict
+  ----------------------------------------------------
+  sh020        4.46   12     3.4   3.75  ok
+  sh030        3.04    4     1.7   1.62  ok
+  sh050        4.46   14     4.0   4.46  ok
+  sh055        4.46   13     3.7   4.46  ok
+  sh070       12.25    6     0.5   2.33  ok
+
+  0 crammed, 0 tight, 5 ok of 5 dialogue shots
+  pace 'normal' = 4.4 syl/s, ceiling 5.8
+
+  Fix by lengthening (`dur:` or `dur: auto`), cutting syllables, or
+  splitting the shot. `pace: fast` marks a rush that is deliberate.
+

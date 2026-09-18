@@ -28,8 +28,10 @@ IR + targets). Read it before changing `h3build.py`, `h3render.py`, `kreagen.py`
 - Never hand-edit generated files (`shotlist/`, `refs_todo.*`); change the script,
   the bible or the code and rebuild.
 - Refactors must keep the golden outputs byte-identical (`tests/golden/`,
-  `python -m pytest`) unless the change is intended and the goldens are updated in
-  the same commit with the reason stated.
+  `python -m pytest` or `python -m unittest discover -s tests`) unless the change is
+  intended and the goldens are updated in the same commit with the reason stated
+  (`python tests/test_golden.py --update`, then review the diff). Real-episode
+  fixtures live in the gitignored `tests/local/`; never commit them.
 - Seeds come from episode/sequence/shot ids (`stable_seed`); don't change that
   derivation — it's what makes untouched shots re-render identically.
 - ComfyUI runs at `http://127.0.0.1:8188`; `refs` and `render` need it up.

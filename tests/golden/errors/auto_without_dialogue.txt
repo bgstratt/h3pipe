@@ -1,0 +1,4 @@
+exit 1
+
+  error in auto_without_dialogue.md: shot sh010: `dur: auto` needs dialogue to measure. Give a silent shot an explicit `dur:`.
+

@@ -1,0 +1,4 @@
+exit 1
+
+  error in retention_on_clone.md: shot sh010: retention fully_copy needs recorded dialogue (policy dub or dub_keep_foley); a clone shot has nothing to copy.
+

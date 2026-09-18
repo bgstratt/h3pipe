@@ -33,3 +33,8 @@ h3render_graph.json
 .idea/
 Thumbs.db
 .DS_Store
+
+# Golden tests: the goldens are generated but committed on purpose. Real
+# episodes used as fixtures stay local.
+!tests/golden/**
+tests/local/

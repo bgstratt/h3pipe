@@ -230,14 +230,27 @@ take's prompt, seed and settings) · Show details (the sidecar) · Reveal in fol
 
 Each phase ends with its exit check passing. Don't start the next until it does.
 
-**Phase 0 — safety net**
-- This folder has no `.git`: `git init`, commit the current state.
-- Pick fixtures: `examples/` plus one or two real episodes (with and without an
-  `audio:`-aligned recording, with a clone-mode shot, a VO line, a prop).
-- Save today's outputs as goldens: `tests/golden/<fixture>/` — `shotlist.json`,
-  `shotlist_proxy.json`, `refs_todo.json`, `refs_todo.md`.
-- `tests/test_golden.py` rebuilds each fixture into a temp dir and compares bytes.
-- Exit: `python -m pytest` green on the untouched code.
+**Phase 0 — safety net** ✅ done 2026-09-18
+- `git init`, current state committed.
+- Fixtures:
+  - `example` (`examples/`: source_track, `audio:` windows).
+  - `tests/fixtures/kitchen_sink`: synthetic, and reaches every branch no real episode
+    uses (per-pass/sequence/shot model, LoRA and steps; explicit policies and
+    retentions; continuous; `extras:`; V.O. with a pronoun; props and vehicles;
+    crammed/tight pacing).
+  - Three real episodes in `tests/local/fixtures`, which is gitignored:
+    TrashPanda ep01, DeanStories ep05, WishTest ep02.
+  - `tests/fixtures/errors/*.md`: 16 scripts that must fail.
+- Goldens per fixture: both passes' shotlist and refs_todo (.json/.md), plus the stdout of
+  `--check` (both passes: this is where the warnings are) and `--pace`. CRLF is
+  normalised to LF; everything else compared byte for byte.
+- `tests/test_golden.py`; `python tests/test_golden.py --update` rewrites the goldens.
+- Found on the way:
+  - No real script repeats a shot id, but the parser allows it, and renders
+    (and soon takes, overrides and the cut) are keyed by shot id. Rejected in Phase 1.
+  - The shotlists on disk in the real episodes predate the current `h3build`
+    (the extras clause was reworded, `defaults.model` was added), so rebuilding them
+    changes their prompts.
 
 **Phase 1 — takes, overrides, cut (CLI)**
 - A `jobs` module shared by `h3render` and the future routes: plan the take, apply
@@ -248,6 +261,8 @@ Each phase ends with its exit check passing. Don't start the next until it does.
   after the workflow's one, so no workflow needs a fixed number of slots. `lora:` in
   the script keeps meaning the single (turbo) LoRA.
 - `overrides.json` read at queue time; `cut.json` read by `h3assemble`.
+- Build rejects a shot id used twice in one episode (an intended change: add an error
+  fixture and its golden).
 - `h3.py takes <ep>` (list with stale reasons), `pick <ep> <shot> <take>`,
   `override <ep> <shot> --seed/--model/--steps/--prompt-file`.
 - Exit: goldens byte-identical; on a real episode: redo gives a new seed, two redos

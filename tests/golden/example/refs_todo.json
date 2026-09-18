@@ -1,0 +1,78 @@
+[
+  {
+    "path": "refs/_bg/street.png",
+    "kind": "background plate",
+    "prompt": "A background plate drawn as a 2D hand-drawn cartoon animation with flat 2D illustration, clean black line art, flat solid colors, and cel-shaded artwork. An empty establishing view of a late-afternoon suburban street edge with a dense treeline beyond, warm low sun and long shadows. No characters, no props, no figures in frame — the environment only. Wide framing that shows the layout of the space.",
+    "target": "1344x768 (the render resolution)",
+    "exists": false,
+    "blocks_shots": [
+      "sh010",
+      "sh020",
+      "sh030"
+    ]
+  },
+  {
+    "path": "refs/huey/huey_sheet_4panel.png",
+    "kind": "character sheet",
+    "prompt": "A character model sheet on a plain flat background: FOUR panels side by side in a single horizontal strip, left to right — three-quarter body, side profile full body, back view full body, and a head-and-shoulders facial close-up. The SAME character in all four. a ten-year-old boy with a rounded afro, a red long-sleeve shirt, dark blue jeans, and white sneakers, drawn with thick confident outlines. Drawn as a 2D hand-drawn cartoon animation with flat 2D illustration, clean black line art, flat solid colors, and cel-shaded artwork. Output 4096x1024 or larger.",
+    "target": "4096x1024 or larger (horizontal 4-panel strip)",
+    "exists": false,
+    "blocks_shots": [
+      "sh010",
+      "sh020",
+      "sh050",
+      "sh060",
+      "sh070"
+    ]
+  },
+  {
+    "path": "refs/riley/riley_sheet_4panel.png",
+    "kind": "character sheet",
+    "prompt": "A character model sheet on a plain flat background: FOUR panels side by side in a single horizontal strip, left to right — three-quarter body, side profile full body, back view full body, and a head-and-shoulders facial close-up. The SAME character in all four. an eight-year-old boy with cornrow braids, an oversized yellow hoodie, baggy grey shorts, and worn high-top sneakers, drawn with thick confident outlines. Drawn as a 2D hand-drawn cartoon animation with flat 2D illustration, clean black line art, flat solid colors, and cel-shaded artwork. Output 4096x1024 or larger.",
+    "target": "4096x1024 or larger (horizontal 4-panel strip)",
+    "exists": false,
+    "blocks_shots": [
+      "sh020",
+      "sh030",
+      "sh040",
+      "sh050",
+      "sh055",
+      "sh060",
+      "sh070"
+    ]
+  },
+  {
+    "path": "refs/_bg/bedroom.png",
+    "kind": "background plate",
+    "prompt": "A background plate drawn as a 2D hand-drawn cartoon animation with flat 2D illustration, clean black line art, flat solid colors, and cel-shaded artwork. An empty establishing view of a cluttered kids' bedroom with bunk beds, posters peeling at the corners, and late-afternoon light through half-closed blinds. No characters, no props, no figures in frame — the environment only. Wide framing that shows the layout of the space.",
+    "target": "1344x768 (the render resolution)",
+    "exists": false,
+    "blocks_shots": [
+      "sh040",
+      "sh050",
+      "sh055"
+    ]
+  },
+  {
+    "path": "refs/props/backpack.png",
+    "kind": "prop reference",
+    "prompt": "A single clean three-quarter view of one object on a plain flat background, no scene around it. a battered olive-green canvas backpack with two front buckles, a broken zipper pull replaced with a shoelace, and a faded patch on the flap. Drawn as a 2D hand-drawn cartoon animation with flat 2D illustration, clean black line art, flat solid colors, and cel-shaded artwork. Output 1024x1024 or larger.",
+    "target": "1024x1024 or larger",
+    "exists": false,
+    "blocks_shots": [
+      "sh040",
+      "sh060"
+    ]
+  },
+  {
+    "path": "refs/_bg/path.png",
+    "kind": "background plate",
+    "prompt": "A background plate drawn as a 2D hand-drawn cartoon animation with flat 2D illustration, clean black line art, flat solid colors, and cel-shaded artwork. An empty establishing view of a narrow dirt path running into dense woods, low golden light breaking through the branches. No characters, no props, no figures in frame — the environment only. Wide framing that shows the layout of the space.",
+    "target": "1344x768 (the render resolution)",
+    "exists": false,
+    "blocks_shots": [
+      "sh060",
+      "sh070"
+    ]
+  }
+]

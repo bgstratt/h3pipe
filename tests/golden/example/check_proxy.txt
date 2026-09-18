@@ -1,0 +1,10 @@
+
+  ep01  The Gold Path   [proxy]  448x256  4 steps
+  model        minimax_h3_ref2va_pruned_int8_convrot.safetensors
+  lora         minimax_h3_ref2v_lightx2v_turbo_4step_v0.1_resized_avg_rank_20_bf16.safetensors
+  ------------------------------------------------------------
+  3 sequences, 8 shots
+  runtime      0:47.71  (scripted 0:45.38, +56f grid pad)
+  audio        5x dub_keep_foley, 3x generate
+  references   0/6 on disk, 6 to make
+

@@ -1,0 +1,21 @@
+
+  shot         held  syl  forced   fits  verdict
+  ----------------------------------------------------
+  sh020        3.75   11     4.2   3.75  ok
+  sh030        1.62    3     3.1   1.62  ok
+  sh040        3.04    9     4.3   3.04  ok
+!!sh050        1.62   26    38.5   5.88  CRAMMED
+ !sh060        3.04   12     5.7   4.46  tight
+  sh110        3.04    3     1.7   2.33  ok
+  sh120        1.62    1     1.0   0.92  ok
+  sh130        2.33    6     3.6   2.33  ok
+!!sh140        2.33   12     7.1   3.75  CRAMMED
+  sh210        3.75    9     4.1   3.75  ok
+
+  2 crammed, 1 tight, 7 ok of 10 dialogue shots
+  pace 'normal' = 4.4 syl/s, ceiling 5.8
+  giving every one of them room adds 7.08s of runtime
+
+  Fix by lengthening (`dur:` or `dur: auto`), cutting syllables, or
+  splitting the shot. `pace: fast` marks a rush that is deliberate.
+

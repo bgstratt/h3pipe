@@ -1,0 +1,98 @@
+{
+  "_README": "Golden-test fixture. Exercises every branch of h3build that no real episode reaches: per-pass/sequence/shot model, lora and steps; a LoRA whose step count disagrees; clone mode with a track so audio windows work; explicit policies and retentions; continuous sequences; a speaker with no voice sample; a subject with no kind.",
+  "series": {
+    "id": "kitchen_sink",
+    "title": "Kitchen Sink",
+    "fps": 24,
+    "width": 1344,
+    "height": 768,
+    "steps": 6,
+    "model": "series_model.safetensors",
+    "lora": "series_turbo_8step.safetensors"
+  },
+  "proxy": {
+    "width": 448,
+    "height": 256,
+    "steps": 4,
+    "audio_mode": "generate",
+    "lora": "proxy_turbo_4step.safetensors"
+  },
+  "style": {
+    "look": "a flat vector cartoon with thick even outlines and a limited pastel palette"
+  },
+  "speech": {
+    "pace": "normal"
+  },
+  "subjects": {
+    "_note": "keys starting with _ are ignored",
+    "ada": {
+      "kind": "character",
+      "name": "Ada",
+      "pronoun": "her",
+      "design": "a tall woman in her thirties with a short grey bob, a mustard apron over a striped shirt, and round red glasses",
+      "sheet": "refs/ada/ada_sheet_4panel.png",
+      "voice": "dry, quick and precise",
+      "voice_sample": "audio/voices/ada_sample.wav"
+    },
+    "bo": {
+      "kind": "character",
+      "name": "Bo",
+      "design": "a stocky teenage boy with a shaved head, an oversized green bomber jacket and orange high-tops",
+      "sheet": "refs/bo/bo_sheet_4panel.png",
+      "voice": "slow and cracking",
+      "voice_sample": "audio/voices/bo_sample.wav"
+    },
+    "cy": {
+      "kind": "character",
+      "name": "Cy",
+      "design": "a small girl with two puffball pigtails, a purple raincoat and yellow rubber boots",
+      "sheet": "refs/cy/cy_sheet_4panel.png",
+      "voice_sample": "audio/voices/cy_sample.wav"
+    },
+    "rex": {
+      "name": "Rex",
+      "design": "a scruffy brown terrier with one white ear and a red collar",
+      "sheet": "refs/rex/rex_sheet_4panel.png",
+      "voice": "a gravelly bark of a voice"
+    },
+    "narrator": {
+      "kind": "character",
+      "name": "the narrator",
+      "design": "never seen",
+      "sheet": "refs/narrator/narrator_sheet_4panel.png",
+      "voice": "warm, older, unhurried",
+      "voice_sample": "audio/voices/narrator_sample.wav"
+    },
+    "kettle": {
+      "kind": "prop",
+      "name": "the diner kettle",
+      "design": "a dented chrome kettle with a black bakelite handle and a whistle cap on a chain",
+      "sheet": "refs/props/kettle.png"
+    },
+    "van": {
+      "kind": "vehicle",
+      "name": "the delivery van",
+      "design": "a boxy white delivery van with a sky-blue stripe and a cracked left headlight",
+      "sheet": "refs/props/van.png"
+    }
+  },
+  "locations": {
+    "_note": "keys starting with _ are ignored",
+    "kitchen": {
+      "description": "a cramped diner kitchen with steel counters, a hanging ticket rail and cold fluorescent light from overhead",
+      "plate": "refs/_bg/kitchen.png"
+    },
+    "kitchen_window": {
+      "description": "the diner's pass-through window looking out to the counter, warm tungsten light spilling in from the dining room",
+      "plate": "refs/_bg/kitchen_window.png"
+    },
+    "street": {
+      "description": "a wet night street outside the diner, neon sign reflected in the puddles, light from the left",
+      "plate": "refs/_bg/street.png"
+    }
+  },
+  "audio": {
+    "mode": "clone",
+    "track": "audio/ks01_mix.wav"
+  }
+}

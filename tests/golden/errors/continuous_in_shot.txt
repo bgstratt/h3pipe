@@ -1,0 +1,5 @@
+exit 1
+
+  error in continuous_in_shot.md: line 4: `continuous:` belongs under `# sequence`, not a shot
+    | continuous: yes
+

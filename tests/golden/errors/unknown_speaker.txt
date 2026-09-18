@@ -1,0 +1,5 @@
+exit 1
+
+  error in unknown_speaker.md: line 5: 'ZED' is not a character in the bible (ada, bo, cy, narrator, rex). Typo, or write it as action.
+    | ZED: Hello.
+

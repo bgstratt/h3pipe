@@ -1,0 +1,5 @@
+exit 1
+
+  error in bad_audio_window.md: line 4: audio window ends (2.0) before it starts (5.0)
+    | audio: 5.00-2.00
+

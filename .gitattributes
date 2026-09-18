@@ -1,0 +1,6 @@
+# Keep the working tree as it was authored (LF), whatever core.autocrlf says.
+* text=auto eol=lf
+
+# Golden-test inputs and outputs are compared byte for byte; never convert them.
+tests/fixtures/** -text
+tests/golden/** -text

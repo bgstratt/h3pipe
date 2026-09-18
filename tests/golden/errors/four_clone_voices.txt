@@ -1,0 +1,4 @@
+exit 1
+
+  error in four_clone_voices.md: shot sh010: 4 speakers (ada, bo, cy, narrator) but clone mode feeds one voice sample each and H3 takes at most 3. Split the shot, or move a line to a neighbouring shot.
+
