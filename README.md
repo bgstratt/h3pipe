@@ -88,7 +88,7 @@ ComfyUI must be running for `refs` and `render`.
 | `mksheet.py` | Joins four character views into one 4096×1024 sheet (kreagen calls it) | 4 images | `refs/<char>/<char>_sheet_4panel.png` |
 | `h3render.py` | Queues each shot on ComfyUI through `H3_Ref2VA_Shotlist_v1.json`, waits, skips finished shots | `shotlist*.json`, the workflow | `renders/` or `renders_proxy/` |
 | `h3align.py` | Times the script against a dialogue recording and writes the `audio:` windows | recording, `epNN.md`, `series.json` | updated script and bible, `align_report.md` |
-| `h3assemble.py` | Joins the rendered shots in script order, trimming timed shots to their windows | `shotlist*.json`, renders | `renders/epNN.mp4`, `epNN_shots.txt` |
+| `h3assemble.py` | Joins the rendered shots in cut order (`cut.json`, else script order), trimming timed shots to their windows | `shotlist*.json`, renders | `renders/epNN.mp4`, `epNN_shots.txt` |
 | `h3plan.py` | Legacy: chained-plan compiler for the looping Contex-Loop graph (see the end of this file) | an episode plan JSON (format documented in that file) | `build/` |
 
 ### What you write
@@ -231,11 +231,21 @@ python h3.py assemble Shows\ep05 --proxy --check   # report only
 python h3.py assemble Shows\ep05 --partial         # join what exists so far
 ```
 
-- Uses each shot's highest take unless `--take N`, so a `--redo` render is picked up
-  automatically. To go back to an older take for one shot, move the newer mp4 out of that
-  shot's folder; `--take` applies to every shot at once.
-- `--check` lists the take it would use for each shot and writes nothing. `--name` sets the
-  output filename, `--shotlist` and `--subfolder` pick the proxy files.
+- Follows the episode's `cut.json` if there is one (a list per pass of
+  `{"shot", "take", "pass", "trim_in", "trim_out"}` entries). The list sets the order and,
+  with `take: N`, the exact take. Without `cut.json`, or for a shot the list leaves out,
+  a shot goes in script order and uses its latest usable take: status `ok` and the mp4 is
+  there, so a `--redo` still queued or failed is skipped. Takes from before sidecars count
+  as ok.
+- A picked take that is queued, failed or has no mp4 makes the shot missing, and the report
+  says why. `--take N` forces take N for every shot and beats `cut.json`.
+- Entries for shots deleted from the script are skipped with a note. An entry with
+  `"pass": "proxy"` in the final list is a placeholder: the proxy take is scaled to the final
+  size. `trim_in`/`trim_out` drop frames from the head and tail.
+- The pass comes from the shotlist's name (`_proxy` means proxy); `--pass` overrides it.
+- `--check` lists the resolved cut (order, take, pass, trims, placeholders, orphans) and
+  writes nothing. `--name` sets the output filename, `--shotlist` picks the proxy files,
+  `--subfolder` reads this pass's takes from another folder.
 - Mute clips (dub, clone) get their `_h3.wav` added so the join works. `--audio h3|none|master`
   chooses the sound.
 - Shots with an `audio:` window are trimmed to it (re-encoded, x264 CRF 16) so the cut lines up
