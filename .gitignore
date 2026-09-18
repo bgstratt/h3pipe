@@ -38,3 +38,6 @@ Thumbs.db
 # episodes used as fixtures stay local.
 !tests/golden/**
 tests/local/
+
+# Claude Code agent worktrees
+.claude/worktrees/

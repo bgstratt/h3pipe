@@ -87,6 +87,22 @@ class TakesTest(unittest.TestCase):
         self.assertEqual([t.status for t in T.list_takes(self.root, "final", "sh010")],
                          ["failed", "queued"])
 
+    def test_sweep_leaves_fresh_and_later_takes_alone(self):
+        old = "2026-01-01T10:00:00+00:00"
+        snap = "2026-01-01T10:05:00+00:00"
+        a = T.reserve_take(self.root, "final", "sh010", {"status": "queued", "queued": old})
+        b = T.reserve_take(self.root, "final", "sh010",   # reserved, not yet queued
+                           {"status": "queued", "queued": "2026-01-01T10:04:30+00:00"})
+        c = T.reserve_take(self.root, "final", "sh010",   # queued after the snapshot
+                           {"status": "queued", "comfy_prompt_id": "x",
+                            "queued": "2026-01-01T10:06:00+00:00"})
+        d = T.reserve_take(self.root, "final", "sh010",
+                           {"status": "queued", "comfy_prompt_id": "y", "queued": old})
+        changed = T.sweep_queued(T.list_takes(self.root, "final", "sh010"), set(), as_of=snap)
+        self.assertEqual(sorted(t.take for t in changed), [a.take, d.take])
+        self.assertNotIn(b.take, [t.take for t in changed])
+        self.assertNotIn(c.take, [t.take for t in changed])
+
     def test_claimed_but_empty_sidecar_reads_as_queued(self):
         touch(T.take_paths(self.root, "final", "sh010", 1).sidecar)
         (t,) = T.list_takes(self.root, "final", "sh010")

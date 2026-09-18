@@ -275,20 +275,42 @@ def update_sidecar(path: str, **fields) -> dict:
     return data
 
 
-def sweep_queued(takes: list[Take], alive: set[str]) -> list[Take]:
+def _parse_time(s) -> _dt.datetime | None:
+    try:
+        return _dt.datetime.fromisoformat(s)
+    except (TypeError, ValueError):
+        return None
+
+
+def sweep_queued(takes: list[Take], alive: set[str], as_of: str | None = None,
+                 grace_s: float = 120.0) -> list[Take]:
     """Mark queued takes whose ComfyUI job is no longer pending or running as failed.
 
-    `alive` is every prompt id ComfyUI still has in /queue (pending or running).
-    A job that finished successfully has already been marked ok by the saver,
-    so anything still `queued` and not alive never reached it. Returns the takes
-    it changed.
+    `alive` is every prompt id ComfyUI still has in /queue (pending or running),
+    fetched at `as_of` (default: now, which is only right if it was just
+    fetched). The saver runs inside the job, so a job that has left the queue
+    has already written its sidecar if it ever will. Two cases are left alone,
+    because the snapshot can't speak for them:
+
+    - a take queued after the snapshot was taken;
+    - a take with no prompt id yet that was reserved less than `grace_s` ago
+      (the queuer reserves first and queues a moment later).
+
+    Returns the takes it changed.
     """
+    snap = _parse_time(as_of) or _dt.datetime.now().astimezone()
     changed = []
     for t in takes:
         sc = t.sidecar
         if sc is None or sc.get("status") != "queued":
             continue
         if sc.get("comfy_prompt_id") in alive:
+            continue
+        queued = _parse_time(sc.get("queued"))
+        if queued is not None and queued >= snap:
+            continue
+        if not sc.get("comfy_prompt_id") and (
+                queued is None or (snap - queued).total_seconds() < grace_s):
             continue
         t.sidecar = update_sidecar(t.paths.sidecar, status="failed", finished=now(),
                                    save_notes="job left the ComfyUI queue without saving")

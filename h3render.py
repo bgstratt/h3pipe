@@ -6,28 +6,45 @@ using the H3 Ref2VA shot-list workflow, and wait for each render.
     python h3render.py path/to/project/ep05
     python h3render.py Shows\\ep05 --proxy
     python h3render.py Shows\\ep05 --only sh040,sh050 --redo
+    python h3render.py Shows\\ep05 --only sh040 --redo --lora a.safetensors --lora b.safetensors:0.6
     python h3render.py --all Shows --proxy          # every ep* folder
     python h3render.py Shows\\ep05 --list           # what would run
     python h3render.py Shows\\ep05 --dry-run        # write the API graph, queue nothing
 
 This is the command-line twin of H3_Ref2VA_Shotlist_v1.json. It loads that
-workflow, sets Shot List Loader (project_root, shotlist_file, index) and
-Save Shot (project_root, subfolder, take) for each shot, and queues one shot
-at a time — the same thing the canvas does with `increment` and a batch count.
+workflow, points Shot List Loader at a frozen one-shot shotlist for each take
+and Save Shot at the take's folder and sidecar, and queues one shot at a time.
+The work of deciding what a take renders lives in h3jobs.py, which the editor
+will share.
 
 The script must run on the machine that runs ComfyUI: it checks
 <project>/<subfolder>/<shot>/ on disk to skip finished shots and to confirm
 each render landed.
 
 Takes and skipping
-    A shot with any <shot>_tNN.mp4 already on disk is skipped.
-    --redo renders it again as the NEXT take (t02, t03 ...), so nothing is
+    A shot with a finished take (or one still queued) is skipped. --redo
+    renders it again as the NEXT take (t02, t03 ...), so nothing is
     overwritten. --take N forces a take number (and overwrites that take).
+    Every take gets a sidecar (<shot>_tNN.json: settings, seed, status) and a
+    frozen copy of the shotlist entry it rendered (<shot>_tNN.shotlist.json),
+    so any take can be reproduced. See h3takes.py and h3jobs.py.
+
+Seeds
+    The first take of a shot uses the shotlist's seed (derived from the ids).
+    --redo picks a NEW seed, so a redo is actually a different attempt.
+    --same-seed keeps the shotlist's seed; --seed N uses N; --new-seed forces
+    a fresh one even on a first render. A seed pinned in overrides.json beats
+    everything except --seed and --new-seed.
+
+Overrides
+    <episode>/overrides.json (written by `h3.py override` or the editor) can
+    replace a shot's prompt, seed, model, LoRAs and steps without touching the
+    script. The flags here beat it for this run.
 
 Proxy vs final
     --proxy reads shotlist/shotlist_proxy.json and writes to renders_proxy/,
     so the animatic never shadows or blocks the final pass. Assemble it with
-        python h3assemble.py -o <project> --shotlist shotlist/shotlist_proxy.json --subfolder renders_proxy
+        python h3assemble.py -o <project> --shotlist shotlist/shotlist_proxy.json
 
 Workflow file
     Default: H3_Ref2VA_Shotlist_v1.json in the folder above this script (the
@@ -39,268 +56,52 @@ Workflow file
 from __future__ import annotations
 
 import argparse
-import copy
 import glob
 import json
 import os
-import re
 import sys
 import time
-import urllib.error
-import urllib.request
 
-LOADER = "H3ShotListLoader"
-SAVER = "H3SaveShot"
-SKIP_UI = {"MarkdownNote", "Note", "H3ShotInfo", "Reroute"}
-PRIMITIVES = {"PrimitiveInt", "PrimitiveFloat", "PrimitiveString",
-              "PrimitiveBoolean", "PrimitiveNode", "PrimitiveStringMultiline"}
-CONTROL_WORDS = {"fixed", "increment", "decrement", "randomize"}
-
-
-# ---------------------------------------------------------------------------
-# workflow loading
-
-def find_workflow(explicit: str | None) -> str:
-    if explicit:
-        return explicit
-    here = os.path.dirname(os.path.abspath(__file__))
-    # $H3_WORKFLOW wins, then beside this file, then $COMFYUI_PATH's workflows folder
-    cands = [os.environ.get("H3_WORKFLOW", ""),
-             os.path.join(here, "workflows", WORKFLOW_NAME),
-             os.path.join(here, WORKFLOW_NAME),
-             os.path.join(here, "..", WORKFLOW_NAME)]
-    comfy = os.environ.get("COMFYUI_PATH", "")
-    if comfy:
-        cands.append(os.path.join(comfy, "user", "default", "workflows", WORKFLOW_NAME))
-    for cand in cands:
-        if cand and os.path.isfile(cand):
-            return os.path.normpath(cand)
-    raise FileNotFoundError(f"{WORKFLOW_NAME} not found — pass --workflow, or set "
-                            f"H3_WORKFLOW to its path")
-
-
-def ui_to_api(ui: dict) -> dict:
-    """Convert a ComfyUI canvas save into the /prompt API graph.
-
-    Handles what this workflow uses: linked inputs, widget values (including
-    the hidden control_after_generate value after seed-style INTs), primitive
-    nodes feeding a widget, and note/readout nodes that do no work.
-    """
-    nodes = {n["id"]: n for n in ui["nodes"]}
-    links = {l[0]: (l[1], l[2]) for l in ui["links"]}   # id -> (from_node, from_slot)
-
-    def primitive_value(node):
-        vals = node.get("widgets_values") or []
-        return vals[0] if vals else None
-
-    api = {}
-    for nid, n in nodes.items():
-        ctype = n["type"]
-        if ctype in SKIP_UI or ctype in PRIMITIVES:
-            continue
-        mode = n.get("mode", 0)
-        if mode == 2:                       # muted
-            continue
-        if mode == 4:
-            raise ValueError(f"node {nid} ({ctype}) is bypassed; the converter does not "
-                             "handle bypass — export the workflow as API and use --workflow")
-
-        inputs = {}
-        vals = list(n.get("widgets_values") or [])
-        if isinstance(n.get("widgets_values"), dict):   # some nodes save a dict
-            vals = []
-            inputs.update(n["widgets_values"])
-        vi = 0
-        for inp in n.get("inputs", []):
-            name = inp["name"]
-            is_widget = "widget" in inp
-            val = None
-            if is_widget and vi < len(vals):
-                val = vals[vi]
-                vi += 1
-                # seed-like INTs carry a hidden control_after_generate value
-                if (vi < len(vals) and isinstance(val, (int, float))
-                        and not isinstance(val, bool)
-                        and isinstance(vals[vi], str) and vals[vi] in CONTROL_WORDS):
-                    vi += 1
-            link = inp.get("link")
-            if link is not None and link in links:
-                src, slot = links[link]
-                srcnode = nodes.get(src)
-                if srcnode and srcnode["type"] in PRIMITIVES:
-                    inputs[name] = primitive_value(srcnode)
-                elif srcnode and srcnode["type"] in SKIP_UI:
-                    continue
-                else:
-                    inputs[name] = [str(src), slot]
-            elif is_widget:
-                inputs[name] = val
-        api[str(nid)] = {"class_type": ctype, "inputs": inputs,
-                         "_meta": {"title": n.get("title", ctype)}}
-
-    # drop outputs that feed only nodes we removed, nothing else to do
-    return api
-
-
-def load_graph(path: str) -> dict:
-    with open(path, encoding="utf-8") as fh:
-        data = json.load(fh)
-    if "nodes" in data and "links" in data:
-        return ui_to_api(data)
-    if all(isinstance(v, dict) and "class_type" in v for v in data.values()):
-        return data
-    raise ValueError(f"{path} is neither a ComfyUI workflow save nor an API export")
-
-
-def node_of(graph: dict, ctype: str) -> str:
-    ids = [k for k, v in graph.items() if v["class_type"] == ctype]
-    if len(ids) != 1:
-        raise ValueError(f"workflow must contain exactly one {ctype} node (found {len(ids)})")
-    return ids[0]
-
-
-# ---------------------------------------------------------------------------
-# ComfyUI client
-
-class Comfy:
-    def __init__(self, base: str):
-        self.base = base.rstrip("/")
-
-    def _json(self, path: str, payload=None, timeout=60):
-        data = json.dumps(payload).encode() if payload is not None else None
-        req = urllib.request.Request(f"{self.base}{path}", data=data,
-                                     headers={"Content-Type": "application/json"})
-        try:
-            with urllib.request.urlopen(req, timeout=timeout) as r:
-                return json.loads(r.read() or b"{}")
-        except urllib.error.HTTPError as e:
-            body = e.read().decode("utf-8", "replace")
-            raise RuntimeError(f"ComfyUI {e.code} on {path}: {body[:1500]}") from None
-
-    def ping(self):
-        self._json("/system_stats", timeout=10)
-
-    def queue(self, graph: dict) -> str:
-        r = self._json("/prompt", {"prompt": graph, "client_id": "h3render"})
-        if r.get("node_errors"):
-            raise RuntimeError(json.dumps(r["node_errors"])[:1500])
-        return r["prompt_id"]
-
-    def wait(self, pid: str, timeout: int) -> dict:
-        t0 = time.time()
-        while time.time() - t0 < timeout:
-            hist = self._json(f"/history/{pid}")
-            if pid in hist:
-                st = hist[pid].get("status", {})
-                if st.get("status_str") == "error":
-                    msgs = [m for m in st.get("messages", []) if m and m[0] == "execution_error"]
-                    detail = msgs[-1][1].get("exception_message", "") if msgs else json.dumps(st)
-                    raise RuntimeError(detail[:800])
-                if st.get("completed", True):
-                    return hist[pid].get("outputs", {})
-            time.sleep(3)
-        raise TimeoutError(f"no result after {timeout}s")
-
-    def interrupt(self):
-        try:
-            self._json("/interrupt", {})
-        except Exception:
-            pass
-
-
-# ---------------------------------------------------------------------------
-# jobs
-
-def existing_takes(shot_dir: str, sid: str) -> list[int]:
-    takes = []
-    for p in glob.glob(os.path.join(shot_dir, f"{sid}_t*.mp4")):
-        m = re.search(rf"{re.escape(sid)}_t(\d+)\.mp4$", os.path.basename(p))
-        if m:
-            takes.append(int(m.group(1)))
-    return sorted(takes)
-
-
-WORKFLOW_NAME = "H3_Ref2VA_Shotlist_v1.json"
-LORA = "LoraLoaderModelOnly"
-UNET = "UNETLoader"
-
-
-def plan_episode(root: str, args) -> list[dict]:
-    sl_rel = "shotlist/shotlist_proxy.json" if args.proxy else "shotlist/shotlist.json"
-    sl_path = os.path.join(root, sl_rel)
-    if not os.path.isfile(sl_path):
-        raise FileNotFoundError(f"{sl_path} not found — run h3build first"
-                                + (" with --proxy" if args.proxy else ""))
-    with open(sl_path, encoding="utf-8") as fh:
-        doc = json.load(fh)
-    shots = doc["shots"]
-    # model and turbo LoRA: the flag beats the shot, the shot beats the pass
-    # default, and an empty value leaves whatever the workflow already has
-    dflt = doc.get("defaults", {})
-    only = {s.strip() for s in args.only.split(",")} if args.only else None
-    jobs = []
-    for idx, s in enumerate(shots):
-        sid = s["id"]
-        if only and sid not in only:
-            continue
-        safe = re.sub(r"[^A-Za-z0-9_.-]", "_", sid) or "shot"
-        shot_dir = os.path.join(root, args.subfolder, safe)
-        takes = existing_takes(shot_dir, safe)
-        if args.take:
-            take, action = args.take, ("overwrite" if args.take in takes else "render")
-        elif takes and not args.redo:
-            take, action = takes[-1], "skip"
-        else:
-            take, action = (takes[-1] + 1 if takes else 1), ("redo" if takes else "render")
-        jobs.append({"index": idx, "id": sid, "safe": safe, "take": take, "action": action,
-                     "frames": s.get("length", 0), "policy": s.get("audio_policy", ""),
-                     "mp4": os.path.join(shot_dir, f"{safe}_t{take:02d}.mp4"),
-                     "sl_rel": sl_rel,
-                     "lora": args.lora or s.get("lora") or dflt.get("lora", ""),
-                     "model": args.model or s.get("model") or dflt.get("model", "")})
-    return jobs
-
-
-def graph_for(base: dict, loader: str, saver: str, root: str, job: dict, args) -> dict:
-    g = copy.deepcopy(base)
-    li = g[loader]["inputs"]
-    li["project_root"] = root
-    li["shotlist_file"] = job["sl_rel"]
-    li["index"] = job["index"]
-    if args.panel_mode:
-        li["panel_mode"] = args.panel_mode
-    for ctype, field, key in ((LORA, "lora_name", "lora"), (UNET, "unet_name", "model")):
-        want = job.get(key)
-        if not want:
-            continue
-        ids = [k for k, v in g.items() if v["class_type"] == ctype]
-        if len(ids) != 1:
-            raise ValueError(f"the shotlist names a {key} but the workflow has "
-                             f"{len(ids)} {ctype} nodes")
-        if key == "lora" and want.lower() in ("none", "off", "-"):
-            # the node stays wired; strength 0 makes it a no-op, which is how a
-            # shot renders on the base model without rebuilding the graph
-            g[ids[0]]["inputs"]["strength_model"] = 0.0
-        else:
-            g[ids[0]]["inputs"][field] = want
-    si = g[saver]["inputs"]
-    si["project_root"] = root
-    si["subfolder"] = args.subfolder
-    si["take"] = job["take"]
-    if args.save_frames is not None:
-        si["save_frames"] = args.save_frames
-    if args.no_review_copy:
-        for k in [k for k, v in g.items() if v["class_type"] in ("SaveVideo", "CreateVideo")]:
-            del g[k]
-    if args.strip_meta:
-        for v in g.values():
-            v.pop("_meta", None)
-    return g
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import h3takes as T  # noqa: E402
+# Re-exported: kreagen imports load_graph from here.
+from h3jobs import (  # noqa: E402,F401
+    LOADER, SAVER, LORA, UNET, WORKFLOW_NAME, Comfy, RenderRequest, find_workflow,
+    finish_job, graph_for, load_graph, load_shotlist, mark_failed, mark_queued, node_of,
+    parse_lora, plan_episode, start_job, ui_to_api)
 
 
 def fmt(sec: float) -> str:
     sec = int(sec)
     return f"{sec // 3600}:{sec % 3600 // 60:02d}:{sec % 60:02d}"
+
+
+def lora_label(loras) -> str:
+    if loras is None:
+        return "(as in the workflow)"
+    if not loras:
+        return "none"
+    return " + ".join(l["name"] + (f"@{l['strength']:g}" if l.get("strength", 1) != 1 else "")
+                      for l in loras)
+
+
+def sweep(comfy: Comfy, roots: list[str], pass_: str, folder: str | None) -> int:
+    """Mark takes left `queued` by a job ComfyUI no longer has as failed."""
+    as_of = T.now()                  # before the fetch: the snapshot is at least this old
+    try:
+        alive = comfy.alive()
+    except Exception:
+        return 0                     # ComfyUI down: can't tell, touch nothing
+    n = 0
+    for root in roots:
+        try:
+            doc = load_shotlist(root, pass_)
+        except FileNotFoundError:
+            continue
+        for s in doc["shots"]:
+            n += len(T.sweep_queued(T.list_takes(root, pass_, s["id"], folder), alive,
+                                    as_of=as_of))
+    return n
 
 
 # ---------------------------------------------------------------------------
@@ -319,8 +120,18 @@ def main() -> int:
     ap.add_argument("--only", help="comma-separated shot ids, e.g. sh040,sh050")
     ap.add_argument("--redo", action="store_true", help="re-render finished shots as a new take")
     ap.add_argument("--take", type=int, help="force this take number (overwrites it)")
-    ap.add_argument("--lora", help="turbo LoRA file name; overrides the shotlist")
+    sd = ap.add_mutually_exclusive_group()
+    sd.add_argument("--seed", type=int, help="render with this seed")
+    sd.add_argument("--same-seed", action="store_true",
+                    help="keep the shotlist's seed on a redo")
+    sd.add_argument("--new-seed", action="store_true",
+                    help="pick a fresh seed even on a first render")
+    ap.add_argument("--lora", action="append", metavar="NAME[:STRENGTH]",
+                    help="LoRA for this run; repeat to stack them; 'none' for no LoRA. "
+                         "Replaces the shotlist's and overrides.json's LoRAs")
     ap.add_argument("--model", help="H3 unet file name; overrides the shotlist")
+    ap.add_argument("--steps", type=int, help="sampler steps; overrides the shotlist")
+    ap.add_argument("--note", default="", help="free text stored in each take's sidecar")
     ap.add_argument("--panel-mode", choices=["auto", "full", "pair", "face", "body"])
     fr = ap.add_mutually_exclusive_group()
     fr.add_argument("--save-frames", dest="save_frames", action="store_true", default=None,
@@ -338,8 +149,9 @@ def main() -> int:
     ap.add_argument("--stop-on-error", action="store_true",
                     help="stop the run on the first failed shot instead of skipping it")
     args = ap.parse_args()
-    if args.subfolder is None:
-        args.subfolder = "renders_proxy" if args.proxy else "renders"
+    pass_ = "proxy" if args.proxy else "final"
+    folder = args.subfolder
+    shown_folder = folder or T.pass_subfolder(pass_)
 
     roots = [os.path.abspath(p) for p in args.projects]
     if args.all:
@@ -348,53 +160,81 @@ def main() -> int:
     if not roots:
         ap.error("give one or more episode folders, or --all DIR")
 
+    loras = [l for spec in args.lora for l in parse_lora(spec)] if args.lora else None
+    template = RenderRequest(
+        shot_id="", take=args.take, redo=args.redo, seed=args.seed,
+        seed_mode="new" if args.new_seed else "same" if args.same_seed else "auto",
+        model=args.model or None, loras=loras, steps=args.steps, note=args.note)
+    only = {s.strip() for s in args.only.split(",")} if args.only else None
+
     wf = find_workflow(args.workflow)
     base = load_graph(wf)
-    loader, saver = node_of(base, LOADER), node_of(base, SAVER)
+    node_of(base, LOADER), node_of(base, SAVER)       # fail early on the wrong workflow
+
+    comfy = Comfy(args.comfy)
+    if not args.dry_run:
+        swept = sweep(comfy, roots, pass_, folder)
+        if swept:
+            print(f"\n  marked {swept} take(s) failed: queued, but ComfyUI no longer has the job")
 
     plans, total_frames = [], 0
     for root in roots:
         try:
-            jobs = plan_episode(root, args)
+            jobs = plan_episode(root, pass_, default=template, folder=folder, only=only)
         except FileNotFoundError as e:
             print(f"  ! {e}")
             continue
-        todo = [j for j in jobs if j["action"] != "skip"]
+        todo = [j for j in jobs if j.runs]
+        busy = sum(1 for j in jobs if j.action == "busy")
         plans.append((root, jobs))
-        total_frames += sum(j["frames"] for j in todo)
+        total_frames += sum(j.frames for j in todo)
         print(f"\n  {os.path.basename(root)}  ·  {len(todo)} to render, "
-              f"{len(jobs) - len(todo)} done  ·  {'proxy' if args.proxy else 'final'}"
-              f"  ->  {args.subfolder}/")
-        for key in ("model", "lora"):
-            vals = sorted({j[key] for j in jobs if j[key]})
+              f"{len(jobs) - len(todo) - busy} done"
+              + (f", {busy} already queued" if busy else "")
+              + f"  ·  {pass_}  ->  {shown_folder}/")
+        for key, vals in (("model", sorted({j.model for j in todo if j.model})),
+                          ("lora", sorted({lora_label(j.loras) for j in todo}))):
             if vals:
                 print(f"    {key} {', '.join(vals)}")
             if len(vals) > 1:
                 print(f"    ! {len(vals)} different {key}s here — ComfyUI reloads on "
                       f"every change, so expect a pause at those shots")
+        for j in todo:
+            if j.override_stale:
+                print(f"    ! {j.id}: overrides.json was written against an older build of "
+                      f"this shot ({', '.join(j.overridden)} still applied)")
         if args.list or args.dry_run:
             for j in jobs:
-                print(f"    [{j['action']:>9}] #{j['index']:<3} {j['id']:<8} t{j['take']:02d}"
-                      f"  {j['frames']:>4}f  {j['policy']}")
-    n_todo = sum(1 for _, js in plans for j in js if j["action"] != "skip")
-    print(f"\n  workflow {wf}\n  {n_todo} shot(s), {total_frames / 24:.1f}s of video · comfy {args.comfy}\n")
+                extra = f"  seed {j.seed} ({j.seed_source})" if j.runs else ""
+                ov = f"  override: {','.join(j.overridden)}" if j.overridden and j.runs else ""
+                print(f"    [{j.action:>9}] #{j.index:<3} {j.id:<8} t{j.take:02d}"
+                      f"  {j.frames:>4}f  {j.shot.get('audio_policy', '')}{extra}{ov}")
+    n_todo = sum(1 for _, js in plans for j in js if j.runs)
+    print(f"\n  workflow {wf}\n  {n_todo} shot(s), {total_frames / 24:.1f}s of video"
+          f" · comfy {args.comfy}\n")
 
+    gkw = dict(panel_mode=args.panel_mode, save_frames=args.save_frames,
+               review_copy=not args.no_review_copy, strip_meta=args.strip_meta)
     if args.list:
         return 0
     if args.dry_run:
+        # Nothing is reserved or written in the episode: the graph points at
+        # where the take WOULD go.
         for root, jobs in plans:
-            for j in jobs:
-                g = graph_for(base, loader, saver, root, j, args)
+            for j in (j for j in jobs if j.runs):
+                take = T.Take(j.id, j.take, pass_,
+                              T.take_paths(root, pass_, j.id, j.take, folder))
+                g = graph_for(base, j, take, **gkw)
                 out = os.path.join(os.getcwd(), "h3render_graph.json")
-                json.dump(g, open(out, "w", encoding="utf-8"), indent=2)
-                print(f"  wrote {out} ({j['id']} of {os.path.basename(root)})")
+                with open(out, "w", encoding="utf-8") as fh:
+                    json.dump(g, fh, indent=2)
+                print(f"  wrote {out} ({j.id} of {os.path.basename(root)})")
                 return 0
         return 0
     if not n_todo:
         print("  nothing to do — pass --redo to render new takes.\n")
         return 0
 
-    comfy = Comfy(args.comfy)
     try:
         comfy.ping()
     except Exception as e:
@@ -405,25 +245,39 @@ def main() -> int:
     failures = []
     t_start = time.time()
     frames_done = 0
+    current = None
     try:
         for root, jobs in plans:
             ep = os.path.basename(root)
-            for j in (j for j in jobs if j["action"] != "skip"):
-                label = f"{ep}/{j['id']} t{j['take']:02d}"
+            for j in (j for j in jobs if j.runs):
                 t0 = time.time()
-                print(f"  .. {label}  ({j['frames']}f, {j['policy']})", flush=True)
+                current = take = start_job(j)
+                label = f"{ep}/{j.id} t{take.take:02d}"
+                print(f"  .. {label}  ({j.frames}f, {j.shot.get('audio_policy', '')}, "
+                      f"seed {j.seed} {j.seed_source})", flush=True)
                 try:
-                    pid = comfy.queue(graph_for(base, loader, saver, root, j, args))
+                    pid = comfy.queue(graph_for(base, j, take, **gkw))
+                    mark_queued(take, pid)
                     comfy.wait(pid, args.timeout)
-                    if not os.path.isfile(j["mp4"]):
-                        raise RuntimeError(f"ComfyUI finished but {j['mp4']} is missing")
+                    if finish_job(take) != "ok":
+                        raise RuntimeError((take.sidecar or {}).get("save_notes")
+                                           or f"{take.paths.mp4} is missing")
+                    current = None
                     done += 1
-                    frames_done += j["frames"]
+                    frames_done += j.frames
                     rate = (time.time() - t_start) / max(frames_done, 1)
                     left = (total_frames - frames_done) * rate
-                    print(f"  -> {j['mp4']}  [{fmt(time.time() - t0)}, ~{fmt(left)} left]",
+                    print(f"  -> {take.paths.mp4}  [{fmt(time.time() - t0)}, ~{fmt(left)} left]",
                           flush=True)
+                except TimeoutError as e:
+                    # Still in ComfyUI's hands: leave it queued; a later run sweeps it.
+                    current = None
+                    failed += 1
+                    failures.append(label)
+                    print(f"  !! {label}: {e} (left queued in ComfyUI)", flush=True)
                 except Exception as e:
+                    current = None
+                    mark_failed(take, str(e)[:800])
                     failed += 1
                     failures.append(label)
                     print(f"  !! {label}: {e}", flush=True)
@@ -432,11 +286,13 @@ def main() -> int:
     except KeyboardInterrupt:
         print("\n  stopping — interrupting the running ComfyUI job")
         comfy.interrupt()
+        if current is not None:
+            mark_failed(current, "interrupted")
 
     print(f"\n  done in {fmt(time.time() - t_start)}: {done} rendered"
           + (f", {failed} failed: {', '.join(failures)}" if failed else ""))
     print("  assemble with: python h3assemble.py -o <episode>"
-          + (" --shotlist shotlist/shotlist_proxy.json --subfolder renders_proxy" if args.proxy else "")
+          + (" --shotlist shotlist/shotlist_proxy.json" if args.proxy else "")
           + "\n")
     return 1 if failed else 0
 
