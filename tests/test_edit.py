@@ -17,6 +17,7 @@ ROOT = os.path.dirname(HERE)
 sys.path.insert(0, ROOT)
 sys.path.insert(0, HERE)
 import h3edit as E  # noqa: E402
+import h3jobs as J  # noqa: E402
 import h3takes as T  # noqa: E402
 from test_render import ENV, FIXTURE, WORKFLOW, FakeComfy  # noqa: E402
 
@@ -146,6 +147,54 @@ class EditFlowTest(unittest.TestCase):
         self.assertIn("loras", T.shot_override(ov, "sh010", "final"))
         self.h3("override", self.ep, "sh010", "--clear")
         self.assertEqual(T.load_overrides(self.ep)["shots"], {})
+
+
+class LibraryTest(unittest.TestCase):
+    """The operations the CLI and the editor routes share (the routes' own
+    tests, test_api.py, drive them end to end)."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.ep = os.path.join(self._tmp.name, "ks01")
+        os.makedirs(self.ep)
+        shutil.copy(os.path.join(FIXTURE, "series.json"), self.ep)
+        shutil.copy(os.path.join(FIXTURE, "script.md"), os.path.join(self.ep, "ks01.md"))
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def test_build_then_override_stamps_and_clears(self):
+        r = E.build_episode(self.ep)
+        self.assertTrue(r["ok"], r)
+        built = E.pass_builds(self.ep, "sh020")
+        self.assertEqual(set(built), {"final", "proxy"})
+        ov = T.load_overrides(self.ep)
+        E.set_shot_override(ov, "sh020", built, ["proxy"], {"seed": 7}, {"steps": 3})
+        self.assertEqual(T.shot_override(ov, "sh020", "proxy"),
+                         {"seed": 7, "steps": 3, "base_hash": J.story_hash(built["proxy"])})
+        # clearing a pass field doesn't restamp; the last one takes the pass block with it
+        E.set_shot_override(ov, "sh020", built, ["proxy"], None, {"steps": None})
+        self.assertEqual(T.shot_override(ov, "sh020", "proxy"), {"seed": 7})
+        view = E.override_view(ov, "sh020", built)
+        self.assertEqual(view["final"], {"seed": 7, "stale": False})
+        E.clear_shot_override(ov, "sh020")
+        self.assertEqual(ov["shots"], {})
+
+    def test_build_reports_a_script_error(self):
+        with open(os.path.join(self.ep, "ks01.md"), "w", encoding="utf-8") as fh:
+            fh.write("no header\n")
+        r = E.build_episode(self.ep)
+        self.assertFalse(r["ok"])
+        self.assertIn("line 1", r["passes"]["final"]["error"])
+        self.assertNotIn(chr(13), r["passes"]["final"]["error"])
+
+    def test_run_tool_puts_the_pipeline_on_sys_path(self):
+        # h3assemble imports h3takes; that must work even where `python
+        # script.py` wouldn't add the script's folder (an embedded Python)
+        rc, out, err = E.run_tool("h3assemble.py", ["-o", self.ep, "--check"],
+                                  self._tmp.name, 60)
+        self.assertNotIn("ModuleNotFoundError", err)
+        self.assertIn("no shotlist", err)
 
 
 if __name__ == "__main__":

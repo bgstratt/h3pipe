@@ -27,7 +27,9 @@ Stdlib only.
 from __future__ import annotations
 
 import argparse
+import copy
 import os
+import subprocess
 import sys
 
 import h3jobs as J
@@ -233,6 +235,285 @@ def sweep(root: str, pass_: str, comfy_url: str, folder: str | None = None) -> i
 
 
 # ---------------------------------------------------------------------------
+# editor operations: shared by the commands below and the ComfyUI routes
+# ---------------------------------------------------------------------------
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+TOOL_ENV = {"PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"}
+
+
+class NotUsable(Exception):
+    """A pick of a take the cut can't use (queued, failed, or no mp4)."""
+
+    def __init__(self, take: T.Take):
+        super().__init__(f"{take.shot} t{take.take:02d} is {take.status}"
+                         + ("" if take.has_video else " with no mp4"))
+        self.take = take
+
+
+class NotQueued(Exception):
+    """Cancel of a take that isn't queued any more."""
+
+
+def pick_take(root: str, pass_: str, shot_id: str, take: int | None,
+              from_pass: str | None = None, force: bool = False) -> dict:
+    """Point `pass_`'s cut at take `take` of `shot_id` (None: latest usable),
+    from `from_pass` (default the same pass; the other one makes a placeholder).
+    Writes cut.json and returns it. Raises KeyError for a shot in neither the
+    script nor the cut, LookupError for a take that doesn't exist, NotUsable
+    for a take that can't be cut in (unless `force`)."""
+    src = from_pass or pass_
+    doc = J.load_shotlist(root, pass_)
+    order = [s["id"] for s in doc["shots"]]
+    if take is not None:
+        t = T.get_take(root, src, shot_id, take)
+        if t is None:
+            raise LookupError(f"{shot_id} has no take {take} in {src}")
+        if not t.usable and not force:
+            raise NotUsable(t)
+    cut = T.pick(T.load_cut(root), pass_, order, shot_id, take, from_pass=src)
+    cut.setdefault("episode", doc.get("episode", ""))
+    T.save_cut(root, cut)
+    return cut
+
+
+def replace_cut(root: str, pass_: str, entries: list[dict]) -> dict:
+    """Replace one pass's list in cut.json (reorder, trims, locks). Entries are
+    cut.json entries; shots not in the script are allowed (they become orphans)."""
+    T.pass_subfolder(pass_)                               # validates the pass
+    cut = T.load_cut(root)
+    cut[pass_] = [dict(e) for e in entries]
+    if "episode" not in cut:
+        try:
+            cut["episode"] = J.load_shotlist(root, pass_).get("episode", "")
+        except FileNotFoundError:
+            cut["episode"] = os.path.basename(os.path.normpath(root))
+    T.save_cut(root, cut)
+    return cut
+
+
+def pass_builds(root: str, shot_id: str,
+                have: dict[str, dict] | None = None) -> dict[str, dict]:
+    """{pass: the shot as that pass builds it now}, for each pass that has it.
+    `have` maps passes to shotlists already loaded."""
+    built = {}
+    for ps in T.PASSES:
+        try:
+            d = (have or {}).get(ps) or J.load_shotlist(root, ps)
+        except FileNotFoundError:
+            continue
+        s = next((s for s in d["shots"] if s["id"] == shot_id), None)
+        if s is not None:
+            built[ps] = s
+    return built
+
+
+def set_shot_override(ov: dict, shot_id: str, built: dict[str, dict], passes,
+                      shot_fields: dict | None = None,
+                      pass_fields: dict | None = None) -> None:
+    """Change one shot's override in `ov` (not saved). `shot_fields` (seed,
+    note) are shared; `pass_fields` (prompt, model, loras, steps) go to each
+    pass in `passes`, stamped with that pass's `base_hash` (the story hash of
+    `built[pass]`) whenever a value is set. None clears a field."""
+    if shot_fields:
+        T.set_override(ov, shot_id, **shot_fields)
+    if pass_fields:
+        stamp = any(v is not None for v in pass_fields.values())
+        for ps in passes:
+            # written against the shot as this pass builds it now
+            extra = {"base_hash": J.story_hash(built[ps])} if stamp else {}
+            T.set_override(ov, shot_id, ps, **extra, **pass_fields)
+
+
+def clear_shot_override(ov: dict, shot_id: str, pass_: str | None = None) -> None:
+    """Drop one pass's fields (prompt, model, loras, steps), or with no pass
+    the shot's whole override: both passes, seed and note."""
+    if pass_ is None:
+        T.set_override(ov, shot_id, **{f: None for f in T.SHOT_FIELDS})
+    for ps in (T.PASSES if pass_ is None else [pass_]):
+        T.set_override(ov, shot_id, ps, **{f: None for f in T.PASS_FIELDS})
+
+
+def override_view(ov: dict, shot_id: str, built: dict[str, dict]) -> dict:
+    """{pass: effective override without base_hash, plus `stale`}, both passes."""
+    out = {}
+    for ps in T.PASSES:
+        eff = T.shot_override(ov, shot_id, ps)
+        view = {k: v for k, v in eff.items() if k != "base_hash"}
+        view["stale"] = (bool(eff.get("base_hash")) and ps in built
+                         and eff["base_hash"] != J.story_hash(built[ps]))
+        out[ps] = view
+    return out
+
+
+def sweep_takes(root: str, pass_: str, comfy, folder: str | None = None) -> list[T.Take]:
+    """Close every queued take whose ComfyUI job is gone; return the takes changed.
+
+    `comfy` is an h3jobs.Comfy (anything with alive() and history()). The
+    snapshot time is taken before the queue is read, as sweep_queued needs. A
+    take whose job has left the queue is looked up in /history: an execution
+    error marks it failed with the exception message; a job that finished is
+    closed from what is on disk (finish_job, for a saver that didn't); anything
+    else goes to sweep_queued. A take whose job is still pending or running is
+    left alone. Raises if ComfyUI can't be reached.
+    """
+    as_of = T.now()
+    alive = comfy.alive()
+    doc = J.load_shotlist(root, pass_)
+    changed = []
+    for s in doc["shots"]:
+        rest = []
+        for t in T.list_takes(root, pass_, s["id"], folder):
+            sc = t.sidecar or {}
+            pid = sc.get("comfy_prompt_id")
+            if sc.get("status") != "queued" or not pid or pid in alive:
+                rest.append(t)
+                continue
+            try:
+                entry = comfy.history(pid)
+            except Exception:
+                entry = None
+            err = J.execution_error(entry)
+            if err is not None:
+                J.mark_failed(t, err)
+                changed.append(t)
+            elif J.execution_done(entry):
+                J.finish_job(t)
+                changed.append(t)
+            else:
+                rest.append(t)
+        changed += T.sweep_queued(rest, alive, as_of=as_of)
+    return changed
+
+
+def cancel_take(root: str, pass_: str, shot_id: str, take: int, comfy,
+                folder: str | None = None) -> T.Take:
+    """Cancel a queued take: delete its job from ComfyUI's queue if pending,
+    interrupt it if running, and mark the take failed ("cancelled"). Raises
+    LookupError for no such take, NotQueued if it isn't queued."""
+    t = T.get_take(root, pass_, shot_id, take, folder)
+    if t is None:
+        raise LookupError(f"{shot_id} has no take {take} in {pass_}")
+    if t.status != "queued":
+        raise NotQueued(f"{shot_id} t{take:02d} is {t.status}, not queued")
+    pid = (t.sidecar or {}).get("comfy_prompt_id")
+    if pid:
+        running, pending = comfy.queue_ids()
+        if pid in pending:
+            comfy.delete_queued([pid])
+        elif pid in running:
+            comfy.interrupt(pid)
+    J.mark_failed(t, "cancelled")
+    return t
+
+
+def queue_shots(root: str, pass_: str, shot_ids: list[str] | None,
+                template: J.RenderRequest, comfy, base: dict,
+                folder: str | None = None) -> dict:
+    """Plan and queue a take for each shot (every shot when `shot_ids` is
+    None), as h3render does, without waiting for any of them.
+
+    Returns {"queued": [{shot, take, prompt_id, seed, seed_source}],
+    "skipped": [{shot, take, reason}], "errors": [{shot, error, take?}]}. A
+    shot that fails to queue has its take marked failed; the others still queue.
+    """
+    doc = J.load_shotlist(root, pass_)
+    ov = T.load_overrides(root)
+    index = {s["id"]: i for i, s in enumerate(doc["shots"])}
+    out = {"queued": [], "skipped": [], "errors": []}
+    for sid in (shot_ids if shot_ids is not None else list(index)):
+        if sid not in index:
+            out["errors"].append({"shot": sid, "error": f"{sid} is not in "
+                                  + J.shotlist_rel(pass_).replace(os.sep, "/")})
+            continue
+        req = copy.copy(template)
+        req.shot_id = sid
+        job = J.plan_job(root, pass_, doc, index[sid], req, ov, folder)
+        if job.action == "busy":
+            out["skipped"].append({"shot": sid, "take": job.take,
+                                   "reason": f"t{job.take:02d} is still queued"})
+            continue
+        if job.action == "skip":
+            out["skipped"].append({"shot": sid, "take": job.take,
+                                   "reason": "has a usable take (pass redo: true)"})
+            continue
+        try:
+            take = J.start_job(job)
+        except Exception as e:
+            out["errors"].append({"shot": sid, "error": str(e)[:800]})
+            continue
+        try:
+            pid = comfy.queue(J.graph_for(base, job, take))
+            J.mark_queued(take, pid)
+        except Exception as e:
+            J.mark_failed(take, str(e)[:800])
+            out["errors"].append({"shot": sid, "take": take.take, "error": str(e)[:800]})
+            continue
+        out["queued"].append({"shot": sid, "take": take.take, "prompt_id": pid,
+                              "seed": job.seed, "seed_source": job.seed_source})
+    return out
+
+
+# Runs a script with its own folder on sys.path. `python script.py` normally
+# does that, but not under an embedded Python whose ._pth file fixes sys.path
+# (ComfyUI's python_embeded), where PYTHONPATH is ignored as well.
+RUN_SCRIPT = ("import os, runpy, sys; s = sys.argv[1]; sys.argv = sys.argv[1:]; "
+              "sys.path.insert(0, os.path.dirname(os.path.abspath(s))); "
+              "runpy.run_path(s, run_name='__main__')")
+
+
+def run_tool(script: str, args: list[str], cwd: str, timeout: int) -> tuple[int, str, str]:
+    """Run a pipeline script beside this file with this Python: (exit code,
+    stdout, stderr)."""
+    env = dict(os.environ, **TOOL_ENV)
+    try:
+        r = subprocess.run([sys.executable, "-c", RUN_SCRIPT, os.path.join(HERE, script), *args],
+                           capture_output=True, cwd=cwd, env=env, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return 1, "", f"{script} took longer than {timeout}s and was stopped"
+    out, err = (b.decode("utf-8", "replace").replace("\r\n", "\n")
+                for b in (r.stdout, r.stderr))
+    return r.returncode, out, err
+
+
+def build_episode(root: str, timeout: int = 600) -> dict:
+    """h3build for the final pass, then the proxy pass, as `h3.py build` runs
+    it. A script error is a result (ok: false, the message in the pass's
+    `error`), not an exception."""
+    bible, script = episode_bible(root), episode_script(root)
+    if not bible or not script:
+        why = ("no series.json here or in the parent folder" if not bible
+               else "can't tell which .md in the folder is the script")
+        return {"ok": False, "error": why, "passes": {}}
+    passes = {}
+    for ps in T.PASSES:
+        rc, out, err = run_tool("h3build.py", [bible, script, "-o", root]
+                                + (["--proxy"] if ps == "proxy" else []), root, timeout)
+        passes[ps] = {"ok": rc == 0, "report": out, "error": err.strip() if rc else ""}
+    return {"ok": all(p["ok"] for p in passes.values()), "passes": passes}
+
+
+def assemble_episode(root: str, pass_: str, partial: bool = True,
+                     timeout: int = 3600) -> dict:
+    """h3assemble for one pass, as `h3.py assemble` runs it. `output` is the
+    cut's path relative to the episode (forward slashes), or None."""
+    args = ["-o", root]
+    if pass_ == "proxy":
+        args += ["--shotlist", "shotlist/shotlist_proxy.json", "--subfolder", "renders_proxy"]
+    if partial:
+        args.append("--partial")
+    rc, out, err = run_tool("h3assemble.py", args, root, timeout)
+    output = None
+    for line in out.splitlines():
+        line = line.strip()
+        if line.startswith("-> ") and line.lower().endswith(".mp4"):
+            output = rel(root, line[3:].strip())
+    ok = rc == 0 and output is not None
+    return {"ok": ok, "output": output, "report": out,
+            "error": "" if ok else (err.strip() or "h3assemble wrote no cut")}
+
+
+# ---------------------------------------------------------------------------
 # commands
 # ---------------------------------------------------------------------------
 
@@ -304,7 +585,7 @@ def cmd_pick(root: str, argv: list[str]) -> int:
     args = ap.parse_args(argv)
     pass_ = _pass(args)
     src = args.src or pass_
-    order = [s["id"] for s in J.load_shotlist(root, pass_)["shots"]]
+    J.load_shotlist(root, pass_)            # no build: fail before parsing the take
     if args.take == "latest":
         take = None
     else:
@@ -313,21 +594,17 @@ def cmd_pick(root: str, argv: list[str]) -> int:
         except ValueError:
             print(f"  !! take must be a number or 'latest', not {args.take!r}")
             return 2
-        t = T.get_take(root, src, args.shot, take)
-        if t is None:
-            print(f"  !! {args.shot} has no take {take} in {src}")
-            return 1
-        if not t.usable and not args.force:
-            print(f"  !! {args.shot} t{take:02d} is {t.status}"
-                  + ("" if t.has_video else " with no mp4") + "; --force to pick it anyway")
-            return 1
     try:
-        cut = T.pick(T.load_cut(root), pass_, order, args.shot, take, from_pass=src)
+        pick_take(root, pass_, args.shot, take, from_pass=src, force=args.force)
+    except NotUsable as e:
+        print(f"  !! {e}; --force to pick it anyway")
+        return 1
     except KeyError as e:
         print(f"  !! {e.args[0]}")
         return 1
-    cut.setdefault("episode", J.load_shotlist(root, pass_).get("episode", ""))
-    T.save_cut(root, cut)
+    except LookupError as e:
+        print(f"  !! {e}")
+        return 1
     print(f"  {pass_} cut: {args.shot} -> "
           + (f"{src} t{take:02d}" if take is not None else "latest usable take"))
     return 0
@@ -368,15 +645,7 @@ def cmd_override(root: str, argv: list[str]) -> int:
         return 0
 
     # each pass's own build of the shot: overrides are stamped against it
-    built = {}
-    for ps in T.PASSES:
-        try:
-            d = doc if ps == pass_ else J.load_shotlist(root, ps)
-        except FileNotFoundError:
-            continue
-        s = next((s for s in d["shots"] if s["id"] == args.shot), None)
-        if s is not None:
-            built[ps] = s
+    built = pass_builds(root, args.shot, {pass_: doc})
 
     passes = list(T.PASSES) if args.both else [pass_]
     missing = [ps for ps in passes if ps not in built]
@@ -415,14 +684,8 @@ def cmd_override(root: str, argv: list[str]) -> int:
         pass_fields["model"] = args.model
     if args.lora:
         pass_fields["loras"] = [l for spec in args.lora for l in J.parse_lora(spec)]
-    if shot_fields:
-        T.set_override(ov, args.shot, **shot_fields)
-        changed = True
-    if pass_fields:
-        for ps in passes:
-            # written against the shot as this pass builds it now
-            T.set_override(ov, args.shot, ps, base_hash=J.story_hash(built[ps]),
-                           **pass_fields)
+    if shot_fields or pass_fields:
+        set_shot_override(ov, args.shot, built, passes, shot_fields, pass_fields)
         changed = True
     if changed:
         ov.setdefault("episode", doc.get("episode", ""))

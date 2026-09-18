@@ -224,13 +224,18 @@ class GraphTest(unittest.TestCase):
 class FakeComfy:
     """Just enough of ComfyUI's API. Each /prompt runs 'instantly' and does what
     the save node does, according to `mode`: 'node' (writes mp4 and closes the
-    sidecar), 'oldnode' (writes the mp4 only), or 'error' (execution error)."""
+    sidecar), 'oldnode' (writes the mp4 only), 'error' (execution error),
+    'hold' (accepted, and left pending in the queue) or 'reject' (node_errors).
+    `running`/`pending` are what /queue reports; other POSTs land in `posts`."""
 
     def __init__(self):
         self.mode = "node"
         self.userdata: dict[str, dict] = {}       # "workflows/x.json" -> saved workflow
         self.graphs: list[dict] = []
         self.history: dict[str, dict] = {}
+        self.running: list[str] = []
+        self.pending: list[str] = []
+        self.posts: list[tuple[str, dict]] = []
         fake = self
 
         class H(BaseHTTPRequestHandler):
@@ -259,15 +264,20 @@ class FakeComfy:
                         self.send_header("Content-Length", "0")
                         self.end_headers()
                 elif self.path == "/queue":
-                    self._send({"queue_running": [], "queue_pending": []})
+                    self._send({"queue_running": [[0, p] for p in fake.running],
+                                "queue_pending": [[1, p] for p in fake.pending]})
                 else:
                     self._send({})
 
             def do_POST(self):
                 data = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
-                if self.path == "/prompt":
+                if self.path == "/prompt" and fake.mode == "reject":
+                    self._send({"error": "invalid prompt",
+                                "node_errors": {"11": {"errors": ["bad input"]}}})
+                elif self.path == "/prompt":
                     self._send({"prompt_id": fake.run(data["prompt"])})
                 else:
+                    fake.posts.append((self.path, data))
                     self._send({})
 
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), H)
@@ -277,6 +287,9 @@ class FakeComfy:
     def run(self, graph: dict) -> str:
         self.graphs.append(graph)
         pid = uuid.uuid4().hex
+        if self.mode == "hold":
+            self.pending.append(pid)
+            return pid
         if self.mode == "error":
             self.history[pid] = {"status": {"status_str": "error", "completed": False,
                                             "messages": [["execution_error",
