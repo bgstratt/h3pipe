@@ -26,6 +26,10 @@ import os
 import re
 import sys
 
+# Sibling modules: ComfyUI's embedded Python (a ._pth install) doesn't put a
+# script's own folder on sys.path, so do it here.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
 from h3core import ir
 from h3core.bible import character_ids, load_bible, series_info, subject_ids
 # Model-neutral pieces, re-exported under their old names: h3align and others

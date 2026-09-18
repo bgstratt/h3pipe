@@ -56,6 +56,10 @@ import subprocess
 import sys
 import tempfile
 
+# Sibling modules: ComfyUI's embedded Python (a ._pth install) doesn't put a
+# script's own folder on sys.path, so do it here.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
 import h3takes
 
 NOT_RENDERED = "not rendered"

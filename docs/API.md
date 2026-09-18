@@ -200,3 +200,31 @@ knows from `/h3pipe/render`. Two custom events come from the node pack:
 The UI reads ComfyUI's own lists: `GET /models/diffusion_models` (and
 `/models/unet` on older installs) for the model picker, `GET /models/loras` for LoRAs.
 No h3pipe route is needed.
+
+## As built (Phase 2): readings of the points above that were ambiguous
+
+- **`POST /h3pipe/cancel`:** 409 if the take isn't `queued`. A finished take is never
+  overwritten.
+- **Sweep in `GET /h3pipe/episode`:** for a queued take whose job has left the queue,
+  `/history` decides:
+  - an execution error marks the take `failed` with ComfyUI's exception message;
+  - success with the sidecar still `queued` (a save node from before sidecars) closes it
+    from disk (`h3jobs.finish_job`);
+  - no history at all falls back to `sweep_queued`.
+- **`POST /h3pipe/assemble` and `POST /h3pipe/build`:** a failure is 200 with
+  `ok: false` and a top-level `error`. Build with no bible or no script returns
+  `{"ok": false, "error", "passes": {}}`. Build always runs both passes.
+- **`POST /h3pipe/render`:**
+  - `shots: null` renders every shot.
+  - `loras` also accepts `"name:strength"` strings.
+  - `skipped` and `errors` entries carry `take` when one was reserved.
+  - The `h3pipe.take` event sent at queue time says `queued`.
+- **`PUT /h3pipe/override`:**
+  - Pass fields on a pass that isn't built answer 409.
+  - A shot in no build answers 404.
+  - An empty `note` or `model` clears the field.
+  - `DELETE` with `pass` keeps the shared `seed` and `note`.
+- **`PUT /h3pipe/cut`:** duplicate shots and unknown entry fields answer 400.
+- **Not handled yet:** ComfyUI multi-user mode (config always lives in `default/`),
+  and a TLS-fronted ComfyUI (self-queueing uses `http://`).
+- **Aliases:** every route also answers under `/api/h3pipe/...`.
