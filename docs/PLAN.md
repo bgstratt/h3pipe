@@ -258,7 +258,7 @@ Each phase ends with its exit check passing. Don't start the next until it does.
     (the extras clause was reworded, `defaults.model` was added), so rebuilding them
     changes their prompts.
 
-**Phase 1 — takes, overrides, cut (CLI)** — code complete 2026-09-18; real-ComfyUI check pending
+**Phase 1 — takes, overrides, cut (CLI)** ✅ done 2026-09-18
 - Built:
   - `h3takes.py`: the on-disk contract.
   - `h3jobs.py`: planning, frozen shotlists, sidecars, graph patching, the ComfyUI client.
@@ -269,9 +269,19 @@ Each phase ends with its exit check passing. Don't start the next until it does.
   - Duplicate shot ids are rejected.
 - Tests: 91, including `h3render` and `h3.py` end to end against a fake ComfyUI
   (`tests/test_render.py`, `tests/test_edit.py`).
-- **Still to do:** the exit check on a real episode with a real ComfyUI. Render a proxy
-  shot, `--redo` it, set an override, pick t01, assemble, check thumbnails and sidecars.
-  Then restart ComfyUI mid-job and confirm `h3.py takes` sweeps the take to failed.
+- Real-ComfyUI exit check passed on a copy of DeanStories ep05 (proxy), 2026-09-18:
+  - First renders: sidecars closed by the node, the built seed used, thumbnail
+    480×274, an 8-frame strip, and exact frame counts.
+  - `--redo`: new seed.
+  - A prompt override plus a pinned seed rendered from the frozen shotlist.
+  - `pick` t01, then assemble: the cut is t01 + t02 + a pre-sidecar take, 321/321 frames.
+  - Hard-killing h3render and interrupting the job left the take `queued`; `h3.py takes`
+    swept it to `failed`, and the next render plans it as a retry.
+- The install now runs the repo directly: `custom_nodes\ComfyUI-H3-Shotlist` is a junction to
+  `comfy_nodes/`. The old copy is at `C:\AI\ComfyUI\ComfyUI-H3-Shotlist.bak`, and the stale
+  pipeline copy is at `workflows\h3pipe.old`. Run `h3.py` from the repo, and pass `--workflow`
+  pointing at the installed `H3_Ref2VA_Shotlist_v1.json`. It matches the installed ComfyUI
+  version (`CreateVideo` has two more widgets than the repo copy).
 - Notes for later phases:
   - Built seeds are 63-bit (`stable_seed`), and JavaScript numbers lose precision above
     2^53. The routes must send seeds as strings, and the editor must never parse them
