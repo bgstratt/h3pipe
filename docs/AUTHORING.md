@@ -224,7 +224,9 @@ Reserve `camera: holds a static shot` for reactions where stillness is the point
 you have just cut to, a slow push gives the space depth, and costs nothing extra.
 
 Shot IDs go `sh010, sh020, sh030`, leaving gaps so you can insert `sh015` later. Renumbering
-changes seeds and invalidates renders.
+changes seeds and invalidates renders. An ID is unique across the whole episode, not just its
+sequence: continue the numbering (`sh110` in the next sequence, or keep counting) rather than
+restarting at `sh010`.
 
 ## Reference slots
 

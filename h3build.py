@@ -175,6 +175,7 @@ def parse_script(text: str, subject_ids: set[str], character_ids: set[str]) -> d
     seq = None
     shot = None
     upper = {c.upper(): c for c in character_ids}
+    first_line: dict[str, int] = {}     # shot id -> line it was first used on
 
     def close_shot():
         nonlocal shot
@@ -217,6 +218,14 @@ def parse_script(text: str, subject_ids: set[str], character_ids: set[str]) -> d
                 raise ScriptError(n, line, "shot appears before any `# sequence`")
             close_shot()
             sid = line[3:].strip().split()[0]
+            # Renders, takes, overrides and the cut are all keyed by shot id,
+            # so a repeat (even in another sequence) would share one render
+            # folder.
+            if sid in first_line:
+                raise ScriptError(n, line, f"shot id '{sid}' is already used on line "
+                                           f"{first_line[sid]}; shot ids must be unique "
+                                           f"in an episode")
+            first_line[sid] = n
             shot = {"id": sid, "cast": [], "props": [], "size": "medium",
                     "dialogue": [], "_action": [], "_line": n}
             continue

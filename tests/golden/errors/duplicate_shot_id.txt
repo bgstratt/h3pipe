@@ -1,0 +1,5 @@
+exit 1
+
+  error in duplicate_shot_id.md: line 8: shot id 'sh010' is already used on line 3; shot ids must be unique in an episode
+    | ## sh010
+
