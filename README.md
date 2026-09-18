@@ -292,6 +292,9 @@ the bible). `clone` and `generate` shots don't use it.
     <shot_id>_t01.mp4
     <shot_id>_t01_h3.wav
     <shot_id>_t01_foley.wav      (dub_keep_foley only)
+    <shot_id>_t01.jpg            mid-frame thumbnail (480 px long side)
+    <shot_id>_t01_strip.jpg      8 frames side by side, for hover scrub
+    <shot_id>_t01.json           take sidecar: written queued, closed by Save Shot
     frames/<shot_id>_t01_%06d.png
   renders_proxy/...            same layout for the animatic
 ```
@@ -473,6 +476,15 @@ grading, effects and titles, not lifting a character off a background. Budget
 The mp4 is pinned with `-frames:v` and never uses `-shortest`: H3's audio often
 runs a few milliseconds short of `length/fps`, and `-shortest` silently drops
 the final frame, which breaks conform.
+
+Save Shot also writes two JPEGs straight from the frames in memory: `_tNN.jpg`
+(the middle frame) and `_tNN_strip.jpg` (8 evenly spaced frames, for hover
+scrub). Its optional `sidecar` input takes the path of the take's `_tNN.json`
+(absolute, or relative to `project_root`), which the queuer writes as `queued`;
+the node closes it with `status` (`ok` or `failed`), `finished`, `frames`, the
+names of the files it wrote and its status line, and leaves every other field
+alone. A failure in the thumbnails or the sidecar is reported in the status
+line, never raised, so it can't cost you the mp4.
 
 ---
 

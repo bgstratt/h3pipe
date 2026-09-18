@@ -39,6 +39,7 @@ looking like one place across every cut in a sequence.
 
 from __future__ import annotations
 
+import datetime
 import json
 import math
 import os
@@ -54,6 +55,13 @@ import torch
 # ---------------------------------------------------------------------------
 
 GRID_STEP, GRID_BASE, GRID_MAX = 17, 5, 3592
+
+# Take thumbnails. STRIP_FRAMES must match h3takes.STRIP_FRAMES: the editor
+# reads the strip as that many equal-width cells.
+STRIP_FRAMES = 8
+THUMB_LONG_SIDE = 480
+STRIP_CELL_WIDTH = 192
+JPEG_QUALITY = 85
 AUDIO_POLICIES = ["generate", "dub", "dub_keep_foley", "clone"]
 PANEL_MODES = ["auto", "full", "pair", "face", "body"]
 
@@ -578,6 +586,30 @@ class H3ShotInfo:
 # H3SaveShot
 # ---------------------------------------------------------------------------
 
+def _write_json_atomic(path: str, data) -> None:
+    """Same bytes and atomicity as h3takes.write_json (not importable here):
+    temp file in the same folder, then os.replace; LF, indent 2, trailing newline."""
+    d = os.path.dirname(os.path.abspath(path))
+    os.makedirs(d, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(prefix=".tmp_", suffix=".json", dir=d)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as fh:
+            json.dump(data, fh, ensure_ascii=False, indent=2)
+            fh.write("\n")
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def _now() -> str:
+    """ISO-8601 local time with offset, seconds precision (as h3takes.now)."""
+    return datetime.datetime.now().astimezone().isoformat(timespec="seconds")
+
+
 class H3SaveShot:
     """Write one shot's deliverables under a strict naming convention.
 
@@ -585,7 +617,20 @@ class H3SaveShot:
         <shot_id>_t<take>.mp4          picture + the audio the policy selects
         <shot_id>_t<take>_h3.wav       H3's generated mix, always kept
         <shot_id>_t<take>_foley.wav    vocal-stripped bed (dub_keep_foley only)
+        <shot_id>_t<take>.jpg          middle frame, longest side 480 px
+        <shot_id>_t<take>_strip.jpg    STRIP_FRAMES frames side by side, 192 px
+                                       wide each, for hover scrub
+        <shot_id>_t<take>.json         the take's sidecar, when `sidecar` is set:
+                                       status, finished, frames, mp4, thumb,
+                                       strip and save_notes are filled in,
+                                       every other field is left alone
         frames/<shot_id>_t<take>_%06d.png   optional PNG sequence
+
+    `sidecar` is the path the queuer wrote the take's `queued` record to
+    (absolute, or relative to project_root); empty means there is none. The
+    rules are h3takes.py's (not importable inside ComfyUI, so followed here by
+    hand). The mp4 comes first: a failure writing thumbnails or the sidecar is
+    reported in the status string and never raised.
     """
 
     @classmethod
@@ -603,6 +648,8 @@ class H3SaveShot:
             },
             "optional": {
                 "audio": ("AUDIO",),
+                # Last, so saved workflows keep their widget order.
+                "sidecar": ("STRING", {"default": ""}),
             },
         }
 
@@ -641,7 +688,7 @@ class H3SaveShot:
     # -- main --------------------------------------------------------------
 
     def save(self, images, shot_id, audio_policy, project_root, subfolder,
-             take, fps, save_frames, audio=None):
+             take, fps, save_frames, audio=None, sidecar=""):
         from PIL import Image
 
         safe = re.sub(r"[^A-Za-z0-9_.-]", "_", shot_id) or "shot"
@@ -680,8 +727,132 @@ class H3SaveShot:
         mp4 = os.path.join(shot_dir, f"{stem}.mp4")
         status = self._encode(images, mp4, fps, mux_audio, frame_dir if save_frames else None)
         notes.append(status)
+        mp4_ok = status.startswith("mp4 written") and os.path.isfile(mp4)
+
+        # ---- thumbnails --------------------------------------------------
+        # After the mp4, and never fatal: the render is the valuable thing.
+        thumb = strip = None
+        try:
+            thumb = self._write_thumb(images, os.path.join(shot_dir, f"{stem}.jpg"))
+        except Exception as exc:
+            notes.append(f"thumbnail failed: {exc}")
+        try:
+            strip = self._write_strip(images, os.path.join(shot_dir, f"{stem}_strip.jpg"))
+        except Exception as exc:
+            notes.append(f"strip failed: {exc}")
+
+        # ---- sidecar -----------------------------------------------------
+        sidecar = (sidecar or "").strip()
+        if sidecar:
+            try:
+                self._finish_sidecar(
+                    sidecar, os.path.normpath(project_root), shot_id, take, notes,
+                    stem=stem, status="ok" if mp4_ok else "failed",
+                    frames=int(images.shape[0]),
+                    mp4=os.path.basename(mp4) if mp4_ok else None,
+                    thumb=thumb, strip=strip)
+            except Exception as exc:
+                notes.append(f"sidecar update failed: {exc}")
 
         return (shot_dir, f"{stem}: " + "; ".join(notes))
+
+    # -- sidecar -----------------------------------------------------------
+
+    @staticmethod
+    def _finish_sidecar(sidecar: str, root: str, shot_id: str, take: int,
+                        notes: list[str], *, stem: str, status: str, frames: int,
+                        mp4, thumb, strip) -> None:
+        """Close the take's record: set the saver's fields, leave the rest alone.
+
+        Warnings go into `notes` first, so they reach both save_notes and the
+        node's returned status string.
+        """
+        path = sidecar if os.path.isabs(sidecar) else os.path.join(root, sidecar)
+        name = os.path.basename(path)
+        data = None
+        try:
+            with open(path, encoding="utf-8") as fh:
+                data = json.load(fh)
+            if not isinstance(data, dict):
+                notes.append(f"sidecar {name} is not a JSON object; rewritten")
+                data = None
+        except FileNotFoundError:
+            notes.append(f"sidecar {name} was missing; created")
+        except (OSError, ValueError) as exc:
+            notes.append(f"sidecar {name} unreadable ({exc.__class__.__name__}); rewritten")
+        if data is None:
+            data = {"shot": shot_id, "take": take}
+        elif data.get("shot") != shot_id or data.get("take") != take:
+            notes.append(f"warning: sidecar {name} is for shot {data.get('shot')!r} "
+                         f"take {data.get('take')!r}, but this is {shot_id!r} take {take}")
+        data.update(status=status, finished=_now(), frames=frames,
+                    mp4=mp4, thumb=thumb, strip=strip,
+                    save_notes=f"{stem}: " + "; ".join(notes))
+        _write_json_atomic(path, data)
+
+    # -- thumbnails --------------------------------------------------------
+
+    @staticmethod
+    def _frame(images, i: int):
+        """Frame i as an RGB PIL image, converting only that frame."""
+        from PIL import Image
+
+        arr = (images[i].detach().float().clamp(0, 1).cpu().numpy() * 255.0 + 0.5)
+        arr = arr.astype(np.uint8)
+        if arr.ndim == 3 and arr.shape[2] == 1:
+            arr = arr[:, :, 0]
+        return Image.fromarray(arr).convert("RGB")
+
+    @staticmethod
+    def _save_jpeg(img, path: str) -> str:
+        """Write a JPEG atomically (temp file, then os.replace); return its name."""
+        fd, tmp = tempfile.mkstemp(prefix=".tmp_", suffix=".jpg",
+                                   dir=os.path.dirname(os.path.abspath(path)))
+        try:
+            with os.fdopen(fd, "wb") as fh:
+                img.save(fh, format="JPEG", quality=JPEG_QUALITY)
+            os.replace(tmp, path)
+        except BaseException:
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+            raise
+        return os.path.basename(path)
+
+    @classmethod
+    def _write_thumb(cls, images, path: str) -> str:
+        """The middle frame, scaled so its longest side is THUMB_LONG_SIDE."""
+        from PIL import Image
+
+        img = cls._frame(images, int(images.shape[0]) // 2)
+        w, h = img.size
+        k = THUMB_LONG_SIDE / max(w, h)
+        img = img.resize((max(1, round(w * k)), max(1, round(h * k))), Image.LANCZOS)
+        return cls._save_jpeg(img, path)
+
+    @staticmethod
+    def strip_indices(n: int) -> list[int]:
+        """The frame at the centre of each of STRIP_FRAMES equal segments of an
+        n-frame clip; every frame when there are fewer than STRIP_FRAMES."""
+        k = min(STRIP_FRAMES, n)
+        return [min(n - 1, int((i + 0.5) * n / k)) for i in range(k)]
+
+    @classmethod
+    def _write_strip(cls, images, path: str) -> str:
+        """The strip_indices frames, STRIP_CELL_WIDTH wide each, left to right."""
+        from PIL import Image
+
+        cells = []
+        for i in cls.strip_indices(int(images.shape[0])):
+            img = cls._frame(images, i)
+            w, h = img.size
+            cells.append(img.resize(
+                (STRIP_CELL_WIDTH, max(1, round(h * STRIP_CELL_WIDTH / w))), Image.LANCZOS))
+        out = Image.new("RGB", (STRIP_CELL_WIDTH * len(cells), cells[0].size[1]))
+        for j, cell in enumerate(cells):
+            out.paste(cell, (j * STRIP_CELL_WIDTH, 0))
+        return cls._save_jpeg(out, path)
 
     @staticmethod
     def _encode(images, mp4, fps, audio_path, existing_frames):
