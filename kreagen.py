@@ -312,8 +312,8 @@ def main() -> int:
     ap.add_argument("--only", help="comma-separated asset name filter, e.g. sam,core_wide")
     ap.add_argument("--redo", action="store_true", help="regenerate assets already on disk")
     ap.add_argument("--workflow", help=f"reference-image workflow to drive "
-                    f"(default: $KREA_WORKFLOW, else this repo's {REFS_WORKFLOW}, "
-                    f"else the built-in graph)")
+                    f"(default: $KREA_WORKFLOW, else {REFS_WORKFLOW} as saved in the "
+                    f"running ComfyUI, else this repo's copy, else the built-in graph)")
     ap.add_argument("--no-workflow", action="store_true",
                     help="ignore any workflow file and use the built-in graph")
     ap.add_argument("--list", action="store_true", help="show the job list and exit")
@@ -377,12 +377,13 @@ def main() -> int:
             print("  ! h3jobs.py is not importable — using the built-in graph")
         else:
             try:
-                # Not the canvas saved in ComfyUI: that one is for trying
-                # things by hand and may carry a style LoRA, and references
-                # must follow series.json's look (see LORA above).
-                base, wf = _resolve_workflow(args.workflow, REFS_WORKFLOW, None,
-                                             env="KREA_WORKFLOW", required=False,
-                                             prefer_repo=True)
+                # Same lookup as h3render: the copy saved in the running
+                # ComfyUI first, so the graph matches its node versions. Keep
+                # that copy LoRA-free (experiment under another name):
+                # references must follow series.json's look (see LORA above),
+                # and --lora is how a run adds one.
+                base, wf = _resolve_workflow(args.workflow, REFS_WORKFLOW, args.comfy,
+                                             env="KREA_WORKFLOW", required=False)
             except Exception as e:
                 print(f"  ! {REFS_WORKFLOW} could not be read ({e}) — using the built-in graph")
                 base, wf = None, ""

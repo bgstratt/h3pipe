@@ -232,6 +232,12 @@ python h3.py render Shows --each --proxy               # every episode
 - Failed shots are reported and skipped; `--stop-on-error` halts instead.
 - Other flags: `--panel-mode`, `--save-frames` / `--no-frames`, `--no-review-copy`, `--comfy URL`,
   `--workflow`, `--dry-run` (writes the API job to `h3render_graph.json`).
+- The workflow comes from the running ComfyUI's saved workflows
+  (`H3_Ref2VA_Shotlist_v1.json`; `kreagen` uses `krea2_refs_t2i.json`), so it always matches
+  your ComfyUI's node versions. Failing that, `$COMFYUI_PATH`, then the copy in this repo's
+  `workflows/`. `--workflow` or `$H3_WORKFLOW` / `$KREA_WORKFLOW` beat all of those. Keep the
+  saved `krea2_refs_t2i.json` free of style LoRAs (experiment under another name), since the
+  references must follow the bible's look.
 - It converts the canvas workflow to API format itself. If ComfyUI rejects it, save
   **Workflow → Export (API)** and pass that file with `--workflow`.
 
