@@ -134,12 +134,12 @@ by build, so the build goldens are unaffected.
   "shots": {
     "sh020": {
       "minimax_h3_ref2va": {
-        "base_hash": "sha1 of the shot entry this was written against",
-        "prompt": "…full compiled text, or null…",
         "seed": null,
-        "final": {"model": null, "loras": null, "steps": null},
-        "proxy": {"model": null, "loras": null, "steps": null},
-        "note": ""
+        "note": "",
+        "final": {"base_hash": "story hash of the final build of the shot this was written against",
+                  "prompt": "…full compiled text, or null…",
+                  "model": null, "loras": null, "steps": null},
+        "proxy": {"base_hash": "…", "prompt": null, "model": null, "loras": null, "steps": null}
       }
     }
   }
@@ -147,6 +147,12 @@ by build, so the build goldens are unaffected.
 ```
 
 - Overrides are keyed by target because compiled text only makes sense for one target.
+- The prompt and `base_hash` are **per pass**. The built prompt differs between passes
+  (a proxy with `audio_mode: generate` has different audio sections from a final that
+  clones), so a shared prompt override was wrong for one of them. Found in Phase 1.
+  The seed is shared, because both passes use the same seeds on purpose.
+- `base_hash` is the shot's *story hash*: the built entry minus model/LoRA/steps. So a
+  series-wide steps change doesn't make every prompt override stale.
 - A null field means "use the built value".
 - When a rebuild changes the shot so that `base_hash` no longer matches, the override is
   **stale**. It still applies (you asked for it), but the inspector flags it and shows a
@@ -252,7 +258,29 @@ Each phase ends with its exit check passing. Don't start the next until it does.
     (the extras clause was reworded, `defaults.model` was added), so rebuilding them
     changes their prompts.
 
-**Phase 1 — takes, overrides, cut (CLI)**
+**Phase 1 — takes, overrides, cut (CLI)** — code complete 2026-09-18; real-ComfyUI check pending
+- Built:
+  - `h3takes.py`: the on-disk contract.
+  - `h3jobs.py`: planning, frozen shotlists, sidecars, graph patching, the ComfyUI client.
+  - `h3render` rebuilt on `h3jobs`.
+  - `H3SaveShot`: closes the sidecar and writes thumbnails.
+  - `h3assemble`: follows `cut.json`.
+  - `h3edit.py`: `episode_status`, plus `h3.py takes / pick / override`.
+  - Duplicate shot ids are rejected.
+- Tests: 91, including `h3render` and `h3.py` end to end against a fake ComfyUI
+  (`tests/test_render.py`, `tests/test_edit.py`).
+- **Still to do:** the exit check on a real episode with a real ComfyUI. Render a proxy
+  shot, `--redo` it, set an override, pick t01, assemble, check thumbnails and sidecars.
+  Then restart ComfyUI mid-job and confirm `h3.py takes` sweeps the take to failed.
+- Notes for later phases:
+  - Built seeds are 63-bit (`stable_seed`), and JavaScript numbers lose precision above
+    2^53. The routes must send seeds as strings, and the editor must never parse them
+    into numbers. New seeds from redo stay below 2^53.
+  - `sweep_queued` needs the time the queue snapshot was taken (`as_of`). Routes must
+    record it before fetching `/queue`.
+  - `h3edit.episode_status()` is already the JSON the shot bin needs. Serve it as is.
+  - Stale reasons split into `script` (story hash), `ref` (reference file sha1s) and
+    `preset` (model/LoRA/steps/size).
 - A `jobs` module shared by `h3render` and the future routes: plan the take, apply
   overrides, write the frozen shotlist and the `queued` sidecar, patch the graph, queue.
 - Seed policy: take 1 = `stable_seed`; `--redo` = new seed unless `--same-seed` / `--seed N`.

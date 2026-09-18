@@ -237,6 +237,45 @@ def load_shotlist(root: str, pass_: str) -> dict:
         return json.load(fh)
 
 
+# What a shot IS (story, framing, timing, refs, prompt) versus how it is
+# rendered (model, LoRA, steps, size). Splitting them lets a take say WHY it is
+# stale, and keeps a series-wide steps change from flagging every prompt
+# override.
+PRESET_KEYS = ("model", "lora", "steps")
+PRESET_DEFAULTS = ("model", "lora", "steps", "width", "height")
+
+
+def story_hash(shot: dict) -> str:
+    return T.content_hash({k: v for k, v in shot.items() if k not in PRESET_KEYS})
+
+
+def preset_hash(doc: dict, shot: dict) -> str:
+    d = doc.get("defaults", {})
+    return T.content_hash({"defaults": {k: d.get(k) for k in PRESET_DEFAULTS},
+                           "shot": {k: shot.get(k) for k in PRESET_KEYS}})
+
+
+def stale_reasons(root: str, doc: dict, shot: dict, sidecar: dict | None) -> list[str]:
+    """Why a take no longer matches what rendering this shot now would use:
+    'script' (the shot changed), 'ref' (a reference file changed), 'preset'
+    (model/LoRA/steps/size defaults changed). Empty: current. A take with no
+    sidecar has no provenance and is reported as ['unknown']."""
+    if not sidecar:
+        return ["unknown"]
+    out = []
+    if sidecar.get("shot_hash") and sidecar["shot_hash"] != story_hash(shot):
+        out.append("script")
+    for r in sidecar.get("refs") or []:
+        p = r.get("path")
+        if p and r.get("sha1") and T.file_sha1(
+                p if os.path.isabs(p) else os.path.join(root, p)) != r["sha1"]:
+            out.append("ref")
+            break
+    if sidecar.get("preset_hash") and sidecar["preset_hash"] != preset_hash(doc, shot):
+        out.append("preset")
+    return out
+
+
 def parse_lora(spec: str) -> list[dict]:
     """`name`, `name:0.7`, or none/off/- (no LoRA) -> a LoRA list."""
     spec = spec.strip()
@@ -315,7 +354,7 @@ def plan_job(root: str, pass_: str, doc: dict, index: int, req: RenderRequest,
     sid = shot["id"]
     dflt = doc.get("defaults", {})
     ov = T.shot_override(overrides or {}, sid, pass_)
-    shot_hash = T.content_hash(shot)
+    shot_hash = story_hash(shot)
 
     takes = T.list_takes(root, pass_, sid, folder)
     usable = [t for t in takes if t.usable]
@@ -442,8 +481,7 @@ def sidecar_for(job: Job) -> dict:
         "height": int(job.shot.get("height", d.get("height", 0))),
         "length": job.frames,
         "shot_hash": job.shot_hash,
-        "preset_hash": T.content_hash({k: d.get(k) for k in
-                                       ("model", "lora", "steps", "width", "height")}),
+        "preset_hash": preset_hash(job.doc, job.shot),
         "overrides": job.overridden, "override_stale": job.override_stale,
         "parent_take": job.parent_take, "note": job.note,
         "refs": ref_files(job),

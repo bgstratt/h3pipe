@@ -14,6 +14,13 @@ your projects, with the pipeline scripts beside it (see the README).
                                                     # refs -> render -> assemble, using the
                                                     # shotlists already on disk (keeps hand edits)
 
+    python h3.py takes    Shows\\ep05 [--proxy]      # every take: status, seed, why stale, which is in the cut
+    python h3.py pick     Shows\\ep05 sh020 3        # the cut uses sh020 take 3 (cut.json)
+    python h3.py pick     Shows\\ep05 sh020 latest   # back to the newest usable take
+    python h3.py override Shows\\ep05 sh020 --seed 1234 --prompt-file p.txt
+                                                    # overrides.json: used by the next render/redo
+    (see h3edit.py for every takes/pick/override flag)
+
 The episode can be a folder (any name) holding series.json and one script .md,
 or several folders at once, or a parent with --each:
 
@@ -32,6 +39,7 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 STAGES = ("align", "build", "check", "refs", "render", "assemble", "all")
+EDIT = ("takes", "pick", "override")          # in-process, see h3edit.py
 
 
 def script(name: str) -> str:
@@ -111,6 +119,12 @@ def stage(name: str, ep: str, extra: list[str], skip_build: bool = False) -> int
 
 def main() -> int:
     argv = sys.argv[1:]
+    if argv and argv[0] in EDIT:
+        if len(argv) < 2 or argv[1].startswith("-"):
+            sys.exit(f"  !! usage: python h3.py {argv[0]} <episode> ...")
+        sys.path.insert(0, HERE)
+        import h3edit
+        return h3edit.COMMANDS[argv[0]](os.path.abspath(argv[1]), argv[2:])
     if not argv or argv[0] in ("-h", "--help") or argv[0] not in STAGES:
         print(__doc__)
         return 0 if argv[:1] in (["-h"], ["--help"], []) else 2

@@ -130,19 +130,28 @@ class TakesTest(unittest.TestCase):
 class OverridesTest(unittest.TestCase):
     def test_set_get_clear(self):
         d = {}
-        T.set_override(d, "sh020", seed=42, prompt="text", base_hash="h")
-        T.set_override(d, "sh020", "final", steps=10, loras=[{"name": "x", "strength": 0.7}])
-        T.set_override(d, "sh020", "proxy", model="m")
+        T.set_override(d, "sh020", seed=42)
+        T.set_override(d, "sh020", "final", prompt="text", base_hash="h", steps=10,
+                       loras=[{"name": "x", "strength": 0.7}])
+        T.set_override(d, "sh020", "proxy", model="m", base_hash="p")
         self.assertEqual(T.shot_override(d, "sh020", "final"),
                          {"prompt": "text", "seed": 42, "base_hash": "h", "steps": 10,
                           "loras": [{"name": "x", "strength": 0.7}]})
-        self.assertEqual(T.shot_override(d, "sh020", "proxy")["model"], "m")
-        self.assertNotIn("steps", T.shot_override(d, "sh020", "proxy"))
+        self.assertEqual(T.shot_override(d, "sh020", "proxy"),
+                         {"seed": 42, "model": "m", "base_hash": "p"})
         self.assertEqual(T.shot_override(d, "sh999", "final"), {})
-        T.set_override(d, "sh020", "final", steps=None, loras=None)
+        T.set_override(d, "sh020", "final", steps=None, loras=None, prompt=None)
         T.set_override(d, "sh020", "proxy", model=None)
-        T.set_override(d, "sh020", seed=None, prompt=None)
+        # pass blocks holding only a base_hash are gone
+        self.assertEqual(d["shots"]["sh020"][T.DEFAULT_TARGET], {"seed": 42})
+        T.set_override(d, "sh020", seed=None)
         self.assertEqual(d["shots"], {})
+
+    def test_prompt_is_per_pass(self):
+        d = T.set_override({}, "sh020", "final", prompt="final text")
+        self.assertNotIn("prompt", T.shot_override(d, "sh020", "proxy"))
+        with self.assertRaises(ValueError):
+            T.set_override({}, "sh020", prompt="no pass")
 
     def test_empty_lora_list_is_kept(self):
         d = {}

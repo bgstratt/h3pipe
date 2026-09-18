@@ -211,12 +211,23 @@ python h3.py render Shows\ep05 --only sh040,sh050 --redo
 python h3.py render Shows --each --proxy               # every episode
 ```
 
-- Runs the same graph as the canvas: sets Shot List Loader and Save Shot for each shot and queues it.
+- Runs the same graph as the canvas: points Shot List Loader and Save Shot at each take and
+  queues it.
 - Must run on the ComfyUI PC. It checks the render folders to skip finished shots, so Ctrl-C
   and re-running resumes where it stopped.
+- Every take gets a sidecar, `<shot>_tNN.json`, holding its seed, model, LoRAs, steps, the refs
+  it used (with checksums) and its status (`queued`, `ok`, `failed`). It also gets
+  `<shot>_tNN.shotlist.json`, the exact shot it rendered. Nothing about a take is lost when the
+  script changes.
 - `--redo` renders a new take (t02, t03…) and never overwrites. `--take N` overwrites that take.
-- Takes the model, LoRA and step count from each shot, falling back to the shotlist defaults.
-  `--model` and `--lora` override both for a whole run, for a quick test without touching a script.
+- **Seeds:** a shot's first take uses its built seed. `--redo` picks a **new** seed, so a redo
+  is really a new attempt. `--same-seed` keeps the built one, `--seed N` uses N, and
+  `--new-seed` forces a fresh one.
+- Takes the model, LoRA and step count from each shot, falling back to the shotlist defaults,
+  then applies the episode's `overrides.json` (see `h3.py override` below). `--model`, `--lora`
+  and `--steps` override all of that for one run. `--lora` repeats to stack LoRAs
+  (`--lora a.safetensors --lora b.safetensors:0.6`); the extras are chained after the
+  workflow's LoRA loader. `--note` stores a remark in each take's sidecar.
   It prints what it will use, and warns when one episode needs more than one model or LoRA.
 - Failed shots are reported and skipped; `--stop-on-error` halts instead.
 - Other flags: `--panel-mode`, `--save-frames` / `--no-frames`, `--no-review-copy`, `--comfy URL`,
@@ -252,6 +263,30 @@ python h3.py assemble Shows\ep05 --partial         # join what exists so far
   with the recording. `--no-trim` keeps the padding.
 - `epNN_shots.txt` lists every shot's start time in the cut.
 - This is a review cut. Mix the final audio in Resolve.
+
+### Takes, picks and overrides
+
+```
+python h3.py takes    Shows\ep05 --proxy          # every take: status, seed, why stale, which is in the cut
+python h3.py pick     Shows\ep05 sh020 1          # the cut uses take 1 of sh020 (writes cut.json)
+python h3.py pick     Shows\ep05 sh020 latest     # back to the newest usable take
+python h3.py override Shows\ep05 sh020 --dump-prompt > sh020.txt     # the prompt it would use
+python h3.py override Shows\ep05 sh020 --prompt-file sh020.txt --seed 1234
+python h3.py override Shows\ep05 sh020 --lora a.safetensors --lora b.safetensors:0.6 --steps 10
+python h3.py override Shows\ep05 sh020 --clear prompt
+python h3.py render   Shows\ep05 --only sh020 --redo                 # renders with the override
+```
+
+- `takes` marks a take **stale** when rendering the shot now would differ: `script` (the
+  shot changed in the script or bible), `ref` (a reference image or voice changed) or
+  `preset` (model, LoRA, steps or size defaults changed). Stale is a hint, not an error.
+- `overrides.json` is how you tweak one shot without touching the script: the exact prompt,
+  a seed, model, LoRAs, steps. Prompt, model, LoRAs and steps are per pass (final unless
+  `--proxy`; `--both` sets both), because the proxy's prompt differs when it generates its
+  audio. The seed applies to both passes. A rebuild never loses an override. If the shot has
+  changed since you wrote it, `takes` and `override` flag it STALE, and it is still applied.
+- Model, LoRAs and steps belong in the script when they're decisions about the film.
+  `overrides.json` is for the tweak loop.
 
 ## Recorded dialogue (lip sync)
 

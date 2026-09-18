@@ -324,17 +324,23 @@ def sweep_queued(takes: list[Take], alive: set[str], as_of: str | None = None,
 #
 # {"episode": "ep01",
 #  "shots": {"sh020": {"minimax_h3_ref2va": {
-#      "base_hash": "…", "prompt": null | "text" | ["section", …],
 #      "seed": null | int, "note": "",
-#      "final": {"model": null, "loras": null, "steps": null},
-#      "proxy": {"model": null, "loras": null, "steps": null}}}}}
+#      "final": {"base_hash": "…", "prompt": null | "text" | ["section", …],
+#                "model": null, "loras": null, "steps": null},
+#      "proxy": {…same…}}}}}
 #
 # null (or absent) means "use the built value". `loras` is a list of
 # {"name": str, "strength": float}; an empty list means "no LoRA at all".
+#
+# The prompt is per pass because the built prompt is: a proxy that generates
+# its audio has different audio sections from a final that clones voices. Each
+# pass's `base_hash` records the build of the shot its override was written
+# against. Seed and note are shared: both passes render the same seeds on
+# purpose, so the proxy stays a preview of the final.
 
 OVERRIDES_FILE = "overrides.json"
-PASS_FIELDS = ("model", "loras", "steps")
-SHOT_FIELDS = ("prompt", "seed", "note", "base_hash")
+PASS_FIELDS = ("prompt", "model", "loras", "steps", "base_hash")
+SHOT_FIELDS = ("seed", "note")
 
 
 def load_overrides(root: str) -> dict:
@@ -380,9 +386,10 @@ def set_override(data: dict, shot_id: str, pass_: str | None = None,
         else:
             dst[k] = v
     for p in PASSES:
-        if p in block and not block[p]:
+        # a base_hash alone describes nothing
+        if p in block and set(block[p]) <= {"base_hash"}:
             del block[p]
-    if set(block) <= {"base_hash"}:
+    if not block:
         del shots[shot_id][target]
     if not shots[shot_id]:
         del shots[shot_id]

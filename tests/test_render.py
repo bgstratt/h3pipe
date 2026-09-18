@@ -110,9 +110,9 @@ class PlanTest(unittest.TestCase):
         self.assertEqual((j.action, j.take, j.forced), ("overwrite", 1, True))
 
     def test_overrides_and_request_precedence(self):
-        ov = T.set_override({}, "sh010", prompt="custom", base_hash="stale")
-        T.set_override(ov, "sh010", "final", steps=11, model="ov_model.safetensors",
-                       loras=[{"name": "a", "strength": 0.5}])
+        ov = T.set_override({}, "sh010", "final", prompt="custom", base_hash="stale",
+                            steps=11, model="ov_model.safetensors",
+                            loras=[{"name": "a", "strength": 0.5}])
         j = self.plan(ov=ov)
         self.assertEqual((j.prompt, j.steps, j.model), ("custom", 11, "ov_model.safetensors"))
         self.assertEqual(j.loras, [{"name": "a", "strength": 0.5}])
@@ -120,7 +120,7 @@ class PlanTest(unittest.TestCase):
         self.assertTrue(j.override_stale)
         j = self.plan(ov=ov, steps=3, loras=[])
         self.assertEqual((j.steps, j.loras), (3, []))
-        ov["shots"]["sh010"][T.DEFAULT_TARGET]["base_hash"] = T.content_hash(self.doc["shots"][0])
+        T.set_override(ov, "sh010", "final", base_hash=J.story_hash(self.doc["shots"][0]))
         self.assertFalse(self.plan(ov=ov).override_stale)
 
     def test_lora_from_shotlist(self):
@@ -139,7 +139,7 @@ class PlanTest(unittest.TestCase):
                          [{"name": "C:/x/a.safetensors", "strength": 1.0}])
 
     def test_start_job_writes_frozen_shotlist_and_sidecar(self):
-        ov = T.set_override({}, "sh010", prompt=["one", "two"])
+        ov = T.set_override({}, "sh010", "final", prompt=["one", "two"])
         j = self.plan(ov=ov, seed=42, note="hello")
         take = J.start_job(j)
         frozen = T.read_json(take.paths.shotlist)
@@ -150,7 +150,7 @@ class PlanTest(unittest.TestCase):
         sc = T.read_json(take.paths.sidecar)
         self.assertEqual((sc["status"], sc["seed"], sc["seed_source"], sc["note"]),
                          ("queued", 42, "typed", "hello"))
-        self.assertEqual(sc["shot_hash"], T.content_hash(self.doc["shots"][0]))
+        self.assertEqual(sc["shot_hash"], J.story_hash(self.doc["shots"][0]))
         self.assertEqual([r["slot"] for r in sc["refs"]][-2:], ["Picture 1", "Picture 4"])
         self.assertIsNone(sc["refs"][0]["sha1"])           # refs not on disk in the test
 
@@ -338,7 +338,7 @@ class RenderCliTest(unittest.TestCase):
         self.assertNotEqual(t2.sidecar["seed"], t1.sidecar["seed"])
 
         # an override (prompt + LoRA stack) applies on the next redo
-        ov = T.set_override({}, "sh020", prompt="hand-tuned prompt")
+        ov = T.set_override({}, "sh020", "proxy", prompt="hand-tuned prompt")
         T.set_override(ov, "sh020", "proxy", loras=[{"name": "a", "strength": 1.0},
                                                     {"name": "b", "strength": 0.4}])
         T.save_overrides(self.root, ov)
