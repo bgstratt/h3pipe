@@ -307,6 +307,12 @@ Each phase ends with its exit check passing. Don't start the next until it does.
   queued at once get different take numbers, an overridden prompt renders and survives
   a rebuild, assemble uses a non-latest take, a script edit marks the take `script`-stale.
 
+**Running Phases 2, 3 and 6 in parallel (decided 2026-09-18, to get through the plan
+faster).** The routes (Phase 2) and the UI (Phase 3) share one contract, `docs/API.md`,
+written first. The UI develops against a mock of it until the routes land. The story-IR
+extraction (Phase 6) is a pure refactor of `h3build` behind the goldens and touches
+neither, so it runs ahead of its turn. Phase 4 (evaluate) still gates Phases 7 and 8.
+
 **Phase 2 — backend routes**
 - `comfy_nodes/` registers `/h3pipe/...`: list episodes; shots (built values + overrides
   + stale); takes and thumbnails; queue render/redo; set/clear override; set pick and

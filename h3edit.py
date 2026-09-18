@@ -18,9 +18,9 @@ cut, set per-shot overrides. The command-line face of what the editor does;
 `takes` shows every take with its status, why it is stale (script / ref /
 preset), and which take the cut uses. `pick` writes cut.json; `latest` puts a
 shot back on its newest usable take. `override` writes overrides.json: the
-next render or redo of that shot uses it (see h3render.py). Model, LoRAs and
-steps are per pass (final unless --proxy; --both sets both); prompt and seed
-apply to both passes.
+next render or redo of that shot uses it (see h3render.py). Prompt, model,
+LoRAs and steps are per pass (final unless --proxy; --both sets both); seed
+and note apply to both passes.
 
 Stdlib only.
 """
@@ -38,10 +38,100 @@ import h3takes as T
 # status: what the editor's shot bin shows
 # ---------------------------------------------------------------------------
 
+SCRIPT_SKIP = ("refs_todo", "readme", "notes")
+
+
+def episode_script(root: str) -> str | None:
+    """The episode's script: <folder name>.md, else the only other .md there."""
+    base = os.path.basename(os.path.normpath(root))
+    md = os.path.join(root, f"{base}.md")
+    if os.path.isfile(md):
+        return md
+    cands = [f for f in os.listdir(root) if f.lower().endswith(".md")
+             and not f.lower().startswith(SCRIPT_SKIP)]
+    return os.path.join(root, cands[0]) if len(cands) == 1 else None
+
+
+def episode_bible(root: str) -> str | None:
+    """series.json in the episode folder, else in its parent (a series folder)."""
+    for d in (root, os.path.dirname(os.path.normpath(root))):
+        p = os.path.join(d, "series.json")
+        if os.path.isfile(p):
+            return p
+    return None
+
+
+def find_episodes(roots: list[str], depth: int = 2) -> list[dict]:
+    """Every folder under `roots` (to `depth` levels) with a bible and a script."""
+    out, seen = [], set()
+
+    def visit(d: str, level: int):
+        if level > depth or not os.path.isdir(d):
+            return
+        try:
+            names = sorted(os.listdir(d))
+        except OSError:
+            return
+        if "series.json" in names:
+            script = episode_script(d)
+            if script and os.path.normcase(d) not in seen:
+                seen.add(os.path.normcase(d))
+                out.append(episode_summary(d, script))
+        for n in names:
+            if n.startswith((".", "_")) or n in ("refs", "renders", "renders_proxy",
+                                                 "shotlist", "views", "audio"):
+                continue
+            p = os.path.join(d, n)
+            if os.path.isdir(p):
+                visit(p, level + 1)
+
+    for r in roots:
+        visit(os.path.abspath(r), 0)
+    return out
+
+
+def episode_summary(root: str, script: str | None = None) -> dict:
+    title = series = ""
+    bible = episode_bible(root)
+    if bible:
+        b = T.read_json(bible) or {}
+        series = (b.get("series") or {}).get("title", "")
+    built = {p: os.path.isfile(os.path.join(root, J.shotlist_rel(p))) for p in T.PASSES}
+    shots = 0
+    for p in T.PASSES:
+        if built[p]:
+            doc = J.load_shotlist(root, p)
+            title, shots = doc.get("title", ""), len(doc.get("shots", []))
+            break
+    return {"ep": os.path.abspath(root), "name": os.path.basename(os.path.normpath(root)),
+            "series": series, "title": title, "built": built, "shots": shots,
+            "script": os.path.basename(script or episode_script(root) or "")}
+
+
+def episode_fps(root: str) -> float:
+    bible = episode_bible(root)
+    b = (T.read_json(bible) or {}) if bible else {}
+    return float((b.get("series") or {}).get("fps", 24))
+
+
+def rel(root: str, path: str) -> str | None:
+    """`path` relative to the episode, with forward slashes (URL-ready), or
+    None if there is no such file."""
+    if not os.path.isfile(path):
+        return None
+    return os.path.relpath(path, root).replace(os.sep, "/")
+
+
+def prompt_text(prompt) -> str:
+    """A shotlist prompt (list of sections, or one string) as the loader joins it."""
+    return "\n\n".join(prompt) if isinstance(prompt, list) else (prompt or "")
+
+
 def episode_status(root: str, pass_: str, folder: str | None = None) -> dict:
     """Every shot in cut order with its takes, the take the cut uses, and its
     override. Plain data, ready to serve as JSON."""
     doc = J.load_shotlist(root, pass_)
+    fps = episode_fps(root)
     shots = {s["id"]: s for s in doc["shots"]}
     ov = T.load_overrides(root)
     cut = T.load_cut(root)
@@ -65,7 +155,12 @@ def episode_status(root: str, pass_: str, folder: str | None = None) -> dict:
         out.append({
             "shot": e.shot,
             "orphan": e.orphan,
+            "sequence": shot.get("sequence") if shot else None,
             "length": shot.get("length") if shot else None,
+            "seconds": round(shot["length"] / fps, 3) if shot else None,
+            "size": shot.get("size") if shot else None,
+            "subjects": shot.get("subjects", []) if shot else [],
+            "audio_policy": shot.get("audio_policy") if shot else None,
             "cut": {"take": chosen_take, "picked": e.take is not None, "pass": e.pass_,
                     "placeholder": e.placeholder, "usable": chosen_ok,
                     "trim_in": e.trim_in, "trim_out": e.trim_out, "locked": e.locked,
@@ -80,17 +175,50 @@ def episode_status(root: str, pass_: str, folder: str | None = None) -> dict:
                 "note": (t.sidecar or {}).get("note", ""),
                 "overrides": (t.sidecar or {}).get("overrides", []),
                 "stale": J.stale_reasons(root, doc, shot, t.sidecar) if shot else [],
-                "thumb": os.path.basename(t.paths.thumb) if os.path.isfile(t.paths.thumb)
-                else None,
-                "strip": os.path.basename(t.paths.strip) if os.path.isfile(t.paths.strip)
-                else None,
+                "thumb": rel(root, t.paths.thumb),
+                "strip": rel(root, t.paths.strip),
+                "mp4": rel(root, t.paths.mp4),
                 "queued": (t.sidecar or {}).get("queued"),
                 "finished": (t.sidecar or {}).get("finished"),
                 "save_notes": (t.sidecar or {}).get("save_notes", ""),
             } for t in takes],
         })
-    return {"episode": doc.get("episode", os.path.basename(root)), "pass": pass_,
-            "shots": out}
+    d = doc.get("defaults", {})
+    return {"episode": doc.get("episode", os.path.basename(root)), "title": doc.get("title", ""),
+            "pass": pass_, "fps": fps, "width": d.get("width"), "height": d.get("height"),
+            "folder": folder or T.pass_subfolder(pass_), "shots": out}
+
+
+def shot_detail(root: str, pass_: str, shot_id: str, folder: str | None = None) -> dict:
+    """Everything the inspector shows for one shot in one pass: the built entry,
+    the prompt it builds to, the override and the prompt a render would use now,
+    and each take's full sidecar."""
+    doc = J.load_shotlist(root, pass_)
+    idx = next((i for i, s in enumerate(doc["shots"]) if s["id"] == shot_id), None)
+    if idx is None:
+        raise KeyError(f"{shot_id} is not in {J.shotlist_rel(pass_)}")
+    shot = doc["shots"][idx]
+    ov = T.load_overrides(root)
+    job = J.plan_job(root, pass_, doc, idx, J.RenderRequest(shot_id), ov, folder)
+    eff = T.shot_override(ov, shot_id, pass_)
+    takes = []
+    for t in T.list_takes(root, pass_, shot_id, folder):
+        takes.append({"take": t.take, "status": t.status, "has_video": t.has_video,
+                      "stale": J.stale_reasons(root, doc, shot, t.sidecar),
+                      "sidecar": t.sidecar,
+                      "files": {k: rel(root, getattr(t.paths, k))
+                                for k in ("mp4", "thumb", "strip", "shotlist", "h3_wav")
+                                if os.path.isfile(getattr(t.paths, k))}})
+    return {
+        "shot": shot_id, "pass": pass_, "index": idx, "built": shot,
+        "built_prompt": prompt_text(shot.get("prompt")),
+        "override": {k: v for k, v in eff.items() if k != "base_hash"},
+        "override_stale": bool(eff.get("base_hash")) and eff["base_hash"] != J.story_hash(shot),
+        "effective": {"prompt": prompt_text(job.prompt), "seed": job.seed,
+                      "seed_source": job.seed_source, "model": job.model,
+                      "loras": job.loras, "steps": job.steps},
+        "takes": takes,
+    }
 
 
 def sweep(root: str, pass_: str, comfy_url: str, folder: str | None = None) -> int:
