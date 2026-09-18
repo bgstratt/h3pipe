@@ -31,13 +31,14 @@ from __future__ import annotations
 
 import argparse, hashlib, json, os, re, subprocess, sys, time, urllib.parse, urllib.request
 
-# h3render already knows how to turn a canvas save into an API graph; reuse it
-# rather than keeping a second converter in step with ComfyUI's format.
+# h3jobs already knows how to find a workflow (including the one saved in the
+# running ComfyUI) and turn a canvas save into an API graph; reuse it rather
+# than keeping a second converter in step with ComfyUI's format.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 try:
-    from h3render import load_graph as _load_graph
-except Exception:                                    # h3render missing or broken
-    _load_graph = None
+    from h3jobs import resolve_workflow as _resolve_workflow
+except Exception:                                    # h3jobs missing or broken
+    _resolve_workflow = None
 
 REFS_WORKFLOW = "krea2_refs_t2i.json"
 
@@ -84,29 +85,6 @@ def seed_for(key: str) -> int:
 def parse_size(target: str, default=(1024, 1024)) -> tuple[int, int]:
     m = re.search(r"(\d+)\s*[x×]\s*(\d+)", target or "")
     return (int(m.group(1)), int(m.group(2))) if m else default
-
-
-def find_workflow(explicit: str | None) -> str:
-    """The reference-image workflow, if there is one.
-
-    Found = used. $KREA_WORKFLOW wins, then a workflows/ folder beside this
-    script, then beside it, then $COMFYUI_PATH's workflows folder. Nothing
-    found means the built-in graph below, so the tool still runs on a bare
-    install.
-    """
-    if explicit:
-        return explicit
-    here = os.path.dirname(os.path.abspath(__file__))
-    cands = [os.environ.get("KREA_WORKFLOW", ""),
-             os.path.join(here, "workflows", REFS_WORKFLOW),
-             os.path.join(here, REFS_WORKFLOW)]
-    comfy = os.environ.get("COMFYUI_PATH", "")
-    if comfy:
-        cands.append(os.path.join(comfy, "user", "default", "workflows", REFS_WORKFLOW))
-    for c in cands:
-        if c and os.path.isfile(c):
-            return os.path.normpath(c)
-    return ""
 
 
 def _one(g: dict, *ctypes: str) -> str:
@@ -334,7 +312,8 @@ def main() -> int:
     ap.add_argument("--only", help="comma-separated asset name filter, e.g. sam,core_wide")
     ap.add_argument("--redo", action="store_true", help="regenerate assets already on disk")
     ap.add_argument("--workflow", help=f"reference-image workflow to drive "
-                    f"(default: {REFS_WORKFLOW} if found, else the built-in graph)")
+                    f"(default: $KREA_WORKFLOW, else this repo's {REFS_WORKFLOW}, "
+                    f"else the built-in graph)")
     ap.add_argument("--no-workflow", action="store_true",
                     help="ignore any workflow file and use the built-in graph")
     ap.add_argument("--list", action="store_true", help="show the job list and exit")
@@ -394,21 +373,23 @@ def main() -> int:
 
     base, wf = None, ""
     if not args.no_workflow:
-        wf = find_workflow(args.workflow)
-        if wf and _load_graph is None:
-            print(f"  ! {wf} found but h3render.py is not importable — "
-                  f"using the built-in graph")
-            wf = ""
-        elif wf:
+        if _resolve_workflow is None:
+            print("  ! h3jobs.py is not importable — using the built-in graph")
+        else:
             try:
-                base = _load_graph(wf)
+                # Not the canvas saved in ComfyUI: that one is for trying
+                # things by hand and may carry a style LoRA, and references
+                # must follow series.json's look (see LORA above).
+                base, wf = _resolve_workflow(args.workflow, REFS_WORKFLOW, None,
+                                             env="KREA_WORKFLOW", required=False,
+                                             prefer_repo=True)
             except Exception as e:
-                print(f"  ! {wf} could not be read ({e}) — using the built-in graph")
-                wf = ""
+                print(f"  ! {REFS_WORKFLOW} could not be read ({e}) — using the built-in graph")
+                base, wf = None, ""
 
     print(f"\n  {len(jobs)} asset(s) · comfy {args.comfy} · "
           f"{args.steps} steps · cfg {args.cfg}\n"
-          f"  graph {os.path.basename(wf) if wf else 'built-in (' + UNET + ')'}\n"
+          f"  graph {wf if wf else 'built-in (' + UNET + ')'}\n"
           f"  {'-' * 62}")
     todo_now = []
     for j in jobs:

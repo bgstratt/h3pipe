@@ -47,11 +47,13 @@ Proxy vs final
         python h3assemble.py -o <project> --shotlist shotlist/shotlist_proxy.json
 
 Workflow file
-    Default: H3_Ref2VA_Shotlist_v1.json in the folder above this script (the
-    ComfyUI workflows folder), or beside it. Either the normal UI save or an
-    API export (Workflow > Export (API)) works; the UI save is converted here.
-    If ComfyUI rejects a converted graph, export the API version once and pass
-    it with --workflow.
+    --workflow, else $H3_WORKFLOW, else H3_Ref2VA_Shotlist_v1.json as saved in
+    the running ComfyUI (its user workflows, fetched over the API, so the graph
+    always matches that ComfyUI's node versions), else $COMFYUI_PATH's
+    workflows folder, else the copy in this repo. It prints which. Either the
+    normal UI save or an API export (Workflow > Export (API)) works; the UI save
+    is converted here. If ComfyUI rejects a converted graph, export the API
+    version once and pass it with --workflow.
 """
 from __future__ import annotations
 
@@ -68,7 +70,7 @@ import h3takes as T  # noqa: E402
 from h3jobs import (  # noqa: E402,F401
     LOADER, SAVER, LORA, UNET, WORKFLOW_NAME, Comfy, RenderRequest, find_workflow,
     finish_job, graph_for, load_graph, load_shotlist, mark_failed, mark_queued, node_of,
-    parse_lora, plan_episode, start_job, ui_to_api)
+    parse_lora, plan_episode, resolve_workflow, start_job, ui_to_api)
 
 
 def fmt(sec: float) -> str:
@@ -167,8 +169,7 @@ def main() -> int:
         model=args.model or None, loras=loras, steps=args.steps, note=args.note)
     only = {s.strip() for s in args.only.split(",")} if args.only else None
 
-    wf = find_workflow(args.workflow)
-    base = load_graph(wf)
+    base, wf = resolve_workflow(args.workflow, WORKFLOW_NAME, args.comfy)
     node_of(base, LOADER), node_of(base, SAVER)       # fail early on the wrong workflow
 
     comfy = Comfy(args.comfy)

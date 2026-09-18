@@ -228,6 +228,7 @@ class FakeComfy:
 
     def __init__(self):
         self.mode = "node"
+        self.userdata: dict[str, dict] = {}       # "workflows/x.json" -> saved workflow
         self.graphs: list[dict] = []
         self.history: dict[str, dict] = {}
         fake = self
@@ -248,6 +249,15 @@ class FakeComfy:
                 if self.path.startswith("/history/"):
                     pid = self.path.rsplit("/", 1)[1]
                     self._send({pid: fake.history[pid]} if pid in fake.history else {})
+                elif self.path.startswith("/api/userdata/"):
+                    from urllib.parse import unquote
+                    key = unquote(self.path[len("/api/userdata/"):])
+                    if key in fake.userdata:
+                        self._send(fake.userdata[key])
+                    else:
+                        self.send_response(404)
+                        self.send_header("Content-Length", "0")
+                        self.end_headers()
                 elif self.path == "/queue":
                     self._send({"queue_running": [], "queue_pending": []})
                 else:
@@ -290,6 +300,51 @@ class FakeComfy:
 
     def close(self):
         self.server.shutdown()
+
+
+class WorkflowLookupTest(unittest.TestCase):
+    def test_order(self):
+        comfy = FakeComfy()
+        try:
+            saved = J.load_graph(WORKFLOW)
+            saved["2"]["inputs"]["lora_name"] = "from_comfy.safetensors"
+            comfy.userdata["workflows/" + J.WORKFLOW_NAME] = saved   # an API graph is fine too
+            g, where = J.resolve_workflow(None, J.WORKFLOW_NAME, comfy.url)
+            self.assertEqual(g["2"]["inputs"]["lora_name"], "from_comfy.safetensors")
+            self.assertIn("user workflows", where)
+            # explicit beats ComfyUI
+            g, where = J.resolve_workflow(WORKFLOW, J.WORKFLOW_NAME, comfy.url)
+            self.assertEqual(where, WORKFLOW)
+            # not saved in ComfyUI, or no ComfyUI at all: the repo copy
+            comfy.userdata.clear()
+            for url in (comfy.url, "http://127.0.0.1:9", None):
+                g, where = J.resolve_workflow(None, J.WORKFLOW_NAME, url)
+                self.assertTrue(where.endswith(os.path.join("workflows", J.WORKFLOW_NAME)), where)
+            self.assertEqual(J.resolve_workflow(None, "nope.json", None, required=False),
+                             (None, ""))
+            with self.assertRaises(FileNotFoundError):
+                J.resolve_workflow(None, "nope.json", None)
+        finally:
+            comfy.close()
+
+    def test_prefer_repo_beats_comfyui_path(self):
+        with tempfile.TemporaryDirectory() as comfy_root:
+            d = os.path.join(comfy_root, "user", "default", "workflows")
+            os.makedirs(d)
+            with open(os.path.join(d, J.WORKFLOW_NAME), "w", encoding="utf-8") as fh:
+                fh.write(open(WORKFLOW, encoding="utf-8").read())
+            old = os.environ.get("COMFYUI_PATH")
+            os.environ["COMFYUI_PATH"] = comfy_root
+            try:
+                _, where = J.resolve_workflow(None, J.WORKFLOW_NAME)
+                self.assertTrue(where.startswith(comfy_root), where)
+                _, where = J.resolve_workflow(None, J.WORKFLOW_NAME, prefer_repo=True)
+                self.assertFalse(where.startswith(comfy_root), where)
+            finally:
+                if old is None:
+                    del os.environ["COMFYUI_PATH"]
+                else:
+                    os.environ["COMFYUI_PATH"] = old
 
 
 class RenderCliTest(unittest.TestCase):

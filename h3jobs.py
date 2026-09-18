@@ -148,11 +148,60 @@ def ui_to_api(ui: dict) -> dict:
 def load_graph(path: str) -> dict:
     with open(path, encoding="utf-8") as fh:
         data = json.load(fh)
+    return graph_from(data, path)
+
+
+def graph_from(data: dict, where: str = "workflow") -> dict:
+    """A UI save or an API export, as an API graph."""
     if "nodes" in data and "links" in data:
         return ui_to_api(data)
     if all(isinstance(v, dict) and "class_type" in v for v in data.values()):
         return data
-    raise ValueError(f"{path} is neither a ComfyUI workflow save nor an API export")
+    raise ValueError(f"{where} is neither a ComfyUI workflow save nor an API export")
+
+
+def resolve_workflow(explicit: str | None, name: str = WORKFLOW_NAME,
+                     comfy_url: str | None = None, env: str = "H3_WORKFLOW",
+                     required: bool = True,
+                     prefer_repo: bool = False) -> tuple[dict | None, str]:
+    """(API graph, where it came from) for the workflow called `name`.
+
+    In order: an explicit path; $`env`; the workflow as saved in the RUNNING
+    ComfyUI at `comfy_url` (its user workflows, fetched over the API, so it
+    always matches that ComfyUI's node versions; skipped when comfy_url is
+    None); $COMFYUI_PATH's workflows folder; the copy in this repo (workflows/)
+    or beside it. `prefer_repo` puts the repo copy ahead of $COMFYUI_PATH, for
+    callers whose saved canvas holds experiments that must not leak in (a
+    style LoRA on the reference-image graph). With `required=False`, finding
+    nothing returns (None, "") instead of raising.
+    """
+    if explicit:
+        return load_graph(explicit), explicit
+    envp = os.environ.get(env, "")
+    if envp and os.path.isfile(envp):
+        return load_graph(envp), envp
+    if comfy_url:
+        try:
+            data = Comfy(comfy_url).userdata(f"workflows/{name}")
+        except Exception:
+            data = None
+        if data is not None:
+            where = f"{comfy_url.rstrip('/')} (user workflows/{name})"
+            return graph_from(data, where), where
+    here = os.path.dirname(os.path.abspath(__file__))
+    comfy = os.environ.get("COMFYUI_PATH", "")
+    saved = [os.path.join(comfy, "user", "default", "workflows", name)] if comfy else []
+    repo = [os.path.join(here, "workflows", name), os.path.join(here, name),
+            os.path.join(here, "..", name)]
+    cands = repo + saved if prefer_repo else saved + repo
+    for cand in cands:
+        if os.path.isfile(cand):
+            cand = os.path.normpath(cand)
+            return load_graph(cand), cand
+    if not required:
+        return None, ""
+    raise FileNotFoundError(f"{name} not found in ComfyUI's saved workflows or beside "
+                            f"this script — pass --workflow, or set {env}")
 
 
 def node_of(graph: dict, ctype: str) -> str:
@@ -184,6 +233,16 @@ class Comfy:
 
     def ping(self):
         self._json("/system_stats", timeout=10)
+
+    def userdata(self, path: str) -> dict | None:
+        """A JSON file from ComfyUI's user folder (e.g. workflows/x.json), or None."""
+        from urllib.parse import quote
+        try:
+            return self._json(f"/api/userdata/{quote(path, safe='')}", timeout=10)
+        except RuntimeError as e:
+            if "ComfyUI 404" in str(e):
+                return None
+            raise
 
     def queue(self, graph: dict) -> str:
         r = self._json("/prompt", {"prompt": graph, "client_id": self.client_id})
