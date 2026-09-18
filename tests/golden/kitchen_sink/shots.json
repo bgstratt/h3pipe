@@ -1,0 +1,582 @@
+{
+  "episode": "ks01",
+  "title": "Kitchen Sink",
+  "series": {
+    "fps": 24,
+    "width": 1344,
+    "height": 768
+  },
+  "sequences": [
+    {
+      "id": "sq01",
+      "location": "kitchen",
+      "continuous": false,
+      "overrides": {
+        "model": null,
+        "lora": null,
+        "steps": null
+      },
+      "source": {
+        "line": 6
+      },
+      "shots": [
+        {
+          "id": "sh010",
+          "cast": [
+            "ada"
+          ],
+          "props": [],
+          "plate": "kitchen",
+          "size": "ws",
+          "camera": "pushes in on Ada with small amplitude at slow speed",
+          "action": "Ada slams the walk-in door shut and turns to face the kitchen.",
+          "dialogue": [],
+          "sound": "the compressor hum of the walk-in, a door latch clanking",
+          "music": "a plucky ukulele sting",
+          "extras": null,
+          "text": "OPEN 24 HOURS",
+          "timing": {
+            "seconds": 2.5
+          },
+          "pace": null,
+          "audio": null,
+          "preserve": null,
+          "seed_key": "ks01/sq01/sh010",
+          "overrides": {
+            "model": null,
+            "lora": null,
+            "steps": null
+          },
+          "source": {
+            "line": 10,
+            "end_line": 18
+          }
+        },
+        {
+          "id": "sh020",
+          "cast": [
+            "ada",
+            "bo"
+          ],
+          "props": [
+            "kettle"
+          ],
+          "plate": "kitchen",
+          "size": "ms",
+          "camera": null,
+          "action": "Bo sets the kettle down on the burner and flicks the gas on.",
+          "dialogue": [
+            {
+              "speaker": "ada",
+              "mode": "on",
+              "delivery": "warmly",
+              "line": "You know that one whistles."
+            },
+            {
+              "speaker": "bo",
+              "mode": "on",
+              "delivery": "",
+              "line": "I know."
+            },
+            {
+              "speaker": "bo",
+              "mode": "on",
+              "delivery": "whispering",
+              "line": "That's the point."
+            }
+          ],
+          "sound": null,
+          "music": null,
+          "extras": "two customers at the counter seen through the window, backs to camera",
+          "text": null,
+          "timing": {
+            "auto": true
+          },
+          "pace": null,
+          "audio": null,
+          "preserve": null,
+          "seed_key": "ks01/sq01/sh020",
+          "overrides": {
+            "model": null,
+            "lora": null,
+            "steps": null
+          },
+          "source": {
+            "line": 21,
+            "end_line": 30
+          }
+        },
+        {
+          "id": "sh030",
+          "cast": [
+            "ada"
+          ],
+          "props": [],
+          "plate": "kitchen",
+          "size": "cu",
+          "camera": null,
+          "action": "Ada's eyes narrow at the kettle.",
+          "dialogue": [
+            {
+              "speaker": "ada",
+              "mode": "vo",
+              "delivery": "",
+              "line": "Not today."
+            }
+          ],
+          "sound": null,
+          "music": null,
+          "extras": null,
+          "text": null,
+          "timing": {
+            "seconds": 1.62
+          },
+          "pace": null,
+          "audio": null,
+          "preserve": null,
+          "seed_key": "ks01/sq01/sh030",
+          "overrides": {
+            "model": null,
+            "lora": null,
+            "steps": null
+          },
+          "source": {
+            "line": 33,
+            "end_line": 38
+          }
+        },
+        {
+          "id": "sh040",
+          "cast": [
+            "bo"
+          ],
+          "props": [
+            "van",
+            "kettle"
+          ],
+          "plate": "kitchen",
+          "size": "close",
+          "camera": null,
+          "action": "Bo leans out of the back door as the van reverses toward it, kettle in hand.",
+          "dialogue": [
+            {
+              "speaker": "bo",
+              "mode": "os",
+              "delivery": "",
+              "line": "Left! Left!"
+            },
+            {
+              "speaker": "narrator",
+              "mode": "vo",
+              "delivery": "into phone",
+              "line": "Nobody ever goes left."
+            }
+          ],
+          "sound": null,
+          "music": null,
+          "extras": null,
+          "text": null,
+          "timing": {
+            "seconds": 3.04
+          },
+          "pace": null,
+          "audio": "generate",
+          "preserve": null,
+          "seed_key": "ks01/sq01/sh040",
+          "overrides": {
+            "model": "shot_model.safetensors",
+            "lora": "none",
+            "steps": 10
+          },
+          "source": {
+            "line": 43,
+            "end_line": 54
+          }
+        },
+        {
+          "id": "sh050",
+          "cast": [
+            "cy",
+            "rex"
+          ],
+          "props": [],
+          "plate": "kitchen",
+          "size": "medium",
+          "camera": null,
+          "action": "Cy bursts in from the back with Rex at her heels.",
+          "dialogue": [
+            {
+              "speaker": "cy",
+              "mode": "on",
+              "delivery": "",
+              "line": "Absolutely everybody in this entire neighbourhood is waiting outside for breakfast!"
+            },
+            {
+              "speaker": "rex",
+              "mode": "on",
+              "delivery": "",
+              "line": "Woof."
+            }
+          ],
+          "sound": null,
+          "music": null,
+          "extras": null,
+          "text": null,
+          "timing": {
+            "seconds": 1.62
+          },
+          "pace": "fast",
+          "audio": null,
+          "preserve": null,
+          "seed_key": "ks01/sq01/sh050",
+          "overrides": {
+            "model": null,
+            "lora": null,
+            "steps": null
+          },
+          "source": {
+            "line": 57,
+            "end_line": 63
+          }
+        },
+        {
+          "id": "sh060",
+          "cast": [
+            "bo"
+          ],
+          "props": [],
+          "plate": "kitchen",
+          "size": "medium",
+          "camera": null,
+          "action": "Bo stares at the ticket rail as it fills with orders.",
+          "dialogue": [
+            {
+              "speaker": "bo",
+              "mode": "vo",
+              "delivery": "",
+              "line": "Here we go again, then, everybody."
+            },
+            {
+              "speaker": "cy",
+              "mode": "os",
+              "delivery": "",
+              "line": "Bo!"
+            }
+          ],
+          "sound": null,
+          "music": null,
+          "extras": null,
+          "text": null,
+          "timing": {
+            "seconds": 3.04
+          },
+          "pace": "slow",
+          "audio": null,
+          "preserve": null,
+          "seed_key": "ks01/sq01/sh060",
+          "overrides": {
+            "model": null,
+            "lora": null,
+            "steps": null
+          },
+          "source": {
+            "line": 66,
+            "end_line": 72
+          }
+        }
+      ]
+    },
+    {
+      "id": "sq02",
+      "location": "street",
+      "continuous": true,
+      "overrides": {
+        "model": "seq_model.safetensors",
+        "lora": null,
+        "steps": 12
+      },
+      "source": {
+        "line": 74
+      },
+      "shots": [
+        {
+          "id": "sh110",
+          "cast": [
+            "ada",
+            "bo",
+            "cy"
+          ],
+          "props": [],
+          "plate": "street",
+          "size": "wide",
+          "camera": null,
+          "action": "Ada, Bo and Cy spill out of the diner door into the rain.",
+          "dialogue": [
+            {
+              "speaker": "ada",
+              "mode": "on",
+              "delivery": "",
+              "line": "Van."
+            },
+            {
+              "speaker": "bo",
+              "mode": "on",
+              "delivery": "",
+              "line": "Where?"
+            },
+            {
+              "speaker": "cy",
+              "mode": "on",
+              "delivery": "",
+              "line": "There!"
+            }
+          ],
+          "sound": "traffic hiss on wet asphalt",
+          "music": null,
+          "extras": null,
+          "text": null,
+          "timing": {
+            "audio_in": 1.0,
+            "audio_out": 3.5
+          },
+          "pace": null,
+          "audio": "dub",
+          "preserve": "strict",
+          "seed_key": "ks01/sq02/sh110",
+          "overrides": {
+            "model": null,
+            "lora": null,
+            "steps": null
+          },
+          "source": {
+            "line": 80,
+            "end_line": 90
+          }
+        },
+        {
+          "id": "sh120",
+          "cast": [
+            "ada"
+          ],
+          "props": [],
+          "plate": "street",
+          "size": "medium",
+          "camera": null,
+          "action": "Ada sprints along the kerb after the van.",
+          "dialogue": [
+            {
+              "speaker": "ada",
+              "mode": "on",
+              "delivery": "",
+              "line": "Stop!"
+            }
+          ],
+          "sound": "running footsteps splashing through puddles",
+          "music": null,
+          "extras": null,
+          "text": null,
+          "timing": {
+            "audio_in": 3.5,
+            "audio_out": 5.0
+          },
+          "pace": null,
+          "audio": "dub_keep_foley",
+          "preserve": "strict",
+          "seed_key": "ks01/sq02/sh120",
+          "overrides": {
+            "model": null,
+            "lora": null,
+            "steps": null
+          },
+          "source": {
+            "line": 93,
+            "end_line": 100
+          }
+        },
+        {
+          "id": "sh130",
+          "cast": [
+            "bo"
+          ],
+          "props": [],
+          "plate": "kitchen_window",
+          "size": "medium",
+          "camera": null,
+          "action": "Bo ducks back inside and leans through the pass-through window.",
+          "dialogue": [
+            {
+              "speaker": "bo",
+              "mode": "os",
+              "delivery": "",
+              "line": "She's never catching that."
+            }
+          ],
+          "sound": "rain drumming on the awning",
+          "music": null,
+          "extras": null,
+          "text": null,
+          "timing": {
+            "audio_in": 5.0,
+            "audio_out": 7.2
+          },
+          "pace": null,
+          "audio": "dub_keep_foley",
+          "preserve": null,
+          "seed_key": "ks01/sq02/sh130",
+          "overrides": {
+            "model": null,
+            "lora": null,
+            "steps": null
+          },
+          "source": {
+            "line": 103,
+            "end_line": 110
+          }
+        },
+        {
+          "id": "sh140",
+          "cast": [],
+          "props": [],
+          "plate": "street",
+          "size": "medium",
+          "camera": null,
+          "action": "The street empties; the neon sign flickers once and goes dark.",
+          "dialogue": [
+            {
+              "speaker": "narrator",
+              "mode": "vo",
+              "delivery": "",
+              "line": "And that was the last anyone saw of the kettle."
+            }
+          ],
+          "sound": null,
+          "music": null,
+          "extras": null,
+          "text": null,
+          "timing": {
+            "audio_in": 7.2,
+            "audio_out": 9.0
+          },
+          "pace": null,
+          "audio": "dub",
+          "preserve": "style",
+          "seed_key": "ks01/sq02/sh140",
+          "overrides": {
+            "model": null,
+            "lora": null,
+            "steps": null
+          },
+          "source": {
+            "line": 113,
+            "end_line": 118
+          }
+        },
+        {
+          "id": "sh150",
+          "cast": [
+            "ada"
+          ],
+          "props": [],
+          "plate": "street",
+          "size": "medium",
+          "camera": null,
+          "action": "Ada stops dead in the middle of the road, soaked, and starts to laugh.",
+          "dialogue": [],
+          "sound": null,
+          "music": null,
+          "extras": null,
+          "text": null,
+          "timing": {
+            "seconds": 1.0
+          },
+          "pace": null,
+          "audio": null,
+          "preserve": null,
+          "seed_key": "ks01/sq02/sh150",
+          "overrides": {
+            "model": null,
+            "lora": null,
+            "steps": null
+          },
+          "source": {
+            "line": 121,
+            "end_line": 124
+          }
+        }
+      ]
+    },
+    {
+      "id": "sq03",
+      "location": "kitchen_window",
+      "continuous": false,
+      "overrides": {
+        "model": null,
+        "lora": "seq_lora.safetensors",
+        "steps": null
+      },
+      "source": {
+        "line": 126
+      },
+      "shots": [
+        {
+          "id": "sh210",
+          "cast": [
+            "ada",
+            "bo"
+          ],
+          "props": [],
+          "plate": "kitchen_window",
+          "size": "medium",
+          "camera": null,
+          "action": "Ada and Bo lean on the counter, dripping, as the kettle finally whistles.",
+          "dialogue": [
+            {
+              "speaker": "ada",
+              "mode": "on",
+              "delivery": "",
+              "line": "Well."
+            },
+            {
+              "speaker": "bo",
+              "mode": "on",
+              "delivery": "",
+              "line": "Well what?"
+            },
+            {
+              "speaker": "ada",
+              "mode": "on",
+              "delivery": "",
+              "line": "Put the tea on."
+            },
+            {
+              "speaker": "narrator",
+              "mode": "vo",
+              "delivery": "",
+              "line": "They did."
+            }
+          ],
+          "sound": null,
+          "music": null,
+          "extras": null,
+          "text": null,
+          "timing": {
+            "auto": true
+          },
+          "pace": null,
+          "audio": null,
+          "preserve": null,
+          "seed_key": "ks01/sq03/sh210",
+          "overrides": {
+            "model": null,
+            "lora": null,
+            "steps": null
+          },
+          "source": {
+            "line": 130,
+            "end_line": 137
+          }
+        }
+      ]
+    }
+  ]
+}

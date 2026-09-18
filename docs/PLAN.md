@@ -347,11 +347,14 @@ Use it on a real episode, then decide and write down here:
   re-picking a ref marks dependent video takes `ref`-stale.
 
 **Phase 6 — extract the story IR, no behaviour change**
-- New package (`h3pipe/` or `core/`): `story.py` (parse → IR), `ir.py` (dataclasses +
+- ✅ New package (`h3pipe/` or `core/`): `story.py` (parse → IR), `ir.py` (dataclasses +
   JSON), `bible.py`.
-- `h3build.py` becomes: parse → IR → the current H3 compile code (still in place).
-- Write `shotlist/shots.json` alongside the existing outputs; `shot_hash` becomes the
-  IR hash.
+- ✅ `h3build.py` becomes: parse → IR → the current H3 compile code (still in place).
+- ✅ Write `shotlist/shots.json` alongside the existing outputs; `shot_hash` becomes the
+  IR hash (not yet: that is `h3jobs`, left for after Phases 2/3 land).
+- Done 2026-09-18 as `h3core/` (plus `speech.py` for pacing); compile reads the IR through
+  `h3build.legacy_episode`, and the goldens changed only by gaining `shots.json`. The
+  as-built shape (`h3core/ir.py`'s docstring) differs slightly from the sketch below.
 - Exit: goldens byte-identical; `shots.json` contains no H3 vocabulary.
 
 **Phase 7 — targets, H3 only**

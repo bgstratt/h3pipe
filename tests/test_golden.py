@@ -16,8 +16,8 @@ examples/script_example.md. tests/fixtures/errors/*.md are scripts that must
 fail; each is checked against the kitchen_sink bible and its golden is the
 error message.
 
-What is captured per fixture: both passes' shotlist and refs_todo (.json and
-.md), the stdout of --check for both passes (it carries every warning, which is
+What is captured per fixture: the story IR (shots.json), both passes' shotlist
+and refs_todo (.json and .md), the stdout of --check for both passes (it carries every warning, which is
 H3 logic that moves in later phases), and the stdout of --pace.
 
 Builds run in a fresh temp folder, so refs_todo never sees refs on disk.
@@ -42,7 +42,7 @@ ROOTS = [(os.path.join(HERE, "fixtures"), os.path.join(HERE, "golden")),
 ERRORS = os.path.join(HERE, "fixtures", "errors")
 ERROR_BIBLE = os.path.join(HERE, "fixtures", "kitchen_sink", "series.json")
 
-OUTPUTS = ["shotlist/shotlist.json", "shotlist/shotlist_proxy.json",
+OUTPUTS = ["shotlist/shotlist.json", "shotlist/shotlist_proxy.json", "shotlist/shots.json",
            "refs_todo.json", "refs_todo.md", "refs_todo_proxy.json", "refs_todo_proxy.md"]
 
 
