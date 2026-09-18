@@ -11,7 +11,8 @@ IR + targets). Read it before changing `h3build.py`, `h3render.py`, `kreagen.py`
 ## Layout
 
 - `h3.py` — one CLI for every stage (`build`, `check`, `refs`, `render`, `assemble`, `all`)
-- `h3build.py` — script + bible → `shotlist/*.json`, `refs_todo.*`
+- `h3core/` — model-free core: script parser → story IR (`shotlist/shots.json`), bible loading, speech pacing
+- `h3build.py` — script + bible → story IR → H3 compile → `shotlist/*.json`, `refs_todo.*`
 - `h3render.py` — queues shots on ComfyUI via `workflows/H3_Ref2VA_Shotlist_v1.json`
 - `kreagen.py`, `mksheet.py` — reference images
 - `h3align.py` — times the script against a dialogue recording

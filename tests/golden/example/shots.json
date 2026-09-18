@@ -1,0 +1,379 @@
+{
+  "episode": "ep01",
+  "title": "The Gold Path",
+  "series": {
+    "fps": 24,
+    "width": 1344,
+    "height": 768
+  },
+  "sequences": [
+    {
+      "id": "sq01",
+      "location": "street",
+      "continuous": false,
+      "overrides": {
+        "model": null,
+        "lora": null,
+        "steps": null
+      },
+      "source": {
+        "line": 19
+      },
+      "shots": [
+        {
+          "id": "sh010",
+          "cast": [
+            "huey"
+          ],
+          "props": [],
+          "plate": "street",
+          "size": "wide",
+          "camera": "holds a static wide shot",
+          "action": "Huey stands near the edge of the yard, small in the frame, watching the empty street.",
+          "dialogue": [],
+          "sound": "late-afternoon suburban ambience with distant birds and a faint breeze through the treeline",
+          "music": null,
+          "extras": null,
+          "text": null,
+          "timing": {
+            "audio_in": 0.0,
+            "audio_out": 3.1
+          },
+          "pace": null,
+          "audio": null,
+          "preserve": null,
+          "seed_key": "ep01/sq01/sh010",
+          "overrides": {
+            "model": null,
+            "lora": null,
+            "steps": null
+          },
+          "source": {
+            "line": 21,
+            "end_line": 27
+          }
+        },
+        {
+          "id": "sh020",
+          "cast": [
+            "riley",
+            "huey"
+          ],
+          "props": [],
+          "plate": "street",
+          "size": "medium",
+          "camera": "pushes in with small amplitude at slow speed on the two of them",
+          "action": "Riley runs into frame from the left and stops hard beside Huey, breathing fast. Huey does not turn his head.",
+          "dialogue": [
+            {
+              "speaker": "riley",
+              "mode": "on",
+              "delivery": "breathless and certain",
+              "line": "There's gold at the end of the path."
+            },
+            {
+              "speaker": "huey",
+              "mode": "on",
+              "delivery": "flat",
+              "line": "There is not."
+            }
+          ],
+          "sound": "running footsteps on grass, fabric movement, and continuing suburban ambience",
+          "music": null,
+          "extras": null,
+          "text": null,
+          "timing": {
+            "audio_in": 3.1,
+            "audio_out": 7.4
+          },
+          "pace": null,
+          "audio": null,
+          "preserve": null,
+          "seed_key": "ep01/sq01/sh020",
+          "overrides": {
+            "model": null,
+            "lora": null,
+            "steps": null
+          },
+          "source": {
+            "line": 29,
+            "end_line": 38
+          }
+        },
+        {
+          "id": "sh030",
+          "cast": [
+            "riley"
+          ],
+          "props": [],
+          "plate": "street",
+          "size": "close",
+          "camera": "holds static as he exits frame right",
+          "action": "A closer framing on Riley's face and shoulders, the treeline soft and out of focus behind him. His eyes fix on the woods and he starts to back away toward the house.",
+          "dialogue": [
+            {
+              "speaker": "riley",
+              "mode": "on",
+              "delivery": "already turning",
+              "line": "I've got to pack."
+            }
+          ],
+          "sound": "sneakers scuffing dry grass over steady outdoor ambience",
+          "music": null,
+          "extras": null,
+          "text": null,
+          "timing": {
+            "audio_in": 7.4,
+            "audio_out": 10.0
+          },
+          "pace": null,
+          "audio": null,
+          "preserve": null,
+          "seed_key": "ep01/sq01/sh030",
+          "overrides": {
+            "model": null,
+            "lora": null,
+            "steps": null
+          },
+          "source": {
+            "line": 40,
+            "end_line": 48
+          }
+        }
+      ]
+    },
+    {
+      "id": "sq02",
+      "location": "bedroom",
+      "continuous": false,
+      "overrides": {
+        "model": null,
+        "lora": null,
+        "steps": null
+      },
+      "source": {
+        "line": 51
+      },
+      "shots": [
+        {
+          "id": "sh040",
+          "cast": [
+            "riley"
+          ],
+          "props": [
+            "backpack"
+          ],
+          "plate": "bedroom",
+          "size": "medium",
+          "camera": "holds static",
+          "action": "Riley drags the backpack off the bunk and starts stuffing it with everything within reach.",
+          "dialogue": [],
+          "sound": "zippers, fabric, objects hitting the bottom of a bag",
+          "music": null,
+          "extras": null,
+          "text": null,
+          "timing": {
+            "seconds": 3.04
+          },
+          "pace": null,
+          "audio": null,
+          "preserve": null,
+          "seed_key": "ep01/sq02/sh040",
+          "overrides": {
+            "model": null,
+            "lora": null,
+            "steps": null
+          },
+          "source": {
+            "line": 53,
+            "end_line": 60
+          }
+        },
+        {
+          "id": "sh050",
+          "cast": [
+            "huey",
+            "riley"
+          ],
+          "props": [],
+          "plate": "bedroom",
+          "size": "wide",
+          "camera": "holds a static wide shot from the hallway",
+          "action": "Huey appears in the doorway and watches Riley pack without moving to help.",
+          "dialogue": [
+            {
+              "speaker": "huey",
+              "mode": "on",
+              "delivery": "unimpressed",
+              "line": "You don't even know where it is."
+            },
+            {
+              "speaker": "riley",
+              "mode": "on",
+              "delivery": "",
+              "line": "I'll know when I see it."
+            }
+          ],
+          "sound": "continuing packing sounds, a floorboard creak from the doorway",
+          "music": null,
+          "extras": null,
+          "text": null,
+          "timing": {
+            "audio_in": 12.2,
+            "audio_out": 16.5
+          },
+          "pace": null,
+          "audio": null,
+          "preserve": null,
+          "seed_key": "ep01/sq02/sh050",
+          "overrides": {
+            "model": null,
+            "lora": null,
+            "steps": null
+          },
+          "source": {
+            "line": 62,
+            "end_line": 70
+          }
+        },
+        {
+          "id": "sh055",
+          "cast": [
+            "riley"
+          ],
+          "props": [],
+          "plate": "bedroom",
+          "size": "medium",
+          "camera": "holds static",
+          "action": "Riley freezes with a fistful of socks halfway to the bag.",
+          "dialogue": [
+            {
+              "speaker": "mom",
+              "mode": "vo",
+              "delivery": "from downstairs",
+              "line": "Riley! Shoes off in the house!"
+            },
+            {
+              "speaker": "riley",
+              "mode": "on",
+              "delivery": "caught",
+              "line": "I'm not even outside!"
+            }
+          ],
+          "sound": "muffled television from another room",
+          "music": null,
+          "extras": null,
+          "text": null,
+          "timing": {
+            "audio_in": 16.5,
+            "audio_out": 20.6
+          },
+          "pace": null,
+          "audio": null,
+          "preserve": null,
+          "seed_key": "ep01/sq02/sh055",
+          "overrides": {
+            "model": null,
+            "lora": null,
+            "steps": null
+          },
+          "source": {
+            "line": 76,
+            "end_line": 84
+          }
+        }
+      ]
+    },
+    {
+      "id": "sq03",
+      "location": "path",
+      "continuous": true,
+      "overrides": {
+        "model": null,
+        "lora": null,
+        "steps": null
+      },
+      "source": {
+        "line": 87
+      },
+      "shots": [
+        {
+          "id": "sh060",
+          "cast": [
+            "huey",
+            "riley"
+          ],
+          "props": [
+            "backpack"
+          ],
+          "plate": "path",
+          "size": "medium",
+          "camera": "tracks backward ahead of them at their pace, holding both in frame",
+          "action": "Riley leads down the dirt path at a fast walk with the backpack half-zipped. Huey trails two steps behind with his hands in his pockets. Branches slide past in the foreground.",
+          "dialogue": [],
+          "sound": "footsteps on packed dirt, backpack buckles ticking, dense woodland ambience with layered insects",
+          "music": null,
+          "extras": null,
+          "text": null,
+          "timing": {
+            "seconds": 12.0
+          },
+          "pace": null,
+          "audio": null,
+          "preserve": null,
+          "seed_key": "ep01/sq03/sh060",
+          "overrides": {
+            "model": null,
+            "lora": null,
+            "steps": null
+          },
+          "source": {
+            "line": 94,
+            "end_line": 101
+          }
+        },
+        {
+          "id": "sh070",
+          "cast": [
+            "huey",
+            "riley"
+          ],
+          "props": [],
+          "plate": "path",
+          "size": "medium",
+          "camera": "continues its backward track and arcs slightly to the right without breaking",
+          "action": "The path narrows and the canopy thickens overhead, dropping the light. Riley slows without stopping and glances back over his shoulder. Huey closes the gap.",
+          "dialogue": [
+            {
+              "speaker": "riley",
+              "mode": "on",
+              "delivery": "quieter now",
+              "line": "It's further than I thought."
+            }
+          ],
+          "sound": "continuing footsteps on dirt and thickening woodland ambience with fewer birds",
+          "music": null,
+          "extras": null,
+          "text": null,
+          "timing": {
+            "audio_in": 20.6,
+            "audio_out": 32.6
+          },
+          "pace": null,
+          "audio": null,
+          "preserve": null,
+          "seed_key": "ep01/sq03/sh070",
+          "overrides": {
+            "model": null,
+            "lora": null,
+            "steps": null
+          },
+          "source": {
+            "line": 103,
+            "end_line": 110
+          }
+        }
+      ]
+    }
+  ]
+}

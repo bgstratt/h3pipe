@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-h3build.py — script.md + series.json  ->  shotlist.json
+h3build.py — script.md + series.json  ->  shots.json (story IR) + shotlist.json
 
 One command. You write a screenplay-flavoured script and a series bible;
 this produces the shotlist the ComfyUI loader reads, a list of any reference
@@ -10,25 +10,35 @@ assets you still need to make, and a timing report.
     python3 h3build.py series.json script.md -o <project_root> --proxy
     python3 h3build.py series.json script.md --check
 
-Everything H3-specific is handled here: the 17k+5 frame grid, the Ref2VA
-six-section prompt format, reference slot allocation, per-shot audio policy,
-and deterministic seeds.
+It runs in three steps: parse the script into the model-free story IR
+(h3core.story, written to shotlist/shots.json), then compile that IR for H3.
+Everything H3-specific is the compile step, here: the 17k+5 frame grid, the
+Ref2VA six-section prompt format, reference slot allocation, per-shot audio
+policy and retention, and deterministic seeds.
 """
 
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import math
 import os
 import re
 import sys
 
+from h3core import ir
+from h3core.bible import character_ids, load_bible, series_info, subject_ids
+# Model-neutral pieces, re-exported under their old names: h3align and others
+# import them from here.
+from h3core.ir import stable_seed  # noqa: F401
+from h3core.speech import (GAP_SAME, GAP_SPEAKER, HEAD_AIR, RATE_CEILING,  # noqa: F401
+                           SPEECH_RATE, TAIL_AIR, forced_rate, pacing,
+                           speech_seconds, syllables)
+from h3core.story import (META_KEYS, OS_TOKENS, SIZES, VO_TOKENS,  # noqa: F401
+                          ScriptError, parse_script, parse_story,
+                          split_parenthetical)
+
 GRID_STEP, GRID_BASE, GRID_MAX = 17, 5, 3592
-META_KEYS = {"who", "cast", "with", "props", "size", "audio", "dur", "duration",
-             "camera", "sound", "music", "policy", "continuous", "text",
-             "pace", "plate", "retention", "model", "lora", "steps", "extras"}
 
 # How a recorded-dialogue (dub) shot treats its audio slice. H3's retention
 # markers: fully_copy makes the slice the shot's ENTIRE audio track (lips follow
@@ -38,39 +48,8 @@ META_KEYS = {"who", "cast", "with", "props", "size", "audio", "dur", "duration",
 # shots have no recording to copy, so they are always `reference` / none.
 RETENTIONS = ("fully_copy", "partially_copy", "reference")
 RETENTION_DEFAULT = {"dub": "fully_copy", "dub_keep_foley": "partially_copy"}
-SIZES = {"close", "cu", "medium", "ms", "wide", "ws"}
-
-# Voice-only delivery markers. A speaker tagged with one of these is NOT added
-# to the visible cast: they cost no reference slot and are never drawn. Without
-# this, a phone voice from another house burns a slot and gets rendered into
-# frame as a full character.
-VO_TOKENS = {"vo", "voiceover", "voover"}
-OS_TOKENS = {"os", "offscreen"}
-
-
-def _norm_token(tok: str) -> str:
-    return re.sub(r"[^a-z]", "", tok.lower())
-
-
-def split_parenthetical(text: str) -> tuple[str, str]:
-    """Return (mode, delivery) from a dialogue parenthetical.
-
-    mode is "vo", "os" or "" (on screen). Everything that is not a voice
-    marker stays as the delivery direction, so `(V.O., into phone)` yields
-    ("vo", "into phone").
-    """
-    mode, keep = "", []
-    for part in (p.strip() for p in (text or "").split(",")):
-        if not part:
-            continue
-        t = _norm_token(part)
-        if t in VO_TOKENS:
-            mode = "vo"
-        elif t in OS_TOKENS:
-            mode = mode or "os"
-        else:
-            keep.append(part)
-    return mode, ", ".join(keep)
+# The IR's neutral `preserve` -> H3's retention marker.
+RETENTION_OF = {"strict": "fully_copy", "loose": "partially_copy", "style": "reference"}
 
 
 # ---------------------------------------------------------------------------
@@ -87,256 +66,57 @@ def snap_up(frames: int) -> int:
 
 
 # ---------------------------------------------------------------------------
-# Speech pacing
+# Story IR -> the episode dict the H3 compile code reads
 #
-# A shot's length has to hold its dialogue at a rate a person can follow.
-# H3 will happily fit any line into any window by speeding the delivery up,
-# which is exactly the failure this catches: the words are all there and the
-# performance is gone.
-#
-# Rates are syllables per second of actual speech. Conversational English runs
-# ~4.0; brisk cartoon delivery ~4.4; deliberate patter ~5.4. Past ~5.8 it stops
-# reading as a person talking fast and starts reading as a sped-up recording.
+# This is the parser's original dict shape (h3core.story.parse_script), rebuilt
+# from the IR so that compile only ever sees what the IR carries. Values the
+# parser could not interpret (`unparsed`) go back in verbatim, so compile
+# rejects them with the same message it always has.
 # ---------------------------------------------------------------------------
 
-SPEECH_RATE = {"slow": 3.6, "normal": 4.4, "fast": 5.4}
-RATE_CEILING = 5.8
-GAP_SPEAKER = 0.30      # beat at each change of speaker
-GAP_SAME = 0.15         # beat between two lines from the same mouth
-HEAD_AIR = 0.35         # air before the first word, so the shot doesn't open mid-syllable
-TAIL_AIR = 0.30         # air after the last, so the cut doesn't clip the tail
-
-_VOWELS = "aeiouy"
-
-
-def syllables(text: str) -> int:
-    """Vowel-group count. Crude, but stable and within ~10% on dialogue."""
-    total = 0
-    for word in text.split():
-        w = re.sub(r"[^a-z]", "", word.lower())
-        if not w:
-            continue
-        n, prev_v = 0, False
-        for ch in w:
-            v = ch in _VOWELS
-            if v and not prev_v:
-                n += 1
-            prev_v = v
-        if w.endswith("e") and n > 1 and not w.endswith(("le", "ee", "ye")):
-            n -= 1
-        total += max(1, n)
-    return total
+def _put_overrides(d: dict, o: dict, unparsed: dict) -> None:
+    for k in ("model", "lora"):
+        if o.get(k):
+            d[k] = o[k]
+    if o.get("steps") is not None:
+        d["steps"] = o["steps"]
+    elif "steps" in unparsed:
+        d["steps"] = unparsed["steps"]
 
 
-def pacing(dialogue: list[dict]) -> tuple[int, float]:
-    """(syllable load, seconds of non-speech the shot owes) for a shot."""
-    if not dialogue:
-        return 0, 0.0
-    syl = sum(syllables(d["line"]) for d in dialogue)
-    pauses = HEAD_AIR + TAIL_AIR
-    for a, b in zip(dialogue, dialogue[1:]):
-        pauses += GAP_SPEAKER if a["who"] != b["who"] else GAP_SAME
-    return syl, pauses
-
-
-def speech_seconds(dialogue: list[dict], pace: str = "normal") -> float:
-    """How long this dialogue needs to land at the given pace."""
-    syl, pauses = pacing(dialogue)
-    if not syl:
-        return 0.0
-    return syl / SPEECH_RATE[pace] + pauses
-
-
-def forced_rate(dialogue: list[dict], seconds: float) -> float:
-    """The syllable rate H3 is being asked to hit to fit this window."""
-    syl, pauses = pacing(dialogue)
-    if not syl:
-        return 0.0
-    return syl / max(0.10, seconds - pauses)
-
-
-def stable_seed(*parts: str) -> int:
-    h = hashlib.sha256("::".join(parts).encode("utf-8")).digest()
-    return int.from_bytes(h[:8], "big") & 0x7FFF_FFFF_FFFF_FFFF
-
-
-class ScriptError(Exception):
-    def __init__(self, line_no: int, line: str, msg: str):
-        super().__init__(f"line {line_no}: {msg}\n    | {line.strip()}")
-
-
-# ---------------------------------------------------------------------------
-# Script parser
-# ---------------------------------------------------------------------------
-
-def parse_script(text: str, subject_ids: set[str], character_ids: set[str]) -> dict:
-    """Parse the screenplay-flavoured script into an episode structure."""
-    ep = {"id": None, "title": "", "sequences": []}
-    seq = None
-    shot = None
-    upper = {c.upper(): c for c in character_ids}
-    first_line: dict[str, int] = {}     # shot id -> line it was first used on
-
-    def close_shot():
-        nonlocal shot
-        if shot is not None:
-            shot["action"] = " ".join(shot["_action"]).strip()
-            del shot["_action"]
-            if not shot["action"] and not shot["dialogue"]:
-                raise ScriptError(shot["_line"], f"## {shot['id']}",
-                                  f"shot '{shot['id']}' has no action and no dialogue")
-            del shot["_line"]
-            seq["shots"].append(shot)
-            shot = None
-
-    for n, raw in enumerate(text.splitlines(), start=1):
-        line = raw.rstrip()
-        if not line.strip() or line.strip().startswith("//"):
-            continue
-
-        # ---- episode header ---------------------------------------------
-        if line.startswith("= "):
-            parts = line[2:].split(None, 1)
-            ep["id"] = parts[0]
-            ep["title"] = parts[1].strip() if len(parts) > 1 else ""
-            continue
-
-        # ---- sequence ----------------------------------------------------
-        if line.startswith("# ") and not line.startswith("## "):
-            close_shot()
-            parts = line[2:].split()
-            if len(parts) < 2:
-                raise ScriptError(n, line, "sequence needs an id and a location: `# sq01 street`")
-            seq = {"id": parts[0], "location_key": parts[1],
-                   "continuous": False, "shots": []}
-            ep["sequences"].append(seq)
-            continue
-
-        # ---- shot --------------------------------------------------------
-        if line.startswith("## "):
-            if seq is None:
-                raise ScriptError(n, line, "shot appears before any `# sequence`")
-            close_shot()
-            sid = line[3:].strip().split()[0]
-            # Renders, takes, overrides and the cut are all keyed by shot id,
-            # so a repeat (even in another sequence) would share one render
-            # folder.
-            if sid in first_line:
-                raise ScriptError(n, line, f"shot id '{sid}' is already used on line "
-                                           f"{first_line[sid]}; shot ids must be unique "
-                                           f"in an episode")
-            first_line[sid] = n
-            shot = {"id": sid, "cast": [], "props": [], "size": "medium",
-                    "dialogue": [], "_action": [], "_line": n}
-            continue
-
-        if seq is None:
-            raise ScriptError(n, line, "content before the first `# sequence`")
-
-        # ---- dialogue: NAME: line   /   NAME (delivery): line -------------
-        m = re.match(r"^([A-Z][A-Z0-9_ '\-]*?)\s*(?:\(([^)]*)\))?\s*:\s*(.+)$", line)
-        if m:
-            name = m.group(1).strip()
-            if name.upper() not in upper:
-                # An ALL-CAPS "NAME:" line is unambiguously an attempt at
-                # dialogue. Falling through would silently fold it into the
-                # action prose, so a typo'd or non-speaking name must be caught
-                # here rather than shipped into a prompt as narration.
-                lower = name.lower()
-                if lower in subject_ids:
-                    raise ScriptError(
-                        n, line,
-                        f"'{lower}' is a {'prop' if lower not in upper.values() else 'subject'} "
-                        f"in the bible, not a character — only characters can speak. "
-                        f"Change its kind to 'character', or write this as action.")
-                raise ScriptError(
-                    n, line,
-                    f"'{name}' is not a character in the bible "
-                    f"({', '.join(sorted(upper.values()))}). Typo, or write it as action.")
-        if m and m.group(1).strip().upper() in upper:
-            if shot is None:
-                raise ScriptError(n, line, "dialogue outside a `## shot`")
-            who = upper[m.group(1).strip().upper()]
-            mode, delivery = split_parenthetical(m.group(2))
-            shot["dialogue"].append({
-                "who": who, "mode": mode,
-                "delivery": delivery,
-                "line": m.group(3).strip(),
-            })
-            # Only an on-screen speaker joins the visible cast.
-            if not mode and who not in shot["cast"]:
-                shot["cast"].append(who)
-            continue
-
-        # ---- key: value --------------------------------------------------
-        m = re.match(r"^([a-z_]+)\s*:\s*(.*)$", line)
-        if m and m.group(1) in META_KEYS:
-            key, val = m.group(1), m.group(2).strip()
-            target = shot if shot is not None else seq
-
-            if key == "continuous":
-                if shot is not None:
-                    raise ScriptError(n, line, "`continuous:` belongs under `# sequence`, not a shot")
-                seq["continuous"] = val.lower() in ("yes", "true", "1", "on")
-            elif key in ("who", "cast", "with", "props"):
-                if shot is None:
-                    raise ScriptError(n, line, f"`{key}:` outside a `## shot`")
-                names = [c.strip() for c in val.split(",") if c.strip()]
-                for c in names:
-                    if c not in subject_ids:
-                        raise ScriptError(n, line,
-                                          f"'{c}' is not in the bible's subjects "
-                                          f"({', '.join(sorted(subject_ids))})")
-                bucket = "cast" if key in ("who", "cast") else "props"
-                merged: list[str] = []
-                for c in names + shot[bucket]:
-                    if c not in merged:
-                        merged.append(c)
-                shot[bucket] = merged
-            elif key == "size":
-                if val.lower() not in SIZES:
-                    raise ScriptError(n, line, f"size '{val}' must be one of {sorted(SIZES)}")
-                shot["size"] = val.lower()
-            elif key == "audio":
-                m2 = re.match(r"^([\d.]+)\s*-\s*([\d.]+)$", val)
-                if not m2:
-                    raise ScriptError(n, line, "audio window must look like `3.10-7.40`")
-                a, b = float(m2.group(1)), float(m2.group(2))
-                if b <= a:
-                    raise ScriptError(n, line, f"audio window ends ({b}) before it starts ({a})")
-                shot["audio_in"], shot["audio_out"] = a, b
-            elif key in ("dur", "duration"):
-                if val.strip().lower() == "auto":
-                    shot["duration_auto"] = True
-                else:
-                    try:
-                        shot["duration"] = float(val)
-                    except ValueError:
-                        raise ScriptError(
-                            n, line,
-                            f"duration '{val}' is not a number or `auto`")
-            elif key == "pace":
-                if val.strip().lower() not in SPEECH_RATE:
-                    raise ScriptError(n, line,
-                                      f"pace '{val}' must be one of "
-                                      f"{sorted(SPEECH_RATE)}")
-                shot["pace"] = val.strip().lower()
-            else:
-                target[key] = val
-            continue
-
-        # ---- action prose -------------------------------------------------
-        if shot is None:
-            if seq is not None and not seq["shots"]:
-                continue          # scene-setting prose under a sequence header
-            raise ScriptError(n, line, "action text outside a `## shot`")
-        shot["_action"].append(line.strip())
-
-    close_shot()
-    if not ep["id"]:
-        raise ScriptError(1, "", "script needs an episode header: `= ep01  Title`")
-    if not ep["sequences"]:
-        raise ScriptError(1, "", "script has no sequences")
+def legacy_episode(story: ir.Episode) -> dict:
+    ep = {"id": story.id, "title": story.title, "sequences": []}
+    for sq in story.sequences:
+        seq = {"id": sq.id, "location_key": sq.location, "continuous": sq.continuous,
+               "shots": []}
+        _put_overrides(seq, sq.overrides, sq.unparsed)
+        for s in sq.shots:
+            sh = {"id": s.id, "cast": list(s.cast), "props": list(s.props), "size": s.size,
+                  "dialogue": [{"who": d.speaker, "mode": "" if d.mode == "on" else d.mode,
+                                "delivery": d.delivery, "line": d.line}
+                               for d in s.dialogue],
+                  "action": s.action, "plate": s.plate}
+            t = s.timing or {}
+            if "audio_in" in t:
+                sh["audio_in"], sh["audio_out"] = t["audio_in"], t["audio_out"]
+            elif t.get("auto"):
+                sh["duration_auto"] = True
+            elif "seconds" in t:
+                sh["duration"] = t["seconds"]
+            if s.pace:
+                sh["pace"] = s.pace
+            for k in ("camera", "sound", "music", "extras", "text"):
+                if getattr(s, k):
+                    sh[k] = getattr(s, k)
+            if s.audio:
+                sh["policy"] = s.audio
+            if s.preserve:
+                sh["retention"] = RETENTION_OF[s.preserve]
+            elif "preserve" in s.unparsed:
+                sh["retention"] = s.unparsed["preserve"]
+            _put_overrides(sh, s.overrides, s.unparsed)
+            seq["shots"].append(sh)
+        ep["sequences"].append(seq)
     return ep
 
 
@@ -1077,18 +857,12 @@ def main() -> int:
     args = ap.parse_args()
 
     try:
-        with open(args.series, encoding="utf-8") as fh:
-            bible = json.load(fh)
-        bible["subjects"] = {k: v for k, v in bible.get("subjects", {}).items()
-                             if not k.startswith("_") and isinstance(v, dict)}
-        bible["locations"] = {k: v for k, v in bible.get("locations", {}).items()
-                              if not k.startswith("_") and isinstance(v, dict)}
-        if not bible["subjects"]:
-            raise ValueError("the bible has no `subjects` block")
-        chars = {k for k, v in bible["subjects"].items()
-                 if v.get("kind", "character") == "character"}
+        bible = load_bible(args.series)
         with open(args.script, encoding="utf-8") as fh:
-            ep = parse_script(fh.read(), set(bible["subjects"]), chars)
+            # parse -> story IR -> the dict the H3 compile code reads
+            story = parse_story(fh.read(), subject_ids(bible), character_ids(bible),
+                                series_info(bible))
+        ep = legacy_episode(story)
         if args.pace:
             return print_pacing(ep, bible)
         doc, report = compile_episode(ep, bible, args.proxy)
@@ -1109,6 +883,10 @@ def main() -> int:
     sl = os.path.join(args.out, "shotlist", name)
     with open(sl, "w", encoding="utf-8") as fh:
         json.dump(doc, fh, ensure_ascii=False, indent=2)
+    # The story IR: model-free and pass-free, so both passes write the same file.
+    ir_path = os.path.join(args.out, "shotlist", "shots.json")
+    with open(ir_path, "w", encoding="utf-8") as fh:
+        json.dump(story.to_json(), fh, ensure_ascii=False, indent=2)
     # Suffix the proxy's work order the way the shotlist is suffixed. A proxy
     # pass can legitimately need fewer assets (generated voices need no
     # samples), and letting it overwrite the canonical list would quietly drop
@@ -1130,6 +908,7 @@ def main() -> int:
         ], fh, ensure_ascii=False, indent=2)
 
     print(f"  -> {sl}")
+    print(f"  -> {ir_path}")
     print(f"  -> {todo}")
     print(f"  -> {todo_json}\n")
     return 0
