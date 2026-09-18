@@ -1,0 +1,153 @@
+#!/usr/bin/env python3
+"""
+h3.py — one front door for the H3 pipeline. Run it from the folder that holds
+your projects, with the pipeline scripts beside it (see the README).
+
+    python h3.py align    Shows\\ep05 audio\\ep05_dialogue.wav   # h3align: time the script to a recording
+    python h3.py build    Shows\\ep05            # h3build: shotlist + refs_todo (final AND proxy)
+    python h3.py check    Shows\\ep05            # h3build --check and --pace, writes nothing
+    python h3.py refs     Shows\\ep05 --list     # kreagen: generate missing reference images
+    python h3.py render   Shows\\ep05 --proxy    # h3render: queue shots on ComfyUI
+    python h3.py assemble Shows\\ep05 --proxy    # h3assemble: join renders into one mp4
+    python h3.py all      Shows\\ep05 --proxy    # build -> refs -> render -> assemble
+    python h3.py all      Shows\\ep05 --proxy --skip-build
+                                                    # refs -> render -> assemble, using the
+                                                    # shotlists already on disk (keeps hand edits)
+
+The episode can be a folder (any name) holding series.json and one script .md,
+or several folders at once, or a parent with --each:
+
+    python h3.py build Shows --each              # every ep* folder under Shows
+
+Anything after the episode is passed straight through to the underlying
+script, so every flag those scripts take still works here. `--proxy` is also
+understood by assemble (it picks the proxy shotlist and renders_proxy/).
+"""
+from __future__ import annotations
+
+import glob
+import os
+import subprocess
+import sys
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+STAGES = ("align", "build", "check", "refs", "render", "assemble", "all")
+
+
+def script(name: str) -> str:
+    p = os.path.join(HERE, name)
+    if not os.path.isfile(p):
+        sys.exit(f"  !! {name} not found beside h3.py ({HERE})")
+    return p
+
+
+def episode_files(ep: str) -> tuple[str, str]:
+    bible = os.path.join(ep, "series.json")
+    if not os.path.isfile(bible):
+        sys.exit(f"  !! {bible} not found")
+    base = os.path.basename(os.path.normpath(ep))
+    md = os.path.join(ep, f"{base}.md")
+    if not os.path.isfile(md):
+        cands = [p for p in glob.glob(os.path.join(ep, "*.md"))
+                 if not os.path.basename(p).lower().startswith(("refs_todo", "readme", "notes"))]
+        if len(cands) != 1:
+            sys.exit(f"  !! can't tell which script to use in {ep}: "
+                     f"{[os.path.basename(c) for c in cands] or 'no .md found'}")
+        md = cands[0]
+    return bible, md
+
+
+def run(cmd: list[str]) -> int:
+    print("  $ " + " ".join(f'"{c}"' if " " in c else c for c in cmd), flush=True)
+    return subprocess.call(cmd)
+
+
+def stage(name: str, ep: str, extra: list[str], skip_build: bool = False) -> int:
+    py = sys.executable
+    proxy = "--proxy" in extra
+    if name in ("build", "check"):
+        bible, md = episode_files(ep)
+        base = [py, script("h3build.py"), bible, md]
+        if name == "check":
+            return run(base + ["--check"]) or run(base + ["--pace"])
+        rest = [a for a in extra if a != "--proxy"]
+        return run(base + ["-o", ep] + rest) or run(base + ["-o", ep, "--proxy"] + rest)
+    if name == "align":
+        return run([py, script("h3align.py"), ep] + extra)
+    if name == "refs":
+        return run([py, script("kreagen.py"), "--project-root", ep] + extra)
+    if name == "render":
+        return run([py, script("h3render.py"), ep] + extra)
+    if name == "assemble":
+        rest = [a for a in extra if a != "--proxy"]
+        if proxy:
+            rest = ["--shotlist", "shotlist/shotlist_proxy.json",
+                    "--subfolder", "renders_proxy"] + rest
+        return run([py, script("h3assemble.py"), "-o", ep] + rest)
+    if name == "all":
+        # refs and build take no render flags; keep only --proxy for them
+        steps = [("build", []), ("refs", []), ("build", []),
+                 ("render", extra), ("assemble", ["--proxy"] if proxy else [])]
+        if skip_build:
+            # use the shotlists already on disk so hand edits (steps, sizes...) survive
+            need = ["shotlist/shotlist.json", "refs_todo.json"]
+            if proxy:
+                need.append("shotlist/shotlist_proxy.json")
+            missing = [n for n in need if not os.path.isfile(os.path.join(ep, n))]
+            if missing:
+                print(f"  !! --skip-build but {ep} has no {', '.join(missing)}; "
+                      f"run `python h3.py build {ep}` once first")
+                return 1
+            print("  -- skipping build; using existing shotlists")
+            steps = [st for st in steps if st[0] != "build"]
+        for s, args in steps:
+            rc = stage(s, ep, args)
+            if rc:
+                print(f"  !! {s} failed for {ep} (exit {rc}); stopping this episode")
+                return rc
+        return 0
+    sys.exit(f"  !! unknown stage {name}")
+
+
+def main() -> int:
+    argv = sys.argv[1:]
+    if not argv or argv[0] in ("-h", "--help") or argv[0] not in STAGES:
+        print(__doc__)
+        return 0 if argv[:1] in (["-h"], ["--help"], []) else 2
+    name, rest = argv[0], argv[1:]
+    each = "--each" in rest
+    skip_build = any(a in ("--skip-build", "--no-build") for a in rest)
+    rest = [a for a in rest if a not in ("--each", "--skip-build", "--no-build")]
+    if skip_build and name != "all":
+        sys.exit("  !! --skip-build only applies to `all` (the other stages never build)")
+
+    eps, extra = [], []
+    if name == "align":
+        # one episode, then the recording path and flags go straight to h3align
+        if not rest or rest[0].startswith("-"):
+            sys.exit("  !! usage: python h3.py align <episode> [recording.wav] [flags]")
+        return 1 if stage(name, rest[0], rest[1:]) else 0
+    for i, a in enumerate(rest):
+        if a.startswith("-"):
+            extra = rest[i:]
+            break
+        eps.append(a)
+    if not eps:
+        sys.exit("  !! give an episode folder, e.g. Shows\\ep05")
+    if each:
+        eps = sorted(p for parent in eps for p in glob.glob(os.path.join(parent, "ep*"))
+                     if os.path.isfile(os.path.join(p, "series.json")))
+
+    failed = []
+    for ep in eps:
+        print(f"\n=== {name}: {ep}")
+        if stage(name, ep, extra, skip_build):
+            failed.append(ep)
+    if len(eps) > 1:
+        print(f"\n  {len(eps) - len(failed)}/{len(eps)} ok"
+              + (f"; failed: {', '.join(failed)}" if failed else ""))
+    return 1 if failed else 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

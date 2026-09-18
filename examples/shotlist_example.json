@@ -1,0 +1,119 @@
+{
+  "_comment": "shotlist.json — what the H3 Shot List Loader reads. One entry per shot. Emitted by h3plan.py, or hand-authored. Paths are relative to project_root.",
+
+  "prompt_prefix": "The target video is a 2D hand-drawn cartoon animation with flat 2D illustration, clean black line art, flat solid colors, and cel-shaded artwork. <Picture 4> defines the series art style: line weight, color palette, and shading treatment.",
+
+  "style_plate": "refs/_style/style_plate.png",
+
+  "defaults": {
+    "width": 1344,
+    "height": 768,
+    "duration": 3.04,
+    "sheet_panels": 4,
+    "audio_policy": "generate",
+    "master_track": "audio/master_dialogue.wav"
+  },
+
+  "cast": {
+    "_comment": "sheet = horizontal 4-panel strip: 3/4 body, side, back, face close-up. Authored at 4096x1024 or larger so `max` mode keeps each panel sharp.",
+    "huey": {
+      "sheet": "refs/huey/huey_sheet_4panel.png",
+      "voice_sample": "audio/voices/huey_sample.wav"
+    },
+    "riley": {
+      "sheet": "refs/riley/riley_sheet_4panel.png",
+      "voice_sample": "audio/voices/riley_sample.wav"
+    }
+  },
+
+  "shots": [
+    {
+      "_comment": "Establishing shot, nobody speaks. H3 generates the whole soundscape and it goes straight into the mp4.",
+      "id": "ep01_sq01_sh010",
+      "cast": ["huey"],
+      "size": "wide",
+      "duration": 3.04,
+      "seed": 1743920155,
+      "audio_policy": "generate",
+      "prompt": [
+        "subject_definitions:",
+        "<Subject 1> is Huey, defined by <Picture 1> — a character model sheet showing the SAME single character in four views (three-quarter body, side, back, and facial close-up). It is one character, not four.",
+        "",
+        "summary:",
+        "[reference generation] <Subject 1> stands at the edge of a yard watching an empty suburban street in late afternoon light.",
+        "",
+        "retention_analysis:",
+        "<Subject 1> (appears in [Shot 1]): fully_preserved - facial identity, hairstyle, proportions, wardrobe and colors are retained from <Picture 1>.",
+        "",
+        "detailed_description:",
+        "[Shot 1] A late-afternoon suburban street edge with a dense treeline beyond, warm low sun and long shadows. <Subject 1> stands small in frame near the edge of the yard, watching the empty street. The camera holds a static wide shot.",
+        "",
+        "overall_soundscape: Late-afternoon suburban ambience with distant birdsong, a faint breeze moving through the treeline, and occasional distant traffic.",
+        "",
+        "non_diegetic_music: N/A"
+      ]
+    },
+    {
+      "_comment": "Two-hander with dialogue. audio_in/out slice the master track — that slice drives lip-sync, and the mp4 is written mute so the clean vocal goes in at conform.",
+      "id": "ep01_sq01_sh020",
+      "cast": ["riley", "huey"],
+      "size": "medium",
+      "audio_in": 3.10,
+      "audio_out": 7.40,
+      "seed": 884201773,
+      "audio_policy": "dub_keep_foley",
+      "prompt": [
+        "subject_definitions:",
+        "<Subject 1> is Riley, defined by <Picture 1> — a model sheet of ONE character shown in a three-quarter body view and a facial close-up.",
+        "<Subject 2> is Huey, defined by <Picture 2> — a model sheet of ONE character shown in a three-quarter body view and a facial close-up.",
+        "<Audio 1> is the voice and timing reference for the spoken lines below.",
+        "",
+        "summary:",
+        "[reference generation + audio reference] <Subject 1> runs in with news and <Subject 2> flatly refuses to believe him.",
+        "",
+        "retention_analysis:",
+        "<Subject 1> (appears in [Shot 1]): fully_preserved - identity, braids, hoodie and proportions retained from <Picture 1>.",
+        "<Subject 2> (appears in [Shot 1]): fully_preserved - identity, afro, red shirt and proportions retained from <Picture 2>.",
+        "<Audio 1>: reference - its vocal delivery and phrasing guide the performance and mouth timing without copying the signal.",
+        "",
+        "detailed_description:",
+        "[Shot 1] A late-afternoon suburban street edge with a dense treeline beyond. <Subject 1> runs into frame from the left and stops hard beside <Subject 2>, breathing fast. <Subject 2> does not turn his head. The camera pushes in with small amplitude at slow speed on the two of them.",
+        "<Subject 1> (S1) says, breathless and certain, <d>[English] There's gold at the end of the path.</d>",
+        "<Subject 2> (S2) says, flat and unmoved, <d>[English] There is not.</d>",
+        "",
+        "overall_soundscape: Running footsteps arriving on dry grass, fabric movement, and continuing late-afternoon suburban ambience underneath.",
+        "",
+        "non_diegetic_music: N/A"
+      ]
+    },
+    {
+      "_comment": "Close-up on one character — panel_mode auto spends the full 4-panel strip here, because identity is the whole point of the shot. Cloned voice: no recording needed, H3 speaks the line in the sampled timbre.",
+      "id": "ep01_sq01_sh030",
+      "cast": ["riley"],
+      "size": "close",
+      "duration": 2.33,
+      "seed": 2210458891,
+      "audio_policy": "clone",
+      "prompt": [
+        "subject_definitions:",
+        "<Subject 1> is Riley, defined by <Picture 1> — a character model sheet showing the SAME single character in four views (three-quarter body, side, back, and facial close-up). It is one character, not four.",
+        "<Audio 1> is the voice-timbre reference for <Subject 1> (S1).",
+        "",
+        "summary:",
+        "[reference generation + audio reference] A closer framing on <Subject 1> as he fixes on the woods and backs away.",
+        "",
+        "retention_analysis:",
+        "<Subject 1> (appears in [Shot 1]): fully_preserved - facial identity, braids and hoodie retained from <Picture 1>.",
+        "<Audio 1>: reference - the target voice follows its timbre and delivery without copying the original signal.",
+        "",
+        "detailed_description:",
+        "[Shot 1] A closer framing on <Subject 1>'s face and shoulders, the treeline soft and out of focus behind him in warm late-afternoon light. His eyes fix on the woods and he starts to back away toward the house. The camera holds a static shot as he exits frame right.",
+        "<Subject 1> (S1) says, already turning away, <d>[English] I've got to pack.</d>",
+        "",
+        "overall_soundscape: Sneakers scuffing dry grass over steady outdoor ambience with distant birds.",
+        "",
+        "non_diegetic_music: N/A"
+      ]
+    }
+  ]
+}

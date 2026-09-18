@@ -1,0 +1,81 @@
+{
+  "_README": "THE BIBLE. Write this ONCE per series. Subjects (anything with identity that appears on screen), locations, the look, the voices. Episodes reference everything by short name and never repeat any of it.",
+  "series": {
+    "id": "gold_path",
+    "title": "The Gold Path",
+    "fps": 24,
+    "width": 1344,
+    "height": 768,
+    "steps": 8
+  },
+  "proxy": {
+    "_note": "The animatic pass. Same seeds, cheap render. 448x256 is exactly one third of 1344x768 - same aspect, and both axes stay on the /32 grid.",
+    "width": 448,
+    "height": 256,
+    "steps": 4
+  },
+  "style": {
+    "_note": "One sentence describing the show's look. Injected into EVERY prompt. There is no style reference image - the style is already carried by every subject sheet and background plate, which are all drawn in it. Slot 4 goes to the background instead, where it buys concrete layout and lighting.",
+    "look": "a 2D hand-drawn cartoon animation with flat 2D illustration, clean black line art, flat solid colors, and cel-shaded artwork"
+  },
+  "subjects": {
+    "_note": "Anything with identity that shows up on screen — or is heard. kind=character gets a 4-panel sheet and can speak; kind=prop or vehicle gets a single clean image on a flat background. Reference slots 1-3 are filled from here in the order the script lists them. A character who only ever speaks off screen (V.O./O.S.) never occupies a slot and needs no sheet — just a voice.",
+    "huey": {
+      "kind": "character",
+      "name": "Huey",
+      "design": "a ten-year-old boy with a rounded afro, a red long-sleeve shirt, dark blue jeans, and white sneakers, drawn with thick confident outlines",
+      "sheet": "refs/huey/huey_sheet_4panel.png",
+      "voice": "measured, serious, low for his age",
+      "voice_sample": "audio/voices/huey_sample.wav"
+    },
+    "riley": {
+      "kind": "character",
+      "name": "Riley",
+      "design": "an eight-year-old boy with cornrow braids, an oversized yellow hoodie, baggy grey shorts, and worn high-top sneakers, drawn with thick confident outlines",
+      "sheet": "refs/riley/riley_sheet_4panel.png",
+      "voice": "fast, bright, always slightly too loud",
+      "voice_sample": "audio/voices/riley_sample.wav"
+    },
+    "mom": {
+      "kind": "character",
+      "name": "Riley and Huey's mother",
+      "pronoun": "her",
+      "design": "never seen on screen in this episode — a voice only",
+      "sheet": "refs/mom/mom_sheet_4panel.png",
+      "voice": "warm but unimpressed, carrying from another room",
+      "voice_sample": "audio/voices/mom_sample.wav"
+    },
+    "backpack": {
+      "kind": "prop",
+      "name": "Riley's backpack",
+      "design": "a battered olive-green canvas backpack with two front buckles, a broken zipper pull replaced with a shoelace, and a faded patch on the flap",
+      "sheet": "refs/props/backpack.png"
+    },
+    "bike": {
+      "kind": "vehicle",
+      "name": "the older kid's bike",
+      "design": "a rust-flecked blue BMX bike with mismatched grips, a torn seat, and a bent number plate on the handlebars",
+      "sheet": "refs/props/bike.png"
+    }
+  },
+  "locations": {
+    "_note": "Every sequence names one. The plate becomes <Picture 4> in every shot there, which is what keeps the same place looking like the same place across a dozen cuts.",
+    "street": {
+      "description": "a late-afternoon suburban street edge with a dense treeline beyond, warm low sun and long shadows",
+      "plate": "refs/_bg/street.png"
+    },
+    "path": {
+      "description": "a narrow dirt path running into dense woods, low golden light breaking through the branches",
+      "plate": "refs/_bg/path.png"
+    },
+    "bedroom": {
+      "description": "a cluttered kids' bedroom with bunk beds, posters peeling at the corners, and late-afternoon light through half-closed blinds",
+      "plate": "refs/_bg/bedroom.png"
+    }
+  },
+  "audio": {
+    "_note": "source_track = you supply a cut dialogue mix and shots read their timing off it. Set mode to 'clone' to skip recording entirely and let H3 speak the lines in each character's sampled voice.",
+    "mode": "source_track",
+    "track": "audio/ep01_dialogue_mix.wav"
+  }
+}

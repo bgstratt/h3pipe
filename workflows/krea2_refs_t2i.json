@@ -1,0 +1,654 @@
+{
+ "id": "57922330-845d-41be-971a-5b6149625daf",
+ "revision": 0,
+ "last_node_id": 23,
+ "last_link_id": 22,
+ "nodes": [
+  {
+   "id": 2,
+   "type": "CLIPLoader",
+   "pos": [
+    100,
+    342
+   ],
+   "size": [
+    270,
+    106
+   ],
+   "flags": {},
+   "order": 0,
+   "mode": 0,
+   "inputs": [
+    {
+     "localized_name": "clip_name",
+     "name": "clip_name",
+     "type": "COMBO",
+     "widget": {
+      "name": "clip_name"
+     },
+     "link": null
+    },
+    {
+     "localized_name": "type",
+     "name": "type",
+     "type": "COMBO",
+     "widget": {
+      "name": "type"
+     },
+     "link": null
+    },
+    {
+     "localized_name": "device",
+     "name": "device",
+     "shape": 7,
+     "type": "COMBO",
+     "widget": {
+      "name": "device"
+     },
+     "link": null
+    }
+   ],
+   "outputs": [
+    {
+     "localized_name": "CLIP",
+     "name": "CLIP",
+     "type": "CLIP",
+     "links": [
+      16
+     ]
+    }
+   ],
+   "properties": {
+    "cnr_id": "comfy-core",
+    "ver": "0.33.0",
+    "Node name for S&R": "CLIPLoader"
+   },
+   "widgets_values": [
+    "qwen3vl_4b_fp8_scaled.safetensors",
+    "krea2",
+    "default"
+   ],
+   "widgets_values_named": {
+    "clip_name": "qwen3vl_4b_fp8_scaled.safetensors",
+    "type": "krea2",
+    "device": "default"
+   }
+  },
+  {
+   "id": 3,
+   "type": "VAELoader",
+   "pos": [
+    100,
+    578
+   ],
+   "size": [
+    270,
+    58
+   ],
+   "flags": {},
+   "order": 1,
+   "mode": 0,
+   "inputs": [
+    {
+     "localized_name": "vae_name",
+     "name": "vae_name",
+     "type": "COMBO",
+     "widget": {
+      "name": "vae_name"
+     },
+     "link": null
+    }
+   ],
+   "outputs": [
+    {
+     "localized_name": "VAE",
+     "name": "VAE",
+     "type": "VAE",
+     "links": [
+      22
+     ]
+    }
+   ],
+   "properties": {
+    "cnr_id": "comfy-core",
+    "ver": "0.33.0",
+    "Node name for S&R": "VAELoader"
+   },
+   "widgets_values": [
+    "wan_2.1_vae.safetensors"
+   ],
+   "widgets_values_named": {
+    "vae_name": "wan_2.1_vae.safetensors"
+   }
+  },
+  {
+   "id": 5,
+   "type": "ConditioningZeroOut",
+   "pos": [
+    970,
+    130
+   ],
+   "size": [
+    204.134765625,
+    26
+   ],
+   "flags": {},
+   "order": 6,
+   "mode": 0,
+   "inputs": [
+    {
+     "localized_name": "conditioning",
+     "name": "conditioning",
+     "type": "CONDITIONING",
+     "link": 12
+    }
+   ],
+   "outputs": [
+    {
+     "localized_name": "CONDITIONING",
+     "name": "CONDITIONING",
+     "type": "CONDITIONING",
+     "links": [
+      19
+     ]
+    }
+   ],
+   "title": "ConditioningZeroOut",
+   "properties": {
+    "cnr_id": "comfy-core",
+    "ver": "0.33.0",
+    "Node name for S&R": "ConditioningZeroOut"
+   }
+  },
+  {
+   "id": "22:6",
+   "type": "KSampler",
+   "pos": [
+    1274.134765625,
+    130
+   ],
+   "size": [
+    270,
+    262
+   ],
+   "flags": {},
+   "order": 7,
+   "mode": 0,
+   "inputs": [
+    {
+     "localized_name": "model",
+     "name": "model",
+     "type": "MODEL",
+     "link": 17
+    },
+    {
+     "localized_name": "positive",
+     "name": "positive",
+     "type": "CONDITIONING",
+     "link": 18
+    },
+    {
+     "localized_name": "negative",
+     "name": "negative",
+     "type": "CONDITIONING",
+     "link": 19
+    },
+    {
+     "localized_name": "latent_image",
+     "name": "latent_image",
+     "type": "LATENT",
+     "link": 20
+    },
+    {
+     "localized_name": "seed",
+     "name": "seed",
+     "type": "INT",
+     "widget": {
+      "name": "seed"
+     },
+     "link": null
+    },
+    {
+     "localized_name": "steps",
+     "name": "steps",
+     "type": "INT",
+     "widget": {
+      "name": "steps"
+     },
+     "link": null
+    },
+    {
+     "localized_name": "cfg",
+     "name": "cfg",
+     "type": "FLOAT",
+     "widget": {
+      "name": "cfg"
+     },
+     "link": null
+    },
+    {
+     "localized_name": "sampler_name",
+     "name": "sampler_name",
+     "type": "COMBO",
+     "widget": {
+      "name": "sampler_name"
+     },
+     "link": null
+    },
+    {
+     "localized_name": "scheduler",
+     "name": "scheduler",
+     "type": "COMBO",
+     "widget": {
+      "name": "scheduler"
+     },
+     "link": null
+    },
+    {
+     "localized_name": "denoise",
+     "name": "denoise",
+     "type": "FLOAT",
+     "widget": {
+      "name": "denoise"
+     },
+     "link": null
+    }
+   ],
+   "outputs": [
+    {
+     "localized_name": "LATENT",
+     "name": "LATENT",
+     "type": "LATENT",
+     "links": [
+      21
+     ]
+    }
+   ],
+   "properties": {
+    "cnr_id": "comfy-core",
+    "ver": "0.33.0",
+    "Node name for S&R": "KSampler"
+   },
+   "widgets_values": [
+    934316797053760,
+    "randomize",
+    12,
+    1,
+    "euler",
+    "beta",
+    1
+   ],
+   "widgets_values_named": {
+    "seed": 934316797053760,
+    "control_after_generate": "randomize",
+    "steps": 12,
+    "cfg": 1,
+    "sampler_name": "euler",
+    "scheduler": "beta",
+    "denoise": 1
+   }
+  },
+  {
+   "id": "22:9",
+   "type": "VAEDecode",
+   "pos": [
+    1644.134765625,
+    130
+   ],
+   "size": [
+    140,
+    46
+   ],
+   "flags": {},
+   "order": 8,
+   "mode": 0,
+   "inputs": [
+    {
+     "localized_name": "samples",
+     "name": "samples",
+     "type": "LATENT",
+     "link": 21
+    },
+    {
+     "localized_name": "vae",
+     "name": "vae",
+     "type": "VAE",
+     "link": 22
+    }
+   ],
+   "outputs": [
+    {
+     "localized_name": "IMAGE",
+     "name": "IMAGE",
+     "type": "IMAGE",
+     "links": [
+      13
+     ]
+    }
+   ],
+   "properties": {
+    "cnr_id": "comfy-core",
+    "ver": "0.33.0",
+    "Node name for S&R": "VAEDecode"
+   }
+  },
+  {
+   "id": 1,
+   "type": "UNETLoader",
+   "pos": [
+    100,
+    130
+   ],
+   "size": [
+    270,
+    82
+   ],
+   "flags": {},
+   "order": 2,
+   "mode": 0,
+   "inputs": [
+    {
+     "localized_name": "unet_name",
+     "name": "unet_name",
+     "type": "COMBO",
+     "widget": {
+      "name": "unet_name"
+     },
+     "link": null
+    },
+    {
+     "localized_name": "weight_dtype",
+     "name": "weight_dtype",
+     "type": "COMBO",
+     "widget": {
+      "name": "weight_dtype"
+     },
+     "link": null
+    }
+   ],
+   "outputs": [
+    {
+     "localized_name": "MODEL",
+     "name": "MODEL",
+     "type": "MODEL",
+     "links": [
+      15
+     ]
+    }
+   ],
+   "properties": {
+    "cnr_id": "comfy-core",
+    "ver": "0.33.0",
+    "Node name for S&R": "UNETLoader"
+   },
+   "widgets_values": [
+    "krea2_turbo_fp8_scaled.safetensors",
+    "default"
+   ],
+   "widgets_values_named": {
+    "unet_name": "krea2_turbo_fp8_scaled.safetensors",
+    "weight_dtype": "default"
+   }
+  },
+  {
+   "id": 7,
+   "type": "EmptyLatentImage",
+   "pos": [
+    100,
+    766
+   ],
+   "size": [
+    270,
+    106
+   ],
+   "flags": {},
+   "order": 3,
+   "mode": 0,
+   "inputs": [
+    {
+     "localized_name": "width",
+     "name": "width",
+     "type": "INT",
+     "widget": {
+      "name": "width"
+     },
+     "link": null
+    },
+    {
+     "localized_name": "height",
+     "name": "height",
+     "type": "INT",
+     "widget": {
+      "name": "height"
+     },
+     "link": null
+    },
+    {
+     "localized_name": "batch_size",
+     "name": "batch_size",
+     "type": "INT",
+     "widget": {
+      "name": "batch_size"
+     },
+     "link": null
+    }
+   ],
+   "outputs": [
+    {
+     "localized_name": "LATENT",
+     "name": "LATENT",
+     "type": "LATENT",
+     "links": [
+      20
+     ]
+    }
+   ],
+   "properties": {
+    "cnr_id": "comfy-core",
+    "ver": "0.33.0",
+    "Node name for S&R": "EmptyLatentImage"
+   },
+   "widgets_values": [
+    1344,
+    768,
+    1
+   ],
+   "widgets_values_named": {
+    "width": 1344,
+    "height": 768,
+    "batch_size": 1
+   }
+  },
+  {
+   "id": 22,
+   "type": "SaveImage",
+   "pos": [
+    962.7563054256171,
+    277.1268644719587
+   ],
+   "size": [
+    317.1996737951613,
+    363.6380625291107
+   ],
+   "flags": {},
+   "order": 9,
+   "mode": 0,
+   "inputs": [
+    {
+     "localized_name": "images",
+     "name": "images",
+     "type": "IMAGE",
+     "link": 13
+    },
+    {
+     "localized_name": "filename_prefix",
+     "name": "filename_prefix",
+     "type": "STRING",
+     "widget": {
+      "name": "filename_prefix"
+     },
+     "link": null
+    }
+   ],
+   "outputs": [
+    {
+     "localized_name": "images",
+     "name": "images",
+     "type": "IMAGE",
+     "links": null
+    }
+   ],
+   "properties": {
+    "cnr_id": "comfy-core",
+    "ver": "0.33.0"
+   },
+   "widgets_values": [
+    "h3refs/tmp"
+   ],
+   "widgets_values_named": {
+    "filename_prefix": "h3refs/tmp"
+   }
+  },
+  {
+   "id": 23,
+   "type": "CLIPTextEncode",
+   "pos": [
+    544.1764608379461,
+    127.03294156648217
+   ],
+   "size": [
+    400,
+    200
+   ],
+   "flags": {},
+   "order": 5,
+   "mode": 0,
+   "inputs": [
+    {
+     "localized_name": "clip",
+     "name": "clip",
+     "type": "CLIP",
+     "link": 14
+    },
+    {
+     "localized_name": "text",
+     "name": "text",
+     "type": "STRING",
+     "widget": {
+      "name": "text"
+     },
+     "link": null
+    }
+   ],
+   "outputs": [
+    {
+     "localized_name": "CONDITIONING",
+     "name": "CONDITIONING",
+     "type": "CONDITIONING",
+     "links": [
+      12,
+      18
+     ]
+    }
+   ],
+   "title": "Prompt  (paste from refs_todo.md)",
+   "properties": {
+    "cnr_id": "comfy-core",
+    "ver": "0.33.0",
+    "Node name for S&R": "CLIPTextEncode"
+   },
+   "widgets_values": [
+    "(kreagen sets this per image — paste a prompt from refs_todo.md to test by hand)"
+   ],
+   "widgets_values_named": {
+    "text": "A background plate drawn as a realistic cartoon style with a tight palette of amber, rust orange, cold blue-black, pale grey-green and warning red. An empty establishing view of a round machine chamber, one tall cylindrical drive drum standing at center and a curved bank of instrument panels around the wall glowing amber, a single panel burning red. No characters, no props, no figures in frame — the environment only. Wide framing that shows the layout of the space."
+   }
+  }
+ ],
+ "links": [
+  [
+   12,
+   23,
+   0,
+   5,
+   0,
+   "CONDITIONING"
+  ],
+  [
+   13,
+   "22:9",
+   0,
+   22,
+   0,
+   "IMAGE"
+  ],
+  [
+   14,
+   2,
+   0,
+   23,
+   0,
+   "CLIP"
+  ],
+  [
+   17,
+   1,
+   0,
+   "22:6",
+   0,
+   "MODEL"
+  ],
+  [
+   18,
+   23,
+   0,
+   "22:6",
+   1,
+   "CONDITIONING"
+  ],
+  [
+   19,
+   5,
+   0,
+   "22:6",
+   2,
+   "CONDITIONING"
+  ],
+  [
+   20,
+   7,
+   0,
+   "22:6",
+   3,
+   "LATENT"
+  ],
+  [
+   21,
+   "22:6",
+   0,
+   "22:9",
+   0,
+   "LATENT"
+  ],
+  [
+   22,
+   3,
+   0,
+   "22:9",
+   1,
+   "VAE"
+  ]
+ ],
+ "groups": [],
+ "config": {},
+ "extra": {
+  "ds": {
+   "scale": 0.6740682884457854,
+   "offset": [
+    73.7128436176796,
+    226.5753953575894
+   ]
+  }
+ },
+ "version": 0.4
+}

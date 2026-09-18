@@ -1,0 +1,2135 @@
+{
+ "id": "h3-ref2va-shotlist-v1",
+ "revision": 0,
+ "last_node_id": 91,
+ "last_link_id": 40,
+ "nodes": [
+  {
+   "id": 1,
+   "type": "UNETLoader",
+   "pos": [
+    -2600,
+    300
+   ],
+   "size": [
+    560,
+    90
+   ],
+   "flags": {},
+   "order": 0,
+   "mode": 0,
+   "inputs": [
+    {
+     "localized_name": "unet_name",
+     "name": "unet_name",
+     "type": "COMBO",
+     "widget": {
+      "name": "unet_name"
+     },
+     "link": null
+    },
+    {
+     "localized_name": "weight_dtype",
+     "name": "weight_dtype",
+     "type": "COMBO",
+     "widget": {
+      "name": "weight_dtype"
+     },
+     "link": null
+    }
+   ],
+   "outputs": [
+    {
+     "localized_name": "MODEL",
+     "name": "MODEL",
+     "type": "MODEL",
+     "links": [
+      1
+     ]
+    }
+   ],
+   "title": "Ref2VA model",
+   "properties": {
+    "cnr_id": "comfy-core",
+    "ver": "0.30.0",
+    "Node name for S&R": "UNETLoader",
+    "models": [
+     {
+      "name": "minimax_h3_ref2va_pruned_int8_convrot.safetensors",
+      "url": "https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/diffusion_models/minimax_h3_ref2va_pruned_int8_convrot.safetensors",
+      "directory": "diffusion_models"
+     }
+    ]
+   },
+   "widgets_values": [
+    "minimax_h3_ref2va_pruned_int8_convrot.safetensors",
+    "default"
+   ],
+   "widgets_values_named": {
+    "unet_name": "minimax_h3_ref2va_pruned_int8_convrot.safetensors",
+    "weight_dtype": "default"
+   }
+  },
+  {
+   "id": 2,
+   "type": "LoraLoaderModelOnly",
+   "pos": [
+    -2600,
+    440
+   ],
+   "size": [
+    560,
+    100
+   ],
+   "flags": {},
+   "order": 8,
+   "mode": 0,
+   "inputs": [
+    {
+     "localized_name": "model",
+     "name": "model",
+     "type": "MODEL",
+     "link": 1
+    },
+    {
+     "localized_name": "lora_name",
+     "name": "lora_name",
+     "type": "COMBO",
+     "widget": {
+      "name": "lora_name"
+     },
+     "link": null
+    },
+    {
+     "localized_name": "strength_model",
+     "name": "strength_model",
+     "type": "FLOAT",
+     "widget": {
+      "name": "strength_model"
+     },
+     "link": null
+    }
+   ],
+   "outputs": [
+    {
+     "localized_name": "MODEL",
+     "name": "MODEL",
+     "type": "MODEL",
+     "links": [
+      2
+     ]
+    }
+   ],
+   "title": "Turbo LoRA (ref2v, 4-step)",
+   "properties": {
+    "cnr_id": "comfy-core",
+    "ver": "0.30.0",
+    "Node name for S&R": "LoraLoaderModelOnly",
+    "models": [
+     {
+      "name": "minimax_h3_ref2v_lightx2v_turbo_4step_v0.1_resized_avg_rank_20_bf16.safetensors",
+      "url": "https://huggingface.co/Kijai/MiniMax-H3_comfy/resolve/main/loras/minimax_h3_ref2v_lightx2v_turbo_4step_v0.1_resized_avg_rank_20_bf16.safetensors",
+      "directory": "loras"
+     }
+    ]
+   },
+   "widgets_values": [
+    "minimax_h3_ref2v_lightx2v_turbo_4step_v0.1_resized_avg_rank_20_bf16.safetensors",
+    1
+   ],
+   "widgets_values_named": {
+    "lora_name": "minimax_h3_ref2v_lightx2v_turbo_4step_v0.1_resized_avg_rank_20_bf16.safetensors",
+    "strength_model": 1
+   }
+  },
+  {
+   "id": 3,
+   "type": "MiniMaxH3SigmaShift",
+   "pos": [
+    -2600,
+    590
+   ],
+   "size": [
+    560,
+    110
+   ],
+   "flags": {},
+   "order": 10,
+   "mode": 0,
+   "inputs": [
+    {
+     "localized_name": "model",
+     "name": "model",
+     "type": "MODEL",
+     "link": 2
+    },
+    {
+     "localized_name": "shift_video",
+     "name": "shift_video",
+     "type": "FLOAT",
+     "widget": {
+      "name": "shift_video"
+     },
+     "link": null
+    },
+    {
+     "localized_name": "shift_audio",
+     "name": "shift_audio",
+     "type": "FLOAT",
+     "widget": {
+      "name": "shift_audio"
+     },
+     "link": null
+    }
+   ],
+   "outputs": [
+    {
+     "localized_name": "MODEL",
+     "name": "MODEL",
+     "type": "MODEL",
+     "links": [
+      3
+     ]
+    }
+   ],
+   "title": "Sigma Shift (video 6 / audio 3)",
+   "properties": {
+    "cnr_id": "comfy-core",
+    "ver": "0.30.0",
+    "Node name for S&R": "MiniMaxH3SigmaShift"
+   },
+   "widgets_values": [
+    6,
+    3
+   ],
+   "widgets_values_named": {
+    "shift_video": 6,
+    "shift_audio": 3
+   }
+  },
+  {
+   "id": 4,
+   "type": "H3SLAAttention",
+   "pos": [
+    -2600,
+    750
+   ],
+   "size": [
+    560,
+    240
+   ],
+   "flags": {},
+   "order": 14,
+   "mode": 0,
+   "inputs": [
+    {
+     "localized_name": "model",
+     "name": "model",
+     "type": "MODEL",
+     "link": 3
+    },
+    {
+     "localized_name": "sparsity_ratio",
+     "name": "sparsity_ratio",
+     "type": "FLOAT",
+     "widget": {
+      "name": "sparsity_ratio"
+     },
+     "link": null
+    },
+    {
+     "localized_name": "block_size",
+     "name": "block_size",
+     "type": "COMBO",
+     "widget": {
+      "name": "block_size"
+     },
+     "link": null
+    },
+    {
+     "localized_name": "min_seq_len",
+     "name": "min_seq_len",
+     "shape": 7,
+     "type": "INT",
+     "widget": {
+      "name": "min_seq_len"
+     },
+     "link": null
+    },
+    {
+     "localized_name": "dense_last_steps",
+     "name": "dense_last_steps",
+     "shape": 7,
+     "type": "INT",
+     "widget": {
+      "name": "dense_last_steps"
+     },
+     "link": null
+    },
+    {
+     "localized_name": "protect_audio",
+     "name": "protect_audio",
+     "shape": 7,
+     "type": "BOOLEAN",
+     "widget": {
+      "name": "protect_audio"
+     },
+     "link": null
+    },
+    {
+     "localized_name": "enabled",
+     "name": "enabled",
+     "shape": 7,
+     "type": "BOOLEAN",
+     "widget": {
+      "name": "enabled"
+     },
+     "link": null
+    }
+   ],
+   "outputs": [
+    {
+     "localized_name": "MODEL",
+     "name": "MODEL",
+     "type": "MODEL",
+     "links": [
+      21,
+      23
+     ]
+    }
+   ],
+   "title": "H3 SLA Attention (LAST in chain)",
+   "properties": {
+    "cnr_id": "comfy-core",
+    "ver": "0.30.0",
+    "Node name for S&R": "H3SLAAttention"
+   },
+   "widgets_values": [
+    0.85,
+    "64",
+    8192,
+    0,
+    true,
+    true
+   ],
+   "widgets_values_named": {
+    "sparsity_ratio": 0.85,
+    "block_size": "64",
+    "min_seq_len": 8192,
+    "dense_last_steps": 0,
+    "protect_audio": true,
+    "enabled": true
+   }
+  },
+  {
+   "id": 5,
+   "type": "CLIPLoader",
+   "pos": [
+    -2600,
+    1040
+   ],
+   "size": [
+    560,
+    120
+   ],
+   "flags": {},
+   "order": 1,
+   "mode": 0,
+   "inputs": [
+    {
+     "localized_name": "clip_name",
+     "name": "clip_name",
+     "type": "COMBO",
+     "widget": {
+      "name": "clip_name"
+     },
+     "link": null
+    },
+    {
+     "localized_name": "type",
+     "name": "type",
+     "type": "COMBO",
+     "widget": {
+      "name": "type"
+     },
+     "link": null
+    },
+    {
+     "localized_name": "device",
+     "name": "device",
+     "shape": 7,
+     "type": "COMBO",
+     "widget": {
+      "name": "device"
+     },
+     "link": null
+    }
+   ],
+   "outputs": [
+    {
+     "localized_name": "CLIP",
+     "name": "CLIP",
+     "type": "CLIP",
+     "links": [
+      6
+     ]
+    }
+   ],
+   "title": "Text encoder",
+   "properties": {
+    "cnr_id": "comfy-core",
+    "ver": "0.30.0",
+    "Node name for S&R": "CLIPLoader"
+   },
+   "widgets_values": [
+    "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
+    "minimax",
+    "default"
+   ],
+   "widgets_values_named": {
+    "clip_name": "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
+    "type": "minimax",
+    "device": "default"
+   }
+  },
+  {
+   "id": 6,
+   "type": "VAELoader",
+   "pos": [
+    -2600,
+    1200
+   ],
+   "size": [
+    560,
+    70
+   ],
+   "flags": {},
+   "order": 2,
+   "mode": 0,
+   "inputs": [
+    {
+     "localized_name": "vae_name",
+     "name": "vae_name",
+     "type": "COMBO",
+     "widget": {
+      "name": "vae_name"
+     },
+     "link": null
+    }
+   ],
+   "outputs": [
+    {
+     "localized_name": "VAE",
+     "name": "VAE",
+     "type": "VAE",
+     "links": [
+      7,
+      30
+     ]
+    }
+   ],
+   "title": "Video VAE",
+   "properties": {
+    "cnr_id": "comfy-core",
+    "ver": "0.30.0",
+    "Node name for S&R": "VAELoader"
+   },
+   "widgets_values": [
+    "minimax_h3_video_vae_fp16.safetensors"
+   ],
+   "widgets_values_named": {
+    "vae_name": "minimax_h3_video_vae_fp16.safetensors"
+   }
+  },
+  {
+   "id": 7,
+   "type": "VAELoader",
+   "pos": [
+    -2600,
+    1310
+   ],
+   "size": [
+    560,
+    70
+   ],
+   "flags": {},
+   "order": 3,
+   "mode": 0,
+   "inputs": [
+    {
+     "localized_name": "vae_name",
+     "name": "vae_name",
+     "type": "COMBO",
+     "widget": {
+      "name": "vae_name"
+     },
+     "link": null
+    }
+   ],
+   "outputs": [
+    {
+     "localized_name": "VAE",
+     "name": "VAE",
+     "type": "VAE",
+     "links": [
+      8,
+      32
+     ]
+    }
+   ],
+   "title": "Audio VAE",
+   "properties": {
+    "cnr_id": "comfy-core",
+    "ver": "0.30.0",
+    "Node name for S&R": "VAELoader"
+   },
+   "widgets_values": [
+    "minimax_h3_audio_vae_fp32.safetensors"
+   ],
+   "widgets_values_named": {
+    "vae_name": "minimax_h3_audio_vae_fp32.safetensors"
+   }
+  },
+  {
+   "id": 20,
+   "type": "MiniMaxH3ReferenceToVideo",
+   "pos": [
+    -1480,
+    300
+   ],
+   "size": [
+    520,
+    620
+   ],
+   "flags": {},
+   "order": 11,
+   "mode": 0,
+   "inputs": [
+    {
+     "localized_name": "clip",
+     "name": "clip",
+     "type": "CLIP",
+     "link": 6
+    },
+    {
+     "localized_name": "vae",
+     "name": "vae",
+     "type": "VAE",
+     "link": 7
+    },
+    {
+     "localized_name": "audio_vae",
+     "name": "audio_vae",
+     "type": "VAE",
+     "link": 8
+    },
+    {
+     "label": "ref_image_0",
+     "localized_name": "ref_images.ref_image_0",
+     "name": "ref_images.ref_image_0",
+     "shape": 7,
+     "type": "IMAGE",
+     "link": 9
+    },
+    {
+     "label": "ref_image_1",
+     "localized_name": "ref_images.ref_image_1",
+     "name": "ref_images.ref_image_1",
+     "shape": 7,
+     "type": "IMAGE",
+     "link": 10
+    },
+    {
+     "label": "ref_image_2",
+     "localized_name": "ref_images.ref_image_2",
+     "name": "ref_images.ref_image_2",
+     "shape": 7,
+     "type": "IMAGE",
+     "link": 11
+    },
+    {
+     "label": "ref_image_3",
+     "localized_name": "ref_images.ref_image_3",
+     "name": "ref_images.ref_image_3",
+     "shape": 7,
+     "type": "IMAGE",
+     "link": 12
+    },
+    {
+     "label": "ref_image_4",
+     "localized_name": "ref_images.ref_image_4",
+     "name": "ref_images.ref_image_4",
+     "shape": 7,
+     "type": "IMAGE",
+     "link": null
+    },
+    {
+     "label": "ref_video_0",
+     "localized_name": "ref_videos.ref_video_0",
+     "name": "ref_videos.ref_video_0",
+     "shape": 7,
+     "type": "IMAGE",
+     "link": null
+    },
+    {
+     "label": "ref_video_audio_0",
+     "localized_name": "ref_video_audios.ref_video_audio_0",
+     "name": "ref_video_audios.ref_video_audio_0",
+     "shape": 7,
+     "type": "AUDIO",
+     "link": null
+    },
+    {
+     "label": "ref_audio_0",
+     "localized_name": "ref_audios.ref_audio_0",
+     "name": "ref_audios.ref_audio_0",
+     "shape": 7,
+     "type": "AUDIO",
+     "link": 13
+    },
+    {
+     "label": "ref_audio_1",
+     "localized_name": "ref_audios.ref_audio_1",
+     "name": "ref_audios.ref_audio_1",
+     "shape": 7,
+     "type": "AUDIO",
+     "link": 14
+    },
+    {
+     "label": "ref_audio_2",
+     "localized_name": "ref_audios.ref_audio_2",
+     "name": "ref_audios.ref_audio_2",
+     "shape": 7,
+     "type": "AUDIO",
+     "link": 15
+    },
+    {
+     "localized_name": "prompt",
+     "name": "prompt",
+     "type": "STRING",
+     "widget": {
+      "name": "prompt"
+     },
+     "link": 16
+    },
+    {
+     "localized_name": "width",
+     "name": "width",
+     "type": "INT",
+     "widget": {
+      "name": "width"
+     },
+     "link": 17
+    },
+    {
+     "localized_name": "height",
+     "name": "height",
+     "type": "INT",
+     "widget": {
+      "name": "height"
+     },
+     "link": 18
+    },
+    {
+     "localized_name": "length",
+     "name": "length",
+     "type": "INT",
+     "widget": {
+      "name": "length"
+     },
+     "link": 19
+    },
+    {
+     "localized_name": "ref_image_size",
+     "name": "ref_image_size",
+     "type": "COMBO",
+     "widget": {
+      "name": "ref_image_size"
+     },
+     "link": null
+    },
+    {
+     "label": "ref_audio_3",
+     "localized_name": "ref_audios.ref_audio_3",
+     "name": "ref_audios.ref_audio_3",
+     "shape": 7,
+     "type": "AUDIO",
+     "link": null
+    }
+   ],
+   "outputs": [
+    {
+     "localized_name": "positive",
+     "name": "positive",
+     "type": "CONDITIONING",
+     "links": [
+      22
+     ]
+    },
+    {
+     "localized_name": "LATENT",
+     "name": "LATENT",
+     "type": "LATENT",
+     "links": [
+      28
+     ]
+    }
+   ],
+   "title": "Ref2VA  —  refs 1-3 = subjects, ref 4 = background plate",
+   "properties": {
+    "cnr_id": "comfy-core",
+    "ver": "0.30.0",
+    "Node name for S&R": "MiniMaxH3ReferenceToVideo"
+   },
+   "widgets_values": [
+    "(driven by the shot list)",
+    1344,
+    768,
+    73,
+    "max"
+   ],
+   "widgets_values_named": {
+    "prompt": "(driven by the shot list)",
+    "width": 1344,
+    "height": 768,
+    "length": 73,
+    "ref_image_size": "max"
+   }
+  },
+  {
+   "id": 30,
+   "type": "RandomNoise",
+   "pos": [
+    -900,
+    300
+   ],
+   "size": [
+    360,
+    90
+   ],
+   "flags": {},
+   "order": 12,
+   "mode": 0,
+   "inputs": [
+    {
+     "localized_name": "noise_seed",
+     "name": "noise_seed",
+     "type": "INT",
+     "widget": {
+      "name": "noise_seed"
+     },
+     "link": 20
+    }
+   ],
+   "outputs": [
+    {
+     "localized_name": "NOISE",
+     "name": "NOISE",
+     "type": "NOISE",
+     "links": [
+      24
+     ]
+    }
+   ],
+   "title": "Noise  <- shot seed",
+   "properties": {
+    "cnr_id": "comfy-core",
+    "ver": "0.30.0",
+    "Node name for S&R": "RandomNoise"
+   },
+   "widgets_values": [
+    0,
+    "fixed"
+   ],
+   "widgets_values_named": {
+    "noise_seed": 0,
+    "control_after_generate": "fixed"
+   }
+  },
+  {
+   "id": 31,
+   "type": "BasicGuider",
+   "pos": [
+    -900,
+    440
+   ],
+   "size": [
+    360,
+    60
+   ],
+   "flags": {},
+   "order": 15,
+   "mode": 0,
+   "inputs": [
+    {
+     "localized_name": "model",
+     "name": "model",
+     "type": "MODEL",
+     "link": 21
+    },
+    {
+     "localized_name": "conditioning",
+     "name": "conditioning",
+     "type": "CONDITIONING",
+     "link": 22
+    }
+   ],
+   "outputs": [
+    {
+     "localized_name": "GUIDER",
+     "name": "GUIDER",
+     "type": "GUIDER",
+     "links": [
+      25
+     ]
+    }
+   ],
+   "title": "Guider (CFG 1)",
+   "properties": {
+    "cnr_id": "comfy-core",
+    "ver": "0.30.0",
+    "Node name for S&R": "BasicGuider"
+   }
+  },
+  {
+   "id": 32,
+   "type": "KSamplerSelect",
+   "pos": [
+    -900,
+    550
+   ],
+   "size": [
+    360,
+    70
+   ],
+   "flags": {},
+   "order": 4,
+   "mode": 0,
+   "inputs": [
+    {
+     "localized_name": "sampler_name",
+     "name": "sampler_name",
+     "type": "COMBO",
+     "widget": {
+      "name": "sampler_name"
+     },
+     "link": null
+    }
+   ],
+   "outputs": [
+    {
+     "localized_name": "SAMPLER",
+     "name": "SAMPLER",
+     "type": "SAMPLER",
+     "links": [
+      26
+     ]
+    }
+   ],
+   "title": "Sampler",
+   "properties": {
+    "cnr_id": "comfy-core",
+    "ver": "0.30.0",
+    "Node name for S&R": "KSamplerSelect"
+   },
+   "widgets_values": [
+    "euler"
+   ],
+   "widgets_values_named": {
+    "sampler_name": "euler"
+   }
+  },
+  {
+   "id": 33,
+   "type": "BasicScheduler",
+   "pos": [
+    -900,
+    670
+   ],
+   "size": [
+    360,
+    130
+   ],
+   "flags": {},
+   "order": 16,
+   "mode": 0,
+   "inputs": [
+    {
+     "localized_name": "model",
+     "name": "model",
+     "type": "MODEL",
+     "link": 23
+    },
+    {
+     "localized_name": "scheduler",
+     "name": "scheduler",
+     "type": "COMBO",
+     "widget": {
+      "name": "scheduler"
+     },
+     "link": null
+    },
+    {
+     "localized_name": "steps",
+     "name": "steps",
+     "type": "INT",
+     "widget": {
+      "name": "steps"
+     },
+     "link": 40
+    },
+    {
+     "localized_name": "denoise",
+     "name": "denoise",
+     "type": "FLOAT",
+     "widget": {
+      "name": "denoise"
+     },
+     "link": null
+    }
+   ],
+   "outputs": [
+    {
+     "localized_name": "SIGMAS",
+     "name": "SIGMAS",
+     "type": "SIGMAS",
+     "links": [
+      27
+     ]
+    }
+   ],
+   "title": "Scheduler (steps from the shot)",
+   "properties": {
+    "cnr_id": "comfy-core",
+    "ver": "0.30.0",
+    "Node name for S&R": "BasicScheduler"
+   },
+   "widgets_values": [
+    "simple",
+    4,
+    1
+   ],
+   "widgets_values_named": {
+    "scheduler": "simple",
+    "steps": 4,
+    "denoise": 1
+   }
+  },
+  {
+   "id": 34,
+   "type": "SamplerCustomAdvanced",
+   "pos": [
+    -900,
+    850
+   ],
+   "size": [
+    360,
+    150
+   ],
+   "flags": {},
+   "order": 17,
+   "mode": 0,
+   "inputs": [
+    {
+     "localized_name": "noise",
+     "name": "noise",
+     "type": "NOISE",
+     "link": 24
+    },
+    {
+     "localized_name": "guider",
+     "name": "guider",
+     "type": "GUIDER",
+     "link": 25
+    },
+    {
+     "localized_name": "sampler",
+     "name": "sampler",
+     "type": "SAMPLER",
+     "link": 26
+    },
+    {
+     "localized_name": "sigmas",
+     "name": "sigmas",
+     "type": "SIGMAS",
+     "link": 27
+    },
+    {
+     "localized_name": "latent_image",
+     "name": "latent_image",
+     "type": "LATENT",
+     "link": 28
+    }
+   ],
+   "outputs": [
+    {
+     "localized_name": "output",
+     "name": "output",
+     "type": "LATENT",
+     "links": [
+      29,
+      31
+     ]
+    },
+    {
+     "localized_name": "denoised_output",
+     "name": "denoised_output",
+     "type": "LATENT",
+     "links": []
+    }
+   ],
+   "title": "Sample",
+   "properties": {
+    "cnr_id": "comfy-core",
+    "ver": "0.30.0",
+    "Node name for S&R": "SamplerCustomAdvanced"
+   }
+  },
+  {
+   "id": 40,
+   "type": "VAEDecode",
+   "pos": [
+    -460,
+    300
+   ],
+   "size": [
+    280,
+    60
+   ],
+   "flags": {},
+   "order": 18,
+   "mode": 0,
+   "inputs": [
+    {
+     "localized_name": "samples",
+     "name": "samples",
+     "type": "LATENT",
+     "link": 29
+    },
+    {
+     "localized_name": "vae",
+     "name": "vae",
+     "type": "VAE",
+     "link": 30
+    }
+   ],
+   "outputs": [
+    {
+     "localized_name": "IMAGE",
+     "name": "IMAGE",
+     "type": "IMAGE",
+     "links": [
+      33,
+      37
+     ]
+    }
+   ],
+   "title": "Decode video  ->  FRAMES",
+   "properties": {
+    "cnr_id": "comfy-core",
+    "ver": "0.30.0",
+    "Node name for S&R": "VAEDecode"
+   }
+  },
+  {
+   "id": 41,
+   "type": "VAEDecodeAudio",
+   "pos": [
+    -460,
+    420
+   ],
+   "size": [
+    280,
+    60
+   ],
+   "flags": {},
+   "order": 19,
+   "mode": 0,
+   "inputs": [
+    {
+     "localized_name": "samples",
+     "name": "samples",
+     "type": "LATENT",
+     "link": 31
+    },
+    {
+     "localized_name": "vae",
+     "name": "vae",
+     "type": "VAE",
+     "link": 32
+    }
+   ],
+   "outputs": [
+    {
+     "localized_name": "AUDIO",
+     "name": "AUDIO",
+     "type": "AUDIO",
+     "links": [
+      36,
+      38
+     ]
+    }
+   ],
+   "title": "Decode audio",
+   "properties": {
+    "cnr_id": "comfy-core",
+    "ver": "0.30.0",
+    "Node name for S&R": "VAEDecodeAudio"
+   }
+  },
+  {
+   "id": 43,
+   "type": "CreateVideo",
+   "pos": [
+    360,
+    300
+   ],
+   "size": [
+    280,
+    110
+   ],
+   "flags": {},
+   "order": 21,
+   "mode": 0,
+   "inputs": [
+    {
+     "localized_name": "images",
+     "name": "images",
+     "type": "IMAGE",
+     "link": 37
+    },
+    {
+     "localized_name": "audio",
+     "name": "audio",
+     "shape": 7,
+     "type": "AUDIO",
+     "link": 38
+    },
+    {
+     "localized_name": "fps",
+     "name": "fps",
+     "type": "FLOAT",
+     "widget": {
+      "name": "fps"
+     },
+     "link": null
+    },
+    {
+     "localized_name": "bit_depth",
+     "name": "bit_depth",
+     "shape": 7,
+     "type": "INT",
+     "widget": {
+      "name": "bit_depth"
+     },
+     "link": null
+    }
+   ],
+   "outputs": [
+    {
+     "localized_name": "VIDEO",
+     "name": "VIDEO",
+     "type": "VIDEO",
+     "links": [
+      39
+     ]
+    }
+   ],
+   "title": "Review copy",
+   "properties": {
+    "cnr_id": "comfy-core",
+    "ver": "0.30.0",
+    "Node name for S&R": "CreateVideo"
+   },
+   "widgets_values": [
+    24,
+    8
+   ],
+   "widgets_values_named": {
+    "fps": 24,
+    "bit_depth": 8
+   }
+  },
+  {
+   "id": 90,
+   "type": "MarkdownNote",
+   "pos": [
+    -3260,
+    300
+   ],
+   "size": [
+    620,
+    1080
+   ],
+   "flags": {},
+   "order": 5,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [],
+   "title": "Note: how to run this",
+   "properties": {
+    "cnr_id": null,
+    "ver": "0.30.0",
+    "Node name for S&R": "MarkdownNote"
+   },
+   "widgets_values": [
+    "## H3 Ref2VA shot-list pipeline\n\nOne shot per queue. Nothing chains, so shots render in any order and a bad\nshot is re-queued alone.\n\n### Run a sequence\n1. Point **Shot List Loader** and **Save Shot** at the same `project_root`.\n2. Set **Shot Index** `control_after_generate` to `increment`.\n3. Set batch count to the shot count shown in Shot Info. Queue once.\n\nRe-render one shot: set the index, `control_after_generate` to `fixed`,\nbump **take** on Save Shot, queue.\n\n### Resolution\n`1344x768` is H3's native canvas and both axes are multiples of 32.\n**1280x720 is not legal** - 720 is not divisible by 32. The loader raises\nrather than letting H3 fail. Crop to 1344x756 and upscale at conform for\ntrue 16:9 delivery.\n\n### Reference sockets\n- `ref_image_0..2` <- the shot's SUBJECTS: characters first, then props and\n  vehicles, in the order the script lists them\n- `ref_image_3` <- the LOCATION plate for this shot, always\nIn the prompt these are `<Picture 1>`..`<Picture 4>` - **1-based in the\nprompt, 0-based on the sockets**.\n\nCharacter sheets are a **horizontal 4-panel strip** (3/4 body, side, back,\nface). `ref_image_size: max` scales the SHORT side to 2048, so a horizontal\nstrip keeps every panel crisp - a square grid would not. Props and vehicles are\na single clean image on a flat background; they are never panel-cropped.\n\nThere is no style reference. Style is carried by every sheet and plate already\n- they are all drawn in it - and stated in the prompt text. Slot 4 goes to the\nbackground, which buys layout, palette, lighting direction and depth for THIS\nshot, and keeps one location looking like one place across every cut.\n\n`panel_mode` controls reference cost:\n- `auto` - full 4-panel strip for a single-character close-up, 3/4+face pair\n  otherwise. **Use this.**\n- `full` / `pair` / `face` - force it.\n\nReference cost scales with strip width. Three characters at full 4-panel is\n~50M pixels of reference encode per shot; the `pair` crop roughly halves it.\n\n### Audio references\n`ref_audio_0..2` carry one clip each. How many are used depends on the policy:\n- `clone` -> ONE TIMBRE SAMPLE PER SPEAKER. A two-hander feeds two. Feeding one\n  would voice the second character from the first one's sample.\n- `dub` / `dub_keep_foley` -> one clip only: the slice of the recorded mix,\n  which already contains every voice in the shot.\n- `generate` -> none.\nUnused sockets receive null. H3 takes at most 3 standalone audio references, so\na clone shot is capped at 3 speakers.\n\n### Audio policy (per shot, from shotlist.json)\n- `generate` - no reference fed. H3 invents ambience and foley, and it is\n  good at it. The mp4 gets H3's audio.\n- `dub` - your recorded line drives lip-sync. The mp4 is written **mute** and\n  H3's mix is kept beside it as `_h3.wav`. Lay the clean vocal in at conform.\n- `dub_keep_foley` - same, plus Demucs strips the vocal from H3's mix and\n  writes `_foley.wav` so you keep the synced foley under your own vocal.\n  Needs `pip install demucs`.\n- `clone` - a voice sample drives timbre and H3 speaks the line written in\n  the prompt's `<d>` tag. No recording session; expect some drift across a\n  long episode. Good for the proxy pass and for incidental characters.\n\n### Sampling\n4 steps / `euler` / `simple` / LoRA 1.0. SLA stays LAST in the model chain,\nwired to both the guider and the scheduler.\n\nIf identity slips, in order: raise `panel_mode` to `full`, then try\n`res_multistep` (roughly doubles time), then drop `sparsity_ratio` to 0.80.\n"
+   ],
+   "widgets_values_named": {
+    "text": "## H3 Ref2VA shot-list pipeline\n\nOne shot per queue. Nothing chains, so shots render in any order and a bad\nshot is re-queued alone.\n\n### Run a sequence\n1. Point **Shot List Loader** and **Save Shot** at the same `project_root`.\n2. Set **Shot Index** `control_after_generate` to `increment`.\n3. Set batch count to the shot count shown in Shot Info. Queue once.\n\nRe-render one shot: set the index, `control_after_generate` to `fixed`,\nbump **take** on Save Shot, queue.\n\n### Resolution\n`1344x768` is H3's native canvas and both axes are multiples of 32.\n**1280x720 is not legal** - 720 is not divisible by 32. The loader raises\nrather than letting H3 fail. Crop to 1344x756 and upscale at conform for\ntrue 16:9 delivery.\n\n### Reference sockets\n- `ref_image_0..2` <- the shot's SUBJECTS: characters first, then props and\n  vehicles, in the order the script lists them\n- `ref_image_3` <- the LOCATION plate for this shot, always\nIn the prompt these are `<Picture 1>`..`<Picture 4>` - **1-based in the\nprompt, 0-based on the sockets**.\n\nCharacter sheets are a **horizontal 4-panel strip** (3/4 body, side, back,\nface). `ref_image_size: max` scales the SHORT side to 2048, so a horizontal\nstrip keeps every panel crisp - a square grid would not. Props and vehicles are\na single clean image on a flat background; they are never panel-cropped.\n\nThere is no style reference. Style is carried by every sheet and plate already\n- they are all drawn in it - and stated in the prompt text. Slot 4 goes to the\nbackground, which buys layout, palette, lighting direction and depth for THIS\nshot, and keeps one location looking like one place across every cut.\n\n`panel_mode` controls reference cost:\n- `auto` - full 4-panel strip for a single-character close-up, 3/4+face pair\n  otherwise. **Use this.**\n- `full` / `pair` / `face` - force it.\n\nReference cost scales with strip width. Three characters at full 4-panel is\n~50M pixels of reference encode per shot; the `pair` crop roughly halves it.\n\n### Audio references\n`ref_audio_0..2` carry one clip each. How many are used depends on the policy:\n- `clone` -> ONE TIMBRE SAMPLE PER SPEAKER. A two-hander feeds two. Feeding one\n  would voice the second character from the first one's sample.\n- `dub` / `dub_keep_foley` -> one clip only: the slice of the recorded mix,\n  which already contains every voice in the shot.\n- `generate` -> none.\nUnused sockets receive null. H3 takes at most 3 standalone audio references, so\na clone shot is capped at 3 speakers.\n\n### Audio policy (per shot, from shotlist.json)\n- `generate` - no reference fed. H3 invents ambience and foley, and it is\n  good at it. The mp4 gets H3's audio.\n- `dub` - your recorded line drives lip-sync. The mp4 is written **mute** and\n  H3's mix is kept beside it as `_h3.wav`. Lay the clean vocal in at conform.\n- `dub_keep_foley` - same, plus Demucs strips the vocal from H3's mix and\n  writes `_foley.wav` so you keep the synced foley under your own vocal.\n  Needs `pip install demucs`.\n- `clone` - a voice sample drives timbre and H3 speaks the line written in\n  the prompt's `<d>` tag. No recording session; expect some drift across a\n  long episode. Good for the proxy pass and for incidental characters.\n\n### Sampling\n4 steps / `euler` / `simple` / LoRA 1.0. SLA stays LAST in the model chain,\nwired to both the guider and the scheduler.\n\nIf identity slips, in order: raise `panel_mode` to `full`, then try\n`res_multistep` (roughly doubles time), then drop `sparsity_ratio` to 0.80.\n"
+   },
+   "color": "#432",
+   "bgcolor": "#653"
+  },
+  {
+   "id": 91,
+   "type": "MarkdownNote",
+   "pos": [
+    -3260,
+    1420
+   ],
+   "size": [
+    620,
+    420
+   ],
+   "flags": {},
+   "order": 6,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [],
+   "title": "Note: what H3 gives you",
+   "properties": {
+    "cnr_id": null,
+    "ver": "0.30.0",
+    "Node name for S&R": "MarkdownNote"
+   },
+   "widgets_values": [
+    "## Frames are available\n\n`VAEDecode` emits the whole frame batch as IMAGE **before** anything muxes it\ninto a video. Save Shot writes them as a PNG sequence when `save_frames` is\non, and always writes H3's audio separately as `_h3.wav`.\n\n**There is no alpha channel.** H3 outputs opaque RGB with no matte, so\ncompositing here means grading, effects and titles - not lifting a character\noff a background.\n\nBudget ~16-50 GB of PNG per 12-minute episode at 1344x768. Leave\n`save_frames` off for shots that need no finishing work.\n"
+   ],
+   "widgets_values_named": {
+    "text": "## Frames are available\n\n`VAEDecode` emits the whole frame batch as IMAGE **before** anything muxes it\ninto a video. Save Shot writes them as a PNG sequence when `save_frames` is\non, and always writes H3's audio separately as `_h3.wav`.\n\n**There is no alpha channel.** H3 outputs opaque RGB with no matte, so\ncompositing here means grading, effects and titles - not lifting a character\noff a background.\n\nBudget ~16-50 GB of PNG per 12-minute episode at 1344x768. Leave\n`save_frames` off for shots that need no finishing work.\n"
+   },
+   "color": "#432",
+   "bgcolor": "#653"
+  },
+  {
+   "id": 44,
+   "type": "SaveVideo",
+   "pos": [
+    698.6689999999999,
+    310.64799999999997
+   ],
+   "size": [
+    760,
+    106
+   ],
+   "flags": {},
+   "order": 22,
+   "mode": 0,
+   "inputs": [
+    {
+     "localized_name": "video",
+     "name": "video",
+     "type": "VIDEO",
+     "link": 39
+    },
+    {
+     "localized_name": "filename_prefix",
+     "name": "filename_prefix",
+     "type": "STRING",
+     "widget": {
+      "name": "filename_prefix"
+     },
+     "link": null
+    },
+    {
+     "localized_name": "format",
+     "name": "format",
+     "type": "COMFY_DYNAMICCOMBO_V3",
+     "widget": {
+      "name": "format"
+     },
+     "link": null
+    },
+    {
+     "localized_name": "format.codec",
+     "name": "format.codec",
+     "type": "COMFY_DYNAMICCOMBO_V3",
+     "widget": {
+      "name": "format.codec"
+     },
+     "link": null
+    },
+    {
+     "localized_name": "codec",
+     "name": "codec",
+     "shape": 7,
+     "type": "COMFY_DYNAMICCOMBO_V3",
+     "widget": {
+      "name": "codec"
+     },
+     "link": null
+    }
+   ],
+   "outputs": [
+    {
+     "localized_name": "video",
+     "name": "video",
+     "type": "VIDEO",
+     "links": []
+    }
+   ],
+   "title": "Daily",
+   "properties": {
+    "cnr_id": "comfy-core",
+    "ver": "0.30.0",
+    "Node name for S&R": "SaveVideo"
+   },
+   "widgets_values": [
+    "video/H3_shot",
+    "auto",
+    "auto",
+    "auto"
+   ],
+   "widgets_values_named": {
+    "filename_prefix": "video/H3_shot",
+    "format": "auto",
+    "format.codec": "auto",
+    "codec": "auto"
+   }
+  },
+  {
+   "id": 42,
+   "type": "H3SaveShot",
+   "pos": [
+    -108.021,
+    309.31700000000006
+   ],
+   "size": [
+    440,
+    300
+   ],
+   "flags": {},
+   "order": 20,
+   "mode": 0,
+   "inputs": [
+    {
+     "localized_name": "images",
+     "name": "images",
+     "type": "IMAGE",
+     "link": 33
+    },
+    {
+     "localized_name": "shot_id",
+     "name": "shot_id",
+     "type": "STRING",
+     "link": 34
+    },
+    {
+     "localized_name": "audio_policy",
+     "name": "audio_policy",
+     "type": "STRING",
+     "link": 35
+    },
+    {
+     "localized_name": "audio",
+     "name": "audio",
+     "shape": 7,
+     "type": "AUDIO",
+     "link": 36
+    },
+    {
+     "localized_name": "project_root",
+     "name": "project_root",
+     "type": "STRING",
+     "widget": {
+      "name": "project_root"
+     },
+     "link": null
+    },
+    {
+     "localized_name": "subfolder",
+     "name": "subfolder",
+     "type": "STRING",
+     "widget": {
+      "name": "subfolder"
+     },
+     "link": null
+    },
+    {
+     "localized_name": "take",
+     "name": "take",
+     "type": "INT",
+     "widget": {
+      "name": "take"
+     },
+     "link": null
+    },
+    {
+     "localized_name": "fps",
+     "name": "fps",
+     "type": "FLOAT",
+     "widget": {
+      "name": "fps"
+     },
+     "link": null
+    },
+    {
+     "localized_name": "save_frames",
+     "name": "save_frames",
+     "type": "BOOLEAN",
+     "widget": {
+      "name": "save_frames"
+     },
+     "link": null
+    }
+   ],
+   "outputs": [
+    {
+     "localized_name": "shot_dir",
+     "name": "shot_dir",
+     "type": "STRING",
+     "links": []
+    },
+    {
+     "localized_name": "status",
+     "name": "status",
+     "type": "STRING",
+     "links": []
+    }
+   ],
+   "title": "Save Shot (frames / wav / mp4)",
+   "properties": {
+    "Node name for S&R": "H3SaveShot",
+    "cnr_id": null,
+    "ver": "0.30.0"
+   },
+   "widgets_values": [
+    "path/to/project/ep01",
+    "renders",
+    1,
+    24,
+    false
+   ],
+   "widgets_values_named": {
+    "project_root": "path/to/project/ep01",
+    "subfolder": "renders",
+    "take": 1,
+    "fps": 24,
+    "save_frames": false
+   },
+   "color": "#223",
+   "bgcolor": "#335"
+  },
+  {
+   "id": 11,
+   "type": "H3ShotListLoader",
+   "pos": [
+    -1963.9930000000004,
+    432.6619999999999
+   ],
+   "size": [
+    400,
+    498
+   ],
+   "flags": {},
+   "order": 9,
+   "mode": 0,
+   "inputs": [
+    {
+     "localized_name": "project_root",
+     "name": "project_root",
+     "type": "STRING",
+     "widget": {
+      "name": "project_root"
+     },
+     "link": null
+    },
+    {
+     "localized_name": "shotlist_file",
+     "name": "shotlist_file",
+     "type": "STRING",
+     "widget": {
+      "name": "shotlist_file"
+     },
+     "link": null
+    },
+    {
+     "localized_name": "index",
+     "name": "index",
+     "type": "INT",
+     "widget": {
+      "name": "index"
+     },
+     "link": 4
+    },
+    {
+     "localized_name": "panel_mode",
+     "name": "panel_mode",
+     "type": "COMBO",
+     "widget": {
+      "name": "panel_mode"
+     },
+     "link": null
+    },
+    {
+     "localized_name": "fps",
+     "name": "fps",
+     "type": "FLOAT",
+     "widget": {
+      "name": "fps"
+     },
+     "link": null
+    },
+    {
+     "localized_name": "resolution_override",
+     "name": "resolution_override",
+     "shape": 7,
+     "type": "STRING",
+     "widget": {
+      "name": "resolution_override"
+     },
+     "link": null
+    }
+   ],
+   "outputs": [
+    {
+     "localized_name": "shot_id",
+     "name": "shot_id",
+     "type": "STRING",
+     "links": [
+      34
+     ]
+    },
+    {
+     "localized_name": "prompt",
+     "name": "prompt",
+     "type": "STRING",
+     "links": [
+      16
+     ]
+    },
+    {
+     "localized_name": "ref_1",
+     "name": "ref_1",
+     "type": "IMAGE",
+     "links": [
+      9
+     ]
+    },
+    {
+     "localized_name": "ref_2",
+     "name": "ref_2",
+     "type": "IMAGE",
+     "links": [
+      10
+     ]
+    },
+    {
+     "localized_name": "ref_3",
+     "name": "ref_3",
+     "type": "IMAGE",
+     "links": [
+      11
+     ]
+    },
+    {
+     "localized_name": "ref_bg",
+     "name": "ref_bg",
+     "type": "IMAGE",
+     "links": [
+      12
+     ]
+    },
+    {
+     "localized_name": "ref_audio_1",
+     "name": "ref_audio_1",
+     "type": "AUDIO",
+     "links": [
+      13
+     ]
+    },
+    {
+     "localized_name": "ref_audio_2",
+     "name": "ref_audio_2",
+     "type": "AUDIO",
+     "links": [
+      14
+     ]
+    },
+    {
+     "localized_name": "ref_audio_3",
+     "name": "ref_audio_3",
+     "type": "AUDIO",
+     "links": [
+      15
+     ]
+    },
+    {
+     "localized_name": "width",
+     "name": "width",
+     "type": "INT",
+     "links": [
+      17
+     ]
+    },
+    {
+     "localized_name": "height",
+     "name": "height",
+     "type": "INT",
+     "links": [
+      18
+     ]
+    },
+    {
+     "localized_name": "length",
+     "name": "length",
+     "type": "INT",
+     "links": [
+      19
+     ]
+    },
+    {
+     "localized_name": "steps",
+     "name": "steps",
+     "type": "INT",
+     "links": [
+      40
+     ]
+    },
+    {
+     "localized_name": "seed",
+     "name": "seed",
+     "type": "INT",
+     "links": [
+      20
+     ]
+    },
+    {
+     "localized_name": "audio_policy",
+     "name": "audio_policy",
+     "type": "STRING",
+     "links": [
+      35
+     ]
+    },
+    {
+     "localized_name": "info",
+     "name": "info",
+     "type": "STRING",
+     "links": [
+      5
+     ]
+    },
+    {
+     "localized_name": "shot_count",
+     "name": "shot_count",
+     "type": "INT",
+     "links": []
+    }
+   ],
+   "title": "Shot List Loader",
+   "properties": {
+    "Node name for S&R": "H3ShotListLoader",
+    "cnr_id": null,
+    "ver": "0.30.0"
+   },
+   "widgets_values": [
+    "path/to/project/ep01",
+    "shotlist/shotlist_proxy.json",
+    0,
+    "auto",
+    24,
+    ""
+   ],
+   "widgets_values_named": {
+    "project_root": "path/to/project/ep01",
+    "shotlist_file": "shotlist/shotlist_proxy.json",
+    "index": 0,
+    "panel_mode": "auto",
+    "fps": 24,
+    "resolution_override": ""
+   },
+   "color": "#223",
+   "bgcolor": "#335"
+  },
+  {
+   "id": 10,
+   "type": "PrimitiveInt",
+   "pos": [
+    -1960,
+    300
+   ],
+   "size": [
+    400,
+    82
+   ],
+   "flags": {},
+   "order": 7,
+   "mode": 0,
+   "inputs": [
+    {
+     "localized_name": "value",
+     "name": "value",
+     "type": "INT",
+     "widget": {
+      "name": "value"
+     },
+     "link": null
+    }
+   ],
+   "outputs": [
+    {
+     "localized_name": "INT",
+     "name": "INT",
+     "type": "INT",
+     "links": [
+      4
+     ]
+    }
+   ],
+   "title": "Shot Index  (set control_after_generate)",
+   "properties": {
+    "cnr_id": "comfy-core",
+    "ver": "0.30.0",
+    "Node name for S&R": "PrimitiveInt"
+   },
+   "widgets_values": [
+    36,
+    "increment"
+   ],
+   "widgets_values_named": {
+    "value": 36,
+    "fixed": "increment"
+   }
+  },
+  {
+   "id": 12,
+   "type": "H3ShotInfo",
+   "pos": [
+    -1524.2823769661402,
+    982.6652647294034
+   ],
+   "size": [
+    400,
+    260
+   ],
+   "flags": {},
+   "order": 13,
+   "mode": 0,
+   "inputs": [
+    {
+     "localized_name": "info",
+     "name": "info",
+     "type": "STRING",
+     "link": 5
+    }
+   ],
+   "outputs": [],
+   "title": "Shot Info (readout)",
+   "properties": {
+    "Node name for S&R": "H3ShotInfo",
+    "cnr_id": null,
+    "ver": "0.30.0"
+   },
+   "color": "#223",
+   "bgcolor": "#335"
+  }
+ ],
+ "links": [
+  [
+   1,
+   1,
+   0,
+   2,
+   0,
+   "MODEL"
+  ],
+  [
+   2,
+   2,
+   0,
+   3,
+   0,
+   "MODEL"
+  ],
+  [
+   3,
+   3,
+   0,
+   4,
+   0,
+   "MODEL"
+  ],
+  [
+   4,
+   10,
+   0,
+   11,
+   2,
+   "INT"
+  ],
+  [
+   5,
+   11,
+   15,
+   12,
+   0,
+   "STRING"
+  ],
+  [
+   6,
+   5,
+   0,
+   20,
+   0,
+   "CLIP"
+  ],
+  [
+   7,
+   6,
+   0,
+   20,
+   1,
+   "VAE"
+  ],
+  [
+   8,
+   7,
+   0,
+   20,
+   2,
+   "VAE"
+  ],
+  [
+   9,
+   11,
+   2,
+   20,
+   3,
+   "IMAGE"
+  ],
+  [
+   10,
+   11,
+   3,
+   20,
+   4,
+   "IMAGE"
+  ],
+  [
+   11,
+   11,
+   4,
+   20,
+   5,
+   "IMAGE"
+  ],
+  [
+   12,
+   11,
+   5,
+   20,
+   6,
+   "IMAGE"
+  ],
+  [
+   13,
+   11,
+   6,
+   20,
+   10,
+   "AUDIO"
+  ],
+  [
+   14,
+   11,
+   7,
+   20,
+   11,
+   "AUDIO"
+  ],
+  [
+   15,
+   11,
+   8,
+   20,
+   12,
+   "AUDIO"
+  ],
+  [
+   16,
+   11,
+   1,
+   20,
+   13,
+   "STRING"
+  ],
+  [
+   17,
+   11,
+   9,
+   20,
+   14,
+   "INT"
+  ],
+  [
+   18,
+   11,
+   10,
+   20,
+   15,
+   "INT"
+  ],
+  [
+   19,
+   11,
+   11,
+   20,
+   16,
+   "INT"
+  ],
+  [
+   20,
+   11,
+   13,
+   30,
+   0,
+   "INT"
+  ],
+  [
+   21,
+   4,
+   0,
+   31,
+   0,
+   "MODEL"
+  ],
+  [
+   22,
+   20,
+   0,
+   31,
+   1,
+   "CONDITIONING"
+  ],
+  [
+   23,
+   4,
+   0,
+   33,
+   0,
+   "MODEL"
+  ],
+  [
+   24,
+   30,
+   0,
+   34,
+   0,
+   "NOISE"
+  ],
+  [
+   25,
+   31,
+   0,
+   34,
+   1,
+   "GUIDER"
+  ],
+  [
+   26,
+   32,
+   0,
+   34,
+   2,
+   "SAMPLER"
+  ],
+  [
+   27,
+   33,
+   0,
+   34,
+   3,
+   "SIGMAS"
+  ],
+  [
+   28,
+   20,
+   1,
+   34,
+   4,
+   "LATENT"
+  ],
+  [
+   29,
+   34,
+   0,
+   40,
+   0,
+   "LATENT"
+  ],
+  [
+   30,
+   6,
+   0,
+   40,
+   1,
+   "VAE"
+  ],
+  [
+   31,
+   34,
+   0,
+   41,
+   0,
+   "LATENT"
+  ],
+  [
+   32,
+   7,
+   0,
+   41,
+   1,
+   "VAE"
+  ],
+  [
+   33,
+   40,
+   0,
+   42,
+   0,
+   "IMAGE"
+  ],
+  [
+   34,
+   11,
+   0,
+   42,
+   1,
+   "STRING"
+  ],
+  [
+   35,
+   11,
+   14,
+   42,
+   2,
+   "STRING"
+  ],
+  [
+   36,
+   41,
+   0,
+   42,
+   3,
+   "AUDIO"
+  ],
+  [
+   37,
+   40,
+   0,
+   43,
+   0,
+   "IMAGE"
+  ],
+  [
+   38,
+   41,
+   0,
+   43,
+   1,
+   "AUDIO"
+  ],
+  [
+   39,
+   43,
+   0,
+   44,
+   0,
+   "VIDEO"
+  ],
+  [
+   40,
+   11,
+   12,
+   33,
+   2,
+   "INT"
+  ]
+ ],
+ "groups": [
+  {
+   "id": 1,
+   "title": "Models + SLA speedup",
+   "bounding": [
+    -2630,
+    230,
+    620,
+    1180
+   ],
+   "color": "#3f789e",
+   "flags": {}
+  },
+  {
+   "id": 2,
+   "title": "Shot list",
+   "bounding": [
+    -1990,
+    230,
+    460,
+    790
+   ],
+   "color": "#3f789e",
+   "flags": {}
+  },
+  {
+   "id": 3,
+   "title": "Ref2VA conditioning",
+   "bounding": [
+    -1510,
+    230,
+    580,
+    790
+   ],
+   "color": "#3f789e",
+   "flags": {}
+  },
+  {
+   "id": 4,
+   "title": "Sampling",
+   "bounding": [
+    -930,
+    230,
+    420,
+    790
+   ],
+   "color": "#3f789e",
+   "flags": {}
+  },
+  {
+   "id": 5,
+   "title": "Decode + save",
+   "bounding": [
+    -490,
+    230,
+    1990,
+    790
+   ],
+   "color": "#3f789e",
+   "flags": {}
+  }
+ ],
+ "config": {},
+ "extra": {
+  "frontendVersion": "1.47.11",
+  "ds": {
+   "scale": 0.6830134553650714,
+   "offset": [
+    77.53490704748506,
+    11.403884884790294
+   ]
+  }
+ },
+ "version": 0.4
+}
