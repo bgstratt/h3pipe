@@ -36,7 +36,13 @@ Each image is fitted to its cell by its `fit`:
 Of every way to split the panels into rows, the one that leaves the least
 black and crops the least wins (fewer rows on a tie).
 
-`layout` is pure Python and `compose` needs PIL; both are importable (tests).
+A spec with "mode": "composite" is something else: the ONE reference image a
+single-reference edit target (flux_kontext) gets for a keyframe, the shot's
+figures pasted side by side over the location plate, bottom-aligned, about
+two thirds of the frame tall (`composite`, `composite_layout`).
+
+`layout` and `composite_layout` are pure Python and `compose` needs PIL; all
+are importable (tests).
 Not a ComfyUI node: nothing here is registered, so adding it needs no restart.
 """
 from __future__ import annotations
@@ -175,10 +181,72 @@ def _load(panel: dict, bg):
     return img
 
 
+def composite_layout(aspects: list[float], width: int, height: int,
+                     figure_height: float = 2 / 3, gap: float = 0.02,
+                     margin: float = 0.03) -> list[tuple[int, int, int, int]]:
+    """Where each figure of a composed reference goes: [(x, y, w, h)], side
+    by side in order, centred, bottom-aligned on the frame's bottom edge,
+    `figure_height` of the frame tall, `gap` (a fraction of the width)
+    between them; scaled down together when they'd be wider than the frame
+    less `margin` at each side. Pure Python."""
+    if not aspects:
+        return []
+    h = figure_height * height
+    g = gap * width
+    room = width * (1 - 2 * margin)
+    total = sum(a * h for a in aspects) + g * (len(aspects) - 1)
+    if total > room:
+        k = (room - g * (len(aspects) - 1)) / sum(a * h for a in aspects)
+        h *= k
+        total = room
+    x = (width - total) / 2
+    out = []
+    for a in aspects:
+        w = a * h
+        x0, y0 = int(round(x)), int(round(height - h))
+        out.append((x0, y0, max(1, int(round(x + w)) - x0), max(1, height - y0)))
+        x += w + g
+    return out
+
+
+def composite(spec: dict, out: str) -> dict:
+    """A single-reference edit target's one reference (h3refs.compose_composite):
+    the plate covering the frame (or `background`), with the figures pasted
+    over it by composite_layout. spec = {"mode": "composite", "width",
+    "height", "background", "figure_height", "gap", "plate": {"path",
+    "crop"?} | None, "figures": [{"path", "crop"?}]}. Returns {"width",
+    "height", "boxes"} (the figures')."""
+    from PIL import Image
+    width, height = int(spec["width"]), int(spec["height"])
+    bg = BACKGROUNDS.get(spec.get("background", "white"), (255, 255, 255))
+    frame = Image.new("RGB", (width, height), bg)
+    plate = spec.get("plate")
+    if plate:
+        im = _load(plate, bg)
+        (l, t, r, b), _box = fit(im.width / im.height, width, height, "cover")
+        src = im.crop((int(round(l * im.width)), int(round(t * im.height)),
+                       int(round(r * im.width)), int(round(b * im.height))))
+        frame.paste(src.resize((width, height), Image.LANCZOS), (0, 0))
+    figures = [_load(f, bg) for f in spec.get("figures") or []]
+    if not figures and not plate:
+        raise ValueError("a composed reference needs a plate or a figure")
+    boxes = composite_layout([im.width / im.height for im in figures], width, height,
+                             float(spec.get("figure_height", 2 / 3)),
+                             float(spec.get("gap", 0.02)))
+    for im, (x, y, w, h) in zip(figures, boxes):
+        frame.paste(im.resize((w, h), Image.LANCZOS), (x, y))
+    os.makedirs(os.path.dirname(os.path.abspath(out)) or ".", exist_ok=True)
+    frame.save(out, format="PNG")
+    return {"width": width, "height": height, "boxes": [list(b) for b in boxes]}
+
+
 def compose(spec: dict, out: str) -> dict:
     """Write the sheet `spec` describes to `out` (PNG). Returns a report:
     {"width", "height", "boxes": [[x, y, w, h], ...]} (where each panel's
-    picture landed)."""
+    picture landed). A spec with "mode": "composite" is a composed reference
+    instead (composite)."""
+    if spec.get("mode") == "composite":
+        return composite(spec, out)
     from PIL import Image
     width, height = int(spec["width"]), int(spec["height"])
     bg = BACKGROUNDS.get(spec.get("background", "black"), (0, 0, 0))

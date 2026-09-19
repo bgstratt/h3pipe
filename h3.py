@@ -25,7 +25,10 @@ your projects, with the pipeline scripts beside it (see the README).
     python h3.py override Shows\\ep05 --episode-target ltx2
                                                     # every shot the script gives no target
                                                     # renders on ltx2 (built: back to series.json's)
-    (see h3edit.py for every takes/pick/override/keyframe flag)
+    python h3.py discard  Shows\\ep05 sh020 3 [--proxy]
+                                                    # move sh020 take 3 to renders/_trash/sh020/
+                                                    # (a cut pick of it goes back to latest)
+    (see h3edit.py for every takes/pick/override/keyframe/discard flag)
 
     python h3.py targets  [Shows\\ep05] [--json]     # which targets the running ComfyUI can
                                                     # render, and what to download for the rest
@@ -48,7 +51,7 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 STAGES = ("align", "build", "check", "refs", "render", "assemble", "all")
-EDIT = ("takes", "pick", "override", "keyframe")          # in-process, see h3edit.py
+EDIT = ("takes", "pick", "override", "keyframe", "discard")          # in-process, see h3edit.py
 # `targets` (readiness) runs in-process too, with the episode optional
 
 

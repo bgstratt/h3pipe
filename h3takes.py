@@ -19,6 +19,9 @@ A take of shot `sh020` in pass `final` lives in <episode>/renders/sh020/:
 Pass `proxy` uses renders_proxy/ instead. Takes made before sidecars existed
 have only the mp4 (and wav); they list as status "ok" with no provenance.
 
+A discarded take (discard_files) moves to <episode>/renders/_trash/sh020/ with
+its file names kept: nothing lists it, and its number is not reused.
+
 SIDECAR — JSON object. Written by the queuer at queue time with status
 "queued"; creating it is what reserves the take number (exclusive create, so
 two queuers can't get the same number). H3SaveShot then sets:
@@ -62,6 +65,13 @@ STRIP_FRAMES = 8
 # ---------------------------------------------------------------------------
 # names and paths
 # ---------------------------------------------------------------------------
+
+TRASH = "_trash"            # discarded takes: <renders>/_trash/<shot>/, refs/_takes/_trash/<key>/
+
+
+class StillQueued(Exception):
+    """Discard of a take that is still queued (cancel it first)."""
+
 
 def safe_id(shot_id: str) -> str:
     """The folder/file-safe form of a shot id. Same rule as the node and h3render."""
@@ -108,6 +118,55 @@ class TakePaths:
 def take_paths(root: str, pass_: str, shot_id: str, take: int,
                folder: str | None = None) -> TakePaths:
     return TakePaths(shot_dir(root, pass_, shot_id, folder), stem(shot_id, take))
+
+
+def trash_dir(root: str, pass_: str, shot_id: str, folder: str | None = None) -> str:
+    """Where a shot's discarded takes go: <renders>/_trash/<shot>/."""
+    return os.path.join(root, folder or pass_subfolder(pass_), TRASH, safe_id(shot_id))
+
+
+def stem_files(d: str, stem_: str) -> list[str]:
+    """Every file in `d` that belongs to the take `stem_` (sh020_t03.json,
+    sh020_t03.mp4, sh020_t03_strip.jpg, ...; not sh020_t030.*), sorted."""
+    try:
+        names = os.listdir(d)
+    except OSError:
+        return []
+    return sorted(os.path.join(d, n) for n in names
+                  if n.startswith(stem_) and n[len(stem_):len(stem_) + 1] in (".", "_")
+                  and os.path.isfile(os.path.join(d, n)))
+
+
+def in_trash(d: str, stem_: str) -> bool:
+    """True when `d` (a trash folder, or any folder under it) holds a file of
+    the take `stem_`: its number stays used."""
+    if not os.path.isdir(d):
+        return False
+    for dirpath, _dirs, _files in os.walk(d):
+        if stem_files(dirpath, stem_):
+            return True
+    return False
+
+
+def discard_files(files: list[str], trash: str) -> list[str]:
+    """Move `files` into the folder `trash`, names kept. Nothing is deleted:
+    when a name is already there (a take number used again by an explicit
+    re-render), the whole set goes to a dated subfolder instead. Returns the
+    new paths."""
+    dst = trash
+    if any(os.path.exists(os.path.join(dst, os.path.basename(f))) for f in files):
+        stamp = _dt.datetime.now().strftime("%Y%m%d-%H%M%S")
+        dst, n = os.path.join(trash, stamp), 1
+        while os.path.exists(dst):
+            n += 1
+            dst = os.path.join(trash, f"{stamp}-{n}")
+    os.makedirs(dst, exist_ok=True)
+    out = []
+    for f in files:
+        to = os.path.join(dst, os.path.basename(f))
+        os.replace(f, to)
+        out.append(to)
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -256,8 +315,10 @@ def reserve_take(root: str, pass_: str, shot_id: str, sidecar: dict,
         lambda k: take_paths(root, pass_, shot_id, k, folder).sidecar,
         lambda k: dict(sidecar, version=SIDECAR_VERSION, shot=shot_id, take=k,
                        **{"pass": pass_}),
-        # a legacy take (mp4, no sidecar) owns its number
-        taken=lambda k: os.path.isfile(take_paths(root, pass_, shot_id, k, folder).mp4))
+        # a legacy take (mp4, no sidecar) owns its number, and so does a discarded one
+        taken=lambda k: (os.path.isfile(take_paths(root, pass_, shot_id, k, folder).mp4)
+                         or in_trash(trash_dir(root, pass_, shot_id, folder),
+                                     stem(shot_id, k))))
     return Take(shot_id, n, pass_, take_paths(root, pass_, shot_id, n, folder), data)
 
 

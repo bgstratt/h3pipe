@@ -8,6 +8,9 @@ ref takes (h3refs.py), and put each one at the path the series config names.
     python3 kreagen.py --project-root . --all            # every ref in the series config
     python3 kreagen.py --project-root . --list
     python3 kreagen.py --project-root . --dry-run
+    python3 kreagen.py --project-root . --clear location:kitchen     # unpick a ref
+    python3 kreagen.py --project-root . --discard subject:ada:02_side:3
+                                                     # a candidate to refs/_takes/_trash/
 
 Reads  <project_root>/refs_todo.json (what this episode uses; --all: every ref)
        and series.json, the series config (in the episode folder or its parent)
@@ -120,6 +123,36 @@ def job_name(j: dict, job: R.GenJob) -> str:
     return f"{j['name']}:{job.view}" if job.view else j["name"]
 
 
+def parse_discard(spec: str) -> tuple[str, str | None, int]:
+    """REF[:VIEW]:TAKE -> (ref id, view or None, take). ValueError if malformed."""
+    rid, _, tk = spec.rpartition(":")
+    if not rid or not re.fullmatch(r"[tT]?\d+", tk):
+        raise ValueError(f"--discard takes REF[:VIEW]:TAKE (e.g. location:kitchen:3), "
+                         f"not {spec!r}")
+    view = None
+    m = re.fullmatch(r"(subject:[^:]+):(\d\d_[a-z]+)", rid)
+    if m:
+        rid, view = m.group(1), m.group(2)
+    return rid, view, int(tk.lstrip("tT"))
+
+
+def discard(s, ep: str, specs: list[str]) -> int:
+    """kreagen --discard: move each candidate to refs/_takes/_trash/."""
+    failed = 0
+    for spec in specs:
+        try:
+            rid, view, take = parse_discard(spec)
+            res = R.discard_take(s, R.find_ref(s, rid), view, take)
+        except (ValueError, R.UnknownRef, R.T.StillQueued) as e:
+            print(f"  !! {spec}: {e}")
+            failed += 1
+            continue
+        where = os.path.relpath(os.path.dirname(res.moved[0]), ep) if res.moved else "the trash"
+        print(f"  {spec}: moved {len(res.moved)} file(s) to {where}"
+              + ("; it was the pick, so the ref is cleared" if res.cleared else ""))
+    return 1 if failed else 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -159,6 +192,10 @@ def main() -> int:
                     help="unpick a ref (e.g. location:kitchen, subject:ada:02_side): its file "
                          "goes, the takes stay, and nothing re-picks it until you pick; "
                          "repeatable")
+    ap.add_argument("--discard", metavar="REF[:VIEW]:TAKE", action="append",
+                    help="move a candidate to refs/_takes/_trash/ (e.g. location:kitchen:3, "
+                         "subject:ada:02_side:2, shot:sh020:first:1); nothing is deleted, and "
+                         "if it was the pick the ref is cleared as --clear does; repeatable")
     ap.add_argument("--negative-file",
                     help="text file with a negative prompt; only bites at --cfg > 1, so "
                          "it is for non-distilled models, not krea2 turbo")
@@ -189,8 +226,11 @@ def main() -> int:
     except ValueError as e:
         print(f"error: series.json: {e}", file=sys.stderr)
         return 1
+    if args.discard:
+        return discard(s, ep, args.discard)
+
     todo = None
-    if not args.all:
+    if not args.all and not args.clear:
         todo_p = os.path.join(root, "refs_todo.json")
         if not os.path.isfile(todo_p):
             print(f"error: {todo_p} not found. Run h3build first (or pass --all to work "
