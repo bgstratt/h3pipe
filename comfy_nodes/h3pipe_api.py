@@ -127,6 +127,28 @@ class Context:
             return list(self.comfy.choices(class_type, field) or [])
         return []
 
+    def model_choices(self, folder: str | None, class_type: str | None,
+                      field: str | None) -> list | None:
+        """model_list, except that None means "can't tell" (no folder_paths
+        and no answer from /object_info for that loader), so queue-time
+        resolution leaves the param alone instead of calling it missing."""
+        if self._model_list is not None:
+            got = self._model_list(folder, class_type, field)
+            return None if got is None else list(got)
+        if folder:
+            try:
+                import folder_paths                       # only inside ComfyUI
+                return list(folder_paths.get_filename_list(folder))
+            except Exception:
+                pass
+        if class_type and field:
+            try:
+                got = self.comfy.choices(class_type, field, strict=True)
+            except Exception:
+                return None
+            return None if got is None else list(got)
+        return None
+
     @property
     def comfy(self):
         if self._comfy is None:
@@ -523,7 +545,8 @@ def post_render(ctx: Context, body):
         return got
 
     result = E.queue_shots(ep, pass_, shots, template, ctx.comfy, base_for,
-                           model_resolve=ctx.model_resolve, model_cache=ctx.model_cache)
+                           model_resolve=ctx.model_resolve, model_cache=ctx.model_cache,
+                           model_list=ctx.model_choices)
     for q in result["queued"]:
         # "queued" even if the job has already finished: the saver sends its own event
         take_event(ctx, ep, T.get_take(ep, pass_, q["shot"], q["take"]), "queued")
@@ -679,11 +702,12 @@ def put_override(ctx: Context, body):
         raise ApiError(404, f"{shot} is in no built shotlist of this episode")
     ov = T.load_overrides(ep)
     if "target" in fields:
-        # shared by both passes; the built target itself (or null) clears it
+        # shared by both passes; null clears it, and so does the built target
+        # itself unless an episode target is set (then it pins the shot there)
         want = _opt_target(fields["target"])
-        T.set_shot_target(ov, shot, None if want == built_target else want)
+        T.set_shot_target(ov, shot, E.keeps_shot_target(ov, want, built_target))
     # overrides are keyed by the target the shot renders on (after this change)
-    target = J.effective_target(ov, shot, built_target)
+    target = J.effective_target(ov, shot, built_target, root=ep)
     built = E.pass_entries(ep, shot, target)
     passes = list(T.PASSES) if both else [pass_]
     missing = [ps for ps in passes if ps not in built]
@@ -709,11 +733,12 @@ def delete_override(ctx: Context, query: dict):
     pass_ = check_pass(p) if p else None
     built_target = E.shot_built_target(ep, shot) or T.DEFAULT_TARGET
     ov = T.load_overrides(ep)
-    target = J.effective_target(ov, shot, built_target)
+    target = J.effective_target(ov, shot, built_target, root=ep)
     E.clear_shot_override(ov, shot, pass_, target)
     if pass_ is None:                                   # everything: the retarget too
         T.set_shot_target(ov, shot, None)
-        target = built_target
+        # back to the script's target, else the episode's, else the build's
+        target = J.effective_target(ov, shot, built_target, root=ep)
     T.save_overrides(ep, ov)
     episode_event(ctx, ep)
     built = E.pass_entries(ep, shot, target)
@@ -732,9 +757,69 @@ def get_targets(ctx: Context, query: dict):
     kind = query.get("kind") or None
     if kind is not None and kind not in TG.KINDS:
         raise ApiError(400, f"kind must be one of {', '.join(TG.KINDS)}, not {kind!r}")
-    return 200, {"targets": [t.describe() for t in TG.list_targets(kind)],
+    ready = query.get("ready")
+    if ready not in (None, "", "0", "1", "true", "false"):
+        raise ApiError(400, f"ready must be 1 or 0, not {ready!r}")
+    targets = TG.list_targets(kind)
+    out = [t.describe() for t in targets]
+    if ready in ("1", "true"):
+        rd = target_readiness(ctx)
+        for d in out:
+            d["readiness"] = rd.get(d["id"]) or {"status": "unknown", "missing": [],
+                                                 "resolved": {}, "features_off": [],
+                                                 "nodes_missing": []}
+    return 200, {"targets": out,
                  "default": {"video": TG.DEFAULT_VIDEO_TARGET,
                              "image": TG.DEFAULT_IMAGE_TARGET}}
+
+
+READY_TTL = 30.0                                          # seconds a readiness answer is kept
+_READY: dict = {}
+_READY_LOCK = None
+
+
+def target_readiness(ctx: Context) -> dict:
+    """Every target's readiness (h3edit.readiness) on this ComfyUI, from its
+    /object_info and model folders, kept READY_TTL seconds per ComfyUI
+    address. The handler runs off the event loop (h3pipe_routes); /object_info
+    is one self-request, and headers are only read to find a family
+    substitute (cached in the user folder)."""
+    import threading
+    import time
+    global _READY_LOCK
+    if _READY_LOCK is None:
+        _READY_LOCK = threading.Lock()
+    with _READY_LOCK:
+        hit = _READY.get(ctx.comfy_url)
+        if hit and time.monotonic() - hit[0] < READY_TTL:
+            return hit[1]
+        try:
+            info, error = ctx.comfy.object_info(), ""
+        except Exception as e:
+            info, error = None, f"ComfyUI didn't answer /object_info: {e}"
+        rd = E.readiness(TG.list_targets(), info, ctx.model_resolve, ctx.model_cache,
+                         error=error)
+        # an unanswered ComfyUI isn't worth remembering
+        if info is not None:
+            _READY[ctx.comfy_url] = (time.monotonic(), rd)
+        return rd
+
+
+@handler
+def put_episode_target(ctx: Context, body):
+    """The episode's video target (overrides.json's episode.target): the
+    default of every shot the script gives no target. null clears it. Never
+    writes series.json."""
+    body = body_dict(body)
+    ep = check_ep(ctx, body.get("ep"))
+    if "target" not in body:
+        raise ApiError(400, "target is required: a video target id, or null to clear it")
+    want = _opt_target(body.get("target"))
+    if not any(os.path.isfile(os.path.join(ep, J.shotlist_rel(ps))) for ps in T.PASSES):
+        raise ApiError(404, f"{ep} has no build: build the episode first")
+    info = E.set_episode_target(ep, want)
+    episode_event(ctx, ep)
+    return 200, {k: info[k] for k in ("target", "target_source", "series_target")}
 
 
 MATCH_ORDER = {"name": 0, "fingerprint": 1, "other": 2}
@@ -1101,6 +1186,7 @@ ROUTES = [
     ("PUT", "/h3pipe/cut", put_cut, "body"),
     ("PUT", "/h3pipe/override", put_override, "body"),
     ("DELETE", "/h3pipe/override", delete_override, "query"),
+    ("PUT", "/h3pipe/episode-target", put_episode_target, "body"),
     ("POST", "/h3pipe/assemble", post_assemble, "body"),
     ("GET", "/h3pipe/targets", get_targets, "query"),
     ("GET", "/h3pipe/models", get_models, "query"),

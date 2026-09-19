@@ -43,8 +43,13 @@
   },
 
   "models": {
-    "_note": "The family the model must be (targets/modelid.py): names first, then the file's header. Krea 2 fine-tunes (renamed, any quantization) have the same tensors and pass as Krea 2 with a note.",
-    "model": {"family": "krea2", "patterns": ["*krea*2*"]}
+    "_note": "The family the model must be (targets/modelid.py): names first, then the file's header. Krea 2 fine-tunes (renamed, any quantization) have the same tensors and pass as Krea 2 with a note. Tiers (docs/API.md): all required. text_encoder and vae are the workflow's own files (`default`, also binding.graph's), for readiness.",
+    "model": {"family": "krea2", "patterns": ["*krea*2*"], "tier": "required", "exclude": ["*lora*"]},
+    "text_encoder": {"family": "qwen3vl-4b", "patterns": ["*qwen3*vl*4b*"], "tier": "required",
+                     "class_type": "CLIPLoader", "field": "clip_name",
+                     "default": "qwen3vl_4b_fp8_scaled.safetensors"},
+    "vae": {"family": "wan2.1-vae", "patterns": ["wan_2.1_vae*", "*wan*2*1*vae*"], "tier": "required",
+            "class_type": "VAELoader", "field": "vae_name", "default": "wan_2.1_vae.safetensors"}
   },
 
   "presets": {
@@ -54,5 +59,12 @@
       "lora": "", "lora_strength": 1.0, "lora_clip_strength": 1.0,
       "steps": 12, "cfg": 1.0
     }
+  },
+
+  "downloads": {
+    "_note": "Where to get each file this target names (docs/API.md 'Downloads'). A url is only given when a trustworthy record has it: a ComfyUI template's or saved workflow's properties.models entry, or ComfyUI-Manager's model list; `source` says which. Otherwise url is null and source says what to search for. Never a guessed URL.",
+    "krea2_turbo_fp8_scaled.safetensors": {"folder": "diffusion_models", "url": "https://huggingface.co/Comfy-Org/Krea-2/resolve/main/diffusion_models/krea2_turbo_fp8_scaled.safetensors", "source": "ComfyUI template image_krea2_turbo_t2i.json (properties.models)"},
+    "qwen3vl_4b_fp8_scaled.safetensors": {"folder": "text_encoders", "url": "https://huggingface.co/Comfy-Org/Krea-2/resolve/main/text_encoders/qwen3vl_4b_fp8_scaled.safetensors", "source": "ComfyUI template image_krea2_turbo_t2i.json (properties.models)"},
+    "wan_2.1_vae.safetensors": {"folder": "vae", "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/vae/wan_2.1_vae.safetensors", "source": "ComfyUI template video_wan2_2_14B_i2v.json (properties.models)"}
   }
 }

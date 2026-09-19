@@ -14,9 +14,11 @@ cut, set per-shot overrides. The command-line face of what the editor does;
     python h3.py override Shows\\ep05 sh020 --dump-prompt > sh020.txt
     python h3.py override Shows\\ep05 sh020 --clear prompt seed
     python h3.py override Shows\\ep05 sh020 --clear
-    python h3.py override Shows\\ep05 sh020 --target ltx2      # retarget (--target built: undo)
+    python h3.py override Shows\\ep05 sh020 --target ltx2      # retarget (--target none: undo)
+    python h3.py override Shows\\ep05 --episode-target ltx2    # the episode's target (built: undo)
     python h3.py keyframe Shows\\ep05 sh020 [--from-prev | --from sh010[:3]] [--first | --last]
                                           [--frame N] [--proxy] [--pick | --no-pick]
+    python h3.py targets  [Shows\\ep05] [--json]               # readiness of every target
 
 `takes` shows every take with its status, why it is stale (script / ref /
 preset / target), and which take the cut uses. `pick` writes cut.json; `latest` puts a
@@ -27,6 +29,12 @@ and note apply to both passes. They are written to the block of the target
 the shot renders on now, so a retargeted shot's settings are its new
 target's. `--target` retargets the shot (both passes): its IR is compiled for
 that target at queue time, and a prompt override is ignored while it is.
+`--target built` puts it back on its build's target: that clears the
+retarget, or, while an episode target is set, pins the shot there.
+`--episode-target` sets the default target of every shot the script gives
+none (overrides.json's episode.target; series.json is never written).
+`targets` shows which targets the running ComfyUI can render (readiness) and
+what to download for the others.
 `keyframe` cuts a frame out of another shot's take and adds it as the shot's
 first (or last) keyframe: by default the previous shot's last frame, from the
 take that shot's cut entry uses (continuity). It is picked when the shot has no
@@ -292,7 +300,7 @@ def episode_status(root: str, pass_: str, folder: str | None = None) -> dict:
     for e in T.resolve_cut(cut, pass_, list(shots)):
         doc, shot = shots.get(e.shot, (doc0, None))
         built_target = J.shotlist_target(doc).id
-        target = J.effective_target(ov, e.shot, built_target)
+        target, target_source = J.target_choice(ov, e.shot, built_target, root=root)
         takes = T.list_takes(root, pass_, e.shot, folder) if shot else []
         chosen, chosen_take, chosen_ok = cut_take(root, e, takes)
         o = T.shot_override(ov, e.shot, pass_, target)
@@ -304,6 +312,8 @@ def episode_status(root: str, pass_: str, folder: str | None = None) -> dict:
             "shot": e.shot,
             "orphan": e.orphan,
             "target": target,
+            # request | override | script | episode | series | default
+            "target_source": target_source,
             "built_target": built_target,
             "profile": shot.get("profile") if shot else None,
             "sequence": shot.get("sequence") if shot else None,
@@ -358,9 +368,57 @@ def episode_status(root: str, pass_: str, folder: str | None = None) -> dict:
     d = doc0.get("defaults", {})
     return {"episode": doc0.get("episode", os.path.basename(root)),
             "title": doc0.get("title", ""), "pass": pass_,
-            "target": J.shotlist_target(doc0).id, "fps": fps, "width": d.get("width"),
+            **episode_target_info(root, ov, J.shotlist_target(doc0).id),
+            "fps": fps, "width": d.get("width"),
             "height": d.get("height"), "folder": folder or T.pass_subfolder(pass_),
             "shots": out}
+
+
+def episode_target_info(root: str, ov: dict | None = None, built: str | None = None) -> dict:
+    """The episode's default video target now in force: {"target",
+    "target_source": "editor" (overrides.json's episode target) | "series"
+    (the series config's series.target) | "default", "series_target" (the
+    series config's series.target, or None)}. `built` is the series
+    target's shotlist's, when the series config names none."""
+    ov = T.load_overrides(root) if ov is None else ov
+    series = J.series_target(root)
+    ep = T.episode_target(ov)
+    if ep:
+        return {"target": ep, "target_source": "editor", "series_target": series}
+    if series:
+        return {"target": series, "target_source": "series", "series_target": series}
+    return {"target": J.TG.DEFAULT_VIDEO_TARGET if built is None else built,
+            "target_source": "default", "series_target": None}
+
+
+def set_episode_target(root: str, target: str | None) -> dict:
+    """Set (or with None clear) the episode's video target in overrides.json;
+    returns episode_target_info. ValueError (TargetError) for an id that
+    isn't a video target. series.json is never written."""
+    if target:
+        J.check_video_target(target)
+    ov = T.load_overrides(root)
+    name = ""
+    for ps in T.PASSES:
+        if os.path.isfile(os.path.join(root, J.shotlist_rel(ps))):
+            name = J.load_shotlist(root, ps).get("episode", "")
+            break
+    T.set_episode_target(ov, target or None, name or os.path.basename(os.path.normpath(root)))
+    T.save_overrides(root, ov)
+    return episode_target_info(root, ov)
+
+
+def keeps_shot_target(ov: dict, want: str | None, built_target: str) -> str | None:
+    """What a shot override's `target` should store for a request of `want`:
+    None clears it. Without an episode target, the built target clears it
+    too (the shot renders on it anyway). With one, the built target is kept
+    as an explicit pin: the shot stays on its build's target while the rest
+    of the episode follows the episode target."""
+    if not want:
+        return None
+    if want == built_target and not T.episode_target(ov):
+        return None
+    return want
 
 
 def shot_detail(root: str, pass_: str, shot_id: str, folder: str | None = None) -> dict:
@@ -391,6 +449,7 @@ def shot_detail(root: str, pass_: str, shot_id: str, folder: str | None = None) 
         view["target"] = T.shot_target(ov, shot_id)
     return {
         "shot": shot_id, "pass": pass_, "index": idx, "target": job.target,
+        "target_source": job.target_source,
         "built_target": job.built_target,
         "profile": shot.get("profile"), "built": shot,
         "built_prompt": prompt_text(shot.get("prompt")),
@@ -626,7 +685,7 @@ def cancel_take(root: str, pass_: str, shot_id: str, take: int, comfy,
 def queue_shots(root: str, pass_: str, shot_ids: list[str] | None,
                 template: J.RenderRequest, comfy, base,
                 folder: str | None = None, model_resolve=J.DEFAULT,
-                model_cache=J.DEFAULT) -> dict:
+                model_cache=J.DEFAULT, model_list=None) -> dict:
     """Plan and queue a take for each shot (every shot when `shot_ids` is
     None), as h3render does, without waiting for any of them.
 
@@ -634,9 +693,14 @@ def queue_shots(root: str, pass_: str, shot_ids: list[str] | None,
     episode), or a function (target id -> API graph) for episodes whose shots
     render on different targets. A job's input images (keyframes) are
     uploaded to ComfyUI first (h3jobs.stage_inputs). Its model files are
-    checked first (h3jobs.check_models, with `model_resolve` and
-    `model_cache`): a file of another family skips the shot, with
-    `model_mismatch` listing the checks, unless the template allows it.
+    resolved to installed ones first (h3jobs.resolve_models: ComfyUI's
+    lists, from `model_list(folder, class_type, field)` or `comfy`'s
+    /object_info): a missing required file skips the shot, with
+    `missing_files` saying what to download; a missing accelerator renders
+    the base preset. Then they are checked (h3jobs.check_models, with
+    `model_resolve` and `model_cache`): a file of another family skips the
+    shot, with `model_mismatch` listing the checks, unless the template
+    allows it.
 
     Returns {"queued": [{shot, take, prompt_id, seed, seed_source, target}],
     "skipped": [{shot, take, reason}], "errors": [{shot, error, take?}]}. A
@@ -646,6 +710,7 @@ def queue_shots(root: str, pass_: str, shot_ids: list[str] | None,
     ov = T.load_overrides(root)
     index = {d["shots"][i]["id"]: (d, i) for d, i in J.episode_shots(root, pass_, docs)}
     out = {"queued": [], "skipped": [], "errors": []}
+    listing = J.model_lister(comfy, model_list)
     for sid in (shot_ids if shot_ids is not None else list(index)):
         if sid not in index:
             out["errors"].append({"shot": sid, "error": f"{sid} is not in "
@@ -669,6 +734,16 @@ def queue_shots(root: str, pass_: str, shot_ids: list[str] | None,
             continue
         if job.action == "error":
             out["errors"].append({"shot": sid, "error": job.error})
+            continue
+        J.resolve_models(job, listing, model_resolve, model_cache)
+        if job.action == "missing_files":
+            out["skipped"].append({"shot": sid, "target": job.target,
+                                   "reason": "model files not installed: "
+                                             + job.missing_files_note(),
+                                   "missing_files": [
+                                       {k: m.get(k) for k in ("param", "tier", "want", "family",
+                                                              "folder", "url", "source")}
+                                       for m in job.missing_files]})
             continue
         J.check_models(job, model_resolve, model_cache)
         if job.action == "mismatch":
@@ -694,6 +769,193 @@ def queue_shots(root: str, pass_: str, shot_ids: list[str] | None,
                               "seed": job.seed, "seed_source": job.seed_source,
                               "target": job.target})
     return out
+
+
+# ---------------------------------------------------------------------------
+# readiness: can this ComfyUI render each target, and what is missing?
+# ---------------------------------------------------------------------------
+
+READY_STATUSES = ("ready", "degraded", "not_ready", "unknown")
+_NODES: dict = {}
+
+
+def target_nodes(t) -> dict[str, dict]:
+    """{node class: {"tier", "feature"}} a target's renders need: its
+    workflow's classes as a job's graph keeps them (the saver in place, then
+    pruned to what the saver needs), its loader and saver, and target.json's
+    `nodes`. From the repo's copy of the workflow; cached per target."""
+    if t.id in _NODES:
+        return _NODES[t.id]
+    b = t.binding
+    need: dict[str, dict] = {}
+    try:
+        g = J.load_graph(b.workflow) if b.workflow and os.path.isfile(b.workflow) else {}
+        if g and b.saver.get("replace"):
+            J.prepare_saver(g, b)
+        # a job patches a value into every widget the binding names, cutting
+        # whatever fed it (the LTX prompt enhancer): do the same before pruning
+        for name in b.params:
+            for spec in b.specs(name):
+                if not (spec.get("class_type") and spec.get("field")):
+                    continue
+                try:
+                    ids = J.select_nodes(g, spec)
+                except ValueError:
+                    continue
+                for nid in ids:
+                    if isinstance(g[nid]["inputs"].get(spec["field"]), list):
+                        g[nid]["inputs"][spec["field"]] = ""
+        if g and b.prune and b.saver_class:
+            J.prune(g, J.node_of(g, b.saver_class))
+        classes = {v["class_type"] for v in g.values()}
+    except Exception:
+        classes = set()
+    if b.saver.get("replaces"):                          # krea2: the saver takes SaveImage's place
+        classes.discard(b.saver["replaces"])
+    for c in sorted(classes | {x for x in (b.loader_class, b.saver_class) if x}):
+        need[c] = {"tier": "required", "feature": ""}
+    need.update(t.nodes)
+    _NODES[t.id] = need
+    return need
+
+
+def readiness(targets, object_info: dict | None, resolve=None, cache=None,
+              extra: dict | None = None, series_cfg: dict | None = None,
+              error: str = "") -> dict[str, dict]:
+    """{target id: readiness} for each target (docs/API.md "Readiness"):
+
+      {"status": "ready" | "degraded" | "not_ready" | "unknown",
+       "missing": [{"param", "tier", "want", "family", "label", "folder", "url",
+                    "source", "feature"?, "passes"}],
+       "resolved": {param: {"want", "using", "how", "tier"}}  (the final pass),
+       "by_pass": {pass: resolved},
+       "features_off": [...], "nodes_missing": [...]}
+
+    `object_info` is ComfyUI's /object_info (None: it didn't answer, so
+    every target is "unknown", with `error`). Each pass's files (the
+    target's presets, the series config's pass blocks over them when
+    `series_cfg` is given) resolve against the loaders' choices
+    (targets.resolve_models); a missing accelerator is judged through the
+    pass's `base`. not_ready: a required file or node is missing;
+    degraded: only accelerators or optional files (or optional nodes)."""
+    out = {}
+    for t in targets:
+        if object_info is None:
+            out[t.id] = {"status": "unknown", "missing": [], "resolved": {}, "by_pass": {},
+                         "features_off": [], "nodes_missing": [],
+                         "error": error or "ComfyUI didn't answer"}
+            continue
+
+        def listing(spec, info=object_info):
+            ct, fld = spec.get("class_type"), spec.get("field")
+            return J.choices_in(info, ct, fld, strict=True) if ct and fld else None
+
+        missing: dict[tuple, dict] = {}
+        blocked = False
+        features_off: list[str] = []
+        by_pass = {}
+        for pass_ in t.presets:
+            try:
+                wanted = J.TG.wanted_files(t, pass_, series_cfg)
+            except Exception:                           # a series config the preset can't read
+                wanted = J.TG.wanted_files(t, pass_, None)
+            r = J.TG.resolve_models(t, pass_, wanted, listing, resolve, extra, cache,
+                                    J.TG.lora_slot(t, pass_, series_cfg))
+            by_pass[pass_] = r["resolved"]
+            blocked = blocked or bool(r["blocked"])
+            for m in r["missing"]:
+                key = (m["param"], m["want"])
+                if key in missing:
+                    missing[key]["passes"].append(pass_)
+                else:
+                    missing[key] = dict(m, passes=[pass_])
+            for f in r["features_off"]:
+                if f not in features_off:
+                    features_off.append(f)
+        nodes_missing = []
+        for cls, spec in target_nodes(t).items():
+            if cls in object_info:
+                continue
+            nodes_missing.append(cls)
+            if spec["tier"] == "optional":
+                if spec["feature"] and spec["feature"] not in features_off:
+                    features_off.append(spec["feature"])
+            else:
+                blocked = True
+        status = ("not_ready" if blocked
+                  else "degraded" if missing or nodes_missing else "ready")
+        out[t.id] = {"status": status, "missing": list(missing.values()),
+                     "resolved": by_pass.get("final") or next(iter(by_pass.values()), {}),
+                     "by_pass": by_pass, "features_off": features_off,
+                     "nodes_missing": nodes_missing}
+    return out
+
+
+def ready_line(tid: str, r: dict) -> str:
+    """One target's readiness, one line: status and what's missing."""
+    n = len(r["missing"]) + len(r["nodes_missing"])
+    what = []
+    for tier in ("required", "accelerator", "optional"):
+        k = sum(1 for m in r["missing"] if m["tier"] == tier)
+        if k:
+            what.append(f"{k} {tier}")
+    if r["nodes_missing"]:
+        what.append(f"{len(r['nodes_missing'])} node(s)")
+    return f"  {tid:<20} {r['status']:<10}" + (f" missing {', '.join(what)}" if n else "")
+
+
+def cmd_targets(root: str | None, argv: list[str]) -> int:
+    """h3.py targets [<episode>] [--json] [--comfy URL]: each target's
+    readiness on the running ComfyUI."""
+    import json as _json
+    ap = argparse.ArgumentParser(prog="h3.py targets",
+                                 description="Which targets this ComfyUI can render, and what "
+                                             "to download for the rest.")
+    ap.add_argument("--json", action="store_true", help="print the readiness as JSON")
+    ap.add_argument("--comfy", default="http://127.0.0.1:8188")
+    ap.add_argument("--kind", choices=J.TG.KINDS)
+    args = ap.parse_args(argv)
+    series_cfg, extra, marks = None, {}, {}
+    if root:
+        series_cfg = J.series_config(root)
+        try:
+            extra = J.series_model_families(root)
+        except ValueError as e:
+            print(f"  ! series.json model_families ignored: {e}")
+        info = episode_target_info(root)
+        marks[info["target"]] = f"episode target ({info['target_source']})"
+    comfy = J.Comfy(args.comfy)
+    try:
+        object_info, error = comfy.object_info(), ""
+    except Exception as e:
+        object_info, error = None, f"ComfyUI at {args.comfy} didn't answer: {e}"
+    targets = J.TG.list_targets(args.kind)
+    ready = readiness(targets, object_info, J.model_resolver(), J.TG.modelid.temp_cache(),
+                      extra, series_cfg, error)
+    if args.json:
+        sys.stdout.write(_json.dumps({"comfy": args.comfy, "targets": ready}, indent=2) + "\n")
+        return 0 if object_info is not None else 1
+    print(f"\n  targets on {args.comfy}" + (f"  ·  {os.path.basename(root)}" if root else ""))
+    if object_info is None:
+        print(f"  !! {error}")
+    for t in targets:
+        r = ready[t.id]
+        print(ready_line(t.id, r) + (f"   <- {marks[t.id]}" if t.id in marks else ""))
+        for m in r["missing"]:
+            passes = "" if len(m["passes"]) == len(t.presets) else f" ({'/'.join(m['passes'])})"
+            what = f"feature off: {m['feature']}" if m["tier"] == "optional" and m.get("feature") \
+                else ("falls back to the base preset" if m["tier"] == "accelerator" else "")
+            print(f"      {m['tier']:<11} {m['param']:<13} {m['want']}{passes}"
+                  + (f"  [{what}]" if what else ""))
+            print(f"                  -> models/{m['folder']}/   "
+                  + (m["url"] if m.get("url") else f"no URL: {m['source']}"))
+        for c in r["nodes_missing"]:
+            print(f"      node        {c}  (update ComfyUI, or install the node pack)")
+        for param, v in sorted(r["resolved"].items()):
+            if v["how"] == "family":
+                print(f"      using       {param}: {v['using']} for {v['want']}")
+    print()
+    return 0 if object_info is not None else 1
 
 
 # Runs a script with its own folder on sys.path. `python script.py` normally
@@ -854,7 +1116,10 @@ def cmd_pick(root: str, argv: list[str]) -> int:
 
 def cmd_override(root: str, argv: list[str]) -> int:
     ap = argparse.ArgumentParser(prog="h3.py override")
-    ap.add_argument("shot")
+    ap.add_argument("shot", nargs="?", help="the shot (not needed with only --episode-target)")
+    ap.add_argument("--episode-target", metavar="TARGET",
+                    help="the episode's video target: every shot the script gives no target "
+                         "renders on it ('built' clears it: back to the series config's)")
     p = ap.add_mutually_exclusive_group()
     p.add_argument("--proxy", action="store_true", help="model/LoRA/steps for the proxy pass")
     p.add_argument("--both", action="store_true", help="model/LoRA/steps for both passes")
@@ -875,6 +1140,24 @@ def cmd_override(root: str, argv: list[str]) -> int:
                     help="print the prompt the next render would use, for editing")
     args = ap.parse_args(argv)
     pass_ = _pass(args)
+    if args.episode_target is not None:
+        want = None if args.episode_target in ("built", "none", "series", "") \
+            else args.episode_target
+        try:
+            info = set_episode_target(root, want)
+        except Exception as e:
+            print(f"  !! {e}")
+            return 2
+        print(f"  episode target: {info['target']} ({info['target_source']})"
+              + (f"; the series config says {info['series_target']}"
+                 if info["series_target"] and info["series_target"] != info["target"] else ""))
+        if info["target_source"] == "editor":
+            print(f"  shots the script gives no target render on {info['target']}; to make it "
+                  f"permanent, put \"target\": \"{info['target']}\" in series.json's \"series\"")
+        if not args.shot:
+            return 0
+    if not args.shot:
+        ap.error("give a shot, or --episode-target")
     try:
         doc, idx = J.find_shot(root, pass_, args.shot)
     except KeyError:
@@ -884,14 +1167,18 @@ def cmd_override(root: str, argv: list[str]) -> int:
     built_target = J.shotlist_target(doc).id
 
     if args.target is not None:
-        want = None if args.target in ("built", "none", "") else args.target
+        want = None if args.target in ("none", "") else args.target
+        if want == "built":
+            # with an episode target, 'built' pins the shot to its build's
+            # target; without one it clears the retarget
+            want = built_target
         if want:
             try:
                 J.check_video_target(want)
             except Exception as e:
                 print(f"  !! {e}")
                 return 2
-        T.set_shot_target(ov, args.shot, None if want == built_target else want)
+        T.set_shot_target(ov, args.shot, keeps_shot_target(ov, want, built_target))
 
     if args.dump_prompt:
         job = J.plan_job(root, pass_, doc, idx, J.RenderRequest(args.shot), ov)
@@ -903,7 +1190,7 @@ def cmd_override(root: str, argv: list[str]) -> int:
         return 0
 
     # the target the shot renders on now: its override block is the one written
-    target = J.effective_target(ov, args.shot, built_target)
+    target = J.effective_target(ov, args.shot, built_target, root=root)
     # each pass's entry for that target: overrides are stamped against it
     built = pass_entries(root, args.shot, target)
 
@@ -955,7 +1242,7 @@ def cmd_override(root: str, argv: list[str]) -> int:
         ov.setdefault("episode", doc.get("episode", ""))
         T.save_overrides(root, ov)
 
-    target = J.effective_target(ov, args.shot, built_target)
+    target = J.effective_target(ov, args.shot, built_target, root=root)
     if target != built_target:
         print(f"  {args.shot} renders on {target} (built for {built_target}); "
               f"a prompt override is ignored while it is retargeted")

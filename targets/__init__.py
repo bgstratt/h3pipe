@@ -62,16 +62,19 @@ Stdlib only.
 """
 from __future__ import annotations
 
+import copy
 import importlib
 import json
 import math
 import os
+import re
 from dataclasses import dataclass, field
 
 from . import modelid
 
 HERE =os.path.dirname(os.path.abspath(__file__))
 KINDS = ("video", "image")
+TIERS = ("required", "accelerator", "optional")
 DEFAULT_VIDEO_TARGET = "minimax_h3_ref2va"
 DEFAULT_IMAGE_TARGET = "krea2"
 PASSES = ("final", "proxy")
@@ -251,11 +254,19 @@ class Preset:
     width: int | None = None
     height: int | None = None
     extra: dict = field(default_factory=dict)
+    # target.json `presets.<pass>.base`: what the pass renders with when an
+    # `accelerator` model file (a turbo / distilled LoRA or checkpoint) isn't
+    # installed: steps, cfg, sampler, `loras` (usually []), a model... in the
+    # target's own terms (resolve_models). Kept out of `extra`, so it never
+    # reaches a shotlist.
+    base: dict | None = None
 
     def to_json(self) -> dict:
         d = {"model": self.model, "lora": self.lora, "steps": self.steps,
              "width": self.width, "height": self.height}
         d.update(self.extra)
+        if self.base is not None:
+            d["base"] = copy.deepcopy(self.base)
         return d
 
 
@@ -372,9 +383,12 @@ class Target:
             if name.startswith("_"):                      # a comment
                 continue
             p = dict(p)
+            base = p.pop("base", None)
             self.presets[name] = Preset(name, p.pop("model", None), p.pop("lora", None),
                                         p.pop("steps", None), p.pop("width", None),
-                                        p.pop("height", None), p)
+                                        p.pop("height", None), p,
+                                        {k: v for k, v in base.items() if not k.startswith("_")}
+                                        if isinstance(base, dict) else None)
         self._module = None
 
     def __repr__(self) -> str:
@@ -488,11 +502,76 @@ class Target:
                 continue
             w = self.binding.specs(param)
             ct = m.get("class_type") or (w[0].get("class_type") if w else None)
-            fld = m.get("field") or (w[0].get("field") if w else None)
+            # a LoRA spec names its file widget `name`
+            fld = m.get("field") or (w[0].get("field") or w[0].get("name") if w else None)
+            tier = m.get("tier") or "required"
+            if tier not in TIERS:
+                raise TargetError(f"{self.id}: models.{param}.tier must be one of "
+                                  f"{', '.join(TIERS)}, not {tier!r}")
             out[param] = {"family": m["family"],
                           "patterns": [str(p) for p in m.get("patterns") or []],
                           "folder": m.get("folder") or MODEL_FOLDERS.get((ct, fld)),
-                          "class_type": ct, "field": fld}
+                          "class_type": ct, "field": fld,
+                          # requirement tier (resolve_models): required |
+                          # accelerator | optional
+                          "tier": tier,
+                          # what an optional file switches on
+                          "feature": m.get("feature") or "",
+                          # the file the workflow loads when nothing names one
+                          "default": m.get("default") or None,
+                          # regexes whose captured word a substitute must share
+                          # with the wanted file (a step count, a noise stage,
+                          # distilled vs dev), and globs it must not match
+                          "keep": [str(k) for k in m.get("keep") or []],
+                          "exclude": [str(x) for x in m.get("exclude") or []]}
+        return out
+
+    @property
+    def downloads(self) -> dict[str, dict]:
+        """target.json `downloads`: {file name: {"folder", "url" (None: no
+        trustworthy record), "source"}}."""
+        return {k: dict(v) for k, v in (self.spec.get("downloads") or {}).items()
+                if not k.startswith("_") and isinstance(v, dict)}
+
+    @property
+    def nodes(self) -> dict[str, dict]:
+        """Node classes the target needs beyond its workflow's own (target.json
+        `nodes`): {class: {"tier": "required" | "optional", "feature"}}. A list
+        names required ones."""
+        raw = self.spec.get("nodes") or {}
+        if isinstance(raw, list):
+            raw = {n: {} for n in raw}
+        return {k: {"tier": (v or {}).get("tier") or "required",
+                    "feature": (v or {}).get("feature") or ""}
+                for k, v in raw.items() if not k.startswith("_")}
+
+    def named_files(self) -> dict[str, str]:
+        """{file name: the param that loads it} for every model file this
+        target names: each preset's (model, LoRAs, every model param's value),
+        its `base`, and the models' defaults. Each should have a `downloads`
+        entry."""
+        out: dict[str, str] = {}
+
+        def add(name, param):
+            if isinstance(name, str) and name and name.lower() not in ("none", "off"):
+                out.setdefault(name, param)
+
+        def add_loras(v):
+            for lo in (v or []) if isinstance(v, list) else []:
+                add(lo.get("name") if isinstance(lo, dict) else lo, "loras")
+
+        models = self.models
+        for p in self.presets.values():
+            for layer in (dict(p.extra, model=p.model, lora=p.lora), p.base or {}):
+                add(layer.get("model"), "model")
+                add(layer.get("lora"), "loras")
+                add_loras(layer.get("loras"))
+                for param in models:
+                    if param not in ("model", "loras"):
+                        add(layer.get(param), param)
+        for param, m in models.items():
+            add(m.get("default"), param)
+        add(self.recipe.get("ic_lora"), "loras")
         return out
 
     def capabilities(self) -> dict:
@@ -544,7 +623,7 @@ class Target:
         else:
             model = block.get("model", s.get("model", base.model or final.model))
         return Preset(pass_, model=model, lora=lora, steps=steps, width=width, height=height,
-                      extra=dict(base.extra))
+                      extra=dict(base.extra), base=copy.deepcopy(base.base))
 
     # -- description (GET /h3pipe/targets) ----------------------------------
 
@@ -561,8 +640,11 @@ class Target:
                 "short": self.short,
                 "capabilities": self.capabilities() if self.kind == "video" else {},
                 "models": {k: {"family": v["family"], "label": modelid.family_label(v["family"]),
-                               "patterns": list(v["patterns"]), "folder": v["folder"]}
-                           for k, v in self.models.items()}}
+                               "patterns": list(v["patterns"]), "folder": v["folder"],
+                               "tier": v["tier"],
+                               **({"feature": v["feature"]} if v["feature"] else {})}
+                           for k, v in self.models.items()},
+                "downloads": self.downloads}
 
 
 # ---------------------------------------------------------------------------
@@ -928,4 +1010,392 @@ def check_model(target: Target, param: str, filename: str, resolve=None,
         out.update(match="unknown", message=(
             f"{who} isn't named like {label} and its header matches no family h3pipe knows "
             f"({found.get('detail')})"))
+    return out
+
+
+# ---------------------------------------------------------------------------
+# requirement tiers: which installed file each model param renders with
+# ---------------------------------------------------------------------------
+#
+# A target's `models` params each have a tier (target.json `models.<param>.tier`):
+#
+#   required     the target can't render without it (the diffusion model, text
+#                encoder, VAEs): its shots are blocked, naming the file and
+#                where to get it (`downloads`)
+#   accelerator  a turbo / distilled LoRA (or checkpoint): without it the pass
+#                renders with its preset's `base` (more steps, real CFG, no LoRA)
+#   optional     only a feature needs it (the LTX duration head: `dur: model`)
+#
+# Each wanted file resolves to an INSTALLED one (ComfyUI's list for the param's
+# loader): the file itself, else the best installed file of the same family
+# (resolve_file). Resolution never picks a file of another family.
+
+PRECISION = re.compile(r"(?<![a-z0-9])(nvfp4|fp4|fp8|int8|int4|bf16|fp16|fp32)", re.I)
+
+
+def precision(name: str) -> str | None:
+    """The weight precision a file name says (fp8, int8, bf16, ...), or None."""
+    m = PRECISION.search(model_stem(name).lower().replace("-", "_"))
+    return m.group(1).lower() if m else None
+
+
+def _captured(rx: str, name: str) -> str | None:
+    m = re.search(rx, model_stem(name), re.I)
+    if not m:
+        return None
+    return (m.group(1) if m.groups() else m.group(0)).lower()
+
+
+def keeps(spec: dict, want: str, cand: str) -> bool:
+    """A substitute `cand` keeps what `want` says in each of the spec's `keep`
+    regexes (the same step count, noise stage, distilled vs dev): when the
+    wanted name has a match, the candidate must match with the same word."""
+    for rx in spec.get("keep") or []:
+        w = _captured(rx, want)
+        if w is not None and _captured(rx, cand) != w:
+            return False
+    return True
+
+
+def _same_file(a: str, b: str) -> bool:
+    """Two names of one file: equal, or equal once ComfyUI's subfolder is
+    left off ("LTX-2.3\\x.safetensors" is "x.safetensors")."""
+    def norm(s: str) -> str:
+        return s.replace("\\", "/").rsplit("/", 1)[-1].lower()
+    return a == b or norm(a) == norm(b)
+
+
+def resolve_file(target: Target, param: str, want: str, installed: list[str],
+                 resolve=None, extra: dict | None = None, cache=None,
+                 spec: dict | None = None) -> dict | None:
+    """The installed file a param renders with for `want`:
+    {"using", "how": "exact" | "family", "match": "file" | "name" |
+    "fingerprint", "detail"}, or None when nothing installed will do.
+
+    1. `want` itself (also in a subfolder of the models folder);
+    2. else the best installed file of the same family: a name match (the
+       family's patterns, plus the series config's model_families `extra`)
+       beats a fingerprint match (its header, read through `resolve(folder,
+       name)`, says the family: only for families a header can tell); a tie
+       goes to the file of the same precision as `want` (fp8 / int8 / bf16 /
+       fp16), then the shortest name. A candidate must keep the spec's `keep`
+       words and match none of its `exclude` globs. Never another family."""
+    for name in installed:
+        if _same_file(name, want):
+            return {"using": name, "how": "exact", "match": "file", "detail": ""}
+    spec = spec if spec is not None else target.models.get(param)
+    if not spec or not spec.get("family"):
+        return None
+    fam = spec["family"]
+    pats = list(spec["patterns"]) + [p for p in (extra or {}).get(fam, [])
+                                     if p not in spec["patterns"]]
+    cands = [n for n in installed if keeps(spec, want, n)
+             and not modelid.name_matches(n, spec.get("exclude") or [])]
+    want_p = precision(want)
+
+    def best(names: list[str]) -> str:
+        order = {n: i for i, n in enumerate(names)}
+        return min(names, key=lambda n: (precision(n) != want_p, len(model_stem(n)), order[n]))
+
+    named = [n for n in cands if modelid.name_matches(n, pats)]
+    if named:
+        using = best(named)
+        return {"using": using, "how": "family", "match": "name",
+                "detail": f"named like {modelid.family_label(fam)}"}
+    if resolve is None or not spec.get("folder") or not modelid.has_signature(fam):
+        return None
+    names = family_names(extra)
+    fp = []
+    for n in cands:
+        path = resolve(spec["folder"], n)
+        if not path:
+            continue
+        found = modelid.identify(path, names, cache, filename=n)
+        # the family or one of its variants; never a parent the header can't
+        # narrow (that could be the wrong variant: H3 Ref2VA vs FL2VA)
+        if modelid.relation(found.get("family"), fam) in ("same", "variant"):
+            fp.append(n)
+    if fp:
+        using = best(fp)
+        return {"using": using, "how": "family", "match": "fingerprint",
+                "detail": f"its header says {modelid.family_label(fam)}"}
+    return None
+
+
+def lora_spec(target: Target, name: str, slot: bool = False) -> dict:
+    """The models spec a LoRA file falls under: the target's `loras` entry
+    when the name is of its family; else, for the LoRA in the pass's own
+    slot (`slot`: the preset's or the series config's pass `lora`, which is
+    the turbo LoRA where `loras` is an accelerator) that entry's tier with no
+    family (only that file, else the base); else an anonymous required one
+    (a style LoRA from a profile: only that exact file will do)."""
+    m = target.models.get("loras")
+    if m and modelid.name_matches(name, m["patterns"]):
+        return m
+    w = target.binding.specs("loras")
+    ct = (m or {}).get("class_type") or (w[0].get("class_type") if w else "LoraLoaderModelOnly")
+    fld = (m or {}).get("field") or (w[0].get("name") if w else "lora_name")
+    return {"family": None, "patterns": [],
+            "tier": m["tier"] if (m and slot) else "required", "feature": "",
+            "folder": (m or {}).get("folder") or MODEL_FOLDERS.get((ct, fld), "loras"),
+            "class_type": ct, "field": fld, "default": None, "keep": [], "exclude": []}
+
+
+def wanted_files(target: Target, pass_: str, series_cfg: dict | None = None) -> dict:
+    """What a pass loads with nothing but the target (and the series config's
+    pass blocks) deciding: {param: file} for every model param, plus "loras"
+    (a list of {"name", "strength"}; [] for none). For readiness; a job's own
+    values come from h3jobs.model_values."""
+    if series_cfg is not None and target.kind == "video":
+        p = target.preset(pass_, series_cfg)
+    else:
+        p = target.presets[pass_]
+    final = target.presets.get("final")
+    out: dict = {}
+    for param, m in target.models.items():
+        if param == "loras":
+            continue
+        if param == "model":
+            v = p.model or (final.model if final else None) or m["default"]
+        else:
+            v = p.extra.get(param) or (final.extra.get(param) if final else None) or m["default"]
+        if isinstance(v, str) and v:
+            out[param] = v
+    lora = p.lora if isinstance(p.lora, str) else ""
+    if lora.strip().lower() not in ("", "none", "off", "-"):
+        out["loras"] = [{"name": lora, "strength": float(p.extra.get("lora_strength", 1.0))}]
+    elif isinstance(p.extra.get("loras"), list):
+        out["loras"] = [dict(lo) for lo in p.extra["loras"]]
+    else:
+        out["loras"] = []
+    return out
+
+
+def lora_slot(target: Target, pass_: str, series_cfg: dict | None = None,
+              defaults: dict | None = None) -> set[str]:
+    """The LoRA names in a pass's own `lora` slot: the target preset's, the
+    series config's pass block's (through Target.preset), and a shotlist's
+    `defaults` (its `lora`, or a preset's per-stage `loras`). Where the
+    target's `loras` are an accelerator, these are its turbo LoRAs whatever
+    they are called (lora_spec)."""
+    out: set[str] = set()
+    try:
+        p = target.preset(pass_, series_cfg) if (series_cfg is not None
+                                                and target.kind == "video") \
+            else target.presets.get(pass_)
+    except Exception:
+        p = target.presets.get(pass_)
+    layers = [dict(p.extra, lora=p.lora) if p is not None else {}, defaults or {}]
+    for layer in layers:
+        lo = layer.get("lora")
+        if isinstance(lo, str) and lo.strip().lower() not in ("", "none", "off", "-"):
+            out.add(lo.rpartition(":")[0] if re.search(r":\d*\.?\d+$", lo) else lo)
+        for x in layer.get("loras") or [] if isinstance(layer.get("loras"), list) else []:
+            if isinstance(x, dict) and x.get("name"):
+                out.add(x["name"])
+    return out
+
+
+def download_for(target: Target, name: str, folder: str | None = None) -> dict:
+    """{"folder", "url", "source"} of a file (target.json `downloads`, by
+    name, ignoring a subfolder); url None when there is no record."""
+    base = name.replace("\\", "/").rsplit("/", 1)[-1]
+    d = target.downloads.get(base) or target.downloads.get(name) or {}
+    return {"folder": d.get("folder") or folder, "url": d.get("url") or None,
+            "source": d.get("source") or f"no download record: search for {base}"}
+
+
+def _missing(target: Target, param: str, spec: dict, want: str, tier: str) -> dict:
+    # an optional file always says what it switches on (features_off lists
+    # the same words)
+    feature = spec.get("feature") or (f"{param} {model_stem(want)}" if tier == "optional" else "")
+    return {"param": param, "tier": tier, "want": want, "family": spec.get("family"),
+            "label": modelid.family_label(spec.get("family")),
+            **download_for(target, want, spec.get("folder")),
+            **({"feature": feature} if feature else {})}
+
+
+def missing_message(m: dict) -> str:
+    """One missing file as a person reads it: the file, the folder, the URL."""
+    where = f"models/{m['folder']}" if m.get("folder") else "ComfyUI's models folder"
+    get = f"download {m['url']}" if m.get("url") else (m.get("source") or "no download record")
+    return f"{m['param']} {m['want']} is not installed ({where}; {get})"
+
+
+BASE_FILE_KEYS = ("model", "lora", "loras")
+
+
+def resolve_models(target: Target, pass_: str, wanted: dict, listing, resolve=None,
+                   extra: dict | None = None, cache=None, slot=()) -> dict:
+    """Resolve every file of `wanted` ({param: file}, plus "loras": a list of
+    {"name", "strength", ...} or None) against what is installed.
+
+    `listing(spec)` gives the files ComfyUI offers for a models spec (its
+    `folder` / `class_type` / `field`), or None when that can't be known (the
+    param is then left alone, as before). `resolve`, `extra` and `cache` are
+    resolve_file's. `slot` names the LoRAs in the pass's own `lora` slot
+    (lora_spec: the turbo LoRA, whatever the series config calls it).
+    Returns
+
+      {"resolved": {param: {"want", "using", "how", "tier"}},
+       "missing":  [{"param", "tier", "want", "family", "label", "folder",
+                     "url", "source", "feature"?}],
+       "blocked":  the missing entries that stop the pass (required files, and
+                   an accelerator with no `base` to fall back to),
+       "features_off": [feature, ...],
+       "files":    {param: the file to load instead} (substitutes only),
+       "loras":    the LoRA list to use (None: unchanged),
+       "base":     the pass's `base` preset when an accelerator is missing,
+       "values":   the base's settings beside its files (steps, cfg, ...),
+       "notes":    [what a take's notes should say]}
+
+    `how` is "exact", "family" (another installed file of the family),
+    "base" (an accelerator's place taken by the base preset) or "off" (an
+    optional file missing: its feature is off)."""
+    out = {"resolved": {}, "missing": [], "blocked": [], "features_off": [], "files": {},
+           "loras": None, "base": None, "values": {}, "notes": []}
+    models = target.models
+    accel: list[tuple[str, str]] = []                    # (param, file) not installed
+    listed: dict = {}
+
+    def one(param: str, spec: dict, want: str):
+        """(resolve_file's answer or None, known): known is False when
+        nothing lists the spec's folder."""
+        key = (spec.get("folder"), spec.get("class_type"), spec.get("field"))
+        if key not in listed:
+            try:
+                listed[key] = listing(spec)
+            except Exception:
+                listed[key] = None
+        files = listed[key]
+        if files is None:
+            return None, False
+        return resolve_file(target, param, want, list(files), resolve, extra, cache, spec), True
+
+    def lost(param: str, spec: dict, want: str, tier: str) -> dict:
+        m = _missing(target, param, spec, want, tier)
+        out["missing"].append(m)
+        if tier == "required":
+            out["blocked"].append(m)
+        return m
+
+    for param, want in wanted.items():
+        if param == "loras" or not isinstance(want, str) or not want:
+            continue
+        spec = models.get(param)
+        if not spec:
+            continue
+        r, known = one(param, spec, want)
+        if not known:
+            continue
+        if r:
+            out["resolved"][param] = {"want": want, "using": r["using"], "how": r["how"],
+                                      "tier": spec["tier"]}
+            if r["using"] != want:
+                out["files"][param] = r["using"]
+            if r["how"] == "family":
+                out["notes"].append(f"{param} {model_stem(want)} isn't installed: rendered "
+                                    f"with {model_stem(r['using'])} ({r['detail']})")
+            continue
+        miss = lost(param, spec, want, spec["tier"])
+        if spec["tier"] == "optional":
+            out["resolved"][param] = {"want": want, "using": None, "how": "off",
+                                      "tier": "optional"}
+            if miss["feature"] not in out["features_off"]:
+                out["features_off"].append(miss["feature"])
+        elif spec["tier"] == "accelerator":
+            accel.append((param, want))
+
+    loras = wanted.get("loras")
+    lora_list = [dict(lo) for lo in loras or [] if isinstance(lo, dict) and lo.get("name")] \
+        if isinstance(loras, list) else None
+    accel_loras: list[str] = []
+    if lora_list:
+        new, how, tier_of, known_any = [], "exact", "required", False
+        for lo in lora_list:
+            spec = lora_spec(target, lo["name"], lo["name"] in slot)
+            r, known = one("loras", spec, lo["name"])
+            if not known:
+                new.append(lo)
+                continue
+            known_any = True
+            if spec["tier"] != "required":
+                tier_of = spec["tier"]
+            if r:
+                new.append(dict(lo, name=r["using"]))
+                if r["how"] == "family":
+                    how = "family"
+                    out["notes"].append(f"LoRA {model_stem(lo['name'])} isn't installed: "
+                                        f"rendered with {model_stem(r['using'])} ({r['detail']})")
+                continue
+            miss = lost("loras", spec, lo["name"], spec["tier"])
+            if spec["tier"] == "accelerator":
+                accel_loras.append(lo["name"])
+            elif spec["tier"] == "optional" and miss["feature"] not in out["features_off"]:
+                out["features_off"].append(miss["feature"])
+        if known_any:
+            out["resolved"]["loras"] = {"want": [lo["name"] for lo in lora_list],
+                                        "using": [lo["name"] for lo in new
+                                                  if lo["name"] not in accel_loras],
+                                        "how": how, "tier": tier_of}
+            if [lo["name"] for lo in new] != [lo["name"] for lo in lora_list]:
+                out["loras"] = new
+            lora_list = new
+
+    if not (accel or accel_loras):
+        return out
+    preset = target.presets.get(pass_)
+    base = copy.deepcopy(preset.base) if preset is not None and preset.base else None
+    if base is None:
+        # nothing to fall back to: this pass can't do without its accelerator
+        out["blocked"] += [m for m in out["missing"] if m["tier"] == "accelerator"]
+        return out
+    out["base"] = base
+    out["values"] = {k: v for k, v in base.items()
+                     if k not in BASE_FILE_KEYS and k not in models}
+    # the base's own files are required: it is the fallback
+    for param, want in accel:
+        bwant = base.get(param)
+        using = None
+        if bwant:
+            spec = dict(models[param], tier="required")
+            r, known = one(param, spec, bwant)
+            if known and not r:
+                lost(param, spec, bwant, "required")
+            using = r["using"] if r else bwant
+            out["files"][param] = using
+        out["resolved"][param] = {"want": want, "using": using, "how": "base",
+                                  "tier": "accelerator"}
+    base_loras = base.get("loras")
+    if base_loras is not None or accel_loras:
+        cur = lora_list or []
+        fams = {lora_spec(target, lo["name"]).get("family") for lo in base_loras or []}
+        fams.discard(None)
+
+        def replaced(lo: dict) -> bool:
+            s = lora_spec(target, lo["name"], lo["name"] in slot)
+            return (lo["name"] in accel_loras or s["tier"] == "accelerator"
+                    or s.get("family") in fams)
+        kept = [lo for lo in cur if not replaced(lo)]
+        added = []
+        for lo in base_loras or []:
+            spec = dict(lora_spec(target, lo["name"]), tier="required")
+            r, known = one("loras", spec, lo["name"])
+            if known and not r:
+                lost("loras", spec, lo["name"], "required")
+            added.append(dict(lo, name=r["using"] if r else lo["name"]))
+        out["loras"] = kept + added
+        prev = out["resolved"].get("loras") or {}
+        out["resolved"]["loras"] = {
+            "want": prev.get("want") or [lo["name"] for lo in cur],
+            "using": [lo["name"] for lo in out["loras"]],
+            "how": "base" if accel_loras else prev.get("how", "exact"),
+            "tier": "accelerator" if accel_loras else prev.get("tier", "required")}
+    said = ", ".join(f"{k} {v}" for k, v in base.items()
+                     if k not in ("loras", "lora") and not isinstance(v, (dict, list)))
+    gone = [f for _, f in accel] + accel_loras
+    out["notes"].append(
+        f"accelerator not installed ({', '.join(model_stem(f) for f in gone)}): rendered "
+        f"with the {pass_} base preset ({said}"
+        + (", no LoRA" if base.get("loras") == [] else "") + "), which is slower")
     return out

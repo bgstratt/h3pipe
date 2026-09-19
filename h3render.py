@@ -31,11 +31,18 @@ Targets
     the take as <shot>_tNN_refsheet.png. A dry run composes nothing.
 
 Model files
-    Each model file a shot loads is checked against its target's family
-    (target.json `models`): by name, then, with $COMFYUI_PATH set, by its
-    safetensors header (targets/modelid.py, cached in the temp folder). A
-    file of another family skips the shot unless --allow-model-mismatch;
-    --dry-run --check-nodes lists every check.
+    Each model file a shot loads is first resolved to an installed one (the
+    loader's choices in the running ComfyUI): the file itself, else the best
+    installed file of its family. A missing turbo LoRA (an `accelerator`)
+    renders the pass's `base` preset instead (more steps, no LoRA); a missing
+    optional file turns its feature off; a missing required file skips the
+    shot, naming the file, its folder and where to download it. Then each
+    file is checked against its target's family (target.json `models`): by
+    name, then, with $COMFYUI_PATH set, by its safetensors header
+    (targets/modelid.py, cached in the temp folder). A file of another family
+    skips the shot unless --allow-model-mismatch; --dry-run --check-nodes
+    prints the resolution and every check. `h3.py targets` shows what each
+    target is missing.
 
 The script must run on the machine that runs ComfyUI: it checks
 <project>/<subfolder>/<shot>/ on disk to skip finished shots and to confirm
@@ -248,6 +255,9 @@ def main() -> int:
     # and fingerprinted once per file version (the temp folder's cache)
     model_resolve = J.model_resolver()
     model_cache = TG.modelid.temp_cache()
+    # which installed file each model param uses: ComfyUI's loader choices
+    # (/object_info). A dry run asks only with --check-nodes.
+    listing = J.model_lister(comfy) if (args.check_nodes or not args.dry_run) else None
     for root in roots:
         try:
             jobs = plan_episode(root, pass_, default=template, folder=folder, only=only)
@@ -257,20 +267,26 @@ def main() -> int:
             print(f"  ! {e}")
             continue
         for j in jobs:
-            # each model file against its target's family (name, then header)
+            # each model file resolved to an installed one (the base preset
+            # when a turbo LoRA isn't), then checked against its target's
+            # family (name, then header)
+            J.resolve_models(j, listing, model_resolve, model_cache)
             J.check_models(j, model_resolve, model_cache)
         todo = [j for j in jobs if j.runs]
         busy = sum(1 for j in jobs if j.action == "busy")
         blocked = [j for j in jobs if j.action == "blocked"]
         errors = [j for j in jobs if j.action == "error"]
         mismatched = [j for j in jobs if j.action == "mismatch"]
+        unavailable = [j for j in jobs if j.action == "missing_files"]
         plans.append((root, jobs))
         total_frames += sum(j.frames for j in todo)
         print(f"\n  {os.path.basename(root)}  ·  {len(todo)} to render, "
-              f"{len(jobs) - len(todo) - busy - len(blocked) - len(errors) - len(mismatched)} done"
+              f"{len(jobs) - len(todo) - busy - len(blocked) - len(errors) - len(mismatched) - len(unavailable)} done"
               + (f", {busy} already queued" if busy else "")
               + (f", {len(blocked)} blocked (missing refs)" if blocked else "")
               + (f", {len(mismatched)} blocked (model mismatch)" if mismatched else "")
+              + (f", {len(unavailable)} blocked (model files not installed)"
+                 if unavailable else "")
               + (f", {len(errors)} can't be planned" if errors else "")
               + f"  ·  {pass_}  ->  {shown_folder}/")
         for key, vals in (("target", sorted({j.target for j in todo})),
@@ -294,6 +310,10 @@ def main() -> int:
         if mismatched:
             print("    ! pick a model of the right family, or --allow-model-mismatch to render "
                   "those shots anyway")
+        for j in unavailable[:8]:
+            print(f"    ! {j.id} ({j.target}): {j.missing_files_note()}")
+        if unavailable:
+            print("    ! download those files (h3.py targets lists what each target needs)")
         for j in todo:
             if j.retargeted:
                 print(f"    ~ {j.id}: retargeted {j.built_target} -> {j.target}")
@@ -348,6 +368,17 @@ def main() -> int:
                 print(f"  wrote {out} ({j.id} of {os.path.basename(root)}, {j.target}"
                       + (f", inputs {j.inputs}" if j.inputs else "") + ")")
                 if args.check_nodes:
+                    print("  model files, resolved against this ComfyUI's loaders:"
+                          + (" (base preset: an accelerator isn't installed)" if j.based else ""))
+                    for param, v in j.resolved.items():
+                        want = ", ".join(v["want"]) if isinstance(v["want"], list) else v["want"]
+                        using = (", ".join(v["using"]) or "(no LoRA)") \
+                            if isinstance(v["using"], list) else (v["using"] or "(off)")
+                        print(f"    {'~' if v['how'] != 'exact' else ' '} {param:<14} "
+                              f"{v['how']:<6} {using}"
+                              + ("" if v["how"] == "exact" else f"   (wanted {want or 'none'})"))
+                    if not j.resolved:
+                        print("    (nothing resolved: ComfyUI's loader lists weren't available)")
                     how = ("by name only: set COMFYUI_PATH to read their headers"
                            if model_resolve is None else "by name, then by header")
                     print(f"  model files, checked {how}:")

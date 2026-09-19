@@ -76,14 +76,24 @@
   },
 
   "models": {
-    "_note": "The family each model param must be (targets/modelid.py): names first, then the file's header (LTX files carry model_version; 2.5's transformer also has keyframes_abs_pos_embedding and no video feed-forward biases). The 2.3 and 2.5 upscalers share every tensor and have no metadata: only the name tells them apart. duration_head is a preset value, not a binding widget: ModelPatchLoader reads it from models/model_patches.",
-    "model": {"family": "ltx2.5", "patterns": ["ltx-2.5*", "*ltx*2.5*", "*ltx*2_5*"]},
-    "text_encoder": {"family": "ltx2.5-text-encoder", "patterns": ["*gemma*4*ltx*2.5*"]},
-    "video_vae": {"family": "ltx2.5-video-vae", "patterns": ["*ltx*2.5*video*vae*"]},
-    "audio_vae": {"family": "ltx2.5-audio-vae", "patterns": ["*ltx*2.5*audio*vae*"]},
-    "upscaler": {"family": "ltx2.5-latent-upscaler", "patterns": ["*ltx*2.5*upscal*"]},
+    "_note": "The family each model param must be (targets/modelid.py): names first, then the file's header (LTX files carry model_version; 2.5's transformer also has keyframes_abs_pos_embedding and no video feed-forward biases). The 2.3 and 2.5 upscalers share every tensor and have no metadata: only the name tells them apart. duration_head is a preset value, not a binding widget: ModelPatchLoader reads it from models/model_patches. Tiers (docs/API.md): the duration head is optional (without it `dur: model` renders the estimate); everything else is required. No base: the preset is already the distilled model with the workflow's fixed 8 + 3 step schedule, and a dev model would need another schedule, so a substitute must say `distilled` like the wanted file (`keep`).",
+    "model": {"family": "ltx2.5", "patterns": ["ltx-2.5*", "*ltx*2.5*", "*ltx*2_5*"], "tier": "required",
+              "keep": ["(?<![a-z])(distilled|dev)(?![a-z])"], "exclude": ["*lora*"]},
+    "text_encoder": {"family": "ltx2.5-text-encoder", "patterns": ["*gemma*4*ltx*2.5*"], "tier": "required"},
+    "video_vae": {"family": "ltx2.5-video-vae", "patterns": ["*ltx*2.5*video*vae*"], "tier": "required"},
+    "audio_vae": {"family": "ltx2.5-audio-vae", "patterns": ["*ltx*2.5*audio*vae*"], "tier": "required"},
+    "upscaler": {"family": "ltx2.5-latent-upscaler", "patterns": ["*ltx*2.5*upscal*"], "tier": "required",
+                 "keep": ["(spatial|temporal)", "[_-](x\\d+(?:\\.\\d+)?)"]},
     "duration_head": {"family": "ltx2.5-duration-head", "patterns": ["*ltx*2.5*duration*"],
-                      "folder": "model_patches", "class_type": "ModelPatchLoader", "field": "name"}
+                      "folder": "model_patches", "class_type": "ModelPatchLoader", "field": "name",
+                      "tier": "optional", "feature": "dur: model (duration head)"}
+  },
+
+  "nodes": {
+    "_note": "Node classes beyond the workflow's own: the keyframe conditioning patch_graph adds (ComfyUI core), and the duration predictor `dur: model` adds (optional: without it the build's estimate is rendered).",
+    "LoadImage": {}, "LTXVPreprocess": {}, "LTXVAddGuide": {}, "LTXVCropGuides": {},
+    "ModelPatchLoader": {"tier": "optional", "feature": "dur: model (duration head)"},
+    "LTXVDurationPredictor": {"tier": "optional", "feature": "dur: model (duration head)"}
   },
 
   "presets": {
@@ -109,5 +119,15 @@
       "duration_head": "ltx-2.5-duration-head-bf16.safetensors",
       "default_seconds": 5.0, "min_seconds": 1.0, "max_seconds": 20.0
     }
+  },
+
+  "downloads": {
+    "_note": "Where to get each file this target names (docs/API.md 'Downloads'). A url is only given when a trustworthy record has it: a ComfyUI template's or saved workflow's properties.models entry, or ComfyUI-Manager's model list; `source` says which. Otherwise url is null and source says what to search for. Never a guessed URL.",
+    "ltx-2.5-audio-vae-bf16.safetensors": {"folder": "vae", "url": "https://huggingface.co/Lightricks/LTX-2.5/resolve/main/vae/ltx-2.5-audio-vae-bf16.safetensors", "source": "ComfyUI template video_ltx2_5_i2v.json (properties.models)"},
+    "ltx-2.5-duration-head-bf16.safetensors": {"folder": "model_patches", "url": "https://huggingface.co/Lightricks/LTX-2.5/resolve/main/model_patches/ltx-2.5-duration-head-bf16.safetensors", "source": "ComfyUI-Manager model list (user/__manager/cache/4245046894_model-list.json: \"LTX-2.5 Duration Head BF16\")"},
+    "ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors": {"folder": "diffusion_models", "url": "https://huggingface.co/Lightricks/LTX-2.5/resolve/main/diffusion_models/ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors", "source": "ComfyUI template video_ltx2_5_i2v.json (properties.models)"},
+    "gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors": {"folder": "text_encoders", "url": "https://huggingface.co/Lightricks/LTX-2.5/resolve/main/text_encoders/gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors", "source": "ComfyUI template video_ltx2_5_i2v.json (properties.models)"},
+    "ltx-2.5-latent-spatial-upscaler-x2-bf16-1.0.safetensors": {"folder": "latent_upscale_models", "url": "https://huggingface.co/Lightricks/LTX-2.5/resolve/main/latent_upscale_models/ltx-2.5-latent-spatial-upscaler-x2-bf16-1.0.safetensors", "source": "ComfyUI template video_ltx2_5_i2v.json (properties.models)"},
+    "ltx-2.5-video-vae-bf16.safetensors": {"folder": "vae", "url": "https://huggingface.co/Lightricks/LTX-2.5/resolve/main/vae/ltx-2.5-video-vae-bf16.safetensors", "source": "ComfyUI template video_ltx2_5_i2v.json (properties.models)"}
   }
 }

@@ -869,3 +869,79 @@ The same readiness as a table: status, what's missing, the folder, and the URL w
   - `series_target`;
   - per shot, `target` (already present) and `target_source`: `"request"` | `"override"` | `"script"` | `"episode"`.
 - **`series.json` is never written by the editor.** The UI offers a copyable `"target": "<id>"` snippet for `series.series` to make the choice permanent.
+
+### As built: where the build departs from the contract above
+
+Everything above is implemented. Each point here is marked **[differs]** (the contract
+said otherwise), **[added]** (the contract said nothing) or **[settled]** (the contract
+left it open).
+
+- **[added] `target.json`**: `models.<param>` may also carry `keep` (regexes whose captured
+  word a substitute must share with the wanted file: a LoRA's step count, a Wan noise
+  stage, LTX's `distilled` / `dev`), `exclude` (globs a substitute must not match: the H3
+  SLA LoRAs), `default` (the file the workflow loads when nothing names one: H3 Ref2VA's
+  text encoder and VAEs, krea2's) and `feature` (what an optional file switches on).
+  `loras` is a models param (family + tier) on H3 Ref2VA / FL2VA, Wan 14B I2V and
+  ingredients. `nodes` is `{class: {"tier", "feature"}}` or a list of required classes.
+- **[settled] Tiers**: the accelerators are the H3 turbo LoRAs, the Wan I2V lightx2v pair
+  and **the ingredients target's `model`** (the distilled LTX 2.3 checkpoint): its `base`
+  names the dev checkpoint, which is then required. The LoRA in a pass's own `lora` slot
+  (the preset's, or the series config's pass block's) counts as that target's
+  accelerator even when it isn't named like the family (it then resolves exactly or falls
+  back to the base). A LoRA from a profile or shot line that isn't installed is required.
+- **[settled] Resolving by family**: a substitute must share the `keep` words and match no
+  `exclude`; headers are read only when no name matches and the family has a header
+  signature (not LoRAs); a header naming only a parent family (an H3 file named neither
+  Ref2VA nor FL2VA) is not picked. A file listed in a subfolder of the models folder
+  (`LTX-2.3\x.safetensors`) is the exact file. A folder ComfyUI can't list leaves its
+  params unresolved, as before.
+- **[added] Sidecar**: `resolved.loras` is `{"want": [names], "using": [names], "how",
+  "tier"}` (lists); `resolved.<param>.tier`; `"base": true` on a take rendered with the
+  base preset (whose `notes` say so). The base's LoRA loaders are removed from the graph
+  (at strength 0 ComfyUI would still load the missing file). A `steps` value set for the
+  shot (request or override) is kept over the base's, with a note. The frozen shotlist
+  carries the base's values (`sampler`, `cfg`, ...) and any substitute file.
+- **[settled] A missing required file** (`POST /h3pipe/render`): the shot is in `skipped`
+  with `reason` ("model files not installed: text_encoder … is not installed
+  (models/text_encoders; download https://…)"), `target`, and `missing_files`: `[{param,
+  tier, want, family, folder, url, source}]`. No take is reserved. The CLI says the same
+  (`h3render`: "blocked (model files not installed)"); a job's action is `missing_files`.
+- **[added] `GET /h3pipe/targets`** (with or without `ready`): `models.<param>` adds `tier`
+  (and `feature`), `presets.<pass>` adds `base`, and each target adds `downloads` (all
+  static data from `target.json`). `ready` must be `1` / `0` (or `true` / `false`), else
+  400; it combines with `kind`.
+- **[added] `readiness`**: `missing[]` entries add `label` (the family's) and `passes`
+  (which passes miss the file); an optional one always has `feature`, the same words as
+  its `features_off` entry. `resolved` is the final pass's; `by_pass` has each pass's.
+  `how` can also be `base` and `off`. An `unknown` readiness has `error`. An optional
+  **node** missing (LTX's `LTXVDurationPredictor`) puts its feature in `features_off`
+  and the class in `nodes_missing`, with no `missing[]` file entry. The node classes are
+  the workflow's as a job keeps them (saver in place, widgets patched, pruned) plus the
+  loader, the saver and `nodes`. The cache is per ComfyUI address; an unanswered
+  `/object_info` isn't cached.
+- **[added] `h3.py targets [<episode>] [--json] [--kind video|image] [--comfy URL]`**: exit
+  1 when ComfyUI doesn't answer. Headers are read for substitutes only with
+  `$COMFYUI_PATH` set. With an episode: its series config's pass blocks and
+  `model_families` apply, and its episode target is marked.
+- **[differs] `overrides.json` `episode`**: before, it was the episode's name (a string).
+  Setting a target makes it `{"id": "<the name>", "target": "<id>"}`; clearing it puts the
+  plain name back. A string `episode` means no episode target.
+- **[settled] Pinning a shot to its built target**: `PUT /h3pipe/override` with
+  `fields.target` equal to the built target clears the shot's retarget only while no
+  episode target is set. With one, it is kept as the shot's own target
+  (`target_source: "override"`); `null` clears it. The CLI's `--target built` does the
+  same; `--target none` clears.
+- **[differs] `target_source`** (per shot in `GET /h3pipe/episode`, and in `GET /h3pipe/shot`,
+  which also has it now): besides request / override / script / episode, a shot on the
+  series default is `"series"` (the series config names `series.target`) or `"default"`.
+  "script" is judged from `shotlist/shots.json` and the series config's profiles (a
+  `target:` line or a profile's target on the shot or its sequence); without a current
+  shots.json, a built target other than the series config's counts as the script's.
+- **[differs] `GET /h3pipe/episode` top-level `target`** is the episode default in force
+  (the editor's, else `series.target`, else the default). It was `shotlist.json`'s target;
+  the two are the same unless an episode target is set. `series_target` is `null` when the
+  series config names none.
+- **[settled] `PUT /h3pipe/episode-target`** returns `{target, target_source,
+  series_target}` (the status fields). 400 for a target that isn't a video target, or a
+  body without `target`; 404 for an episode with no build. CLI: `h3.py override <ep>
+  --episode-target <id>`; `built` (or `none` / `series`) clears it.

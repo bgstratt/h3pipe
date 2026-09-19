@@ -5,8 +5,14 @@ Status (2026-09-19): Phases 0–3 and 5–8 done; Phase 4 (evaluate) continues t
 `ltx2` (LTX-2.5; `dur: model` predicts length once the duration head is installed), `ltx2_ingredients`
 (LTX-2.3 + IC-LoRA reference sheet: identity), `wan22_i2v` / `wan22_ti2v` / `wan22_vace` (Wan 2.2, silent,
 16/24 fps; assemble converts fps). Model files are checked against each target's family (name patterns +
-safetensors header). Keyframe continuity is in the CLI, the routes and the editor. Open items: the per-target
-lists under Phase 8 / Wan / shot lengths, and the Phase 9 editor items.
+safetensors header). Keyframe continuity is in the CLI, the routes and the editor. Readiness (backend,
+2026-09-19): each target's model params have tiers (required / accelerator / optional), accelerated presets a
+`base`, and `downloads` from trustworthy records only; queue time resolves every file to an installed one of its
+family (a missing turbo LoRA renders the base preset, a missing required file skips the shot with its download
+link); `GET /h3pipe/targets?ready=1` and `h3.py targets` report what each target is missing; the episode target
+(`overrides.json` `episode.target`) sits between the script and `series.target`. See **Readiness and the
+episode target (as built)** below. Open items: the per-target lists under Phase 8 / Wan / shot lengths, and the
+Phase 9 editor items.
 This is the working plan for the next round of development. `CLAUDE.md` points here.
 
 ## Goals
@@ -1077,6 +1083,48 @@ renamed by hand). Now:
   param's files by match; the picker groups them and the redo dialog offers "Render anyway
   (model mismatch)". See docs/API.md **Model families**.
 - Not done: reference images (`h3refs`, krea2) aren't checked at queue time, only listed.
+
+## Readiness and the episode target (as built)
+
+The goal: know what's missing for a target, and where to download it, before rendering;
+and pick a target for a whole episode. docs/API.md **Readiness, requirement tiers, and the
+episode target** is the contract; its "as built" notes list where the build differs.
+
+- **Tiers** (`target.json` `models.<param>.tier`). Accelerators: the H3 Ref2VA / FL2VA turbo
+  LoRAs, the Wan 2.2 I2V lightx2v pair, and LTX-2.3 ingredients' distilled checkpoint.
+  Optional: the LTX-2.5 duration head. Everything else is required. No voice ID-LoRA is
+  referenced by any target, so none is marked. New params where a workflow loads a file on
+  its own (`default`): H3 Ref2VA's text encoder and VAEs, krea2's text encoder and VAE.
+  `loras` is a models param now (family, tier, `keep` / `exclude`).
+- **Base presets** (`presets.<pass>.base`, never written to a shotlist), with their sources:
+  - H3 Ref2VA and FL2VA: no LoRA, 20 steps, `res_multistep`, no CFG. From ComfyUI's H3
+    templates (`video_minimax_h3_r2v.json`, `_i2v`, `_t2v`), full branch: 'Int (Full)' 20,
+    KSamplerSelect `res_multistep`, BasicGuider.
+  - Wan 2.2 14B I2V: no LoRA, 20 steps split 10 / 10, cfg 3.5 (euler / simple, shift 5). From
+    the non-LoRA branch of ComfyUI's `video_wan2_2_14B_i2v.json` ('Int (Steps)' 20,
+    'Int (split_step)' 10, 'Float (CFG)' 3.5).
+  - LTX-2.3 ingredients: `ltx-2.3-22b-dev-fp8`, IC-LoRA at 1.4, 30 steps, cfg 4.0. From the
+    model card, as ComfyUI's ingredients template quotes it in 'Note: IC-LoRA'. ComfyUI's
+    LTX-2.3 templates have no undistilled path.
+- **Resolution** (`targets.resolve_models`, `h3jobs.resolve_models`): exact file (also in a
+  subfolder), else the best installed file of the family (name before header; same
+  precision, then shortest name; `keep` words such as the step count, noise stage or
+  distilled vs dev must match; never a parent family the header can't narrow). The LoRA in
+  a pass's own `lora` slot counts as the accelerator whatever it is called. Runs in
+  `queue_shots` and `h3render` before `check_models`; the sidecar records `resolved`.
+- **Readiness** (`h3edit.readiness`): from `/object_info` (loader choices, node classes of
+  the pruned workflow + target.json `nodes`). The route caches it for 30 s.
+- **Episode target**: `overrides.json` `{"episode": {"id", "target"}}`; `h3jobs.target_choice`
+  is the precedence; the retarget path compiles such shots at queue time.
+- **Live check (2026-09-19, read-only):** `h3.py targets` on the dev machine: every target
+  ready except `ltx2`, degraded (the duration head isn't installed; its link comes from
+  ComfyUI-Manager's model list). `h3render --dry-run --check-nodes` on a scratch copy of
+  ep05 sh020: exact files; with a LoRA named `…ref2v_turbo_4step_v0.1_comfyui_bf16` (not
+  installed) the installed lightx2v 4-step Ref2V LoRA stood in; with a 2-step one (none of
+  that family) the base preset ran: no LoRA loader in the graph, `res_multistep`; both
+  graphs passed `/object_info`.
+- **Left:** the editor's readiness view and episode-target picker (the UI agent's side);
+  `h3refs` / kreagen don't resolve krea2's files at queue time yet (readiness covers them).
 
 ## Source of truth
 
