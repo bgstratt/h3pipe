@@ -3,7 +3,8 @@
 Status (2026-09-19): Phases 0, 1, 2, 3, 5, 6 and 7 done and in use; Phase 4 (evaluate) is
 ongoing through use. Phase 8 (LTX-2.5 as the second video target, mixed-target episodes,
 retargeting) is built, green on every golden, and live-checked from the CLI; the
-editor's target picker is merged too (route-level live check pending a restart). The remaining LTX work
+editor's target picker is merged; the route-level live check passed 2026-09-19 (an LTX one-off of ep38 sh020 through
+`/h3pipe/render`: ok, 65 frames at 448×256, with audio, thumbnail and strip, beside its H3 take). The remaining LTX work
 (ingredients / subject refs, final-quality settings, keyframe generation) is listed under
 **Phase 8 — as built**.
 This is the working plan for the next round of development. `CLAUDE.md` points here.
