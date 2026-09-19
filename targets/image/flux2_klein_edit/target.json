@@ -1,7 +1,7 @@
 {
   "id": "flux2_klein_edit",
   "kind": "image",
-  "label": "FLUX.2 Klein 9B edit (reference images)",
+  "label": "FLUX.2 Klein 9B edit (uses reference images)",
   "short": "Klein edit",
   "code": "target.py",
 

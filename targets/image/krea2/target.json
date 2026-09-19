@@ -1,7 +1,8 @@
 {
   "id": "krea2",
   "kind": "image",
-  "label": "Krea 2 turbo (reference images)",
+  "label": "Krea 2 turbo (text to image)",
+  "capabilities": {"mode": "t2i", "max_refs": 0},
   "short": "krea2",
   "code": "prompt.py",
 
