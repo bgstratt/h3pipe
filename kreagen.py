@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-kreagen.py — generate every missing H3 reference image on a local ComfyUI, as
+kreagen.py — generate every missing reference image on a local ComfyUI, as
 ref takes (h3refs.py), and put each one at the path the series config names.
 
     python3 kreagen.py --project-root .
@@ -32,8 +32,11 @@ subject whose `sheet` is the path, whatever the file is called.
 
 Voice samples are skipped; they are not images.
 
-The graph is krea2_refs_t2i.json (the copy saved in the running ComfyUI, else
-this repo's), or a built-in krea2 turbo graph. Its SaveImage is replaced by the
+The image target (--target, else the episode's: the editor's choice, the series
+config's refs.target, else krea2) decides the graph, and the banner names it. For
+krea2 it is krea2_refs_t2i.json (the copy saved in the running ComfyUI, else
+this repo's), or a built-in krea2 turbo graph; any other target uses its own
+workflow (targets/image/<id>/). Its SaveImage is replaced by the
 node pack's H3SaveRefTake, which writes the take and closes its sidecar; on a
 ComfyUI whose node pack predates that node, SaveImage stays and kreagen fetches
 the image over HTTP. When a LoRA is given, the text encoder reads the LoRA's
@@ -239,12 +242,29 @@ def main() -> int:
         except Exception as e:
             print(f"  ! {REFS_WORKFLOW} could not be read ({e}) — using the built-in graph")
             base, wf = None, ""
+    # The banner names the graph the refs actually render with: the image
+    # target --target names, else the episode's (the editor's choice, the
+    # series config's refs.target, else krea2). A ref's own override can
+    # still pick another; its job line says so.
+    graphs: dict = {}
+    try:
+        tgt = R.TG.load_target(args.target or R.image_defaults(s)["target"], "image")
+    except (R.RefError, R.TG.TargetError, ValueError) as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 1
+    if tgt.id == R.TG.DEFAULT_IMAGE_TARGET:
+        graph = wf if wf else f"built-in ({UNET})"
+    else:
+        try:
+            graphs[tgt.id], twf = R.resolve_workflow(args.comfy, None, tgt)
+            graph = twf
+        except Exception as e:
+            graph = f"{tgt.id}: its workflow could not be read ({e})"
 
     print(f"\n  {len(jobs)} asset(s) · comfy {args.comfy} · "
           f"{args.steps or 'preset'} steps · cfg "
-          f"{args.cfg if args.cfg is not None else 'preset'}"
-          f"{' · ' + args.target if args.target else ''}\n"
-          f"  graph {wf if wf else 'built-in (' + UNET + ')'}\n"
+          f"{args.cfg if args.cfg is not None else 'preset'} · {tgt.id}\n"
+          f"  graph {graph}\n"
           f"  {'-' * 62}")
     todo_now = []
     for j in jobs:
@@ -286,7 +306,6 @@ def main() -> int:
 
     listing = J.model_lister(comfy)
     cache = R.TG.modelid.temp_cache()
-    graphs: dict = {}
     failed = []
     for j in todo_now:
         r = j["ref"]
