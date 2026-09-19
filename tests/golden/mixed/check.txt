@@ -1,0 +1,28 @@
+
+  mx01  Mixed Targets   [final]  1344x768  6 steps
+  model        series_model.safetensors
+  lora         series_turbo_8step.safetensors
+  ------------------------------------------------------------
+  2 sequences, 3 shots
+  runtime      0:07.00  (scripted 0:06.12, +21f grid pad)
+  audio        1x clone, 2x generate
+  references   0/4 on disk, 4 to make
+    ! sh010: dur 2.50s snaps up to 3.04s, wasting 13 frames. Writing it as 3.04s costs the same render.
+    ! sh060 overrides loras: profile_turbo_8step.safetensors@1, profile_style.safetensors@0.6
+    ! sh060 overrides model: profile_model.safetensors
+    ! sh060 overrides steps: 7
+    ! series.steps is 6 but the LoRA series_turbo_8step.safetensors is distilled for 8 steps — set steps: 8 or pick a matching lora
+
+  target ltx2 (LTX-2): 3 shot(s) of this episode
+
+  mx01  Mixed Targets   [final]  1344x768  8 steps
+  model        ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors
+  lora         none
+  ------------------------------------------------------------
+  2 sequences, 3 shots
+  runtime      0:09.79  (scripted 0:09.50, +7f grid pad)
+  audio        3x generate
+  references   0/0 on disk
+    ! 2 shot(s) ask for audio clone, which LTX-2 can't render (LTX-2 generates sound with the picture and takes no voice sample or recording): they render with generate: sh020, sh050
+    ! 1 shot(s) ask for audio dub_keep_foley, which LTX-2 can't render (LTX-2 generates sound with the picture and takes no voice sample or recording): they render with generate: sh040
+

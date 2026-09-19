@@ -60,7 +60,8 @@ import tempfile
 # script's own folder on sys.path, so do it here.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-import h3takes
+import h3jobs  # noqa: E402
+import h3takes  # noqa: E402
 
 NOT_RENDERED = "not rendered"
 
@@ -287,6 +288,11 @@ def main() -> int:
     with open(sl, encoding="utf-8") as fh:
         doc = json.load(fh)
     shots = doc.get("shots", [])
+    if os.path.normcase(os.path.abspath(sl)) == os.path.normcase(
+            os.path.abspath(os.path.join(root, h3jobs.shotlist_rel(pass_)))):
+        # an episode that mixes targets: the other targets' shots are in
+        # shotlist.<target>[_proxy].json; the cut follows script order
+        shots = [d["shots"][i] for d, i in h3jobs.episode_shots(root, pass_)]
     by_id = {s["id"]: s for s in shots}
     fps = 24.0
     width = doc.get("defaults", {}).get("width")
@@ -329,9 +335,12 @@ def main() -> int:
         # Both passes share lengths, so a placeholder is checked against the
         # same shot's length.
         n = frame_count(t.paths.mp4)
-        if n > 0 and n != s["length"]:
-            bad.append(f"{e.shot}: {n} frames on disk, shotlist says {s['length']}")
-        on_disk = n if n > 0 else s["length"]
+        # a take rendered on another target (retargeted) has that target's
+        # length, which its sidecar records
+        want = int((t.sidecar or {}).get("length") or s["length"])
+        if n > 0 and n != want:
+            bad.append(f"{e.shot}: {n} frames on disk, shotlist says {want}")
+        on_disk = n if n > 0 else want
         if keep and keep > on_disk:
             bad.append(f"{e.shot}: window needs {keep} frames but the clip has {on_disk}")
             keep = on_disk

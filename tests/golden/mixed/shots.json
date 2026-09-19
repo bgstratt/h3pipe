@@ -1,0 +1,298 @@
+{
+  "episode": "mx01",
+  "title": "Mixed Targets",
+  "series": {
+    "fps": 24,
+    "width": 1344,
+    "height": 768
+  },
+  "sequences": [
+    {
+      "id": "sq01",
+      "location": "kitchen",
+      "continuous": false,
+      "overrides": {
+        "model": null,
+        "lora": null,
+        "steps": null
+      },
+      "source": {
+        "line": 7
+      },
+      "shots": [
+        {
+          "id": "sh010",
+          "cast": [
+            "ada"
+          ],
+          "props": [],
+          "plate": "kitchen",
+          "size": "ws",
+          "camera": "pushes in on Ada with small amplitude at slow speed",
+          "action": "Ada slams the walk-in door shut and turns to face the kitchen.",
+          "dialogue": [],
+          "sound": "the compressor hum of the walk-in, a door latch clanking",
+          "music": "a plucky ukulele sting",
+          "extras": null,
+          "text": null,
+          "timing": {
+            "seconds": 2.5
+          },
+          "pace": null,
+          "audio": null,
+          "preserve": null,
+          "seed_key": "mx01/sq01/sh010",
+          "overrides": {
+            "model": null,
+            "lora": null,
+            "steps": null
+          },
+          "source": {
+            "line": 11,
+            "end_line": 18
+          }
+        },
+        {
+          "id": "sh020",
+          "cast": [
+            "ada",
+            "bo"
+          ],
+          "props": [
+            "kettle"
+          ],
+          "plate": "kitchen",
+          "size": "ms",
+          "camera": null,
+          "action": "Bo sets the kettle down on the burner and flicks the gas on.",
+          "dialogue": [
+            {
+              "speaker": "ada",
+              "mode": "on",
+              "delivery": "warmly",
+              "line": "You know that one whistles."
+            },
+            {
+              "speaker": "bo",
+              "mode": "on",
+              "delivery": "",
+              "line": "I know."
+            },
+            {
+              "speaker": "ada",
+              "mode": "vo",
+              "delivery": "",
+              "line": "He always knows."
+            }
+          ],
+          "sound": null,
+          "music": null,
+          "extras": "two customers at the counter seen through the window, backs to camera",
+          "text": null,
+          "timing": {
+            "auto": true
+          },
+          "pace": null,
+          "audio": null,
+          "preserve": null,
+          "seed_key": "mx01/sq01/sh020",
+          "overrides": {
+            "model": null,
+            "lora": null,
+            "steps": null
+          },
+          "source": {
+            "line": 22,
+            "end_line": 32
+          },
+          "target": "ltx2"
+        },
+        {
+          "id": "sh030",
+          "cast": [
+            "ada"
+          ],
+          "props": [],
+          "plate": "kitchen",
+          "size": "cu",
+          "camera": null,
+          "action": "Ada's eyes narrow at the kettle.",
+          "dialogue": [
+            {
+              "speaker": "ada",
+              "mode": "vo",
+              "delivery": "",
+              "line": "Not today."
+            }
+          ],
+          "sound": null,
+          "music": null,
+          "extras": null,
+          "text": null,
+          "timing": {
+            "seconds": 1.62
+          },
+          "pace": null,
+          "audio": null,
+          "preserve": null,
+          "seed_key": "mx01/sq01/sh030",
+          "overrides": {
+            "model": null,
+            "lora": null,
+            "steps": null
+          },
+          "source": {
+            "line": 35,
+            "end_line": 40
+          }
+        }
+      ]
+    },
+    {
+      "id": "sq02",
+      "location": "street",
+      "continuous": false,
+      "overrides": {
+        "model": null,
+        "lora": null,
+        "steps": null
+      },
+      "source": {
+        "line": 42
+      },
+      "target": "ltx2",
+      "shots": [
+        {
+          "id": "sh040",
+          "cast": [
+            "bo"
+          ],
+          "props": [
+            "van"
+          ],
+          "plate": "street",
+          "size": "wide",
+          "camera": null,
+          "action": "Bo waves the van back toward the kitchen door.",
+          "dialogue": [
+            {
+              "speaker": "bo",
+              "mode": "on",
+              "delivery": "",
+              "line": "Left! Left!"
+            }
+          ],
+          "sound": "a reversing beeper, traffic in the distance",
+          "music": null,
+          "extras": null,
+          "text": null,
+          "timing": {
+            "audio_in": 1.0,
+            "audio_out": 3.5
+          },
+          "pace": null,
+          "audio": "dub_keep_foley",
+          "preserve": null,
+          "seed_key": "mx01/sq02/sh040",
+          "overrides": {
+            "model": null,
+            "lora": null,
+            "steps": null
+          },
+          "source": {
+            "line": 47,
+            "end_line": 55
+          }
+        },
+        {
+          "id": "sh050",
+          "cast": [
+            "cy"
+          ],
+          "props": [],
+          "plate": "kitchen_window",
+          "size": "close",
+          "camera": "slowly tilts up to the grey sky",
+          "action": "Cy presses her face to the window glass.",
+          "dialogue": [
+            {
+              "speaker": "narrator",
+              "mode": "os",
+              "delivery": "",
+              "line": "And then it rained."
+            }
+          ],
+          "sound": null,
+          "music": null,
+          "extras": null,
+          "text": null,
+          "timing": {
+            "seconds": 3.04
+          },
+          "pace": null,
+          "audio": null,
+          "preserve": null,
+          "seed_key": "mx01/sq02/sh050",
+          "overrides": {
+            "model": null,
+            "lora": null,
+            "steps": null
+          },
+          "source": {
+            "line": 58,
+            "end_line": 66
+          },
+          "profile": "ltx_quick"
+        }
+      ]
+    },
+    {
+      "id": "sq03",
+      "location": "kitchen",
+      "continuous": false,
+      "overrides": {
+        "model": null,
+        "lora": null,
+        "steps": null
+      },
+      "source": {
+        "line": 68
+      },
+      "shots": [
+        {
+          "id": "sh060",
+          "cast": [
+            "bo"
+          ],
+          "props": [],
+          "plate": "kitchen",
+          "size": "close",
+          "camera": null,
+          "action": "Bo pours the tea.",
+          "dialogue": [],
+          "sound": null,
+          "music": null,
+          "extras": null,
+          "text": null,
+          "timing": {
+            "seconds": 2.0
+          },
+          "pace": null,
+          "audio": null,
+          "preserve": null,
+          "seed_key": "mx01/sq03/sh060",
+          "overrides": {
+            "model": null,
+            "lora": null,
+            "steps": null
+          },
+          "source": {
+            "line": 71,
+            "end_line": 76
+          },
+          "profile": "dialogue_close"
+        }
+      ]
+    }
+  ]
+}

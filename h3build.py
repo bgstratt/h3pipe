@@ -211,13 +211,16 @@ def main() -> int:
             # parse -> story IR
             story = parse_story(fh.read(), subject_ids(series_cfg), character_ids(series_cfg),
                                 series_info(series_cfg))
-        # -> the video target every shot renders on (profiles and target:
-        # lines checked here) -> its compile
-        target = TG.episode_target(story, series_cfg)
+        # -> the video target each shot renders on (profiles and target:
+        # lines checked here) -> each target compiles its own shots
+        groups = TG.episode_targets(story, series_cfg)
+        target = groups[0][0]
         if args.pace:
             return print_pacing(story, series_cfg, template=target.template)
-        doc, report = target.compile_episode(story, series_cfg,
-                                             "proxy" if args.proxy else "final")
+        pass_ = "proxy" if args.proxy else "final"
+        built = [(t, *t.compile_episode(story, series_cfg, pass_, only=ids))
+                 for t, ids in groups]
+        _, doc, report = built[0]
     except (ScriptError, ValueError, KeyError) as exc:
         print(f"\n  error in {os.path.basename(args.script)}: {exc}\n", file=sys.stderr)
         return 1
@@ -226,17 +229,46 @@ def main() -> int:
         return 1
 
     print_report(report, args.out)
+    for t, _, rep in built[1:]:
+        print(f"  target {t.id} ({t.short}): {rep['shots']} shot(s) of this episode")
+        print_report(rep, args.out)
+    if len(built) > 1:
+        # one work order for the episode: every target's refs, the series
+        # target's first (a later target only adds what it alone needs)
+        report = dict(report, needed=dict(report["needed"]),
+                      blocked_shots={k: list(v) for k, v in report["blocked_shots"].items()},
+                      size_hints=dict(report.get("size_hints", SIZE_HINT)))
+        for _, _, rep in built[1:]:
+            for p, v in rep["needed"].items():
+                report["needed"].setdefault(p, v)
+            for p, ids in rep.get("blocked_shots", {}).items():
+                have = report["blocked_shots"].setdefault(p, [])
+                have += [i for i in ids if i not in have]
+            for k, v in (rep.get("size_hints") or {}).items():
+                report["size_hints"].setdefault(k, v)
     if args.check:
         return 0
 
     os.makedirs(os.path.join(args.out, "shotlist"), exist_ok=True)
 
-    # One shotlist per pass, for the episode's one target. Per-target files
-    # (shotlist.<target>.json) come with Phase 8's mixed-target episodes.
-    name = f"shotlist{'_proxy' if args.proxy else ''}.json"
-    sl = os.path.join(args.out, "shotlist", name)
+    # One shotlist per pass for the series target, and one per other target
+    # that some shot renders on (shotlist.<target>[_proxy].json).
+    sfx = "_proxy" if args.proxy else ""
+    sl = os.path.join(args.out, "shotlist", f"shotlist{sfx}.json")
+    written = [sl]
     with open(sl, "w", encoding="utf-8") as fh:
         json.dump(doc, fh, ensure_ascii=False, indent=2)
+    for t, tdoc, _ in built[1:]:
+        p = os.path.join(args.out, "shotlist", f"shotlist.{t.id}{sfx}.json")
+        with open(p, "w", encoding="utf-8") as fh:
+            json.dump(tdoc, fh, ensure_ascii=False, indent=2)
+        written.append(p)
+    # a target no shot uses any more leaves no stale file behind
+    keep = {os.path.basename(p) for p in written}
+    for n in os.listdir(os.path.join(args.out, "shotlist")):
+        if (n.startswith("shotlist.") and n.endswith(f"{sfx}.json") and n not in keep
+                and (args.proxy or not n.endswith("_proxy.json"))):
+            os.remove(os.path.join(args.out, "shotlist", n))
     # The story IR: model-free and pass-free, so both passes write the same file.
     ir_path = os.path.join(args.out, "shotlist", "shots.json")
     with open(ir_path, "w", encoding="utf-8") as fh:
@@ -261,7 +293,8 @@ def main() -> int:
             for p, v in report["needed"].items()
         ], fh, ensure_ascii=False, indent=2)
 
-    print(f"  -> {sl}")
+    for p in written:
+        print(f"  -> {p}")
     print(f"  -> {ir_path}")
     print(f"  -> {todo}")
     print(f"  -> {todo_json}\n")

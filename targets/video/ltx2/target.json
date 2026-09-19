@@ -1,0 +1,88 @@
+{
+  "id": "ltx2",
+  "kind": "video",
+  "label": "LTX-2.5 distilled (text / keyframes to video + audio)",
+  "short": "LTX-2",
+  "code": "compile.py",
+
+  "template": {
+    "_note": "LTX-2 renders 8k+1 frames (9, 17, ..., 97, ...). This workflow is two-stage: a base pass at half size, then the x2 latent upsampler and a refine pass, so the output must be a multiple of 64 (the base latent needs 32). Sizes that aren't legal are snapped down, then shrunk under 1 MP / 1536 on the long side. The frame rate is the series config's. LTX-2 handles about 20 s per shot.",
+    "fps": "series",
+    "default_fps": 24,
+    "frames": {"step": 8, "base": 1, "max": 481},
+    "size_multiple": 64,
+    "size_fit": "snap",
+    "max_size": {"long_side": 1536, "pixels": 1048576}
+  },
+
+  "recipe": {
+    "_note": "No identity references: subjects are written in words from the series config's `design`, the location from its `description`. Optional shot keyframes: shot:<id>:first conditions frame 0 (LTXVImgToVideoInplace), shot:<id>:last the final frame (LTXVAddGuide). A shot with neither renders text-to-video. LTX-2 makes the soundtrack with the picture and takes no voice sample or recording, so clone / dub / dub_keep_foley shots render with generate and say so.",
+    "policies": ["generate"],
+    "policy_fallback": {"to": "generate", "why": "LTX-2 generates sound with the picture and takes no voice sample or recording"},
+    "keyframes": ["first", "last"],
+    "keyframe_path": "refs/shots/{shot}/{end}.png",
+    "keyframe_strength": {"first": 0.7, "first_refine": 1.0, "last": 1.0},
+    "prompt": "prose",
+    "size_hints": {
+      "keyframe": "the render size (any size works: it is resized to the frame)"
+    }
+  },
+
+  "binding": {
+    "_note": "The workflow is ComfyUI's LTX-2.5 image-to-video template (a subgraph, flattened by h3jobs.ui_to_api). Every value is patched straight into a widget: there is no loader node, so a text-only shot needs no custom node beyond H3SaveShot, which takes the place of CreateVideo/SaveVideo. The prompt enhancer (TextGenerateLTX2Prompt) is never used: the prompt goes into the positive CLIPTextEncode, and prune drops the enhancer with everything else the saver doesn't need.",
+    "workflow": "workflow.json",
+    "workflow_name": "h3pipe_ltx2_5.json",
+    "env": "H3_LTX2_WORKFLOW",
+    "saver": {"class_type": "H3SaveShot",
+              "inputs": {"root": "project_root", "subfolder": "subfolder", "take": "take",
+                         "sidecar": "sidecar"},
+              "replace": {"class_type": "CreateVideo", "inputs": {"images": "images", "audio": "audio"}},
+              "drop": ["SaveVideo", "PreviewAny"],
+              "set": {"save_frames": false}},
+    "prune": true,
+    "params": {
+      "model": {"class_type": "UNETLoader", "field": "unet_name"},
+      "loras": {"class_type": "LoraLoaderModelOnly", "name": "lora_name",
+                "strength": "strength_model", "input": "model", "chain": true,
+                "insert_after": {"class_type": "UNETLoader", "output": 0}},
+      "seed": [{"class_type": "RandomNoise", "field": "noise_seed", "all": true}],
+      "prompt": {"class_type": "CLIPTextEncode", "field": "text", "feeds": ["LTXVConditioning", "positive"]},
+      "negative": {"class_type": "CLIPTextEncode", "field": "text", "feeds": ["LTXVConditioning", "negative"]},
+      "width": {"class_type": "EmptyLTXVLatentVideo", "field": "width", "scale": 0.5},
+      "height": {"class_type": "EmptyLTXVLatentVideo", "field": "height", "scale": 0.5},
+      "length": [{"class_type": "EmptyLTXVLatentVideo", "field": "length"},
+                 {"class_type": "LTXVEmptyLatentAudio", "field": "frames_number"}],
+      "fps": [{"class_type": "LTXVConditioning", "field": "frame_rate"},
+              {"class_type": "LTXVEmptyLatentAudio", "field": "frame_rate"},
+              {"class_type": "H3SaveShot", "field": "fps"}],
+      "shot_id": {"class_type": "H3SaveShot", "field": "shot_id"},
+      "audio_policy": {"class_type": "H3SaveShot", "field": "audio_policy"},
+      "text_encoder": {"class_type": "CLIPLoader", "field": "clip_name", "feeds": ["CLIPTextEncode", "clip"]},
+      "video_vae": {"class_type": "VAELoader", "field": "vae_name", "feeds": ["VAEDecodeTiled", "vae"]},
+      "audio_vae": {"class_type": "VAELoader", "field": "vae_name", "feeds": ["LTXVAudioVAEDecode", "audio_vae"]},
+      "upscaler": {"class_type": "LatentUpscaleModelLoader", "field": "model_name"}
+    },
+    "review_nodes": []
+  },
+
+  "presets": {
+    "_note": "LTX-2.5 22B distilled (int8): a fixed 8-step base schedule plus a 3-step refine (the workflow's ManualSigmas; `steps` is recorded, not patched). The final is the workflow's 768x512 unless the series config sets a size; the proxy is 448x256. Both use the same model: the distilled model is already fast. The negative prompt is the IC-LoRA model card's suggestion plus the artefacts a review cut can't use; the template's own ('pc game, ..., cartoon, childish') would fight a cartoon series' look.",
+    "final": {
+      "model": "ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors",
+      "lora": null, "steps": 8, "width": 768, "height": 512,
+      "negative": "worst quality, inconsistent motion, blurry, jittery, distorted, flickering, morphing, extra limbs, watermark, subtitles",
+      "text_encoder": "gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors",
+      "video_vae": "ltx-2.5-video-vae-bf16.safetensors",
+      "audio_vae": "ltx-2.5-audio-vae-bf16.safetensors",
+      "upscaler": "ltx-2.5-latent-spatial-upscaler-x2-bf16-1.0.safetensors"
+    },
+    "proxy": {
+      "lora": null, "steps": 8, "width": 448, "height": 256,
+      "negative": "worst quality, inconsistent motion, blurry, jittery, distorted, flickering, morphing, extra limbs, watermark, subtitles",
+      "text_encoder": "gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors",
+      "video_vae": "ltx-2.5-video-vae-bf16.safetensors",
+      "audio_vae": "ltx-2.5-audio-vae-bf16.safetensors",
+      "upscaler": "ltx-2.5-latent-spatial-upscaler-x2-bf16-1.0.safetensors"
+    }
+  }
+}

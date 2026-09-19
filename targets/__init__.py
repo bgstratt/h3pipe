@@ -12,6 +12,8 @@ h3jobs, h3refs, the routes) only talks to a target through this module:
     load_target(id)            -> Target            (cached; TargetError if unknown)
     list_targets(kind=None)    -> [Target]          (video, then image; by id)
     episode_target(story, series_cfg) -> Target     (validates target:/profile:)
+    shot_targets(story, series_cfg)   -> {shot id: target id}
+    episode_targets(story, series_cfg) -> [(Target, shot ids)]  (how a build splits)
 
 A Target has four parts, as docs/PLAN.md sketches them:
 
@@ -25,12 +27,15 @@ A Target has four parts, as docs/PLAN.md sketches them:
 
 and, for a video target, the code behind it:
 
-    compile_episode(story, series_cfg, pass_)       -> (shotlist doc, report)
+    compile_episode(story, series_cfg, pass_, only=None) -> (shotlist doc, report)
     compile(shot_ir, series_cfg, preset, ctx)       -> one shotlist entry
     required_refs(shot_ir, series_cfg)              -> [RefRequest]
     ref_slots(doc, shot)                            -> what the loader reads
     compile_without(story, series_cfg, pass_, entry, missing)   (optional)
                                                     -> the entry without some refs
+    patch_graph(graph, job, inputs)                 (optional) graph surgery the
+                                                    binding's data can't express
+                                                    (LTX: keyframe conditioning)
 
 or, for an image target:
 
@@ -74,16 +79,67 @@ class TargetError(ValueError):
 
 class Template:
     """Legal lengths and sizes. `frames` is a grid of `step * k + base`
-    frames, capped at `max`; `size_multiple` applies to width and height."""
+    frames, capped at `max`; `size_multiple` applies to width and height.
+
+    `fps` is a number, or "series": the target renders at whatever the series
+    config's `series.fps` says (fps_for). `max_size` caps the picture:
+    {"long_side": n} and/or {"pixels": n}. `size_fit` is how a size that isn't
+    legal is treated: "error" (the default; the build names the nearest legal
+    sizes) or "snap" (rounded down to the multiple, then shrunk under the
+    maximum, keeping the aspect ratio; fit_size)."""
 
     def __init__(self, spec: dict, short: str):
         fr = spec.get("frames") or {"step": 1, "base": 1, "max": 1 << 30}
         self.step, self.base, self.max = int(fr["step"]), int(fr["base"]), int(fr["max"])
-        self.fps = float(spec.get("fps", 24))
+        raw_fps = spec.get("fps", 24)
+        self.fps_from_series = raw_fps == "series"
+        self.fps = float(spec.get("default_fps", 24) if self.fps_from_series else raw_fps)
         self.size_multiple = int(spec.get("size_multiple", 1))
+        self.max_size = dict(spec.get("max_size") or {})
+        self.size_fit = spec.get("size_fit", "error")
         self.continuous = dict(spec.get("continuous") or {})
         self.short = short
         self.spec = spec
+
+    def fps_for(self, series_cfg: dict | None) -> float:
+        """The frame rate this target renders at for a series."""
+        if self.fps_from_series:
+            return float(((series_cfg or {}).get("series") or {}).get("fps", self.fps))
+        return self.fps
+
+    def fit_size(self, width: int, height: int) -> tuple[int, int]:
+        """(width, height) made legal: validate_size's rules, or with
+        `size_fit: snap`, snapped down to the multiple and shrunk under the
+        maximum size, keeping the aspect ratio as near as the grid allows."""
+        if self.size_fit != "snap":
+            self.validate_size(width, height)
+            return width, height
+        m = max(1, self.size_multiple)
+        k = 1.0
+        long_side = self.max_size.get("long_side")
+        if long_side and max(width, height) > long_side:
+            k = min(k, long_side / max(width, height))
+        pixels = self.max_size.get("pixels")
+        if pixels and width * height * k * k > pixels:
+            k = min(k, math.sqrt(pixels / (width * height)))
+        w, h = max(m, int(width * k) // m * m), max(m, int(height * k) // m * m)
+        return w, h
+
+    def validate_size(self, width: int, height: int) -> None:
+        m = self.size_multiple
+        for nm, v in (("width", width), ("height", height)):
+            if m > 1 and v % m:
+                raise ValueError(
+                    f"{nm}={v} is not a multiple of {m} — {self.short} rejects it. "
+                    f"Nearest legal: {v // m * m} or {(v // m + 1) * m}.")
+        long_side = self.max_size.get("long_side")
+        if long_side and max(width, height) > long_side:
+            raise ValueError(f"{width}x{height} is larger than {self.short}'s maximum "
+                             f"({long_side} on the long side)")
+        pixels = self.max_size.get("pixels")
+        if pixels and width * height > pixels:
+            raise ValueError(f"{width}x{height} is more than {self.short}'s maximum of "
+                             f"{pixels} pixels")
 
     def snap(self, frames: int) -> int:
         """Round a frame count UP onto the grid (ValueError past the maximum)."""
@@ -100,14 +156,6 @@ class Template:
         """The frames a render of `seconds` at `fps` will actually have."""
         return self.snap(max(1, round(seconds * fps)))
 
-    def validate_size(self, width: int, height: int) -> None:
-        m = self.size_multiple
-        for nm, v in (("width", width), ("height", height)):
-            if m > 1 and v % m:
-                raise ValueError(
-                    f"{nm}={v} is not a multiple of {m} — {self.short} rejects it. "
-                    f"Nearest legal: {v // m * m} or {(v // m + 1) * m}.")
-
     def continuous_warning(self, shot_id: str, frames: int) -> str | None:
         """The warning for a shot after the first in a `continuous: yes`
         sequence, when chaining eats too much of it (None: no warning)."""
@@ -120,20 +168,39 @@ class Template:
         return None
 
     def to_json(self) -> dict:
-        return {"fps": self.fps, "frames": {"step": self.step, "base": self.base,
-                                            "max": self.max},
-                "size_multiple": self.size_multiple}
+        d = {"fps": "series" if self.fps_from_series else self.fps,
+             "frames": {"step": self.step, "base": self.base, "max": self.max},
+             "size_multiple": self.size_multiple}
+        # only when set, so an H3 description is what it always was
+        if self.max_size:
+            d["max_size"] = dict(self.max_size)
+        if self.size_fit != "error":
+            d["size_fit"] = self.size_fit
+        return d
 
 
 @dataclass
 class Binding:
     """Which workflow a target drives and which widgets take what.
 
-    `params` maps a render parameter (model, loras, steps, seed, ...) to either
-    {"class_type", "field"} (patch that node's widget), a LoRA spec
-    {"class_type", "name", "strength", "input", "chain"} (see h3jobs.apply_loras),
-    or {"via": "loader"} (the loader node reads it from the frozen shotlist,
-    so the graph needs no patch)."""
+    `params` maps a render parameter (model, loras, steps, seed, prompt,
+    width, ...) to one widget spec or a list of them (one value patched into
+    several widgets, e.g. both stages' seeds). A widget spec is
+    {"class_type", "field"} plus optional selectors when the class occurs more
+    than once: "title" (the node's title), "feeds": [class, input] (the node
+    whose output feeds that input of a node of that class), or "all": true
+    (every node of the class); and "scale" (the value is multiplied first:
+    a two-stage graph's base latent is half the output size). A LoRA spec is
+    {"class_type", "name", "strength", "input", "chain", "insert_after"?}
+    (see h3jobs.apply_loras). {"via": "loader"} means the loader node reads it
+    from the frozen shotlist, so the graph needs no patch.
+
+    `loader` is optional: a target with none (LTX) gets every value patched
+    into widgets. `saver.replace` names a node class the saver takes the place
+    of ({"class_type", "inputs": {saver input: that node's input}}), with
+    `saver.drop` (classes deleted with it) and `saver.set` (fixed saver
+    inputs), so a stock workflow ending in CreateVideo/SaveVideo can feed
+    H3SaveShot. `prune` drops every node the saver doesn't depend on."""
     workflow: str                       # the repo copy (absolute path), or ""
     workflow_name: str                  # its name among ComfyUI's saved workflows
     env: str = ""                       # environment variable naming a file to use
@@ -141,6 +208,7 @@ class Binding:
     saver: dict = field(default_factory=dict)
     params: dict = field(default_factory=dict)
     review_nodes: list = field(default_factory=list)
+    prune: bool = False
 
     @property
     def loader_class(self) -> str:
@@ -154,8 +222,16 @@ class Binding:
         return self.params.get(name)
 
     def widgets(self) -> dict:
-        """The render parameters this binding exposes, for pickers."""
-        return {k: dict(v) for k, v in self.params.items()}
+        """The render parameters this binding exposes, for pickers: one spec
+        each (for a list of specs, the first; the rest take the same value)."""
+        return {k: dict(v[0] if isinstance(v, list) else v) for k, v in self.params.items()}
+
+    def specs(self, name: str) -> list[dict]:
+        """Every widget spec of a param ([]: not a setting of this binding)."""
+        v = self.params.get(name)
+        if not v:
+            return []
+        return [dict(x) for x in (v if isinstance(v, list) else [v])]
 
 
 @dataclass
@@ -195,6 +271,33 @@ class RefRequest:
                 "slot": self.slot, "size_hint": self.size_hint}
 
 
+GENERATE_MODES = ("generate", "generated", "generated_audio")
+
+
+def audio_intent(shot_ir, series_cfg: dict, pass_: str) -> str:
+    """What the script and series config ask of a shot's audio, before any
+    target decides how: the shot's own `policy:`, else for a shot with
+    dialogue the series config's default (`audio.default_policy`, else from
+    `audio.mode`, which the proxy may replace with `proxy.audio_mode`:
+    source_track -> dub_keep_foley, generate -> generate, anything else ->
+    clone), else generate. A target then renders it (Target.audio_policy)."""
+    if shot_ir.audio:
+        return shot_ir.audio
+    if not shot_ir.dialogue:
+        return "generate"
+    audio_cfg = series_cfg.get("audio", {})
+    mode = audio_cfg.get("mode", "source_track")
+    if pass_ == "proxy":
+        mode = series_cfg.get("proxy", {}).get("audio_mode") or mode
+    if mode == "source_track":
+        speaking = "dub_keep_foley"
+    elif mode in GENERATE_MODES:
+        speaking = "generate"
+    else:
+        speaking = "clone"
+    return audio_cfg.get("default_policy", speaking)
+
+
 def voice_prompt(name: str, voice: str) -> str:
     """What a voice sample should be. No audio target exists (nothing generates
     voices); this is the note refs_todo prints for a person recording one."""
@@ -223,7 +326,7 @@ class Target:
             workflow_name=b.get("workflow_name") or wf,
             env=b.get("env", ""), loader=dict(b.get("loader") or {}),
             saver=dict(b.get("saver") or {}), params=dict(b.get("params") or {}),
-            review_nodes=list(b.get("review_nodes") or []))
+            review_nodes=list(b.get("review_nodes") or []), prune=bool(b.get("prune")))
         self.presets: dict[str, Preset] = {}
         for name, p in (spec.get("presets") or {}).items():
             if name.startswith("_"):                      # a comment
@@ -257,8 +360,14 @@ class Target:
         return fn
 
     # video
-    def compile_episode(self, story, series_cfg: dict, pass_: str):
-        return self._need("compile_episode")(self, story, series_cfg, pass_)
+    def compile_episode(self, story, series_cfg: dict, pass_: str, only=None):
+        """(shotlist doc, report) for the episode's shots, or only the shots
+        whose ids are in `only` (an episode that mixes targets compiles each
+        target's own shots; a retarget compiles one)."""
+        fn = self._need("compile_episode")
+        if only is None:
+            return fn(self, story, series_cfg, pass_)
+        return fn(self, story, series_cfg, pass_, only=set(only))
 
     def compile(self, shot_ir, series_cfg: dict, preset: "Preset | str", ctx=None) -> dict:
         return self._need("compile_shot")(self, shot_ir, series_cfg, preset, ctx)
@@ -276,8 +385,49 @@ class Target:
     def ref_slots(self, doc: dict, shot: dict) -> list[dict]:
         return self._need("ref_slots")(self, doc, shot)
 
+    def patch_graph(self, graph: dict, job, inputs: dict) -> None:
+        """The target's own graph surgery for one job, after the binding's
+        widgets are patched (only targets that have it: supports("patch_graph")).
+        `inputs` maps an input role ("first", "last") to the name ComfyUI's
+        LoadImage reads (see h3jobs.stage_inputs)."""
+        self._need("patch_graph")(self, graph, job, inputs)
+
     def supports(self, name: str) -> bool:
         return getattr(self.module, name, None) is not None
+
+    # -- capabilities (target.json "recipe") ---------------------------------
+
+    @property
+    def policies(self) -> list[str]:
+        """The audio policies this target renders (recipe.policies)."""
+        return list(self.recipe.get("policies") or ["generate"])
+
+    def audio_policy(self, intent: str) -> tuple[str, str]:
+        """(policy it renders with, note) for a shot's audio intent. A policy
+        the target doesn't declare falls back to `recipe.policy_fallback`
+        ({"to", "why"}) with a note saying so, or is a ValueError when the
+        target declares no fallback. This is the check the core relies on:
+        no code outside a target asks which model it is."""
+        if intent in self.policies:
+            return intent, ""
+        fb = self.recipe.get("policy_fallback") or {}
+        if fb.get("to") in self.policies:
+            why = fb.get("why") or f"{self.short} doesn't support it"
+            return fb["to"], f"audio {intent} renders as {fb['to']} on {self.short}: {why}"
+        raise ValueError(f"{self.short} can't render audio policy {intent!r} "
+                         f"(it renders {', '.join(self.policies)})")
+
+    def capabilities(self) -> dict:
+        """What a picker or the core may need to know without asking which
+        model this is (GET /h3pipe/targets)."""
+        r = self.recipe
+        return {"policies": self.policies,
+                "policy_fallback": (r.get("policy_fallback") or {}).get("to"),
+                "voice_reference": bool(r.get("voice_slots")),
+                "subject_refs": bool(r.get("subject_slots")),
+                "keyframes": list(r.get("keyframes") or []),
+                "prompt": r.get("prompt", "sections" if r.get("subject_slots") else "prose"),
+                "negative_prompt": bool(self.binding.specs("negative"))}
 
     # image
     def ref_prompt(self, req: RefRequest, series_cfg: dict) -> str:
@@ -297,6 +447,12 @@ class Target:
         base = self.presets[pass_]
         final = self.presets.get("final", base)
         block = s if pass_ == "final" else (series_cfg or {}).get(pass_, {})
+        if (s.get("target") or DEFAULT_VIDEO_TARGET) != self.id and self.kind == "video":
+            # Not the series target (a shot or profile picked this one): the
+            # pass block's model / LoRA / steps were written for another model,
+            # so only its picture size carries over (made legal by fit_size).
+            s = {k: v for k, v in s.items() if k in ("width", "height")}
+            block = {k: v for k, v in block.items() if k in ("width", "height")}
         # evaluated in this order so a bad value is reported as it always was
         width, height = int(block.get("width", base.width)), int(block.get("height", base.height))
         steps = int(block.get("steps", base.steps))
@@ -319,7 +475,9 @@ class Target:
                 "workflow": self.binding.workflow_name,
                 "loader": self.binding.loader_class or None,
                 "saver": self.binding.saver_class or None,
-                "template": self.template.to_json()}
+                "template": self.template.to_json(),
+                "short": self.short,
+                "capabilities": self.capabilities() if self.kind == "video" else {}}
 
 
 # ---------------------------------------------------------------------------
@@ -502,25 +660,50 @@ def layered_lora(layers: list[dict]) -> tuple[str, object] | None:
     return None
 
 
-def episode_target(story, series_cfg: dict) -> Target:
-    """The one video target an episode compiles for, after checking every
-    `profile:` and `target:` it names. Several targets in one episode arrive
-    with Phase 8: until then a shot that resolves to another target is an
-    error, not a silent render on the wrong model."""
+def shot_targets(story, series_cfg: dict) -> dict[str, str]:
+    """{shot id: the video target it renders on}, in script order, after
+    checking every `profile:` and `target:` the script names. Each shot layers
+    like any render setting: the series config's `series.target` -> sequence
+    profile -> sequence `target:` -> shot profile -> shot `target:`. A target
+    no video target is called is an error naming the known ones."""
     profiles = series_profiles(series_cfg)
     default = video_target(series_cfg)
     known = [x.id for x in list_targets("video")]
+    out = {}
     for sq in story.sequences:
         seq = {"id": sq.id, "profile": sq.profile, "target": sq.target}
         for s in sq.shots:
             shot = {"id": s.id, "profile": s.profile, "target": s.target}
             tid = layered(render_layers(series_cfg, seq, shot, profiles), "target",
                           default.id)
-            if tid != default.id:
-                unknown = ("" if tid in known else
-                           f" (and no video target is called that: {', '.join(known)})")
-                raise ValueError(
-                    f"shot {s.id}: target '{tid}' is not the series target "
-                    f"'{default.id}'{unknown}. Episodes that mix targets arrive with "
-                    f"Phase 8; until then every shot renders on the series target.")
-    return default
+            if tid not in known:
+                raise ValueError(f"shot {s.id}: target '{tid}' is not a video target "
+                                 f"(known: {', '.join(known)})")
+            out[s.id] = tid
+    return out
+
+
+def episode_targets(story, series_cfg: dict) -> list[tuple[Target, set[str] | None]]:
+    """How a build splits an episode: [(target, shot ids)], the series target
+    first. The series target's ids are None when every shot is its own (the
+    whole episode compiles as it always has, byte for byte); it is listed even
+    when no shot uses it, because shotlist.json is always written."""
+    by_shot = shot_targets(story, series_cfg)
+    default = video_target(series_cfg)
+    others: dict[str, set[str]] = {}
+    for sid, tid in by_shot.items():
+        if tid != default.id:
+            others.setdefault(tid, set()).add(sid)
+    if not others:
+        return [(default, None)]
+    mine = {sid for sid, tid in by_shot.items() if tid == default.id}
+    return [(default, mine)] + [(load_target(t, "video"), ids)
+                                for t, ids in sorted(others.items())]
+
+
+def episode_target(story, series_cfg: dict) -> Target:
+    """The series target, after checking every `profile:` and `target:` the
+    script names (shot_targets). Shots on other targets are compiled into
+    their own shotlists (episode_targets)."""
+    shot_targets(story, series_cfg)
+    return video_target(series_cfg)

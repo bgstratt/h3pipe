@@ -16,8 +16,9 @@ What it does
        with every cut placed at the quietest point of the pause between lines.
        Silent shots between two lines get the pause time, stretched or squeezed
        from their scripted `dur:` (warned when the recording's pause is far off).
-       With --snap (default) a speaking shot's window is lengthened to H3's
-       17k+5 frame grid when the pause has room, so nothing is padded.
+       With --snap (default) a speaking shot's window is lengthened to the
+       frame grid of the target it renders on (H3's 17k+5, LTX's 8k+1) when
+       the pause has room, so nothing is padded.
     4. Rewrites the script: `audio: in-out` on every shot it placed, old `dur:`
        lines kept as comments. Points the series config at the recording
        (audio.mode = source_track). Both files are backed up as .bak first.
@@ -52,7 +53,7 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-import h3build  # noqa: E402  (parse_script, snap_up)
+import h3build  # noqa: E402  (parse_script, parse_story)
 
 SR = 16000
 LEAD = 0.25      # seconds of air kept before a line's first word
@@ -79,6 +80,25 @@ def episode_files(ep: str) -> tuple[str, str]:
                      f"{[os.path.basename(c) for c in cands]}")
         md = cands[0]
     return series_cfg, md
+
+
+def shot_grids(series_cfg_path: str, script_text: str):
+    """shot id -> the snap of the frame grid that shot renders on: its video
+    target's template (targets.shot_targets: series.target, profiles and
+    `target:` lines), H3's 17k+5 or LTX's 8k+1. A script the targets can't
+    resolve falls back to the series target for every shot."""
+    import targets as TG
+    from h3core.series_config import (character_ids, load_series_config, series_info,
+                                      subject_ids)
+    cfg = load_series_config(series_cfg_path)
+    default = TG.video_target(cfg)
+    try:
+        story = h3build.parse_story(script_text, subject_ids(cfg), character_ids(cfg),
+                                    series_info(cfg))
+        by_shot = TG.shot_targets(story, cfg)
+    except Exception:
+        by_shot = {}
+    return lambda sid: TG.load_target(by_shot.get(sid, default.id), "video").template.snap
 
 
 def load_pcm(path: str) -> "np.ndarray":
@@ -263,7 +283,7 @@ def build_windows(shots: list[dict], pcm, duration: float, fps: float, snap: boo
             if between:
                 end = lo
                 if snap:
-                    want = h3build.snap_up(max(1, round((end - prev_cut) * fps))) / fps
+                    want = s["snap"](max(1, round((end - prev_cut) * fps))) / fps
                     if prev_cut + want <= hi - MIN_SILENT * len(between):
                         end = prev_cut + want
                 s["window"] = [prev_cut, end]
@@ -272,7 +292,7 @@ def build_windows(shots: list[dict], pcm, duration: float, fps: float, snap: boo
             else:
                 end = quietest(pcm, lo, hi) if hi > lo else (b + na) / 2
                 if snap:
-                    want = h3build.snap_up(max(1, round((end - prev_cut) * fps))) / fps
+                    want = s["snap"](max(1, round((end - prev_cut) * fps))) / fps
                     if lo <= prev_cut + want <= hi:
                         end = prev_cut + want
                 s["window"] = [prev_cut, end]
@@ -281,7 +301,7 @@ def build_windows(shots: list[dict], pcm, duration: float, fps: float, snap: boo
             tail_ids = list(range(i + 1, len(shots)))
             end = min(duration, b + TAIL)
             if snap and not tail_ids:
-                want = h3build.snap_up(max(1, round((end - prev_cut) * fps))) / fps
+                want = s["snap"](max(1, round((end - prev_cut) * fps))) / fps
                 if prev_cut + want <= duration:
                     end = prev_cut + want
             s["window"] = [prev_cut, end]
@@ -385,10 +405,12 @@ def main() -> int:
              and v.get("kind", "character") == "character"}
     text = open(md_p, encoding="utf-8").read()
     epi = h3build.parse_script(text, subjects, chars)
+    snap_of = shot_grids(series_cfg_p, text)
     shots, lines = [], []
     for seq in epi["sequences"]:
         for sh in seq["shots"]:
-            entry = {"id": sh["id"], "lines": [], "dur": sh.get("duration")}
+            entry = {"id": sh["id"], "lines": [], "dur": sh.get("duration"),
+                     "snap": snap_of(sh["id"])}
             for d in sh["dialogue"]:
                 ln = {"shot": sh["id"], "who": d["who"], "text": d["line"]}
                 entry["lines"].append(ln)
@@ -434,7 +456,7 @@ def main() -> int:
         if w:
             ln_s = w[1] - w[0]
             req = max(1, round(ln_s * fps))
-            fr = f"{req}/{h3build.snap_up(req)}"
+            fr = f"{req}/{s['snap'](req)}"
             win = f"{w[0]:7.3f}-{w[1]:7.3f}"
         else:
             ln_s, fr, win = 0.0, "-", "  (keeps dur:)"

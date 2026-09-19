@@ -42,8 +42,8 @@ def kitchen_sink():
 class LoadingTest(unittest.TestCase):
     def test_list_and_load(self):
         ids = {(t.kind, t.id) for t in TG.list_targets()}
-        self.assertEqual(ids, {("video", H3), ("image", "krea2")})
-        self.assertEqual([t.id for t in TG.list_targets("video")], [H3])
+        self.assertEqual(ids, {("video", H3), ("video", "ltx2"), ("image", "krea2")})
+        self.assertEqual([t.id for t in TG.list_targets("video")], ["ltx2", H3])
         self.assertIs(TG.load_target(H3), TG.load_target(H3))
         with self.assertRaises(TG.TargetError) as cm:
             TG.load_target("ltx_2_3", "video")
@@ -165,10 +165,22 @@ class ProfileTest(unittest.TestCase):
         series_cfg["profiles"]["dialogue_close"]["target"] = "ltx_2_3"
         with self.assertRaises(ValueError) as cm:
             TG.episode_target(story, series_cfg)
-        self.assertIn("Phase 8", str(cm.exception))
+        self.assertIn("not a video target (known: ltx2, minimax_h3_ref2va)", str(cm.exception))
         # sh320 names the series target itself, which beats its profile's; sh330
         # takes the profile's
         self.assertIn("shot sh330:", str(cm.exception))
+        # a known target: the episode is split, the series target first
+        series_cfg["profiles"]["dialogue_close"]["target"] = "ltx2"
+        self.assertEqual(TG.episode_target(story, series_cfg).id, H3)
+        by_shot = TG.shot_targets(story, series_cfg)
+        self.assertEqual((by_shot["sh320"], by_shot["sh330"], by_shot["sh010"]), (H3, "ltx2", H3))
+        groups = TG.episode_targets(story, series_cfg)
+        self.assertEqual([(t.id, sorted(ids)) for t, ids in groups][1], ("ltx2", ["sh330"]))
+        self.assertEqual(groups[0][0].id, H3)
+        self.assertNotIn("sh330", groups[0][1])
+        series_cfg["profiles"]["dialogue_close"].pop("target")
+        self.assertEqual([(t.id, ids) for t, ids in TG.episode_targets(story, series_cfg)],
+                         [(H3, None)])
 
 
 class H3InterfaceTest(unittest.TestCase):
@@ -375,9 +387,21 @@ class TargetsRouteTest(ApiTest):
     def test_targets(self):
         data = self.ok(A.get_targets(self.ctx, {}))
         by = {t["id"]: t for t in data["targets"]}
-        self.assertEqual(set(by), {H3, "krea2"})
+        self.assertEqual(set(by), {H3, "ltx2", "krea2"})
         self.assertEqual(by[H3]["kind"], "video")
         self.assertIn("loras", by[H3]["widgets"])
+        # what a target picker needs
+        lt = by["ltx2"]
+        self.assertFalse(lt["default"])
+        self.assertEqual(lt["capabilities"]["policies"], ["generate"])
+        self.assertEqual(lt["capabilities"]["keyframes"], ["first", "last"])
+        self.assertFalse(lt["capabilities"]["voice_reference"])
+        self.assertTrue(by[H3]["capabilities"]["voice_reference"])
+        self.assertEqual(lt["widgets"]["model"], {"class_type": "UNETLoader", "field": "unet_name"})
+        self.assertEqual(lt["widgets"]["seed"]["class_type"], "RandomNoise")
+        self.assertEqual(lt["template"]["frames"], {"step": 8, "base": 1, "max": 481})
+        self.assertEqual(lt["template"]["fps"], "series")
+        self.assertEqual(lt["presets"]["proxy"]["width"], 448)
         self.assertEqual(data["default"], {"video": H3, "image": "krea2"})
         self.assertEqual([t["id"] for t in self.ok(A.get_targets(self.ctx, {"kind": "image"}))
                           ["targets"]], ["krea2"])

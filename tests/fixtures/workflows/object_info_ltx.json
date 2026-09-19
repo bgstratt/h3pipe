@@ -1,0 +1,1114 @@
+{
+ "CFGGuider": {
+  "input": {
+   "required": {
+    "model": [
+     "MODEL"
+    ],
+    "positive": [
+     "CONDITIONING"
+    ],
+    "negative": [
+     "CONDITIONING"
+    ],
+    "cfg": [
+     "FLOAT"
+    ]
+   },
+   "optional": {}
+  },
+  "output": [
+   "GUIDER"
+  ],
+  "output_name": [
+   "GUIDER"
+  ]
+ },
+ "CLIPLoader": {
+  "input": {
+   "required": {
+    "clip_name": [
+     "COMBO"
+    ],
+    "type": [
+     "COMBO"
+    ]
+   },
+   "optional": {
+    "device": [
+     "COMBO"
+    ]
+   }
+  },
+  "output": [
+   "CLIP"
+  ],
+  "output_name": [
+   "CLIP"
+  ]
+ },
+ "CLIPTextEncode": {
+  "input": {
+   "required": {
+    "text": [
+     "STRING"
+    ],
+    "clip": [
+     "CLIP"
+    ]
+   },
+   "optional": {}
+  },
+  "output": [
+   "CONDITIONING"
+  ],
+  "output_name": [
+   "CONDITIONING"
+  ]
+ },
+ "CheckpointLoaderSimple": {
+  "input": {
+   "required": {
+    "ckpt_name": [
+     "COMBO"
+    ]
+   },
+   "optional": {}
+  },
+  "output": [
+   "MODEL",
+   "CLIP",
+   "VAE"
+  ],
+  "output_name": [
+   "MODEL",
+   "CLIP",
+   "VAE"
+  ]
+ },
+ "ComfyMathExpression": {
+  "input": {
+   "required": {
+    "expression": [
+     "STRING"
+    ],
+    "values": [
+     "COMFY_AUTOGROW_V3"
+    ]
+   },
+   "optional": {}
+  },
+  "output": [
+   "FLOAT",
+   "INT",
+   "BOOLEAN"
+  ],
+  "output_name": [
+   "FLOAT",
+   "INT",
+   "BOOL"
+  ]
+ },
+ "ComfySwitchNode": {
+  "input": {
+   "required": {
+    "switch": [
+     "BOOLEAN"
+    ]
+   },
+   "optional": {
+    "on_false": [
+     "COMFY_MATCHTYPE_V3"
+    ],
+    "on_true": [
+     "COMFY_MATCHTYPE_V3"
+    ]
+   }
+  },
+  "output": [
+   "COMFY_MATCHTYPE_V3"
+  ],
+  "output_name": [
+   "output"
+  ]
+ },
+ "CreateVideo": {
+  "input": {
+   "required": {
+    "images": [
+     "IMAGE"
+    ],
+    "fps": [
+     "FLOAT"
+    ]
+   },
+   "optional": {
+    "audio": [
+     "AUDIO"
+    ],
+    "bit_depth": [
+     "COMBO"
+    ],
+    "color_space": [
+     "COMBO"
+    ],
+    "codec": [
+     "COMBO"
+    ]
+   }
+  },
+  "output": [
+   "VIDEO"
+  ],
+  "output_name": [
+   "VIDEO"
+  ]
+ },
+ "EmptyImage": {
+  "input": {
+   "required": {
+    "width": [
+     "INT"
+    ],
+    "height": [
+     "INT"
+    ],
+    "batch_size": [
+     "INT"
+    ],
+    "color": [
+     "INT"
+    ]
+   },
+   "optional": {}
+  },
+  "output": [
+   "IMAGE"
+  ],
+  "output_name": [
+   "IMAGE"
+  ]
+ },
+ "EmptyLTXVLatentVideo": {
+  "input": {
+   "required": {
+    "width": [
+     "INT"
+    ],
+    "height": [
+     "INT"
+    ],
+    "length": [
+     "INT"
+    ],
+    "batch_size": [
+     "INT"
+    ]
+   },
+   "optional": {}
+  },
+  "output": [
+   "LATENT"
+  ],
+  "output_name": [
+   "LATENT"
+  ]
+ },
+ "GetICLoRAParameters": {
+  "input": {
+   "required": {
+    "iclora_model": [
+     "MODEL"
+    ]
+   },
+   "optional": {}
+  },
+  "output": [
+   "IC_LORA_PARAMETERS"
+  ],
+  "output_name": [
+   "iclora_parameters"
+  ]
+ },
+ "GetImageSize": {
+  "input": {
+   "required": {
+    "image": [
+     "IMAGE"
+    ]
+   },
+   "optional": {}
+  },
+  "output": [
+   "INT",
+   "INT",
+   "INT"
+  ],
+  "output_name": [
+   "width",
+   "height",
+   "batch_size"
+  ]
+ },
+ "H3SaveShot": {
+  "input": {
+   "required": {
+    "images": [
+     "IMAGE"
+    ],
+    "shot_id": [
+     "STRING"
+    ],
+    "audio_policy": [
+     "STRING"
+    ],
+    "project_root": [
+     "STRING"
+    ],
+    "subfolder": [
+     "STRING"
+    ],
+    "take": [
+     "INT"
+    ],
+    "fps": [
+     "FLOAT"
+    ],
+    "save_frames": [
+     "BOOLEAN"
+    ]
+   },
+   "optional": {
+    "audio": [
+     "AUDIO"
+    ],
+    "sidecar": [
+     "STRING"
+    ]
+   }
+  },
+  "output": [
+   "STRING",
+   "STRING"
+  ],
+  "output_name": [
+   "shot_dir",
+   "status"
+  ]
+ },
+ "KSampler": {
+  "input": {
+   "required": {
+    "model": [
+     "MODEL"
+    ],
+    "seed": [
+     "INT"
+    ],
+    "steps": [
+     "INT"
+    ],
+    "cfg": [
+     "FLOAT"
+    ],
+    "sampler_name": [
+     "COMBO"
+    ],
+    "scheduler": [
+     "COMBO"
+    ],
+    "positive": [
+     "CONDITIONING"
+    ],
+    "negative": [
+     "CONDITIONING"
+    ],
+    "latent_image": [
+     "LATENT"
+    ],
+    "denoise": [
+     "FLOAT"
+    ]
+   },
+   "optional": {}
+  },
+  "output": [
+   "LATENT"
+  ],
+  "output_name": [
+   "LATENT"
+  ]
+ },
+ "KSamplerSelect": {
+  "input": {
+   "required": {
+    "sampler_name": [
+     "COMBO"
+    ]
+   },
+   "optional": {}
+  },
+  "output": [
+   "SAMPLER"
+  ],
+  "output_name": [
+   "SAMPLER"
+  ]
+ },
+ "LTXAVTextEncoderLoader": {
+  "input": {
+   "required": {
+    "text_encoder": [
+     "COMBO"
+    ],
+    "ckpt_name": [
+     "COMBO"
+    ],
+    "device": [
+     "COMBO"
+    ]
+   },
+   "optional": {}
+  },
+  "output": [
+   "CLIP"
+  ],
+  "output_name": [
+   "CLIP"
+  ]
+ },
+ "LTXVAddGuide": {
+  "input": {
+   "required": {
+    "positive": [
+     "CONDITIONING"
+    ],
+    "negative": [
+     "CONDITIONING"
+    ],
+    "vae": [
+     "VAE"
+    ],
+    "latent": [
+     "LATENT"
+    ],
+    "image": [
+     "IMAGE"
+    ],
+    "frame_idx": [
+     "INT"
+    ],
+    "strength": [
+     "FLOAT"
+    ]
+   },
+   "optional": {
+    "attention_mask": [
+     "MASK"
+    ],
+    "iclora_parameters": [
+     "IC_LORA_PARAMETERS"
+    ]
+   }
+  },
+  "output": [
+   "CONDITIONING",
+   "CONDITIONING",
+   "LATENT"
+  ],
+  "output_name": [
+   "positive",
+   "negative",
+   "latent"
+  ]
+ },
+ "LTXVAudioVAEDecode": {
+  "input": {
+   "required": {
+    "samples": [
+     "LATENT"
+    ],
+    "audio_vae": [
+     "VAE"
+    ]
+   },
+   "optional": {}
+  },
+  "output": [
+   "AUDIO"
+  ],
+  "output_name": [
+   "Audio"
+  ]
+ },
+ "LTXVAudioVAELoader": {
+  "input": {
+   "required": {
+    "ckpt_name": [
+     "COMBO"
+    ]
+   },
+   "optional": {}
+  },
+  "output": [
+   "VAE"
+  ],
+  "output_name": [
+   "Audio VAE"
+  ]
+ },
+ "LTXVConcatAVLatent": {
+  "input": {
+   "required": {
+    "video_latent": [
+     "LATENT"
+    ],
+    "audio_latent": [
+     "LATENT"
+    ]
+   },
+   "optional": {}
+  },
+  "output": [
+   "LATENT"
+  ],
+  "output_name": [
+   "latent"
+  ]
+ },
+ "LTXVConditioning": {
+  "input": {
+   "required": {
+    "positive": [
+     "CONDITIONING"
+    ],
+    "negative": [
+     "CONDITIONING"
+    ],
+    "frame_rate": [
+     "FLOAT"
+    ]
+   },
+   "optional": {}
+  },
+  "output": [
+   "CONDITIONING",
+   "CONDITIONING"
+  ],
+  "output_name": [
+   "positive",
+   "negative"
+  ]
+ },
+ "LTXVCropGuides": {
+  "input": {
+   "required": {
+    "positive": [
+     "CONDITIONING"
+    ],
+    "negative": [
+     "CONDITIONING"
+    ],
+    "latent": [
+     "LATENT"
+    ]
+   },
+   "optional": {}
+  },
+  "output": [
+   "CONDITIONING",
+   "CONDITIONING",
+   "LATENT"
+  ],
+  "output_name": [
+   "positive",
+   "negative",
+   "latent"
+  ]
+ },
+ "LTXVDualCFGGuider": {
+  "input": {
+   "required": {
+    "model": [
+     "MODEL"
+    ],
+    "positive": [
+     "CONDITIONING"
+    ],
+    "negative": [
+     "CONDITIONING"
+    ],
+    "video_cfg": [
+     "FLOAT"
+    ],
+    "audio_cfg": [
+     "FLOAT"
+    ]
+   },
+   "optional": {}
+  },
+  "output": [
+   "GUIDER"
+  ],
+  "output_name": [
+   "GUIDER"
+  ]
+ },
+ "LTXVEmptyLatentAudio": {
+  "input": {
+   "required": {
+    "frames_number": [
+     "INT"
+    ],
+    "frame_rate": [
+     "FLOAT,INT"
+    ],
+    "batch_size": [
+     "INT"
+    ],
+    "audio_vae": [
+     "VAE"
+    ]
+   },
+   "optional": {}
+  },
+  "output": [
+   "LATENT"
+  ],
+  "output_name": [
+   "Latent"
+  ]
+ },
+ "LTXVImgToVideoInplace": {
+  "input": {
+   "required": {
+    "vae": [
+     "VAE"
+    ],
+    "image": [
+     "IMAGE"
+    ],
+    "latent": [
+     "LATENT"
+    ],
+    "strength": [
+     "FLOAT"
+    ],
+    "bypass": [
+     "BOOLEAN"
+    ]
+   },
+   "optional": {}
+  },
+  "output": [
+   "LATENT"
+  ],
+  "output_name": [
+   "latent"
+  ]
+ },
+ "LTXVLatentUpsampler": {
+  "input": {
+   "required": {
+    "samples": [
+     "LATENT"
+    ],
+    "upscale_model": [
+     "LATENT_UPSCALE_MODEL"
+    ],
+    "vae": [
+     "VAE"
+    ]
+   },
+   "optional": {}
+  },
+  "output": [
+   "LATENT"
+  ],
+  "output_name": [
+   "LATENT"
+  ]
+ },
+ "LTXVPreprocess": {
+  "input": {
+   "required": {
+    "image": [
+     "IMAGE"
+    ],
+    "img_compression": [
+     "INT"
+    ]
+   },
+   "optional": {}
+  },
+  "output": [
+   "IMAGE"
+  ],
+  "output_name": [
+   "output_image"
+  ]
+ },
+ "LTXVSeparateAVLatent": {
+  "input": {
+   "required": {
+    "av_latent": [
+     "LATENT"
+    ]
+   },
+   "optional": {}
+  },
+  "output": [
+   "LATENT",
+   "LATENT"
+  ],
+  "output_name": [
+   "video_latent",
+   "audio_latent"
+  ]
+ },
+ "LatentUpscaleModelLoader": {
+  "input": {
+   "required": {
+    "model_name": [
+     "COMBO"
+    ]
+   },
+   "optional": {}
+  },
+  "output": [
+   "LATENT_UPSCALE_MODEL"
+  ],
+  "output_name": [
+   "LATENT_UPSCALE_MODEL"
+  ]
+ },
+ "LoadImage": {
+  "input": {
+   "required": {
+    "image": [
+     "COMBO"
+    ]
+   },
+   "optional": {}
+  },
+  "output": [
+   "IMAGE",
+   "MASK"
+  ],
+  "output_name": [
+   "IMAGE",
+   "MASK"
+  ]
+ },
+ "LoraLoader": {
+  "input": {
+   "required": {
+    "model": [
+     "MODEL"
+    ],
+    "clip": [
+     "CLIP"
+    ],
+    "lora_name": [
+     "COMBO"
+    ],
+    "strength_model": [
+     "FLOAT"
+    ],
+    "strength_clip": [
+     "FLOAT"
+    ]
+   },
+   "optional": {}
+  },
+  "output": [
+   "MODEL",
+   "CLIP"
+  ],
+  "output_name": [
+   "MODEL",
+   "CLIP"
+  ]
+ },
+ "LoraLoaderModelOnly": {
+  "input": {
+   "required": {
+    "model": [
+     "MODEL"
+    ],
+    "lora_name": [
+     "COMBO"
+    ],
+    "strength_model": [
+     "FLOAT"
+    ]
+   },
+   "optional": {}
+  },
+  "output": [
+   "MODEL"
+  ],
+  "output_name": [
+   "MODEL"
+  ]
+ },
+ "ManualSigmas": {
+  "input": {
+   "required": {
+    "sigmas": [
+     "STRING"
+    ]
+   },
+   "optional": {}
+  },
+  "output": [
+   "SIGMAS"
+  ],
+  "output_name": [
+   "SIGMAS"
+  ]
+ },
+ "PreviewAny": {
+  "input": {
+   "required": {
+    "source": [
+     "*"
+    ]
+   },
+   "optional": {}
+  },
+  "output": [
+   "STRING"
+  ],
+  "output_name": [
+   "STRING"
+  ]
+ },
+ "PrimitiveInt": {
+  "input": {
+   "required": {
+    "value": [
+     "INT"
+    ]
+   },
+   "optional": {}
+  },
+  "output": [
+   "INT"
+  ],
+  "output_name": [
+   "INT"
+  ]
+ },
+ "PrimitiveStringMultiline": {
+  "input": {
+   "required": {
+    "value": [
+     "STRING"
+    ]
+   },
+   "optional": {}
+  },
+  "output": [
+   "STRING"
+  ],
+  "output_name": [
+   "STRING"
+  ]
+ },
+ "RandomNoise": {
+  "input": {
+   "required": {
+    "noise_seed": [
+     "INT"
+    ]
+   },
+   "optional": {}
+  },
+  "output": [
+   "NOISE"
+  ],
+  "output_name": [
+   "NOISE"
+  ]
+ },
+ "RepeatImageBatch": {
+  "input": {
+   "required": {
+    "image": [
+     "IMAGE"
+    ],
+    "amount": [
+     "INT"
+    ]
+   },
+   "optional": {}
+  },
+  "output": [
+   "IMAGE"
+  ],
+  "output_name": [
+   "IMAGE"
+  ]
+ },
+ "ResizeAndPadImage": {
+  "input": {
+   "required": {
+    "image": [
+     "IMAGE"
+    ],
+    "target_width": [
+     "INT"
+    ],
+    "target_height": [
+     "INT"
+    ],
+    "padding_color": [
+     "COMBO"
+    ],
+    "interpolation": [
+     "COMBO"
+    ]
+   },
+   "optional": {}
+  },
+  "output": [
+   "IMAGE"
+  ],
+  "output_name": [
+   "IMAGE"
+  ]
+ },
+ "ResizeImageMaskNode": {
+  "input": {
+   "required": {
+    "input": [
+     "COMFY_MATCHTYPE_V3"
+    ],
+    "resize_type": [
+     "COMFY_DYNAMICCOMBO_V3"
+    ],
+    "scale_method": [
+     "COMBO"
+    ]
+   },
+   "optional": {}
+  },
+  "output": [
+   "COMFY_MATCHTYPE_V3"
+  ],
+  "output_name": [
+   "resized"
+  ]
+ },
+ "ResizeImagesByLongerEdge": {
+  "input": {
+   "required": {
+    "images": [
+     "IMAGE"
+    ],
+    "longer_edge": [
+     "INT"
+    ]
+   },
+   "optional": {}
+  },
+  "output": [
+   "IMAGE"
+  ],
+  "output_name": [
+   "images"
+  ]
+ },
+ "ResolutionSelector": {
+  "input": {
+   "required": {
+    "aspect_ratio": [
+     "COMBO"
+    ],
+    "megapixels": [
+     "FLOAT"
+    ],
+    "multiple": [
+     "INT"
+    ]
+   },
+   "optional": {
+    "preview": [
+     "RESOLUTION_PREVIEW"
+    ]
+   }
+  },
+  "output": [
+   "INT",
+   "INT"
+  ],
+  "output_name": [
+   "width",
+   "height"
+  ]
+ },
+ "SamplerCustomAdvanced": {
+  "input": {
+   "required": {
+    "noise": [
+     "NOISE"
+    ],
+    "guider": [
+     "GUIDER"
+    ],
+    "sampler": [
+     "SAMPLER"
+    ],
+    "sigmas": [
+     "SIGMAS"
+    ],
+    "latent_image": [
+     "LATENT"
+    ]
+   },
+   "optional": {}
+  },
+  "output": [
+   "LATENT",
+   "LATENT"
+  ],
+  "output_name": [
+   "output",
+   "denoised_output"
+  ]
+ },
+ "SaveVideo": {
+  "input": {
+   "required": {
+    "video": [
+     "VIDEO"
+    ],
+    "filename_prefix": [
+     "STRING"
+    ],
+    "format": [
+     "COMFY_DYNAMICCOMBO_V3"
+    ]
+   },
+   "optional": {
+    "codec": [
+     "COMFY_DYNAMICCOMBO_V3"
+    ]
+   }
+  },
+  "output": [
+   "VIDEO"
+  ],
+  "output_name": [
+   "video"
+  ]
+ },
+ "TextGenerateLTX2Prompt": {
+  "input": {
+   "required": {
+    "clip": [
+     "CLIP"
+    ],
+    "prompt": [
+     "STRING"
+    ],
+    "max_length": [
+     "INT"
+    ],
+    "sampling_mode": [
+     "COMFY_DYNAMICCOMBO_V3"
+    ]
+   },
+   "optional": {
+    "image": [
+     "IMAGE"
+    ],
+    "video": [
+     "IMAGE"
+    ],
+    "audio": [
+     "AUDIO"
+    ],
+    "thinking": [
+     "BOOLEAN"
+    ],
+    "use_default_template": [
+     "BOOLEAN"
+    ]
+   }
+  },
+  "output": [
+   "STRING"
+  ],
+  "output_name": [
+   "generated_text"
+  ]
+ },
+ "UNETLoader": {
+  "input": {
+   "required": {
+    "unet_name": [
+     "COMBO"
+    ],
+    "weight_dtype": [
+     "COMBO"
+    ]
+   },
+   "optional": {}
+  },
+  "output": [
+   "MODEL"
+  ],
+  "output_name": [
+   "MODEL"
+  ]
+ },
+ "VAEDecodeTiled": {
+  "input": {
+   "required": {
+    "samples": [
+     "LATENT"
+    ],
+    "vae": [
+     "VAE"
+    ],
+    "tile_size": [
+     "INT"
+    ],
+    "overlap": [
+     "INT"
+    ],
+    "temporal_size": [
+     "INT"
+    ],
+    "temporal_overlap": [
+     "INT"
+    ]
+   },
+   "optional": {}
+  },
+  "output": [
+   "IMAGE"
+  ],
+  "output_name": [
+   "IMAGE"
+  ]
+ },
+ "VAELoader": {
+  "input": {
+   "required": {
+    "vae_name": [
+     "COMBO"
+    ]
+   },
+   "optional": {}
+  },
+  "output": [
+   "VAE"
+  ],
+  "output_name": [
+   "VAE"
+  ]
+ }
+}

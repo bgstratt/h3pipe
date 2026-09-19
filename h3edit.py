@@ -14,13 +14,17 @@ cut, set per-shot overrides. The command-line face of what the editor does;
     python h3.py override Shows\\ep05 sh020 --dump-prompt > sh020.txt
     python h3.py override Shows\\ep05 sh020 --clear prompt seed
     python h3.py override Shows\\ep05 sh020 --clear
+    python h3.py override Shows\\ep05 sh020 --target ltx2      # retarget (--target built: undo)
 
 `takes` shows every take with its status, why it is stale (script / ref /
-preset), and which take the cut uses. `pick` writes cut.json; `latest` puts a
+preset / target), and which take the cut uses. `pick` writes cut.json; `latest` puts a
 shot back on its newest usable take. `override` writes overrides.json: the
 next render or redo of that shot uses it (see h3render.py). Prompt, model,
 LoRAs and steps are per pass (final unless --proxy; --both sets both); seed
-and note apply to both passes.
+and note apply to both passes. They are written to the block of the target
+the shot renders on now, so a retargeted shot's settings are its new
+target's. `--target` retargets the shot (both passes): its IR is compiled for
+that target at queue time, and a prompt override is ignored while it is.
 
 Stdlib only.
 """
@@ -162,8 +166,9 @@ def episode_summary(root: str, script: str | None = None) -> dict:
     shots = 0
     for p in T.PASSES:
         if built[p]:
-            doc = J.load_shotlist(root, p)
-            title, shots = doc.get("title", ""), len(doc.get("shots", []))
+            docs = J.load_shotlists(root, p)
+            title = docs[0].get("title", "")
+            shots = sum(len(d.get("shots", [])) for d in docs)
             break
     return {"ep": os.path.abspath(root), "name": os.path.basename(os.path.normpath(root)),
             "series": series, "title": title, "built": built, "shots": shots,
@@ -189,18 +194,42 @@ def prompt_text(prompt) -> str:
     return "\n\n".join(prompt) if isinstance(prompt, list) else (prompt or "")
 
 
+def take_stale(root: str, pass_: str, doc: dict, shot: dict, sidecar: dict | None,
+               target: str, cache: dict) -> list[str]:
+    """Why a take is stale (h3jobs.stale_reasons), judged against the entry its
+    own target would render now: the built entry, or the shot retargeted to
+    that target. `target` is what the shot's next render uses; a take made on
+    another target is also stale `target`."""
+    if not sidecar:
+        return ["unknown"]
+    built_target = J.shotlist_target(doc).id
+    tt = sidecar.get("target") or built_target
+    cur = J.current_entry(root, pass_, doc, shot, tt, cache)
+    out = J.stale_reasons(root, cur[0], cur[1], sidecar) if cur else []
+    if tt != target:
+        out.append("target")
+    return out
+
+
 def episode_status(root: str, pass_: str, folder: str | None = None) -> dict:
     """Every shot in cut order with its takes, the take the cut uses, and its
-    override. Plain data, ready to serve as JSON."""
-    doc = J.load_shotlist(root, pass_)
-    target = J.shotlist_target(doc).id
+    override. Plain data, ready to serve as JSON. Shots come from every
+    target's shotlist; each says the target its next render uses (`target`:
+    overrides.json may retarget it) and the one the build compiled it for
+    (`built_target`)."""
+    docs = J.load_shotlists(root, pass_)
+    doc0 = docs[0]
     fps = episode_fps(root)
-    shots = {s["id"]: s for s in doc["shots"]}
+    entries = J.episode_shots(root, pass_, docs)
+    shots = {d["shots"][i]["id"]: (d, d["shots"][i]) for d, i in entries}
     ov = T.load_overrides(root)
     cut = T.load_cut(root)
+    cache: dict = {}
     out = []
     for e in T.resolve_cut(cut, pass_, list(shots)):
-        shot = shots.get(e.shot)
+        doc, shot = shots.get(e.shot, (doc0, None))
+        built_target = J.shotlist_target(doc).id
+        target = J.effective_target(ov, e.shot, built_target)
         takes = T.list_takes(root, pass_, e.shot, folder) if shot else []
         if e.placeholder:
             src = T.list_takes(root, e.pass_, e.shot)
@@ -215,10 +244,14 @@ def episode_status(root: str, pass_: str, folder: str | None = None) -> dict:
             chosen_take = chosen.take if chosen else None
             chosen_ok = chosen is not None
         o = T.shot_override(ov, e.shot, pass_, target)
+        # what the next render reads: the retargeted entry when retargeted
+        cur = J.current_entry(root, pass_, doc, shot, target, cache) if shot else None
+        rdoc, rshot = cur if cur else (doc, shot)
         out.append({
             "shot": e.shot,
             "orphan": e.orphan,
             "target": target,
+            "built_target": built_target,
             "profile": shot.get("profile") if shot else None,
             "sequence": shot.get("sequence") if shot else None,
             "length": shot.get("length") if shot else None,
@@ -228,14 +261,18 @@ def episode_status(root: str, pass_: str, folder: str | None = None) -> dict:
             "audio_policy": shot.get("audio_policy") if shot else None,
             "missing_refs": [{k: r.get(k) for k in ("slot", "kind", "path", "subject")
                               if r.get(k) is not None}
-                             for r in J.missing_refs(root, doc, shot)] if shot else [],
+                             for r in J.missing_refs(root, rdoc, rshot)] if shot else [],
+            **({"retarget_error": f"can't compile {e.shot} for {target} "
+                                  f"(rebuild the episode)"}
+               if shot and cur is None else {}),
             "cut": {"take": chosen_take, "picked": e.take is not None, "pass": e.pass_,
                     "placeholder": e.placeholder, "usable": chosen_ok,
                     "trim_in": e.trim_in, "trim_out": e.trim_out, "locked": e.locked,
                     "note": e.note, "in_cut_file": e.in_cut_file},
-            "override": {"fields": sorted(k for k in o if k != "base_hash"),
+            "override": {"fields": sorted([k for k in o if k != "base_hash"]
+                                          + (["target"] if T.shot_target(ov, e.shot) else [])),
                          "stale": bool(o.get("base_hash"))
-                         and bool(shot) and o["base_hash"] != J.story_hash(shot)},
+                         and bool(rshot) and o["base_hash"] != J.story_hash(rshot)},
             "takes": [{
                 "take": t.take, "status": t.status, "has_video": t.has_video,
                 "seed": (t.sidecar or {}).get("seed"),
@@ -243,7 +280,8 @@ def episode_status(root: str, pass_: str, folder: str | None = None) -> dict:
                 "target": (t.sidecar or {}).get("target"),
                 "note": (t.sidecar or {}).get("note", ""),
                 "overrides": (t.sidecar or {}).get("overrides", []),
-                "stale": J.stale_reasons(root, doc, shot, t.sidecar) if shot else [],
+                "stale": take_stale(root, pass_, doc, shot, t.sidecar, target, cache)
+                if shot else [],
                 "thumb": rel(root, t.paths.thumb),
                 "strip": rel(root, t.paths.strip),
                 "mp4": rel(root, t.paths.mp4),
@@ -253,41 +291,53 @@ def episode_status(root: str, pass_: str, folder: str | None = None) -> dict:
                 "save_notes": (t.sidecar or {}).get("save_notes", ""),
             } for t in takes],
         })
-    d = doc.get("defaults", {})
-    return {"episode": doc.get("episode", os.path.basename(root)), "title": doc.get("title", ""),
-            "pass": pass_, "target": target, "fps": fps, "width": d.get("width"), "height": d.get("height"),
-            "folder": folder or T.pass_subfolder(pass_), "shots": out}
+    d = doc0.get("defaults", {})
+    return {"episode": doc0.get("episode", os.path.basename(root)),
+            "title": doc0.get("title", ""), "pass": pass_,
+            "target": J.shotlist_target(doc0).id, "fps": fps, "width": d.get("width"),
+            "height": d.get("height"), "folder": folder or T.pass_subfolder(pass_),
+            "shots": out}
 
 
 def shot_detail(root: str, pass_: str, shot_id: str, folder: str | None = None) -> dict:
     """Everything the inspector shows for one shot in one pass: the built entry,
     the prompt it builds to, the override and the prompt a render would use now,
-    and each take's full sidecar."""
-    doc = J.load_shotlist(root, pass_)
-    idx = next((i for i, s in enumerate(doc["shots"]) if s["id"] == shot_id), None)
-    if idx is None:
-        raise KeyError(f"{shot_id} is not in {J.shotlist_rel(pass_)}")
+    and each take's full sidecar. `target` is what the next render uses,
+    `built_target` what the build compiled it for; `effective` is that
+    render's settings (a retargeted shot's are its new target's)."""
+    try:
+        doc, idx = J.find_shot(root, pass_, shot_id)
+    except KeyError:
+        raise KeyError(f"{shot_id} is not in {J.shotlist_rel(pass_)}") from None
     shot = doc["shots"][idx]
     ov = T.load_overrides(root)
     job = J.plan_job(root, pass_, doc, idx, J.RenderRequest(shot_id), ov, folder)
     eff = T.shot_override(ov, shot_id, pass_, job.target)
+    cache: dict = {}
     takes = []
     for t in T.list_takes(root, pass_, shot_id, folder):
         takes.append({"take": t.take, "status": t.status, "has_video": t.has_video,
-                      "stale": J.stale_reasons(root, doc, shot, t.sidecar),
+                      "stale": take_stale(root, pass_, doc, shot, t.sidecar, job.target, cache),
                       "sidecar": t.sidecar,
                       "files": {k: rel(root, getattr(t.paths, k))
                                 for k in ("mp4", "thumb", "strip", "shotlist", "h3_wav")
                                 if os.path.isfile(getattr(t.paths, k))}})
+    view = {k: v for k, v in eff.items() if k != "base_hash"}
+    if T.shot_target(ov, shot_id):
+        view["target"] = T.shot_target(ov, shot_id)
     return {
         "shot": shot_id, "pass": pass_, "index": idx, "target": job.target,
+        "built_target": job.built_target,
         "profile": shot.get("profile"), "built": shot,
         "built_prompt": prompt_text(shot.get("prompt")),
-        "override": {k: v for k, v in eff.items() if k != "base_hash"},
-        "override_stale": bool(eff.get("base_hash")) and eff["base_hash"] != J.story_hash(shot),
+        "override": view,
+        "override_stale": bool(eff.get("base_hash")) and eff["base_hash"] != J.story_hash(job.shot),
         "effective": {"prompt": prompt_text(job.prompt), "seed": job.seed,
                       "seed_source": job.seed_source, "model": job.model,
-                      "loras": job.loras, "steps": job.steps},
+                      "loras": job.loras, "steps": job.steps, "target": job.target,
+                      "width": job.width, "height": job.height, "length": job.frames,
+                      **({"error": job.error} if job.error else {}),
+                      **({"notes": list(job.notes)} if job.notes else {})},
         "takes": takes,
     }
 
@@ -298,11 +348,9 @@ def sweep(root: str, pass_: str, comfy_url: str, folder: str | None = None) -> i
         alive = J.Comfy(comfy_url).alive()
     except Exception:
         return -1
-    doc = J.load_shotlist(root, pass_)
-    return sum(len(T.sweep_queued(T.list_takes(root, pass_, s["id"], folder), alive,
-                                  as_of=as_of)) for s in doc["shots"])
-
-
+    return sum(len(T.sweep_queued(T.list_takes(root, pass_, d["shots"][i]["id"], folder),
+                                  alive, as_of=as_of))
+               for d, i in J.episode_shots(root, pass_))
 # ---------------------------------------------------------------------------
 # editor operations: shared by the commands below and the ComfyUI routes
 # ---------------------------------------------------------------------------
@@ -333,7 +381,7 @@ def pick_take(root: str, pass_: str, shot_id: str, take: int | None,
     for a take that can't be cut in (unless `force`)."""
     src = from_pass or pass_
     doc = J.load_shotlist(root, pass_)
-    order = [s["id"] for s in doc["shots"]]
+    order = [d["shots"][i]["id"] for d, i in J.episode_shots(root, pass_)]
     if take is not None:
         t = T.get_take(root, src, shot_id, take)
         if t is None:
@@ -368,13 +416,41 @@ def pass_builds(root: str, shot_id: str,
     built = {}
     for ps in T.PASSES:
         try:
-            d = (have or {}).get(ps) or J.load_shotlist(root, ps)
-        except FileNotFoundError:
+            d = (have or {}).get(ps)
+            s = next((s for s in d["shots"] if s["id"] == shot_id), None) if d else None
+            if s is None:
+                fd, fi = J.find_shot(root, ps, shot_id)
+                s = fd["shots"][fi]
+        except (FileNotFoundError, KeyError):
             continue
-        s = next((s for s in d["shots"] if s["id"] == shot_id), None)
-        if s is not None:
-            built[ps] = s
+        built[ps] = s
     return built
+
+
+def pass_entries(root: str, shot_id: str, target: str | None = None) -> dict[str, dict]:
+    """{pass: the entry a render of the shot on `target` uses now} (the built
+    entry, or the shot retargeted), for each pass that builds it. Override
+    base_hashes are stamped against these."""
+    out = {}
+    for ps in T.PASSES:
+        try:
+            d, i = J.find_shot(root, ps, shot_id)
+        except (FileNotFoundError, KeyError):
+            continue
+        cur = J.current_entry(root, ps, d, d["shots"][i], target)
+        if cur is not None:
+            out[ps] = cur[1]
+    return out
+
+
+def shot_built_target(root: str, shot_id: str) -> str | None:
+    """The target the build compiled a shot for (None: in no build)."""
+    for ps in T.PASSES:
+        try:
+            return J.shotlist_target(J.find_shot(root, ps, shot_id)[0]).id
+        except (FileNotFoundError, KeyError):
+            continue
+    return None
 
 
 def set_shot_override(ov: dict, shot_id: str, built: dict[str, dict], passes,
@@ -407,11 +483,15 @@ def clear_shot_override(ov: dict, shot_id: str, pass_: str | None = None,
 
 def override_view(ov: dict, shot_id: str, built: dict[str, dict],
                   target: str = T.DEFAULT_TARGET) -> dict:
-    """{pass: effective override without base_hash, plus `stale`}, both passes."""
+    """{pass: effective override without base_hash, plus `stale`}, both passes.
+    A retargeted shot's `target` (shared by both passes) is in each pass's
+    view. `built` is what each pass renders now (pass_entries)."""
     out = {}
     for ps in T.PASSES:
         eff = T.shot_override(ov, shot_id, ps, target)
         view = {k: v for k, v in eff.items() if k != "base_hash"}
+        if T.shot_target(ov, shot_id):
+            view["target"] = T.shot_target(ov, shot_id)
         view["stale"] = (bool(eff.get("base_hash")) and ps in built
                          and eff["base_hash"] != J.story_hash(built[ps]))
         out[ps] = view
@@ -431,9 +511,9 @@ def sweep_takes(root: str, pass_: str, comfy, folder: str | None = None) -> list
     """
     as_of = T.now()
     alive = comfy.alive()
-    doc = J.load_shotlist(root, pass_)
     changed = []
-    for s in doc["shots"]:
+    for d, i in J.episode_shots(root, pass_):
+        s = d["shots"][i]
         rest = []
         for t in T.list_takes(root, pass_, s["id"], folder):
             sc = t.sidecar or {}
@@ -480,18 +560,23 @@ def cancel_take(root: str, pass_: str, shot_id: str, take: int, comfy,
 
 
 def queue_shots(root: str, pass_: str, shot_ids: list[str] | None,
-                template: J.RenderRequest, comfy, base: dict,
+                template: J.RenderRequest, comfy, base,
                 folder: str | None = None) -> dict:
     """Plan and queue a take for each shot (every shot when `shot_ids` is
     None), as h3render does, without waiting for any of them.
 
-    Returns {"queued": [{shot, take, prompt_id, seed, seed_source}],
+    `base` is the workflow: one API graph for every shot (a single-target
+    episode), or a function (target id -> API graph) for episodes whose shots
+    render on different targets. A job's input images (keyframes) are
+    uploaded to ComfyUI first (h3jobs.stage_inputs).
+
+    Returns {"queued": [{shot, take, prompt_id, seed, seed_source, target}],
     "skipped": [{shot, take, reason}], "errors": [{shot, error, take?}]}. A
     shot that fails to queue has its take marked failed; the others still queue.
     """
-    doc = J.load_shotlist(root, pass_)
+    docs = J.load_shotlists(root, pass_)
     ov = T.load_overrides(root)
-    index = {s["id"]: i for i, s in enumerate(doc["shots"])}
+    index = {d["shots"][i]["id"]: (d, i) for d, i in J.episode_shots(root, pass_, docs)}
     out = {"queued": [], "skipped": [], "errors": []}
     for sid in (shot_ids if shot_ids is not None else list(index)):
         if sid not in index:
@@ -500,7 +585,8 @@ def queue_shots(root: str, pass_: str, shot_ids: list[str] | None,
             continue
         req = copy.copy(template)
         req.shot_id = sid
-        job = J.plan_job(root, pass_, doc, index[sid], req, ov, folder)
+        doc, i = index[sid]
+        job = J.plan_job(root, pass_, doc, i, req, ov, folder)
         if job.action == "busy":
             out["skipped"].append({"shot": sid, "take": job.take,
                                    "reason": f"t{job.take:02d} is still queued"})
@@ -514,20 +600,26 @@ def queue_shots(root: str, pass_: str, shot_ids: list[str] | None,
                                    + " (pass allow_missing_refs: true to render anyway)",
                                    "missing_refs": job.missing})
             continue
+        if job.action == "error":
+            out["errors"].append({"shot": sid, "error": job.error})
+            continue
         try:
+            graph = base(job.target) if callable(base) else base
+            J.stage_inputs(job, comfy if hasattr(comfy, "upload_input") else None)
             take = J.start_job(job)
         except Exception as e:
             out["errors"].append({"shot": sid, "error": str(e)[:800]})
             continue
         try:
-            pid = comfy.queue(J.graph_for(base, job, take))
+            pid = comfy.queue(J.graph_for(graph, job, take))
             J.mark_queued(take, pid)
         except Exception as e:
             J.mark_failed(take, str(e)[:800])
             out["errors"].append({"shot": sid, "take": take.take, "error": str(e)[:800]})
             continue
         out["queued"].append({"shot": sid, "take": take.take, "prompt_id": pid,
-                              "seed": job.seed, "seed_source": job.seed_source})
+                              "seed": job.seed, "seed_source": job.seed_source,
+                              "target": job.target})
     return out
 
 
@@ -700,6 +792,9 @@ def cmd_override(root: str, argv: list[str]) -> int:
                     help="repeat to stack; 'none' for no LoRA")
     ap.add_argument("--prompt-file", help="text file whose contents become the prompt")
     ap.add_argument("--note")
+    ap.add_argument("--target", metavar="TARGET",
+                    help="render this shot on another video target (both passes); "
+                         "'built' goes back to the one the build chose")
     ap.add_argument("--clear", nargs="*", metavar="FIELD",
                     help="remove these fields (all of this shot's override if none named)")
     ap.add_argument("--show", action="store_true", help="print the effective override")
@@ -707,41 +802,60 @@ def cmd_override(root: str, argv: list[str]) -> int:
                     help="print the prompt the next render would use, for editing")
     args = ap.parse_args(argv)
     pass_ = _pass(args)
-    doc = J.load_shotlist(root, pass_)
-    idx = next((i for i, s in enumerate(doc["shots"]) if s["id"] == args.shot), None)
-    if idx is None:
+    try:
+        doc, idx = J.find_shot(root, pass_, args.shot)
+    except KeyError:
         print(f"  !! {args.shot} is not in {J.shotlist_rel(pass_)}")
         return 1
-    shot = doc["shots"][idx]
     ov = T.load_overrides(root)
+    built_target = J.shotlist_target(doc).id
+
+    if args.target is not None:
+        want = None if args.target in ("built", "none", "") else args.target
+        if want:
+            try:
+                J.check_video_target(want)
+            except Exception as e:
+                print(f"  !! {e}")
+                return 2
+        T.set_shot_target(ov, args.shot, None if want == built_target else want)
 
     if args.dump_prompt:
         job = J.plan_job(root, pass_, doc, idx, J.RenderRequest(args.shot), ov)
+        if job.error:
+            print(f"  !! {job.error}")
+            return 1
         pr = job.prompt
         sys.stdout.write(("\n\n".join(pr) if isinstance(pr, list) else pr) + "\n")
         return 0
 
-    # each pass's own build of the shot: overrides are stamped against it
-    built = pass_builds(root, args.shot, {pass_: doc})
+    # the target the shot renders on now: its override block is the one written
+    target = J.effective_target(ov, args.shot, built_target)
+    # each pass's entry for that target: overrides are stamped against it
+    built = pass_entries(root, args.shot, target)
 
     passes = list(T.PASSES) if args.both else [pass_]
     missing = [ps for ps in passes if ps not in built]
     if missing:
-        print(f"  !! {args.shot} has no {'/'.join(missing)} build — run h3.py build first")
+        print(f"  !! {args.shot} has no {'/'.join(missing)} build"
+              + (f" that compiles for {target}" if target != built_target else "")
+              + " — run h3.py build first")
         return 1
-    user_fields = [f for f in T.SHOT_FIELDS + T.PASS_FIELDS if f != "base_hash"]
-    changed = False
+    user_fields = [f for f in T.SHOT_FIELDS + T.PASS_FIELDS if f != "base_hash"] + ["target"]
+    changed = args.target is not None
     if args.clear is not None:
         # bare --clear drops the whole override (both passes unless --proxy);
         # named pass fields follow the usual pass flags
         fields = args.clear or user_fields
         clear_passes = T.PASSES if (not args.clear and not args.proxy) else passes
         for f in fields:
-            if f in T.SHOT_FIELDS:
-                T.set_override(ov, args.shot, **{f: None})
+            if f == "target":
+                T.set_shot_target(ov, args.shot, None)
+            elif f in T.SHOT_FIELDS:
+                T.set_override(ov, args.shot, target=target, **{f: None})
             elif f in user_fields:
                 for ps in clear_passes:
-                    T.set_override(ov, args.shot, ps, **{f: None})
+                    T.set_override(ov, args.shot, ps, target, **{f: None})
             else:
                 print(f"  !! unknown field {f!r}: one of {', '.join(user_fields)}")
                 return 2
@@ -762,14 +876,18 @@ def cmd_override(root: str, argv: list[str]) -> int:
     if args.lora:
         pass_fields["loras"] = [l for spec in args.lora for l in J.parse_lora(spec)]
     if shot_fields or pass_fields:
-        set_shot_override(ov, args.shot, built, passes, shot_fields, pass_fields)
+        set_shot_override(ov, args.shot, built, passes, shot_fields, pass_fields, target)
         changed = True
     if changed:
         ov.setdefault("episode", doc.get("episode", ""))
         T.save_overrides(root, ov)
 
+    target = J.effective_target(ov, args.shot, built_target)
+    if target != built_target:
+        print(f"  {args.shot} renders on {target} (built for {built_target}); "
+              f"a prompt override is ignored while it is retargeted")
     for ps in T.PASSES:
-        eff = T.shot_override(ov, args.shot, ps)
+        eff = T.shot_override(ov, args.shot, ps, target)
         if not {k for k in eff if k not in T.SHOT_FIELDS} and ps != pass_:
             continue
         stale = (eff.get("base_hash") and ps in built

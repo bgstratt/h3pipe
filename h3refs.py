@@ -241,10 +241,11 @@ def built_shot_ids(ep: str) -> list[str]:
     ids: list[str] = []
     for ps in T.PASSES:
         try:
-            doc = J.load_shotlist(ep, ps)
+            docs = J.load_shotlists(ep, ps)
         except (FileNotFoundError, ValueError):
             continue
-        ids += [sh["id"] for sh in doc.get("shots", []) if sh["id"] not in ids]
+        for doc in docs:
+            ids += [sh["id"] for sh in doc.get("shots", []) if sh["id"] not in ids]
     return ids
 
 
@@ -1113,11 +1114,11 @@ def used_by(s: Series, refs: list[Ref]) -> dict[str, dict[str, list[str]]]:
 
     for ps in T.PASSES:
         try:
-            doc = J.load_shotlist(s.ep, ps)
+            docs = J.load_shotlists(s.ep, ps)
         except FileNotFoundError:
-            doc = None
-        if doc is not None:
-            for shot in doc.get("shots", []):
+            docs = None
+        if docs is not None:
+            for doc, shot in ((d, sh) for d in docs for sh in d.get("shots", [])):
                 for slot in J.ref_slots(doc, shot):
                     if slot.get("subject") and slot["kind"] == "image":
                         add(f"subject:{slot['subject']}", ps, shot["id"])

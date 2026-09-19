@@ -1,0 +1,130 @@
+{
+  "episode": "mx01",
+  "title": "Mixed Targets",
+  "target": "ltx2",
+  "defaults": {
+    "width": 1344,
+    "height": 768,
+    "fps": 24.0,
+    "steps": 8,
+    "model": "ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors",
+    "lora": null,
+    "audio_policy": "generate",
+    "master_track": "audio/ks01_mix.wav",
+    "negative": "worst quality, inconsistent motion, blurry, jittery, distorted, flickering, morphing, extra limbs, watermark, subtitles",
+    "text_encoder": "gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors",
+    "video_vae": "ltx-2.5-video-vae-bf16.safetensors",
+    "audio_vae": "ltx-2.5-audio-vae-bf16.safetensors",
+    "upscaler": "ltx-2.5-latent-spatial-upscaler-x2-bf16-1.0.safetensors"
+  },
+  "subjects": {
+    "ada": {
+      "kind": "character",
+      "sheet": "refs/ada/ada_sheet_4panel.png",
+      "voice_sample": "audio/voices/ada_sample.wav"
+    },
+    "bo": {
+      "kind": "character",
+      "sheet": "refs/bo/bo_sheet_4panel.png",
+      "voice_sample": "audio/voices/bo_sample.wav"
+    },
+    "cy": {
+      "kind": "character",
+      "sheet": "refs/cy/cy_sheet_4panel.png",
+      "voice_sample": "audio/voices/cy_sample.wav"
+    },
+    "rex": {
+      "kind": "character",
+      "sheet": "refs/rex/rex_sheet_4panel.png",
+      "voice_sample": ""
+    },
+    "narrator": {
+      "kind": "character",
+      "sheet": "refs/narrator/narrator_sheet_4panel.png",
+      "voice_sample": "audio/voices/narrator_sample.wav"
+    },
+    "kettle": {
+      "kind": "prop",
+      "sheet": "refs/props/kettle.png",
+      "voice_sample": ""
+    },
+    "van": {
+      "kind": "vehicle",
+      "sheet": "refs/props/van.png",
+      "voice_sample": ""
+    }
+  },
+  "shots": [
+    {
+      "id": "sh020",
+      "sequence": "sq01",
+      "subjects": [
+        "ada",
+        "bo",
+        "kettle"
+      ],
+      "background": "refs/_bg/kitchen.png",
+      "size": "ms",
+      "length": 97,
+      "seed": 7721459633976781580,
+      "steps": 8,
+      "audio_policy": "generate",
+      "prompt": "Style: a flat vector cartoon with thick even outlines and a limited pastel palette. A medium shot of a cramped diner kitchen with steel counters, a hanging ticket rail and cold fluorescent light from overhead, the camera remains static. Ada is a tall woman in her thirties with a short grey bob, a mustard apron over a striped shirt, and round red glasses. Bo is a stocky teenage boy with a shaved head, an oversized green bomber jacket and orange high-tops. The diner kettle is a dented chrome kettle with a black bakelite handle and a whistle cap on a chain. Also in frame are two customers at the counter seen through the window, backs to camera, unnamed background figures who look nothing like Ada and Bo. Bo sets the kettle down on the burner and flicks the gas on. Ada, in a voice that is dry, quick and precise, says, warmly: \"You know that one whistles.\" Bo, in a voice that is slow and cracking, says: \"I know.\" Ada says in an off-screen voiceover, her lips staying closed: \"He always knows.\" The ambient sound of the place follows the action. There is no music.",
+      "negative": "worst quality, inconsistent motion, blurry, jittery, distorted, flickering, morphing, extra limbs, watermark, subtitles",
+      "keyframes": {
+        "first": "refs/shots/sh020/first.png",
+        "last": "refs/shots/sh020/last.png"
+      },
+      "audio_intent": "clone",
+      "audio_note": "audio clone renders as generate on LTX-2: LTX-2 generates sound with the picture and takes no voice sample or recording",
+      "duration": 3.977
+    },
+    {
+      "id": "sh040",
+      "sequence": "sq02",
+      "subjects": [
+        "bo",
+        "van"
+      ],
+      "background": "refs/_bg/street.png",
+      "size": "wide",
+      "length": 65,
+      "seed": 5427364453333850997,
+      "steps": 8,
+      "audio_policy": "generate",
+      "prompt": "Style: a flat vector cartoon with thick even outlines and a limited pastel palette. A wide shot of a wet night street outside the diner, neon sign reflected in the puddles, light from the left, the camera remains static. Bo is a stocky teenage boy with a shaved head, an oversized green bomber jacket and orange high-tops. The delivery van is a boxy white delivery van with a sky-blue stripe and a cracked left headlight. Bo waves the van back toward the kitchen door. Bo, in a voice that is slow and cracking, says: \"Left! Left!\" The sound is a reversing beeper, traffic in the distance. There is no music.",
+      "negative": "worst quality, inconsistent motion, blurry, jittery, distorted, flickering, morphing, extra limbs, watermark, subtitles",
+      "keyframes": {
+        "first": "refs/shots/sh040/first.png",
+        "last": "refs/shots/sh040/last.png"
+      },
+      "audio_intent": "dub_keep_foley",
+      "audio_note": "audio dub_keep_foley renders as generate on LTX-2: LTX-2 generates sound with the picture and takes no voice sample or recording",
+      "audio_in": 1.0,
+      "audio_out": 3.5
+    },
+    {
+      "id": "sh050",
+      "sequence": "sq02",
+      "subjects": [
+        "cy"
+      ],
+      "background": "refs/_bg/kitchen_window.png",
+      "size": "close",
+      "length": 73,
+      "seed": 8372754737509601045,
+      "steps": 8,
+      "audio_policy": "generate",
+      "prompt": "Style: a flat vector cartoon with thick even outlines and a limited pastel palette. A close-up of the diner's pass-through window looking out to the counter, warm tungsten light spilling in from the dining room, the camera slowly tilts up to the grey sky. Cy is a small girl with two puffball pigtails, a purple raincoat and yellow rubber boots. Cy presses her face to the window glass. The narrator, in a voice that is warm, older, unhurried, says from off-screen, outside the frame: \"And then it rained.\" The ambient sound of the place follows the action. There is no music.",
+      "negative": "worst quality, inconsistent motion, blurry, jittery, distorted, flickering, morphing, extra limbs, watermark, subtitles",
+      "keyframes": {
+        "first": "refs/shots/sh050/first.png",
+        "last": "refs/shots/sh050/last.png"
+      },
+      "audio_intent": "clone",
+      "audio_note": "audio clone renders as generate on LTX-2: LTX-2 generates sound with the picture and takes no voice sample or recording",
+      "profile": "ltx_quick",
+      "duration": 3.04
+    }
+  ]
+}
