@@ -329,7 +329,20 @@ neither, so it runs ahead of its turn. Phase 4 (evaluate) still gates Phases 7 a
 - Exit: review and fix a real episode (swap takes, tweak prompts, redo, compare,
   assemble) without touching the CLI or the canvas.
 
-**Phase 4 — evaluate**
+**Phase 4 — evaluate**: first look done 2026-09-18. Your verdicts:
+- Timeline: good. **Add Play all**: play the cut in order from the takes themselves, with
+  no assemble required. Assemble stays as an optional export.
+- Compare in the viewer: right as it is.
+- **Drop the Queue tab.** ComfyUI's own queue is enough; keep the live progress badges
+  in the bin and timeline.
+- **The Inspector becomes a floating window** like the viewer, not a sidebar tab.
+- **Roots and episodes are chosen with a folder browser**, not by typing a path. The
+  server lists folders, because the browser can't see server paths.
+- **Refs aren't in the editor yet (Phase 5).** Rendering ep38 before any refs existed
+  queued 17 takes that all failed with "background plate not found". The editor must show
+  missing refs and refuse to render a shot that is missing any.
+
+**Phase 4 — evaluate** (the original checklist)
 Use it on a real episode, then decide and write down here:
 - Is the sidebar + bottom panel too cramped? If so, arrange the same components as a
   fullscreen overlay.
