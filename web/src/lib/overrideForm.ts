@@ -2,7 +2,15 @@
 // `fields` out (only what changed; null clears a field, per docs/API.md).
 
 import { parseSeed } from "../api";
-import type { Lora, OverrideFields, ShotDetail } from "../types";
+import type { Lora, Override, OverrideFields } from "../types";
+
+/** What the form needs from a shot's detail (or a ref, adapted): the override
+ * as stored, the prompt in effect, and the prompt without an override. */
+export interface OverrideSource {
+  override: Override;
+  effective: { prompt: string };
+  built_prompt: string;
+}
 import { promptText } from "./format";
 
 export interface LoraRow {
@@ -24,7 +32,7 @@ export interface OverrideForm {
   note: string;
 }
 
-export function formFromDetail(d: ShotDetail): OverrideForm {
+export function formFromDetail(d: Pick<OverrideSource, "override" | "effective">): OverrideForm {
   const o = d.override;
   return {
     prompt: o.prompt != null ? promptText(o.prompt) : d.effective.prompt,
@@ -69,7 +77,7 @@ export function isDirty(form: OverrideForm, initial: OverrideForm): boolean {
  * The fields to send: only those that changed since `initial`. Throws a readable
  * Error for bad input (seed, steps, LoRA strength).
  */
-export function overrideFields(form: OverrideForm, initial: OverrideForm, d: ShotDetail): OverrideFields {
+export function overrideFields(form: OverrideForm, initial: OverrideForm, d: Pick<OverrideSource, "built_prompt">): OverrideFields {
   const f: OverrideFields = {};
   if (form.prompt !== initial.prompt) {
     // back to exactly the built text = no prompt override

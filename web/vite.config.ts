@@ -25,7 +25,8 @@ export default defineConfig(({ command, mode }) => {
   return {
     plugins: [react()],
     define: extension ? { "process.env.NODE_ENV": JSON.stringify("production") } : {},
-    server: { open: "/dev.html" },
+    // the mock reads the kitchen_sink bible from tests/fixtures (outside web/)
+    server: { open: "/dev.html", fs: { allow: [resolve(HERE, "..")] } },
     build: extension
       ? {
           outDir: resolve(HERE, "../comfy_nodes/web"),

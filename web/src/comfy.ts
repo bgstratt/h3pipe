@@ -60,10 +60,11 @@ interface ComfyApi {
 const app = comfyApp as ComfyApp;
 const api = comfyApi as ComfyApi;
 
+// Round 2: the Queue tab is gone (ComfyUI's own queue is enough) and the
+// inspector is a floating window in the overlay, not a sidebar tab.
 const IDS: Record<Surface, string> = {
   shots: "h3pipe-shots",
-  inspector: "h3pipe-inspector",
-  queue: "h3pipe-queue",
+  refs: "h3pipe-refs",
   timeline: "h3pipe-timeline",
 };
 
@@ -120,8 +121,7 @@ export function install() {
         return;
       }
       em.registerSidebarTab({ ...tab("shots", "h3 Shots"), icon: "pi pi-video", tooltip: "h3pipe: episode, shots and takes" });
-      em.registerSidebarTab({ ...tab("inspector", "h3 Inspector"), icon: "pi pi-sliders-h", tooltip: "h3pipe: the selected shot, overrides and redo" });
-      em.registerSidebarTab({ ...tab("queue", "h3 Queue"), icon: "pi pi-list", tooltip: "h3pipe: queued and rendering takes" });
+      em.registerSidebarTab({ ...tab("refs", "h3 Refs"), icon: "pi pi-palette", tooltip: "h3pipe: references (characters, props, locations, voices)" });
       mountOverlay();
       await start();
     },

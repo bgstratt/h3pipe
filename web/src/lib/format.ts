@@ -1,4 +1,5 @@
 import type { ShotStatus, TakeSummary } from "../types";
+import { missingOf, missingRefsTitle } from "./missingRefs";
 
 export type BadgeKind =
   | "stale"
@@ -10,7 +11,8 @@ export type BadgeKind =
   | "none"
   | "orphan"
   | "failed"
-  | "unusable";
+  | "unusable"
+  | "missing-refs";
 
 export interface Badge {
   kind: BadgeKind;
@@ -45,6 +47,15 @@ export function staleTitle(reasons: string[]): string {
 export function shotBadges(s: ShotStatus, rendering: ReadonlySet<number> = new Set()): Badge[] {
   const out: Badge[] = [];
   if (s.orphan) out.push({ kind: "orphan", label: "orphan", title: "In cut.json but no longer in the script; assemble skips it" });
+  const missing = missingOf(s);
+  if (missing.length) {
+    out.push({
+      kind: "missing-refs",
+      label: "missing refs",
+      title: `A render needs ${missing.length} reference${missing.length > 1 ? "s" : ""} that aren't on disk; it's skipped unless you render anyway:
+${missingRefsTitle(missing)}`,
+    });
+  }
   const queued = s.takes.filter((t) => t.status === "queued");
   const running = queued.filter((t) => rendering.has(t.take));
   if (running.length) {

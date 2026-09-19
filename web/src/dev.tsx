@@ -35,7 +35,7 @@ const params = new URLSearchParams(location.search);
 setHost(devHost);
 setApi(createMockApi(emit, { firstRun: params.has("firstrun") }));
 
-for (const s of ["shots", "inspector", "queue", "timeline"] as Surface[]) {
+for (const s of ["shots", "refs", "timeline"] as Surface[]) {
   mountSurface(s, document.getElementById(s)!);
 }
 mountOverlay({ toasts: true });

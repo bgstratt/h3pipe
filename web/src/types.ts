@@ -71,6 +71,18 @@ export interface ShotStatus {
   cut: CutInfo;
   override: { fields: string[]; stale: boolean };
   takes: TakeSummary[];
+  /** References its render needs that aren't on disk (API.md "Missing references").
+   * Optional: a server from before round 2 doesn't send it. Empty = ready. */
+  missing_refs?: MissingRef[];
+}
+
+export interface MissingRef {
+  /** the loader slot, e.g. "Picture 4" or "Audio 1" */
+  slot: string;
+  kind: "image" | "audio";
+  /** relative to the episode (or its bible) */
+  path: string;
+  subject?: string;
 }
 
 export interface EpisodeStatus {
@@ -173,12 +185,21 @@ export interface RenderRequest {
   prompt: string | null;
   parent_take: number | null;
   note: string;
+  /** Queue shots with missing refs anyway (flat grey pictures, no audio ref). */
+  allow_missing_refs?: boolean;
+}
+
+export interface RenderSkip {
+  shot: string;
+  reason: string;
+  take?: number;
+  missing_refs?: MissingRef[];
 }
 
 export interface RenderResult {
   queued: { shot: string; take: number; prompt_id: string; seed: Seed; seed_source: string }[];
-  skipped: { shot: string; reason: string }[];
-  errors: { shot: string; error: string }[];
+  skipped: RenderSkip[];
+  errors: { shot: string; error: string; take?: number }[];
 }
 
 export interface TakeRef {
@@ -274,4 +295,155 @@ export interface PromptEvent {
 export interface ComfyQueue {
   running: string[];
   pending: string[];
+}
+
+// ---------------------------------------------------------------------------
+// folder browser (API.md "Round 2 additions")
+// ---------------------------------------------------------------------------
+
+export interface BrowseDir {
+  name: string;
+  path: string;
+  /** has a series.json and a script */
+  episode: boolean;
+  /** has a series.json */
+  bible: boolean;
+}
+
+export interface BrowseFile {
+  name: string;
+  path: string;
+  size?: number;
+}
+
+export interface BrowseResult {
+  /** "" (or absent) at the starting points */
+  path: string;
+  /** null at the starting points; "" at a drive root (up = the starting points) */
+  parent: string | null;
+  episode: boolean;
+  truncated: boolean;
+  dirs: BrowseDir[];
+  /** Not in the contract: only when the request asks for files (see api.ts). */
+  files?: BrowseFile[];
+}
+
+export type BrowseFiles = "image" | "audio";
+
+// ---------------------------------------------------------------------------
+// references (API.md "References (Phase 5)")
+// ---------------------------------------------------------------------------
+
+export type RefScope = "series" | "shot";
+export type RefKind = "character" | "prop" | "vehicle" | "location" | "voice" | "keyframe";
+
+export interface RefTake {
+  take: number;
+  status: TakeStatus;
+  seed: Seed | null;
+  /** the candidate file (image, or audio for a voice), relative like `path` */
+  image: string | null;
+  source: "generated" | "imported";
+  note: string;
+  /** Not in the contract's list example; read if a server sends them. */
+  prompt?: string;
+  model?: string;
+  steps?: number;
+  loras?: Lora[] | null;
+  queued?: string | null;
+  finished?: string | null;
+  save_notes?: string;
+  comfy_prompt_id?: string;
+}
+
+export interface RefView {
+  /** 01_threequarter | 02_side | 03_back | 04_face */
+  view: string;
+  picked: number | null;
+  takes: RefTake[];
+}
+
+/** What a generate would use now (not in the contract yet: see api.ts). */
+export interface RefEffective {
+  prompt: string;
+  seed: Seed;
+  model: string;
+  loras: Lora[] | null;
+  steps: number;
+}
+
+export interface Ref {
+  /** subject:<id> | location:<id> | voice:<id> | shot:<shot>:first|last */
+  id: string;
+  scope: RefScope;
+  kind: RefKind;
+  name: string;
+  /** the file renders read */
+  path: string;
+  exists: boolean;
+  sha1: string | null;
+  used_by: Partial<Record<Pass, string[]>>;
+  /** the prompt a generate would use now */
+  prompt: string;
+  override: { fields: string[]; stale: boolean };
+  /** characters only */
+  views?: RefView[];
+  takes: RefTake[];
+  picked: number | null;
+  /** TODO(contract): see api.ts. The override's values and the effective settings. */
+  override_values?: Override;
+  effective?: RefEffective;
+  built_prompt?: string;
+}
+
+export interface RefList {
+  refs: Ref[];
+}
+
+export interface RefGenerateRequest {
+  ep: string;
+  ref: string;
+  view: string | null;
+  count: number;
+  seed_mode: SeedMode;
+  seed: Seed | null;
+  prompt: string | null;
+  model: string | null;
+  loras: Lora[] | null;
+  steps: number | null;
+  note: string;
+}
+
+export interface RefGenerateResult {
+  queued: { ref: string; view: string | null; take: number; prompt_id: string; seed: Seed }[];
+  errors: { ref?: string; view?: string | null; error: string }[];
+}
+
+export interface RefPickRequest {
+  ep: string;
+  ref: string;
+  view?: string | null;
+  take: number;
+}
+
+export interface RefImportRequest {
+  ep: string;
+  ref: string;
+  view?: string | null;
+  source_path: string;
+}
+
+export interface RefOverrideRequest {
+  ep: string;
+  ref: string;
+  view?: string | null;
+  fields: OverrideFields;
+}
+
+export interface RefEvent {
+  ep: string;
+  ref: string;
+  view: string | null;
+  take: number;
+  status: TakeStatus;
 }

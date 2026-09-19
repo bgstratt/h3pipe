@@ -1,17 +1,25 @@
+// The inspector: a floating window (round 2; it was a sidebar tab) showing the
+// selected shot. It follows the selection while open.
+
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  loadDetail, openRedo, openViewer, queueRender, baseRender, renderShots, revertOverride, saveOverride,
+  baseRender, closeInspector, loadDetail, openRedo, openViewer, queueRender, renderShots, revertOverride, saveOverride,
 } from "../actions";
 import { errText } from "../api";
 import { host } from "../host";
 import { cutTake, fmtSeconds, shortName, shotBadges, tn } from "../lib/format";
+import { missingOf } from "../lib/missingRefs";
 import { formFromDetail, isDirty, overrideFields, type OverrideForm } from "../lib/overrideForm";
 import { useApp } from "../store";
 import type { ShotDetail } from "../types";
-import { DiffView, LoraEditor, ModelSelect } from "./Fields";
+import { FloatingWindow, defaultInspectorRect } from "./FloatingWindow";
 import { useDetail, useDetailError, useShotStatus } from "./hooks";
+import { MissingRefsNote } from "./MissingRefs";
+import { OverrideFields } from "./OverrideFields";
 import { PassToggle } from "./ShotsTab";
 import { Badges } from "./Thumb";
+
+const RECT_KEY = "h3pipe.inspector.rect";
 
 function Built({ d }: { d: ShotDetail }) {
   const b = d.built as Record<string, unknown>;
@@ -103,7 +111,6 @@ function OverrideEditor({ d, shot }: { d: ShotDetail; shot: string }) {
   const ov = d.override;
   const hasOverride = Object.keys(ov).length > 0;
   const eff = d.effective;
-  const promptChanged = form.prompt !== d.built_prompt;
 
   return (
     <div className="h3-col">
@@ -119,56 +126,20 @@ function OverrideEditor({ d, shot }: { d: ShotDetail; shot: string }) {
           </div>
         </div>
       )}
-      <div className="h3-row">
-        <span className="h3-h h3-grow">Prompt {ov.prompt != null ? <span className="h3-badge h3-b-override">override</span> : <span className="h3-muted">(built)</span>}</span>
-        <label className="h3-check h3-small"><input type="checkbox" checked={showDiff} onChange={(e) => setShowDiff(e.target.checked)} /> diff</label>
-        <button className="h3-btn" disabled={!promptChanged} title="Put the built prompt back in the box" onClick={() => set({ prompt: d.built_prompt })}>Built</button>
-      </div>
-      {showDiff ? (
-        <DiffView oldText={d.built_prompt} newText={form.prompt} />
-      ) : (
-        <textarea className="h3-in" rows={12} value={form.prompt} onChange={(e) => set({ prompt: e.target.value })} spellCheck={false} />
-      )}
-      <div className="h3-field">
-        <label>Seed</label>
-        <div className="h3-row">
-          <input
-            className="h3-in h3-grow h3-mono"
-            inputMode="numeric"
-            placeholder={`${String(d.built.seed ?? eff.seed)} (built)`}
-            value={form.seed}
-            onChange={(e) => set({ seed: e.target.value.replace(/[^\d]/g, "") })}
-            title="Pinned seed for this shot (both passes). Empty = the built seed; a redo still picks a new one unless you choose same/typed."
-          />
-          {form.seed && <button className="h3-btn h3-icon" title="Clear" onClick={() => set({ seed: "" })}>✕</button>}
-        </div>
-        <label>Model</label>
-        <ModelSelect value={form.model} onChange={(model) => set({ model })} placeholder={`(built) ${ov.model == null ? shortName(eff.model, 40) : ""}`} />
-        <label>LoRAs</label>
-        <div className="h3-col" style={{ gap: 3 }}>
-          <span className="h3-seg">
-            <button className={form.lorasMode === "built" ? "h3-on" : ""} onClick={() => set({ lorasMode: "built" })}>built</button>
-            <button
-              className={form.lorasMode === "custom" ? "h3-on" : ""}
-              onClick={() => set({
-                lorasMode: "custom",
-                loras: form.loras.length ? form.loras : (eff.loras ?? []).map((l) => ({ name: l.name, strength: String(l.strength) })),
-              })}
-            >
-              custom
-            </button>
-          </span>
-          {form.lorasMode === "custom" ? (
-            <LoraEditor rows={form.loras} onChange={(loras) => set({ loras })} />
-          ) : (
-            <span className="h3-muted h3-small">{eff.loras?.length && ov.loras == null ? eff.loras.map((l) => `${shortName(l.name, 32)} @${l.strength}`).join(", ") : ov.loras == null ? "the workflow's LoRA" : ""}</span>
-          )}
-        </div>
-        <label>Steps</label>
-        <input className="h3-in" inputMode="numeric" placeholder={`${ov.steps == null ? eff.steps : ""} (built)`} value={form.steps} onChange={(e) => set({ steps: e.target.value.replace(/[^\d]/g, "") })} />
-        <label>Note</label>
-        <input className="h3-in" value={form.note} placeholder="why this override" onChange={(e) => set({ note: e.target.value })} />
-      </div>
+      <OverrideFields
+        form={form}
+        set={set}
+        builtPrompt={d.built_prompt}
+        promptOverridden={ov.prompt != null}
+        showDiff={showDiff}
+        setShowDiff={setShowDiff}
+        seedPlaceholder={`${String(d.built.seed ?? eff.seed)} (built)`}
+        seedTitle="Pinned seed for this shot (both passes). Empty = the built seed; a redo still picks a new one unless you choose same/typed."
+        modelPlaceholder={`(built) ${ov.model == null ? shortName(eff.model, 40) : ""}`}
+        stepsPlaceholder={`${ov.steps == null ? eff.steps : ""} (built)`}
+        effLoras={eff.loras}
+        lorasOverridden={ov.loras != null}
+      />
       <label className="h3-check" title="Prompt, model, LoRAs and steps are per pass; this writes them to final and proxy. Seed and note are always shared.">
         <input type="checkbox" checked={both} onChange={(e) => setBoth(e.target.checked)} /> Apply to both passes
       </label>
@@ -201,6 +172,7 @@ function OverrideEditor({ d, shot }: { d: ShotDetail; shot: string }) {
   );
 }
 
+/** The inspector's contents for the selected shot. */
 export function Inspector() {
   const ep = useApp((s) => s.ep);
   const shot = useApp((s) => s.shot);
@@ -208,73 +180,90 @@ export function Inspector() {
   const d = useDetail(shot);
   const derr = useDetailError(shot);
   const s = useShotStatus(shot);
+  const [allowMissing, setAllowMissing] = useState(false);
   const renderBusy = useApp((st) => !!shot && Object.keys(st.busy).some((k) => k.startsWith(`render|${pass}|`) && k.split("|")[2].split(",").includes(shot)));
 
   useEffect(() => {
     if (shot && ep) void loadDetail(shot);
   }, [shot, ep, pass]);
+  // "render anyway" is a per-shot decision
+  useEffect(() => setAllowMissing(false), [shot]);
 
   const badges = useMemo(() => (s ? shotBadges(s) : []), [s]);
 
-  if (!ep) return <div className="h3-surface"><div className="h3-empty-state">Pick an episode in the h3 Shots tab.</div></div>;
-  if (!shot) {
-    return (
-      <div className="h3-surface">
-        <div className="h3-bar"><span className="h3-title">Inspector</span><span className="h3-grow" /><PassToggle /></div>
-        <div className="h3-empty-state">Select a shot in the Shots tab or the timeline.</div>
-      </div>
-    );
-  }
+  if (!ep) return <div className="h3-empty-state">Pick an episode in the h3 Shots tab.</div>;
+  if (!shot) return <div className="h3-empty-state">Select a shot in the Shots tab or the timeline.</div>;
   const ct = s ? cutTake(s) : undefined;
   const hasUsable = !!s?.takes.some((t) => t.status === "ok" && t.has_video);
+  const missing = s ? missingOf(s) : [];
+  const blocked = missing.length && !allowMissing;
   return (
-    <div className="h3-surface">
-      <div className="h3-bar">
-        <span className="h3-title">{shot}</span>
-        {s && <span className="h3-muted h3-small">{s.sequence} · {fmtSeconds(s.seconds)}{s.size ? ` · ${s.size}` : ""}</span>}
-        <span className="h3-grow" />
-        <PassToggle />
-      </div>
-      <div className="h3-scroll h3-pad h3-col">
-        {s && (
-          <div className="h3-col" style={{ gap: 4 }}>
-            {s.subjects.length > 0 && <div className="h3-small h3-muted">subjects: {s.subjects.join(", ")}</div>}
-            <Badges badges={badges} />
-            <div className="h3-row h3-wrap">
-              <button
-                className="h3-btn h3-primary"
-                disabled={renderBusy || !d}
-                title={hasUsable ? "Queue a redo with the saved override and a new seed" : "Queue the first take"}
-                onClick={() => {
-                  if (!hasUsable) void renderShots([shot], false);
-                  else if (ep) void queueRender({ ...baseRender(ep, pass, [shot]), redo: true, seed_mode: "new", parent_take: ct?.take ?? null });
-                }}
-              >
-                <i className="pi pi-play" /> {hasUsable ? "Redo (new seed)" : "Render"}
-              </button>
-              <button className="h3-btn" disabled={!d} onClick={() => openRedo(shot, ct?.take ?? s.takes[s.takes.length - 1]?.take ?? null)}>
-                <i className="pi pi-refresh" /> Redo…
-              </button>
-              <button className="h3-btn" disabled={!ct?.mp4} onClick={() => ct && openViewer(shot, ct.take, null, "single")}>
-                <i className="pi pi-eye" /> View {ct ? tn(ct.take) : ""}
-              </button>
-            </div>
+    <div className="h3-scroll h3-pad h3-col">
+      {s && (
+        <div className="h3-col" style={{ gap: 4 }}>
+          {s.subjects.length > 0 && <div className="h3-small h3-muted">subjects: {s.subjects.join(", ")}</div>}
+          <Badges badges={badges} />
+          <MissingRefsNote blocked={missing.length ? [{ shot, refs: missing }] : []} allow={allowMissing} setAllow={setAllowMissing} />
+          <div className="h3-row h3-wrap">
+            <button
+              className="h3-btn h3-primary"
+              disabled={renderBusy || !d}
+              title={blocked
+                ? "Missing refs: the server will skip this shot (tick Render anyway to render with stand-ins)"
+                : hasUsable ? "Queue a redo with the saved override and a new seed" : "Queue the first take"}
+              onClick={() => {
+                if (!hasUsable) void renderShots([shot], false, allowMissing);
+                else void queueRender({ ...baseRender(ep, pass, [shot], allowMissing), redo: true, seed_mode: "new", parent_take: ct?.take ?? null });
+              }}
+            >
+              <i className="pi pi-play" /> {hasUsable ? "Redo (new seed)" : "Render"}{blocked ? " (will skip)" : ""}
+            </button>
+            <button className="h3-btn" disabled={!d} onClick={() => openRedo(shot, ct?.take ?? s.takes[s.takes.length - 1]?.take ?? null)}>
+              <i className="pi pi-refresh" /> Redo…
+            </button>
+            <button className="h3-btn" disabled={!ct?.mp4} onClick={() => ct && openViewer(shot, ct.take, null, "single")}>
+              <i className="pi pi-eye" /> View {ct ? tn(ct.take) : ""}
+            </button>
           </div>
-        )}
-        {derr && !d && (
-          <div className="h3-note h3-note-err">
-            {derr} <button className="h3-link" onClick={() => void loadDetail(shot, pass, true)}>Retry</button>
-          </div>
-        )}
-        {!d && !derr && <div className="h3-muted">Loading…</div>}
-        {d && (
-          <>
-            <Built d={d} />
-            <div className="h3-sep" />
-            <OverrideEditor key={`${ep}|${pass}|${shot}`} d={d} shot={shot} />
-          </>
-        )}
-      </div>
+        </div>
+      )}
+      {derr && !d && (
+        <div className="h3-note h3-note-err">
+          {derr} <button className="h3-link" onClick={() => void loadDetail(shot, pass, true)}>Retry</button>
+        </div>
+      )}
+      {!d && !derr && <div className="h3-muted">Loading…</div>}
+      {d && (
+        <>
+          <Built d={d} />
+          <div className="h3-sep" />
+          <OverrideEditor key={`${ep}|${pass}|${shot}`} d={d} shot={shot} />
+        </>
+      )}
     </div>
+  );
+}
+
+/** The floating inspector window (drag by the head, resize from the corner). */
+export function InspectorWindow() {
+  const open = useApp((s) => s.inspector);
+  const ep = useApp((s) => s.ep);
+  const shot = useApp((s) => s.shot);
+  const s = useShotStatus(shot);
+  if (!open) return null;
+  const head = (
+    <>
+      <i className="pi pi-sliders-h h3-muted" />
+      <b>{shot ?? "Inspector"}</b>
+      {s && <span className="h3-muted h3-small">{s.sequence} · {fmtSeconds(s.seconds)}{s.size ? ` · ${s.size}` : ""}</span>}
+      <span className="h3-grow" />
+      {ep && <PassToggle />}
+      <button className="h3-btn h3-icon" title="Close" onClick={closeInspector}><i className="pi pi-times" /></button>
+    </>
+  );
+  return (
+    <FloatingWindow storageKey={RECT_KEY} defaultRect={defaultInspectorRect} head={head} className="h3-inspector" minW={300}>
+      <Inspector />
+    </FloatingWindow>
   );
 }

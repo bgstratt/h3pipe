@@ -2,13 +2,15 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { closeRedo, closeSidecar, copyText, loadDetail, runRedo, takePrompt, type RedoSeed } from "../actions";
 import { errText, parseSeed } from "../api";
 import { absPath, shortName, tn } from "../lib/format";
+import { missingOf } from "../lib/missingRefs";
 import { loraRow, parseLoras, parseSteps, type LoraRow } from "../lib/overrideForm";
 import { useApp } from "../store";
 import type { Pass, ShotDetail, TakeDetail } from "../types";
 import { DiffView, LoraEditor, ModelSelect } from "./Fields";
-import { useDetail, useDetailError } from "./hooks";
+import { useDetail, useDetailError, useShotStatus } from "./hooks";
+import { MissingRefsNote } from "./MissingRefs";
 
-function Dialog({ title, onClose, children, footer, wide }: { title: ReactNode; onClose: () => void; children: ReactNode; footer?: ReactNode; wide?: boolean }) {
+export function Dialog({ title, onClose, children, footer, wide }: { title: ReactNode; onClose: () => void; children: ReactNode; footer?: ReactNode; wide?: boolean }) {
   useEffect(() => {
     const key = (e: KeyboardEvent) => e.key === "Escape" && onClose();
     window.addEventListener("keydown", key);
@@ -91,6 +93,9 @@ function RedoBody({ d, shot, openPass, parent }: { d: ShotDetail; shot: string; 
   const [busy, setBusy] = useState(false);
   const [parentPrompt, setParentPrompt] = useState<{ take: number; text: string | null; error?: string } | null>(null);
   const [showDiff, setShowDiff] = useState(false);
+  const [allowMissing, setAllowMissing] = useState(false);
+  const targetStatus = useShotStatus(shot, f.pass);
+  const missing = targetStatus ? missingOf(targetStatus) : [];
   const set = (p: Partial<RedoForm>) => {
     setErr(null);
     setF((x) => ({ ...x, ...p }));
@@ -152,7 +157,7 @@ function RedoBody({ d, shot, openPass, parent }: { d: ShotDetail; shot: string; 
     try {
       const ok = await runRedo({
         shot, pass: f.pass, parent: f.parent, seed, model: f.model, loras, steps, prompt: f.prompt, note: f.note.trim(),
-        saveAsOverride: f.save,
+        saveAsOverride: f.save, allowMissingRefs: allowMissing,
       });
       if (ok) closeRedo();
     } finally {
@@ -235,6 +240,7 @@ function RedoBody({ d, shot, openPass, parent }: { d: ShotDetail; shot: string; 
         <input type="checkbox" checked={f.save} onChange={(e) => set({ save: e.target.checked })} />
         Save these as the shot's {f.pass} override
       </label>
+      <MissingRefsNote blocked={missing.length ? [{ shot, refs: missing }] : []} allow={allowMissing} setAllow={setAllowMissing} />
       {err && <div className="h3-note h3-note-err">{err}</div>}
       <div className="h3-row" style={{ justifyContent: "flex-end" }}>
         <span className="h3-muted h3-small h3-grow">

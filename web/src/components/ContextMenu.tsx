@@ -1,9 +1,10 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
-  closeMenu, copyText, openRedo, openSidecar, openViewer, pickTake, renderShots, select,
+  cancelTake, closeMenu, copyText, openInspector, openRedo, openSidecar, openViewer, pickTake, playAll, requestRender,
+  showMissingRefs,
 } from "../actions";
-import { host } from "../host";
 import { absPath, tn } from "../lib/format";
+import { missingOf } from "../lib/missingRefs";
 import { statusKey, useApp } from "../store";
 
 /** The thumbnail context menu, the same in the bin, the timeline and the viewer strip. */
@@ -58,6 +59,25 @@ export function ContextMenu() {
     closeMenu();
     fn();
   };
+  const missing = shot ? missingOf(shot) : [];
+  // the timeline plays the current pass's cut
+  const inCut = !!cutShot && !cutShot.orphan;
+  const common = (
+    <>
+      <div className="h3-menu-sep" />
+      <button disabled={!inCut} title="Play the cut from this shot, in the viewer" onClick={run(() => playAll(menu.shot))}>
+        <i className="pi pi-forward" /> Play from here
+      </button>
+      {missing.length > 0 && (
+        <button title={missing.map((m) => `${m.slot}: ${m.path}`).join("\n")} onClick={run(() => showMissingRefs(menu.shot))}>
+          <i className="pi pi-exclamation-triangle" /> Show missing refs ({missing.length})
+        </button>
+      )}
+      <button onClick={run(() => openInspector(menu.shot, take?.take ?? null))}>
+        <i className="pi pi-sliders-h" /> Inspect shot
+      </button>
+    </>
+  );
 
   return (
     <div
@@ -101,31 +121,22 @@ export function ContextMenu() {
           >
             <i className="pi pi-copy" /> Copy path
           </button>
-          <button
-            onClick={run(() => {
-              select(menu.shot, take.take);
-              host().show("inspector");
-            })}
-          >
-            <i className="pi pi-sliders-h" /> Inspect shot
-          </button>
+          {take.status === "queued" && (
+            <button onClick={run(() => void cancelTake({ ep, pass: menu.pass, shot: menu.shot, take: take.take }))}>
+              <i className="pi pi-ban" /> Cancel this render
+            </button>
+          )}
+          {common}
         </>
       ) : (
         <>
-          <button onClick={run(() => void renderShots([menu.shot], false))}>
-            <i className="pi pi-play" /> Render this shot
+          <button onClick={run(() => requestRender([menu.shot], false))}>
+            <i className="pi pi-play" /> Render this shot{missing.length ? "…" : ""}
           </button>
           <button onClick={run(() => openRedo(menu.shot, null, menu.pass))}>
             <i className="pi pi-refresh" /> Render with settings…
           </button>
-          <button
-            onClick={run(() => {
-              select(menu.shot);
-              host().show("inspector");
-            })}
-          >
-            <i className="pi pi-sliders-h" /> Inspect shot
-          </button>
+          {common}
         </>
       )}
     </div>

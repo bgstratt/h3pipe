@@ -2,10 +2,6 @@
 // interface is implemented by the mock (src/mock/) for the dev page.
 //
 // CONTRACT TODOs (gaps found while building the UI; see the report):
-//  - TODO(contract): `GET /h3pipe/episode` takes don't carry `comfy_prompt_id`,
-//    so after a page reload the Queue tab has to fetch `/h3pipe/shot` for every
-//    shot with a queued take to match websocket progress to takes. Adding
-//    `comfy_prompt_id` to each take in episode_status would remove that.
 //  - TODO(contract): `POST /h3pipe/cancel` says it "returns the take's new status"
 //    without a shape. Typed here as `{status?: ...}`; the UI only needs 2xx.
 //  - TODO(contract): `PUT /h3pipe/override` returns each pass's override "plus
@@ -17,11 +13,43 @@
 //  - TODO(contract): a placeholder cut entry's take lives in the other pass;
 //    episode_status gives its number but not its thumb/strip/mp4, so the UI
 //    loads the other pass's status to draw it.
+//
+// Round 2 / Phase 5 (refs) gaps:
+//  - TODO(contract): `GET /h3pipe/browse` lists folders only. Importing a ref
+//    needs a file picker, so the client sends `files=image|audio` and reads an
+//    optional `files: [{name, path, size?}]`. A server without it gets the
+//    typed-path fallback in the dialog.
+//  - TODO(contract): ref files live beside the bible, which (Phase 5 layout) can be
+//    the episode's parent folder, but `GET /h3pipe/file` only serves paths inside
+//    `ep`. `refFileUrl` uses `/h3pipe/file` with the ref's path as given, plus
+//    `v=<sha1>` to beat the browser's image cache after a re-pick. A
+//    `/h3pipe/refs/file?ep&path` (paths relative to the bible) would settle it.
+//  - TODO(contract): `GET /h3pipe/refs` gives the effective `prompt` and the
+//    override's field *names*, not the override's values or the effective
+//    seed/model/LoRAs/steps, so the ref override editor can't show them. Read
+//    here as optional `override_values`, `effective` and `built_prompt`.
+//  - TODO(contract): per-view prompts/overrides for a character: `/refs` has one
+//    `prompt` per ref; the override routes take `view`, but nothing lists a view's
+//    own prompt or override. The UI edits the ref-level override only.
+//  - TODO(contract): the ref override routes are "the same shape as the shot
+//    override routes"; the response of PUT/DELETE isn't pinned down. The UI
+//    refetches `/h3pipe/refs`.
+//  - TODO(contract): `PUT /h3pipe/refs/pick` doesn't say whether it sends
+//    `h3pipe.episode` (a pick changes `missing_refs` and makes takes ref-stale).
+//    The UI refetches the episode itself after a pick or import.
+//  - TODO(contract): `/refs/generate` progress: the UI matches ComfyUI `progress`
+//    events by the `prompt_id`s it gets back; after a reload a queued ref take
+//    carries no prompt id (read as optional `comfy_prompt_id`).
+//  - TODO(contract): `POST /h3pipe/refs/import` "returns the new take": typed as
+//    a RefTake (plus `view`).
+//  - TODO(contract): a render's `skipped[].reason` for missing refs is free text;
+//    the UI groups by the presence of `missing_refs` instead.
 
 import type {
-  AssembleResult, BuildResult, CancelResult, ComfyQueue, Config, CutEntry, CutFile,
-  EpisodeStatus, EpisodeSummary, OverrideRequest, OverrideResult, Pass, PickRequest,
-  RenderRequest, RenderResult, Seed, ShotDetail, TakeRef,
+  AssembleResult, BrowseFiles, BrowseResult, BuildResult, CancelResult, ComfyQueue, Config, CutEntry,
+  CutFile, EpisodeStatus, EpisodeSummary, OverrideRequest, OverrideResult, Pass, PickRequest, Ref,
+  RefGenerateRequest, RefGenerateResult, RefImportRequest, RefList, RefOverrideRequest, RefPickRequest,
+  RefTake, RenderRequest, RenderResult, Seed, ShotDetail, TakeRef,
 } from "./types";
 
 export interface Api {
@@ -42,6 +70,17 @@ export interface Api {
   putOverride(req: OverrideRequest): Promise<OverrideResult>;
   deleteOverride(ep: string, shot: string, pass?: Pass): Promise<unknown>;
   assemble(ep: string, pass: Pass, partial: boolean): Promise<AssembleResult>;
+  /** Folders on the ComfyUI machine; no path = the starting points. `files` asks
+   * for files too (not in the contract yet, see the TODO above). */
+  browse(path?: string | null, files?: BrowseFiles | null): Promise<BrowseResult>;
+  refs(ep: string): Promise<RefList>;
+  /** URL of a ref file (live file or a candidate); `version` busts the image cache. */
+  refFileUrl(ep: string, path: string, version?: string | null): string;
+  refsGenerate(req: RefGenerateRequest): Promise<RefGenerateResult>;
+  refsPick(req: RefPickRequest): Promise<Ref>;
+  refsImport(req: RefImportRequest): Promise<RefTake & { view?: string | null }>;
+  putRefOverride(req: RefOverrideRequest): Promise<unknown>;
+  deleteRefOverride(ep: string, ref: string, view?: string | null): Promise<unknown>;
   /** ComfyUI's own lists (not h3pipe routes). */
   models(): Promise<string[]>;
   loras(): Promise<string[]>;
@@ -168,6 +207,25 @@ export function createHttpApi(t: Transport): Api {
     },
     deleteOverride: (ep, shot, pass) => call("DELETE", `/h3pipe/override?${qs({ ep, shot, pass })}`),
     assemble: (ep, pass, partial) => call("POST", "/h3pipe/assemble", { ep, pass, partial }),
+    browse: (path, files) => get(`/h3pipe/browse?${qs({ path: path || undefined, files: files || undefined })}`),
+    refs: (ep) => get(`/h3pipe/refs?${qs({ ep })}`),
+    refFileUrl: (ep, path, version) => t.url(`/h3pipe/file?${qs({ ep, path, v: version || undefined })}`),
+    refsGenerate: (req) => {
+      if (req.seed !== null && !isSeed(req.seed)) {
+        return Promise.reject(new Error(`Seed must be a string of digits, got ${String(req.seed)}`));
+      }
+      return call("POST", "/h3pipe/refs/generate", req);
+    },
+    refsPick: (req) => call("PUT", "/h3pipe/refs/pick", req),
+    refsImport: (req) => call("POST", "/h3pipe/refs/import", req),
+    putRefOverride: (req) => {
+      const s = req.fields.seed;
+      if (s !== undefined && s !== null && !isSeed(s)) {
+        return Promise.reject(new Error(`Seed must be a string of digits, got ${String(s)}`));
+      }
+      return call("PUT", "/h3pipe/refs/override", req);
+    },
+    deleteRefOverride: (ep, ref, view) => call("DELETE", `/h3pipe/refs/override?${qs({ ep, ref, view: view || undefined })}`),
     models: async () => {
       try {
         const m = await get<string[]>("/models/diffusion_models");

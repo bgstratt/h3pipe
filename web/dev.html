@@ -22,7 +22,7 @@
       }
       html, body { margin: 0; height: 100%; font-family: Inter, system-ui, sans-serif; background: #151515; color: var(--fg-color); }
       :root.light body { background: #f4f4f4; }
-      #dev { display: grid; grid-template-columns: 350px 350px 350px 1fr; grid-template-rows: minmax(0, 1fr) 220px; gap: 6px; height: 100vh; padding: 6px; box-sizing: border-box; }
+      #dev { display: grid; grid-template-columns: 350px 350px 1fr; grid-template-rows: minmax(0, 1fr) 220px; gap: 6px; height: 100vh; padding: 6px; box-sizing: border-box; }
       .panel { border: 1px solid var(--border-color); overflow: hidden; min-height: 0; display: flex; flex-direction: column; }
       .panel > h6 { margin: 0; font: 600 10px system-ui; text-transform: uppercase; letter-spacing: .05em; padding: 3px 6px; color: var(--descrip-text); border-bottom: 1px solid var(--border-color); }
       .panel > div { flex: 1 1 auto; min-height: 0; }
@@ -35,14 +35,21 @@
   <body>
     <div id="dev">
       <section class="panel" id="p-shots"><h6>Sidebar: h3 Shots (350px)</h6><div id="shots"></div></section>
-      <section class="panel" id="p-inspector"><h6>Sidebar: h3 Inspector</h6><div id="inspector"></div></section>
-      <section class="panel" id="p-queue"><h6>Sidebar: h3 Queue</h6><div id="queue"></div></section>
+      <section class="panel" id="p-refs"><h6>Sidebar: h3 Refs (350px)</h6><div id="refs"></div></section>
       <section class="panel" id="info">
         <b>h3pipe editor, dev page</b>
-        <p>Every surface on the <b>mock API</b> (<code>src/mock/</code>): the real smoke-test episode's status, details and media.
-          Renders are simulated (queued, then progress, then ok).</p>
+        <p>Every surface on the <b>mock API</b> (<code>src/mock/</code>): the real smoke-test episode's status, details and media,
+          a fake folder tree, and refs from the <code>kitchen_sink</code> bible (shots are mapped onto its refs by index).
+          Renders and ref candidates are simulated (queued, then progress, then ok). The inspector and the viewer float.</p>
         <p><button id="theme">Toggle light/dark</button> · <a href="?firstrun" style="color:inherit">first-run (no roots)</a> · <a href="?" style="color:inherit">normal</a></p>
-        <p>Try: expand <code>sh020</code>, hover a thumbnail to scrub, right-click it, double-click to open the viewer,
+        <p><b>Round 2:</b> the <b>Play all</b> button on the timeline (space toggles while the timeline or player has focus; click a clip to jump;
+          right-click a clip: Play from here). Select a shot and press the sliders icon: the inspector floats beside the viewer.
+          The folder icon (or "Browse…" in the episode list) opens the folder browser. Shots with a <i>missing refs</i> badge
+          (e.g. <code>sh040</code>, <code>sh050</code>) are skipped by renders unless you tick "Render anyway"; try Render missing.</p>
+        <p><b>Refs tab:</b> filters, expand <code>Bo</code> (two views picked of four) and pick views to stitch the sheet;
+          <code>kitchen window</code> has two candidates and no pick (it blocks shots); Generate, Import… (D:\Stock\portraits),
+          ctrl-click two candidates to compare, and the prompt/settings override.</p>
+        <p>Before: expand <code>sh020</code>, hover a thumbnail to scrub, right-click it, double-click to open the viewer,
           ctrl-click another take for B, switch to wipe. Select <code>sh030</code> (it has an override) and toggle the diff.</p>
       </section>
       <section class="panel" id="p-timeline"><h6>Bottom panel: h3 Timeline (220px)</h6><div id="timeline"></div></section>
