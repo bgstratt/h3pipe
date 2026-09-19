@@ -908,13 +908,26 @@ deviation)
   have no `built_prompt`. Manual: a real `dur: model` render, FL2VA with a recording,
   final-size looks on FL2VA/LTX/Wan, and voice generation (no voice target yet).
 
-**Phase 9 — later**
-- Script pane: `epNN.md` in a text editor with live `--check` errors beside the lines;
-  save → rebuild.
-- Promote to script (needs the parser to record each shot's line span).
-- Drag-reorder and trims in the timeline; play-through of the cut; master dialogue
-  waveform under the timeline.
-- Series config editing in the UI (design sentences → regenerate refs).
+**Phase 9a — script and series config windows, promote** (in progress 2026-09-19; contract
+in `docs/API.md`, "Phase 9a")
+- Floating **Script** and **Series config** windows (CodeMirror 6: a script-format mode and
+  JSON), live check errors at their lines, save → rebuild, `_history/` copies, and a
+  reload/keep-mine choice when the file was changed outside ComfyUI (the usual case).
+- Script ↔ shot bin sync through the parser's line spans; "Show in script".
+- **Promote**: overrides the authored files can express move into them (shot `target`,
+  `model`/`lora`/`steps` where the meaning is the same; the episode's and refs' targets
+  and ref design fields into the series config); the rest stays with a reason. Diff preview
+  first. Replaces the old rule that the editor never writes the series config.
+
+**Phase 9b — timeline** (after 9a; decide per item)
+- Drag-reorder and trims in the timeline; play-through of the cut (partly there: play all);
+  master dialogue waveform under the timeline (only useful with a recorded track).
+
+**Phase 9c — voices** (after 9b)
+- Voice refs made in ComfyUI instead of import-only. Candidates: LTX-2's audio-only nodes
+  (`LTXVAudioOnlyModel`, `LTXVReferenceAudio`; installed models), a local TTS node pack
+  (downloads), or cutting a line out of a video take's generated audio (works today, but the
+  voice changes between takes).
 
 ## Story IR — `shotlist/shots.json` (Phase 6)
 
