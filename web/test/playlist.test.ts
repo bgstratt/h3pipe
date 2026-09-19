@@ -99,6 +99,23 @@ describe("buildPlaylist", () => {
     expect(buildPlaylist(ep([shot("d", 121, {}, { frames: 73 })]))[0].dur).toBe(73 / 24);
     expect(framesOf(shot("e", 121), 24)).toBe(121);
   });
+  it("a take at another frame rate lasts its own duration (a 16 fps Wan take in a 24 fps cut)", () => {
+    // 81 frames at 16 fps = 5.0625 s
+    const items = buildPlaylist(ep([
+      shot("w", 81, { takes: [take(1, { mp4: "r/w/t1.mp4", frames: 81, fps: 16 })] }, { frames: 81, fps: 16 }),
+      shot("b", 48),
+    ]));
+    expect(items[0]).toMatchObject({ inT: 0, outT: 81 / 16, dur: 81 / 16 });
+    expect(items[1].start).toBe(81 / 16);
+    // trims are the cut's frames (24 fps), the length the clip's own
+    const [t] = buildPlaylist(ep([shot("w", 81, { takes: [take(1, { frames: 81, fps: 16 })] }, { trim_in: 12, trim_out: 6 })]));
+    expect(t).toMatchObject({ inT: 0.5, outT: 81 / 16 - 0.25 });
+    expect(t.dur).toBeCloseTo(81 / 16 - 0.75);
+    // no take yet: the build's length at the shot's own rate (cut.fps)
+    expect(buildPlaylist(ep([shot("n", 81, { takes: [] }, { take: null, usable: false, fps: 16 })]))[0].dur).toBe(81 / 16);
+    expect(trimWindow(81, 0, 0, 24, 16)).toEqual({ inT: 0, outT: 81 / 16, dur: 81 / 16 });
+    expect(trimWindow(16, 12, 12, 24, 16)).toBeNull();
+  });
 });
 
 describe("locate and clocks", () => {

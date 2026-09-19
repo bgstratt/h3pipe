@@ -1,0 +1,130 @@
+{
+  "id": "wan22_vace",
+  "kind": "video",
+  "label": "Wan 2.2 14B VACE (refs)",
+  "short": "Wan+refs",
+  "code": "compile.py",
+
+  "capabilities": {
+    "_note": "audio: none. Wan 2.2 makes no sound: every take is a mute mp4, whatever the shot's audio policy (it renders `silent`, with a note in the take), and assemble lays silence under it.",
+    "audio": "none"
+  },
+
+  "models": {
+    "_note": "Glob patterns (case-insensitive) naming the files each model parameter of the binding takes, for the model identification that reads them; `family` is its id for the file header check (high vs low noise is decided by the name: the headers are identical). `model` is the high noise (first stage) model, `model_low` the low noise one.",
+    "model": {"patterns": ["wan2.2_fun_vace_high_noise*", "*wan2*2*vace*high*"], "family": "wan2.2-vace-14b-high",
+             "class_type": "UNETLoader", "field": "unet_name"},
+    "model_low": {"patterns": ["wan2.2_fun_vace_low_noise*", "*wan2*2*vace*low*"], "family": "wan2.2-vace-14b-low",
+                 "class_type": "UNETLoader", "field": "unet_name"},
+    "text_encoder": {"patterns": ["umt5_xxl*", "*umt5*"], "family": "umt5-xxl",
+                    "class_type": "CLIPLoader", "field": "clip_name"},
+    "vae": {"patterns": ["wan_2.1_vae*", "*wan*2*1*vae*"], "family": "wan2.1-vae",
+           "class_type": "VAELoader", "field": "vae_name"}
+  },
+
+  "template": {
+    "_note": "Wan 2.2 14B (Fun VACE is built on the A14B pair): 4k+1 frames at 16 fps, trained on 81 frames (5 s), so a longer shot is a warning, and past 161 frames (10 s) it must be split. Width and height are multiples of 16 (WanVaceToVideo's step; its masks need /8); sizes that aren't legal are snapped down, then shrunk under 720p.",
+    "fps": 16,
+    "frames": {"step": 4, "base": 5, "max": 161},
+    "size_multiple": 16,
+    "size_fit": "snap",
+    "max_size": {"long_side": 1280, "pixels": 921600},
+    "trained_frames": 81
+  },
+
+  "recipe": {
+    "_note": "Identity: WanVaceToVideo's reference_image is ONE picture (the node takes the first of a batch, scales it to the render size with a centre crop, and conditions the clip on it as an extra leading latent frame, trimmed afterwards). It is composed at queue time from the shot's picked refs: one panel per subject (characters in `who:` order, then props and vehicles; a character's face panel on a single-character close-up, else its three-quarter body panel, as ltx2_ingredients), at the render size, on WHITE (VACE pads its references on a white canvas; comfy_nodes/h3_refsheet.py). The location plate is left off by default (`plate: false`: one scene next to the subjects reads as another subject; the prose describes the place). Every panel's file is required (blocked, as ltx2_ingredients); rendering anyway drops the missing ones, and a shot with none renders from the prompt alone (and its keyframes). Keyframes: shot:<id>:first / last are optional control frames, the standard VACE first/last recipe: a control video of the keyframe(s) with mid-grey frames between, and a mask that keeps the keyframes (0) and generates the rest (1). No sound: every policy renders silent and says so.",
+    "policies": ["silent"],
+    "policy_fallback": {"to": "silent", "why": "Wan 2.2 makes no sound (lay the soundtrack in at the edit)"},
+    "keyframes": ["first", "last"],
+    "keyframe_path": "refs/shots/{shot}/{end}.png",
+    "reference_image": {
+      "take_suffix": "_reference.png",
+      "background": "white",
+      "gap": 0.02,
+      "sheet_panels": 4,
+      "views": {"body": 0, "face": 3},
+      "face_sizes": ["close", "cu"],
+      "plate": false
+    },
+    "control": {"grey": 8355711, "keep": 0, "generate": 16777215},
+    "prompt": "prose",
+    "refs": {
+      "character": {"kind": "character sheet", "shape": "sheet", "views": 4},
+      "object": {"kind": "{kind} reference", "shape": "object"},
+      "location": {"kind": "background plate", "shape": "plate"}
+    },
+    "size_hints": {
+      "character sheet": "4096x1024 or larger (horizontal 4-panel strip; one panel goes on the reference image)",
+      "prop reference": "1024x1024 or larger, on a plain light background",
+      "vehicle reference": "1024x1024 or larger, on a plain light background",
+      "keyframe": "the render size (any size works: it is scaled and centre-cropped to the frame)"
+    }
+  },
+
+  "binding": {
+    "_note": "An API graph built for this target from ComfyUI's Wan nodes (no VACE workflow was saved): the Wan 2.2 Fun VACE high/low noise pair, each with shift 8, sampling steps [0, split) and [split, end) with KSamplerAdvanced (`stages`, as wan22_i2v), conditioned by one WanVaceToVideo (reference_image, and control_video / control_masks for keyframes, added by patch_graph), then TrimVideoLatent drops the reference's leading latent frame (the node's trim_latent output) before VAEDecode. No LoRA loaders: one per stage is inserted after that stage's UNETLoader when a profile names LoRAs (by `stage`, else *high_noise* / *low_noise*, else both). H3SaveShot takes the place of CreateVideo/SaveVideo (no audio input: the mp4 is mute) at the job's fps.",
+    "workflow": "workflow.json",
+    "workflow_name": "h3pipe_wan22_14b_vace.json",
+    "env": "H3_WAN22_VACE_WORKFLOW",
+    "saver": {"class_type": "H3SaveShot",
+              "inputs": {"root": "project_root", "subfolder": "subfolder", "take": "take",
+                         "sidecar": "sidecar"},
+              "replace": {"class_type": "CreateVideo", "inputs": {"images": "images", "audio": "audio"}},
+              "drop": ["SaveVideo"],
+              "set": {"save_frames": false}},
+    "prune": true,
+    "stages": {
+      "high": {"sampler": "Wan high noise sampler", "model": "Wan high noise model"},
+      "low": {"sampler": "Wan low noise sampler", "model": "Wan low noise model"}
+    },
+    "params": {
+      "model": {"class_type": "UNETLoader", "field": "unet_name", "title": "Wan high noise model"},
+      "model_low": {"class_type": "UNETLoader", "field": "unet_name", "title": "Wan low noise model"},
+      "loras": [{"class_type": "LoraLoaderModelOnly", "name": "lora_name", "strength": "strength_model",
+                 "input": "model", "chain": true, "title": "Wan high noise LoRA", "stage": "high",
+                 "insert_after": {"class_type": "UNETLoader", "title": "Wan high noise model", "output": 0}},
+                {"class_type": "LoraLoaderModelOnly", "name": "lora_name", "strength": "strength_model",
+                 "input": "model", "chain": true, "title": "Wan low noise LoRA", "stage": "low",
+                 "insert_after": {"class_type": "UNETLoader", "title": "Wan low noise model", "output": 0}}],
+      "steps": {"class_type": "KSamplerAdvanced", "field": "steps", "all": true},
+      "seed": {"class_type": "KSamplerAdvanced", "field": "noise_seed", "all": true},
+      "cfg": {"class_type": "KSamplerAdvanced", "field": "cfg", "all": true},
+      "sampler": {"class_type": "KSamplerAdvanced", "field": "sampler_name", "all": true},
+      "shift": {"class_type": "ModelSamplingSD3", "field": "shift", "all": true},
+      "prompt": {"class_type": "CLIPTextEncode", "field": "text", "title": "Positive prompt"},
+      "negative": {"class_type": "CLIPTextEncode", "field": "text", "title": "Negative prompt"},
+      "width": {"class_type": "WanVaceToVideo", "field": "width"},
+      "height": {"class_type": "WanVaceToVideo", "field": "height"},
+      "length": {"class_type": "WanVaceToVideo", "field": "length"},
+      "vace_strength": {"class_type": "WanVaceToVideo", "field": "strength"},
+      "fps": {"class_type": "H3SaveShot", "field": "fps"},
+      "shot_id": {"class_type": "H3SaveShot", "field": "shot_id"},
+      "audio_policy": {"class_type": "H3SaveShot", "field": "audio_policy"},
+      "text_encoder": {"class_type": "CLIPLoader", "field": "clip_name"},
+      "vae": {"class_type": "VAELoader", "field": "vae_name"}
+    },
+    "review_nodes": []
+  },
+
+  "presets": {
+    "_note": "The Wan 2.2 Fun VACE 14B fp8 pair, no turbo LoRA (none is installed for it: lightx2v's 4-step pair is for the I2V models), so cfg 3.5 and real steps: euler / simple, shift 8, split half-way, VACE strength 1. Final 832x480 at 20 steps (10 + 10); proxy 640x352 at 10 steps (5 + 5), which is slow next to the 4-step targets. Another target's series config block lends no size. The negative prompt is Wan's standard one from ComfyUI's Wan templates.",
+    "final": {
+      "model": "wan2.2_fun_vace_high_noise_14B_fp8_scaled.safetensors",
+      "lora": null, "steps": 20, "width": 832, "height": 480,
+      "model_low": "wan2.2_fun_vace_low_noise_14B_fp8_scaled.safetensors",
+      "cfg": 3.5, "sampler": "euler", "shift": 8.0, "split": 0.5, "vace_strength": 1.0,
+      "negative": "色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走",
+      "text_encoder": "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+      "vae": "wan_2.1_vae.safetensors"
+    },
+    "proxy": {
+      "lora": null, "steps": 10, "width": 640, "height": 352,
+      "model_low": "wan2.2_fun_vace_low_noise_14B_fp8_scaled.safetensors",
+      "cfg": 3.5, "sampler": "euler", "shift": 8.0, "split": 0.5, "vace_strength": 1.0,
+      "negative": "色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走",
+      "text_encoder": "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+      "vae": "wan_2.1_vae.safetensors"
+    }
+  }
+}

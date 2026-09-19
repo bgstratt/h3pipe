@@ -1,0 +1,691 @@
+{
+  "doc": {
+    "episode": "ks01",
+    "title": "Kitchen Sink",
+    "target": "wan22_vace",
+    "defaults": {
+      "width": 832,
+      "height": 480,
+      "fps": 16.0,
+      "steps": 20,
+      "model": "wan2.2_fun_vace_high_noise_14B_fp8_scaled.safetensors",
+      "lora": null,
+      "audio_policy": "silent",
+      "master_track": "audio/ks01_mix.wav",
+      "model_low": "wan2.2_fun_vace_low_noise_14B_fp8_scaled.safetensors",
+      "cfg": 3.5,
+      "sampler": "euler",
+      "shift": 8.0,
+      "split": 0.5,
+      "vace_strength": 1.0,
+      "negative": "色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走",
+      "text_encoder": "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+      "vae": "wan_2.1_vae.safetensors"
+    },
+    "subjects": {
+      "ada": {
+        "kind": "character",
+        "sheet": "refs/ada/ada_sheet_4panel.png",
+        "voice_sample": "audio/voices/ada_sample.wav"
+      },
+      "bo": {
+        "kind": "character",
+        "sheet": "refs/bo/bo_sheet_4panel.png",
+        "voice_sample": "audio/voices/bo_sample.wav"
+      },
+      "cy": {
+        "kind": "character",
+        "sheet": "refs/cy/cy_sheet_4panel.png",
+        "voice_sample": "audio/voices/cy_sample.wav"
+      },
+      "rex": {
+        "kind": "character",
+        "sheet": "refs/rex/rex_sheet_4panel.png",
+        "voice_sample": ""
+      },
+      "narrator": {
+        "kind": "character",
+        "sheet": "refs/narrator/narrator_sheet_4panel.png",
+        "voice_sample": "audio/voices/narrator_sample.wav"
+      },
+      "kettle": {
+        "kind": "prop",
+        "sheet": "refs/props/kettle.png",
+        "voice_sample": ""
+      },
+      "van": {
+        "kind": "vehicle",
+        "sheet": "refs/props/van.png",
+        "voice_sample": ""
+      }
+    },
+    "shots": [
+      {
+        "id": "sh010",
+        "sequence": "sq01",
+        "subjects": [
+          "ada"
+        ],
+        "background": "refs/_bg/kitchen.png",
+        "size": "ws",
+        "length": 41,
+        "seed": 8828384270954910346,
+        "steps": 20,
+        "audio_policy": "silent",
+        "prompt": "Style: a flat vector cartoon with thick even outlines and a limited pastel palette. A wide shot of a cramped diner kitchen with steel counters, a hanging ticket rail and cold fluorescent light from overhead, the camera pushes in on Ada with small amplitude at slow speed. Ada is a tall woman in her thirties with a short grey bob, a mustard apron over a striped shirt, and round red glasses. Ada slams the walk-in door shut and turns to face the kitchen. Visible on-screen text reads \"OPEN 24 HOURS\".",
+        "negative": "色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走",
+        "keyframes": {
+          "first": "refs/shots/sh010/first.png",
+          "last": "refs/shots/sh010/last.png"
+        },
+        "panels": [
+          {
+            "subject": "ada",
+            "kind": "character",
+            "path": "refs/ada/ada_sheet_4panel.png",
+            "view": "body"
+          }
+        ],
+        "audio_intent": "generate",
+        "audio_note": "audio generate renders as silent on Wan+refs: Wan 2.2 makes no sound (lay the soundtrack in at the edit)",
+        "duration": 2.5
+      },
+      {
+        "id": "sh020",
+        "sequence": "sq01",
+        "subjects": [
+          "ada",
+          "bo",
+          "kettle"
+        ],
+        "background": "refs/_bg/kitchen.png",
+        "size": "ms",
+        "length": 61,
+        "seed": 2769191069994745345,
+        "steps": 20,
+        "audio_policy": "silent",
+        "prompt": "Style: a flat vector cartoon with thick even outlines and a limited pastel palette. A medium shot of a cramped diner kitchen with steel counters, a hanging ticket rail and cold fluorescent light from overhead, the camera remains static. Ada is a tall woman in her thirties with a short grey bob, a mustard apron over a striped shirt, and round red glasses. Bo is a stocky teenage boy with a shaved head, an oversized green bomber jacket and orange high-tops. The diner kettle is a dented chrome kettle with a black bakelite handle and a whistle cap on a chain. Also in frame are two customers at the counter seen through the window, backs to camera, unnamed background figures who look nothing like Ada and Bo. Bo sets the kettle down on the burner and flicks the gas on. Ada talks, warmly, mouth moving with the words. Bo talks, mouth moving with the words.",
+        "negative": "色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走",
+        "keyframes": {
+          "first": "refs/shots/sh020/first.png",
+          "last": "refs/shots/sh020/last.png"
+        },
+        "panels": [
+          {
+            "subject": "ada",
+            "kind": "character",
+            "path": "refs/ada/ada_sheet_4panel.png",
+            "view": "body"
+          },
+          {
+            "subject": "bo",
+            "kind": "character",
+            "path": "refs/bo/bo_sheet_4panel.png",
+            "view": "body"
+          },
+          {
+            "subject": "kettle",
+            "kind": "prop",
+            "path": "refs/props/kettle.png"
+          }
+        ],
+        "audio_intent": "clone",
+        "audio_note": "audio clone renders as silent on Wan+refs: Wan 2.2 makes no sound (lay the soundtrack in at the edit)",
+        "duration": 3.6
+      },
+      {
+        "id": "sh030",
+        "sequence": "sq01",
+        "subjects": [
+          "ada"
+        ],
+        "background": "refs/_bg/kitchen.png",
+        "size": "cu",
+        "length": 29,
+        "seed": 9049780455082391214,
+        "steps": 20,
+        "audio_policy": "silent",
+        "prompt": "Style: a flat vector cartoon with thick even outlines and a limited pastel palette. A close-up of a cramped diner kitchen with steel counters, a hanging ticket rail and cold fluorescent light from overhead, the camera remains static. Ada is a tall woman in her thirties with a short grey bob, a mustard apron over a striped shirt, and round red glasses. Ada's eyes narrow at the kettle. Ada stays silent, lips closed.",
+        "negative": "色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走",
+        "keyframes": {
+          "first": "refs/shots/sh030/first.png",
+          "last": "refs/shots/sh030/last.png"
+        },
+        "panels": [
+          {
+            "subject": "ada",
+            "kind": "character",
+            "path": "refs/ada/ada_sheet_4panel.png",
+            "view": "face"
+          }
+        ],
+        "audio_intent": "clone",
+        "audio_note": "audio clone renders as silent on Wan+refs: Wan 2.2 makes no sound (lay the soundtrack in at the edit)",
+        "duration": 1.62
+      },
+      {
+        "id": "sh040",
+        "sequence": "sq01",
+        "subjects": [
+          "bo",
+          "van",
+          "kettle"
+        ],
+        "background": "refs/_bg/kitchen.png",
+        "size": "close",
+        "length": 49,
+        "seed": 2765843861826537092,
+        "steps": 10,
+        "audio_policy": "silent",
+        "prompt": "Style: a flat vector cartoon with thick even outlines and a limited pastel palette. A close-up of a cramped diner kitchen with steel counters, a hanging ticket rail and cold fluorescent light from overhead, the camera remains static. Bo is a stocky teenage boy with a shaved head, an oversized green bomber jacket and orange high-tops. The delivery van is a boxy white delivery van with a sky-blue stripe and a cracked left headlight. The diner kettle is a dented chrome kettle with a black bakelite handle and a whistle cap on a chain. Bo leans out of the back door as the van reverses toward it, kettle in hand.",
+        "negative": "色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走",
+        "keyframes": {
+          "first": "refs/shots/sh040/first.png",
+          "last": "refs/shots/sh040/last.png"
+        },
+        "panels": [
+          {
+            "subject": "bo",
+            "kind": "character",
+            "path": "refs/bo/bo_sheet_4panel.png",
+            "view": "body"
+          },
+          {
+            "subject": "van",
+            "kind": "vehicle",
+            "path": "refs/props/van.png"
+          },
+          {
+            "subject": "kettle",
+            "kind": "prop",
+            "path": "refs/props/kettle.png"
+          }
+        ],
+        "audio_intent": "generate",
+        "audio_note": "audio generate renders as silent on Wan+refs: Wan 2.2 makes no sound (lay the soundtrack in at the edit)",
+        "model": "shot_model.safetensors",
+        "lora": "none",
+        "duration": 3.04
+      },
+      {
+        "id": "sh050",
+        "sequence": "sq01",
+        "subjects": [
+          "cy",
+          "rex"
+        ],
+        "background": "refs/_bg/kitchen.png",
+        "size": "medium",
+        "length": 29,
+        "seed": 4412217473130868673,
+        "steps": 20,
+        "audio_policy": "silent",
+        "prompt": "Style: a flat vector cartoon with thick even outlines and a limited pastel palette. A medium shot of a cramped diner kitchen with steel counters, a hanging ticket rail and cold fluorescent light from overhead, the camera remains static. Cy is a small girl with two puffball pigtails, a purple raincoat and yellow rubber boots. Rex is a scruffy brown terrier with one white ear and a red collar. Cy bursts in from the back with Rex at her heels. Cy talks, mouth moving with the words. Rex talks, mouth moving with the words.",
+        "negative": "色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走",
+        "keyframes": {
+          "first": "refs/shots/sh050/first.png",
+          "last": "refs/shots/sh050/last.png"
+        },
+        "panels": [
+          {
+            "subject": "cy",
+            "kind": "character",
+            "path": "refs/cy/cy_sheet_4panel.png",
+            "view": "body"
+          },
+          {
+            "subject": "rex",
+            "kind": "character",
+            "path": "refs/rex/rex_sheet_4panel.png",
+            "view": "body"
+          }
+        ],
+        "audio_intent": "clone",
+        "audio_note": "audio clone renders as silent on Wan+refs: Wan 2.2 makes no sound (lay the soundtrack in at the edit)",
+        "duration": 1.62
+      },
+      {
+        "id": "sh060",
+        "sequence": "sq01",
+        "subjects": [
+          "bo"
+        ],
+        "background": "refs/_bg/kitchen.png",
+        "size": "medium",
+        "length": 49,
+        "seed": 7624922143456421625,
+        "steps": 20,
+        "audio_policy": "silent",
+        "prompt": "Style: a flat vector cartoon with thick even outlines and a limited pastel palette. A medium shot of a cramped diner kitchen with steel counters, a hanging ticket rail and cold fluorescent light from overhead, the camera remains static. Bo is a stocky teenage boy with a shaved head, an oversized green bomber jacket and orange high-tops. Bo stares at the ticket rail as it fills with orders. Bo stays silent, lips closed.",
+        "negative": "色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走",
+        "keyframes": {
+          "first": "refs/shots/sh060/first.png",
+          "last": "refs/shots/sh060/last.png"
+        },
+        "panels": [
+          {
+            "subject": "bo",
+            "kind": "character",
+            "path": "refs/bo/bo_sheet_4panel.png",
+            "view": "body"
+          }
+        ],
+        "audio_intent": "clone",
+        "audio_note": "audio clone renders as silent on Wan+refs: Wan 2.2 makes no sound (lay the soundtrack in at the edit)",
+        "duration": 3.04
+      },
+      {
+        "id": "sh110",
+        "sequence": "sq02",
+        "subjects": [
+          "ada",
+          "bo",
+          "cy"
+        ],
+        "background": "refs/_bg/street.png",
+        "size": "wide",
+        "length": 41,
+        "seed": 3054841815674432230,
+        "steps": 12,
+        "audio_policy": "silent",
+        "prompt": "Style: a flat vector cartoon with thick even outlines and a limited pastel palette. A wide shot of a wet night street outside the diner, neon sign reflected in the puddles, light from the left, the camera remains static. Ada is a tall woman in her thirties with a short grey bob, a mustard apron over a striped shirt, and round red glasses. Bo is a stocky teenage boy with a shaved head, an oversized green bomber jacket and orange high-tops. Cy is a small girl with two puffball pigtails, a purple raincoat and yellow rubber boots. Ada, Bo and Cy spill out of the diner door into the rain. Ada talks, mouth moving with the words. Bo talks, mouth moving with the words. Cy talks, mouth moving with the words.",
+        "negative": "色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走",
+        "keyframes": {
+          "first": "refs/shots/sh110/first.png",
+          "last": "refs/shots/sh110/last.png"
+        },
+        "panels": [
+          {
+            "subject": "ada",
+            "kind": "character",
+            "path": "refs/ada/ada_sheet_4panel.png",
+            "view": "body"
+          },
+          {
+            "subject": "bo",
+            "kind": "character",
+            "path": "refs/bo/bo_sheet_4panel.png",
+            "view": "body"
+          },
+          {
+            "subject": "cy",
+            "kind": "character",
+            "path": "refs/cy/cy_sheet_4panel.png",
+            "view": "body"
+          }
+        ],
+        "audio_intent": "dub",
+        "audio_note": "audio dub renders as silent on Wan+refs: Wan 2.2 makes no sound (lay the soundtrack in at the edit)",
+        "model": "seq_model.safetensors",
+        "audio_in": 1.0,
+        "audio_out": 3.5
+      },
+      {
+        "id": "sh120",
+        "sequence": "sq02",
+        "subjects": [
+          "ada"
+        ],
+        "background": "refs/_bg/street.png",
+        "size": "medium",
+        "length": 25,
+        "seed": 985161046565145751,
+        "steps": 12,
+        "audio_policy": "silent",
+        "prompt": "Style: a flat vector cartoon with thick even outlines and a limited pastel palette. A medium shot of a wet night street outside the diner, neon sign reflected in the puddles, light from the left, the camera remains static. Ada is a tall woman in her thirties with a short grey bob, a mustard apron over a striped shirt, and round red glasses. Ada sprints along the kerb after the van. Ada talks, mouth moving with the words.",
+        "negative": "色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走",
+        "keyframes": {
+          "first": "refs/shots/sh120/first.png",
+          "last": "refs/shots/sh120/last.png"
+        },
+        "panels": [
+          {
+            "subject": "ada",
+            "kind": "character",
+            "path": "refs/ada/ada_sheet_4panel.png",
+            "view": "body"
+          }
+        ],
+        "audio_intent": "dub_keep_foley",
+        "audio_note": "audio dub_keep_foley renders as silent on Wan+refs: Wan 2.2 makes no sound (lay the soundtrack in at the edit)",
+        "model": "seq_model.safetensors",
+        "audio_in": 3.5,
+        "audio_out": 5.0
+      },
+      {
+        "id": "sh130",
+        "sequence": "sq02",
+        "subjects": [
+          "bo"
+        ],
+        "background": "refs/_bg/kitchen_window.png",
+        "size": "medium",
+        "length": 37,
+        "seed": 1964752148325355590,
+        "steps": 12,
+        "audio_policy": "silent",
+        "prompt": "Style: a flat vector cartoon with thick even outlines and a limited pastel palette. A medium shot of the diner's pass-through window looking out to the counter, warm tungsten light spilling in from the dining room, the camera remains static. Bo is a stocky teenage boy with a shaved head, an oversized green bomber jacket and orange high-tops. Bo ducks back inside and leans through the pass-through window.",
+        "negative": "色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走",
+        "keyframes": {
+          "first": "refs/shots/sh130/first.png",
+          "last": "refs/shots/sh130/last.png"
+        },
+        "panels": [
+          {
+            "subject": "bo",
+            "kind": "character",
+            "path": "refs/bo/bo_sheet_4panel.png",
+            "view": "body"
+          }
+        ],
+        "audio_intent": "dub_keep_foley",
+        "audio_note": "audio dub_keep_foley renders as silent on Wan+refs: Wan 2.2 makes no sound (lay the soundtrack in at the edit)",
+        "model": "seq_model.safetensors",
+        "audio_in": 5.0,
+        "audio_out": 7.2
+      },
+      {
+        "id": "sh140",
+        "sequence": "sq02",
+        "subjects": [],
+        "background": "refs/_bg/street.png",
+        "size": "medium",
+        "length": 29,
+        "seed": 5738520875936942780,
+        "steps": 12,
+        "audio_policy": "silent",
+        "prompt": "Style: a flat vector cartoon with thick even outlines and a limited pastel palette. A medium shot of a wet night street outside the diner, neon sign reflected in the puddles, light from the left, the camera remains static. The street empties; the neon sign flickers once and goes dark.",
+        "negative": "色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走",
+        "keyframes": {
+          "first": "refs/shots/sh140/first.png",
+          "last": "refs/shots/sh140/last.png"
+        },
+        "panels": [],
+        "audio_intent": "dub",
+        "audio_note": "audio dub renders as silent on Wan+refs: Wan 2.2 makes no sound (lay the soundtrack in at the edit)",
+        "model": "seq_model.safetensors",
+        "audio_in": 7.2,
+        "audio_out": 9.0
+      },
+      {
+        "id": "sh150",
+        "sequence": "sq02",
+        "subjects": [
+          "ada"
+        ],
+        "background": "refs/_bg/street.png",
+        "size": "medium",
+        "length": 17,
+        "seed": 5193023516762493768,
+        "steps": 12,
+        "audio_policy": "silent",
+        "prompt": "Style: a flat vector cartoon with thick even outlines and a limited pastel palette. A medium shot of a wet night street outside the diner, neon sign reflected in the puddles, light from the left, the camera remains static. Ada is a tall woman in her thirties with a short grey bob, a mustard apron over a striped shirt, and round red glasses. Ada stops dead in the middle of the road, soaked, and starts to laugh.",
+        "negative": "色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走",
+        "keyframes": {
+          "first": "refs/shots/sh150/first.png",
+          "last": "refs/shots/sh150/last.png"
+        },
+        "panels": [
+          {
+            "subject": "ada",
+            "kind": "character",
+            "path": "refs/ada/ada_sheet_4panel.png",
+            "view": "body"
+          }
+        ],
+        "audio_intent": "generate",
+        "audio_note": "audio generate renders as silent on Wan+refs: Wan 2.2 makes no sound (lay the soundtrack in at the edit)",
+        "model": "seq_model.safetensors",
+        "duration": 1.0
+      },
+      {
+        "id": "sh210",
+        "sequence": "sq03",
+        "subjects": [
+          "ada",
+          "bo"
+        ],
+        "background": "refs/_bg/kitchen_window.png",
+        "size": "medium",
+        "length": 61,
+        "seed": 1998322879969458948,
+        "steps": 20,
+        "audio_policy": "silent",
+        "prompt": "Style: a flat vector cartoon with thick even outlines and a limited pastel palette. A medium shot of the diner's pass-through window looking out to the counter, warm tungsten light spilling in from the dining room, the camera remains static. Ada is a tall woman in her thirties with a short grey bob, a mustard apron over a striped shirt, and round red glasses. Bo is a stocky teenage boy with a shaved head, an oversized green bomber jacket and orange high-tops. Ada and Bo lean on the counter, dripping, as the kettle finally whistles. Ada talks, mouth moving with the words. Bo talks, mouth moving with the words. Ada talks, mouth moving with the words.",
+        "negative": "色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走",
+        "keyframes": {
+          "first": "refs/shots/sh210/first.png",
+          "last": "refs/shots/sh210/last.png"
+        },
+        "panels": [
+          {
+            "subject": "ada",
+            "kind": "character",
+            "path": "refs/ada/ada_sheet_4panel.png",
+            "view": "body"
+          },
+          {
+            "subject": "bo",
+            "kind": "character",
+            "path": "refs/bo/bo_sheet_4panel.png",
+            "view": "body"
+          }
+        ],
+        "audio_intent": "clone",
+        "audio_note": "audio clone renders as silent on Wan+refs: Wan 2.2 makes no sound (lay the soundtrack in at the edit)",
+        "lora": "seq_lora.safetensors",
+        "duration": 3.595
+      },
+      {
+        "id": "sh310",
+        "sequence": "sq04",
+        "subjects": [
+          "cy"
+        ],
+        "background": "refs/_bg/kitchen.png",
+        "size": "medium",
+        "length": 37,
+        "seed": 6151578644003521749,
+        "steps": 5,
+        "audio_policy": "silent",
+        "prompt": "Style: a flat vector cartoon with thick even outlines and a limited pastel palette. A medium shot of a cramped diner kitchen with steel counters, a hanging ticket rail and cold fluorescent light from overhead, the camera remains static. Cy is a small girl with two puffball pigtails, a purple raincoat and yellow rubber boots. Cy climbs onto a stool and peers into the steaming kettle.",
+        "negative": "色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走",
+        "keyframes": {
+          "first": "refs/shots/sh310/first.png",
+          "last": "refs/shots/sh310/last.png"
+        },
+        "panels": [
+          {
+            "subject": "cy",
+            "kind": "character",
+            "path": "refs/cy/cy_sheet_4panel.png",
+            "view": "body"
+          }
+        ],
+        "audio_intent": "generate",
+        "audio_note": "audio generate renders as silent on Wan+refs: Wan 2.2 makes no sound (lay the soundtrack in at the edit)",
+        "profile": "quick",
+        "duration": 2.33
+      },
+      {
+        "id": "sh320",
+        "sequence": "sq04",
+        "subjects": [
+          "ada"
+        ],
+        "background": "refs/_bg/kitchen.png",
+        "size": "close",
+        "length": 21,
+        "seed": 5660381186064488857,
+        "steps": 7,
+        "audio_policy": "silent",
+        "prompt": "Style: a flat vector cartoon with thick even outlines and a limited pastel palette. A close-up of a cramped diner kitchen with steel counters, a hanging ticket rail and cold fluorescent light from overhead, the camera remains static. Ada is a tall woman in her thirties with a short grey bob, a mustard apron over a striped shirt, and round red glasses. Ada points a wooden spoon at the kettle. Ada talks, mouth moving with the words.",
+        "negative": "色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走",
+        "keyframes": {
+          "first": "refs/shots/sh320/first.png",
+          "last": "refs/shots/sh320/last.png"
+        },
+        "panels": [
+          {
+            "subject": "ada",
+            "kind": "character",
+            "path": "refs/ada/ada_sheet_4panel.png",
+            "view": "face"
+          }
+        ],
+        "audio_intent": "clone",
+        "audio_note": "audio clone renders as silent on Wan+refs: Wan 2.2 makes no sound (lay the soundtrack in at the edit)",
+        "model": "profile_model.safetensors",
+        "loras": [
+          {
+            "name": "profile_turbo_8step.safetensors",
+            "strength": 1.0
+          },
+          {
+            "name": "profile_style.safetensors",
+            "strength": 0.6
+          }
+        ],
+        "profile": "dialogue_close",
+        "duration": 1.332
+      },
+      {
+        "id": "sh330",
+        "sequence": "sq04",
+        "subjects": [
+          "bo"
+        ],
+        "background": "refs/_bg/kitchen.png",
+        "size": "medium",
+        "length": 21,
+        "seed": 5114629555451768005,
+        "steps": 9,
+        "audio_policy": "silent",
+        "prompt": "Style: a flat vector cartoon with thick even outlines and a limited pastel palette. A medium shot of a cramped diner kitchen with steel counters, a hanging ticket rail and cold fluorescent light from overhead, the camera remains static. Bo is a stocky teenage boy with a shaved head, an oversized green bomber jacket and orange high-tops. Bo lifts the kettle off the burner with a grin. Bo talks, mouth moving with the words.",
+        "negative": "色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走",
+        "keyframes": {
+          "first": "refs/shots/sh330/first.png",
+          "last": "refs/shots/sh330/last.png"
+        },
+        "panels": [
+          {
+            "subject": "bo",
+            "kind": "character",
+            "path": "refs/bo/bo_sheet_4panel.png",
+            "view": "body"
+          }
+        ],
+        "audio_intent": "clone",
+        "audio_note": "audio clone renders as silent on Wan+refs: Wan 2.2 makes no sound (lay the soundtrack in at the edit)",
+        "model": "profile_model.safetensors",
+        "lora": "shot_lora.safetensors",
+        "profile": "dialogue_close",
+        "duration": 1.105
+      }
+    ]
+  },
+  "report": {
+    "episode": "ks01",
+    "title": "Kitchen Sink",
+    "mode": "final",
+    "resolution": "832x480",
+    "steps": 20,
+    "model": "wan2.2_fun_vace_high_noise_14B_fp8_scaled.safetensors",
+    "lora": "none",
+    "fps": 16.0,
+    "shots": 15,
+    "sequences": 4,
+    "target_s": 32.875,
+    "delivered_s": 34.1875,
+    "pad_frames": 21,
+    "policies": {
+      "silent": 15
+    },
+    "needed": {
+      "refs/ada/ada_sheet_4panel.png": {
+        "kind": "character sheet",
+        "prompt": "A character model sheet on a plain flat background: FOUR panels side by side in a single horizontal strip, left to right — three-quarter body, side profile full body, back view full body, and a head-and-shoulders facial close-up. The SAME character in all four. a tall woman in her thirties with a short grey bob, a mustard apron over a striped shirt, and round red glasses. Drawn as a flat vector cartoon with thick even outlines and a limited pastel palette. Output 4096x1024 or larger."
+      },
+      "refs/bo/bo_sheet_4panel.png": {
+        "kind": "character sheet",
+        "prompt": "A character model sheet on a plain flat background: FOUR panels side by side in a single horizontal strip, left to right — three-quarter body, side profile full body, back view full body, and a head-and-shoulders facial close-up. The SAME character in all four. a stocky teenage boy with a shaved head, an oversized green bomber jacket and orange high-tops. Drawn as a flat vector cartoon with thick even outlines and a limited pastel palette. Output 4096x1024 or larger."
+      },
+      "refs/props/kettle.png": {
+        "kind": "prop reference",
+        "prompt": "A single clean three-quarter view of one object on a plain flat background, no scene around it. a dented chrome kettle with a black bakelite handle and a whistle cap on a chain. Drawn as a flat vector cartoon with thick even outlines and a limited pastel palette. Output 1024x1024 or larger."
+      },
+      "refs/props/van.png": {
+        "kind": "vehicle reference",
+        "prompt": "A single clean three-quarter view of one object on a plain flat background, no scene around it. a boxy white delivery van with a sky-blue stripe and a cracked left headlight. Drawn as a flat vector cartoon with thick even outlines and a limited pastel palette. Output 1024x1024 or larger."
+      },
+      "refs/cy/cy_sheet_4panel.png": {
+        "kind": "character sheet",
+        "prompt": "A character model sheet on a plain flat background: FOUR panels side by side in a single horizontal strip, left to right — three-quarter body, side profile full body, back view full body, and a head-and-shoulders facial close-up. The SAME character in all four. a small girl with two puffball pigtails, a purple raincoat and yellow rubber boots. Drawn as a flat vector cartoon with thick even outlines and a limited pastel palette. Output 4096x1024 or larger."
+      },
+      "refs/rex/rex_sheet_4panel.png": {
+        "kind": "character sheet",
+        "prompt": "A character model sheet on a plain flat background: FOUR panels side by side in a single horizontal strip, left to right — three-quarter body, side profile full body, back view full body, and a head-and-shoulders facial close-up. The SAME character in all four. a scruffy brown terrier with one white ear and a red collar. Drawn as a flat vector cartoon with thick even outlines and a limited pastel palette. Output 4096x1024 or larger."
+      }
+    },
+    "blocked_shots": {
+      "refs/ada/ada_sheet_4panel.png": [
+        "sh010",
+        "sh020",
+        "sh030",
+        "sh110",
+        "sh120",
+        "sh150",
+        "sh210",
+        "sh320"
+      ],
+      "refs/bo/bo_sheet_4panel.png": [
+        "sh020",
+        "sh040",
+        "sh060",
+        "sh110",
+        "sh130",
+        "sh210",
+        "sh330"
+      ],
+      "refs/props/kettle.png": [
+        "sh020",
+        "sh040"
+      ],
+      "refs/props/van.png": [
+        "sh040"
+      ],
+      "refs/cy/cy_sheet_4panel.png": [
+        "sh050",
+        "sh110",
+        "sh310"
+      ],
+      "refs/rex/rex_sheet_4panel.png": [
+        "sh050"
+      ]
+    },
+    "warnings": [
+      "sh050: CRAMMED — 26 syllables in 1.81s forces 30.1 syl/s (ceiling 5.8). `dur: 5.81` gives it room.",
+      "sh140: CRAMMED — 12 syllables in 1.81s forces 10.3 syl/s (ceiling 5.8). `dur: 3.56` gives it room.",
+      "Wan+refs makes no sound: 15 shot(s) render silent (asked for clone x7, dub x2, dub_keep_foley x2, generate x4); lay the soundtrack in at the edit",
+      "12 dialogue shot(s): no audio or lip-sync on Wan (the lines are acted silently): sh020, sh030, sh040, sh050, sh060, sh110, sh120, sh130 …",
+      "sh040 overrides model: shot_model.safetensors",
+      "sh040 overrides lora: none",
+      "sh110 overrides model: seq_model.safetensors",
+      "sh120 overrides model: seq_model.safetensors",
+      "sh130 overrides model: seq_model.safetensors",
+      "sh140 overrides model: seq_model.safetensors",
+      "sh150 overrides model: seq_model.safetensors",
+      "sh210 overrides lora: seq_lora.safetensors",
+      "sh320 overrides model: profile_model.safetensors",
+      "sh330 overrides model: profile_model.safetensors",
+      "sh330 overrides lora: shot_lora.safetensors"
+    ],
+    "target": "wan22_vace",
+    "size_hints": {
+      "character sheet": "4096x1024 or larger (horizontal 4-panel strip; one panel goes on the reference image)",
+      "prop reference": "1024x1024 or larger, on a plain light background",
+      "vehicle reference": "1024x1024 or larger, on a plain light background",
+      "keyframe": "the render size (any size works: it is scaled and centre-cropped to the frame)"
+    }
+  }
+}

@@ -1,0 +1,116 @@
+{
+  "id": "wan22_i2v",
+  "kind": "video",
+  "label": "Wan 2.2 14B I2V",
+  "short": "Wan I2V",
+  "code": "compile.py",
+
+  "capabilities": {
+    "_note": "audio: none. Wan 2.2 makes no sound: every take is a mute mp4, whatever the shot's audio policy (it renders `silent`, with a note in the take), and assemble lays silence under it.",
+    "audio": "none"
+  },
+
+  "models": {
+    "_note": "Glob patterns (case-insensitive) naming the files each model parameter of the binding takes, for the model identification that reads them; `family` is its id for the file header check (high vs low noise is decided by the name: the headers are identical). `model` is the high noise (first stage) model, `model_low` the low noise one.",
+    "model": {"patterns": ["wan2.2_i2v_high_noise*", "*wan2*2*i2v*high*"], "family": "wan2.2-i2v-14b-high",
+             "class_type": "UNETLoader", "field": "unet_name"},
+    "model_low": {"patterns": ["wan2.2_i2v_low_noise*", "*wan2*2*i2v*low*"], "family": "wan2.2-i2v-14b-low",
+                 "class_type": "UNETLoader", "field": "unet_name"},
+    "text_encoder": {"patterns": ["umt5_xxl*", "*umt5*"], "family": "umt5-xxl",
+                    "class_type": "CLIPLoader", "field": "clip_name"},
+    "vae": {"patterns": ["wan_2.1_vae*", "*wan*2*1*vae*"], "family": "wan2.1-vae",
+           "class_type": "VAELoader", "field": "vae_name"}
+  },
+
+  "template": {
+    "_note": "Wan 2.2 14B renders 4k+1 frames at 16 fps (the template's CreateVideo, and its duration maths `floor(seconds * 16 + 1)`); trained on 81 frames (5 s), so a longer shot is a warning, and past 161 frames (10 s) it must be split. Width and height are multiples of 16 (WanImageToVideo's step); sizes that aren't legal are snapped down, then shrunk under 720p (1280 on the long side, 921600 pixels).",
+    "fps": 16,
+    "frames": {"step": 4, "base": 5, "max": 161},
+    "size_multiple": 16,
+    "size_fit": "snap",
+    "max_size": {"long_side": 1280, "pixels": 921600},
+    "trained_frames": 81
+  },
+
+  "recipe": {
+    "_note": "Image to video: shot:<id>:first is REQUIRED (it is the picture Wan animates; WanImageToVideo's start_image). A shot without it is blocked, like a missing ref, and can't be rendered anyway: make one with continuity (h3.py keyframe, or the editor), import one, or retarget the shot to wan22_ti2v. shot:<id>:last is optional; with it the graph uses WanFirstLastFrameToVideo instead. No identity references: subjects are written in words from the series config's `design`. No sound: every policy renders silent and says so.",
+    "policies": ["silent"],
+    "policy_fallback": {"to": "silent", "why": "Wan 2.2 makes no sound (lay the soundtrack in at the edit)"},
+    "keyframes": ["first", "last"],
+    "keyframe_path": "refs/shots/{shot}/{end}.png",
+    "keyframe_required": {
+      "first": "Wan 14B I2V needs a first frame: use continuity or import one, or retarget to wan22_ti2v"
+    },
+    "prompt": "prose",
+    "size_hints": {
+      "keyframe": "the render size (any size works: it is scaled and centre-cropped to the frame)"
+    }
+  },
+
+  "binding": {
+    "_note": "An API graph built from ComfyUI's Wan 2.2 14B image-to-video template as the user saved it (video_wan2_2_14B_i2v.json): its subgraph flattened and its 4-step LoRA switches resolved to the LoRA branch, so no switch or primitive is left and every node the binding names has a title. Two stages: the high noise model (+ its lightx2v LoRA, shift 5) samples steps [0, split) with noise, the low noise model (+ its LoRA) finishes [split, end) (`stages`; patch_graph sets split = the preset's `split` fraction of the steps). `model` / `model_low` are the two UNETLoaders; `loras` is one chain per stage: a LoRA goes to the stage its `stage` names, else by its name (*high_noise* / *low_noise*), else to both. H3SaveShot takes the place of CreateVideo/SaveVideo (no audio input: the mp4 is mute) at the job's fps.",
+    "workflow": "workflow.json",
+    "workflow_name": "h3pipe_wan22_14b_i2v.json",
+    "env": "H3_WAN22_I2V_WORKFLOW",
+    "saver": {"class_type": "H3SaveShot",
+              "inputs": {"root": "project_root", "subfolder": "subfolder", "take": "take",
+                         "sidecar": "sidecar"},
+              "replace": {"class_type": "CreateVideo", "inputs": {"images": "images", "audio": "audio"}},
+              "drop": ["SaveVideo"],
+              "set": {"save_frames": false}},
+    "prune": true,
+    "stages": {
+      "high": {"sampler": "Wan high noise sampler", "model": "Wan high noise model"},
+      "low": {"sampler": "Wan low noise sampler", "model": "Wan low noise model"}
+    },
+    "params": {
+      "model": {"class_type": "UNETLoader", "field": "unet_name", "title": "Wan high noise model"},
+      "model_low": {"class_type": "UNETLoader", "field": "unet_name", "title": "Wan low noise model"},
+      "loras": [{"class_type": "LoraLoaderModelOnly", "name": "lora_name", "strength": "strength_model",
+                 "input": "model", "chain": true, "title": "Wan high noise LoRA", "stage": "high"},
+                {"class_type": "LoraLoaderModelOnly", "name": "lora_name", "strength": "strength_model",
+                 "input": "model", "chain": true, "title": "Wan low noise LoRA", "stage": "low"}],
+      "steps": {"class_type": "KSamplerAdvanced", "field": "steps", "all": true},
+      "seed": {"class_type": "KSamplerAdvanced", "field": "noise_seed", "all": true},
+      "cfg": {"class_type": "KSamplerAdvanced", "field": "cfg", "all": true},
+      "sampler": {"class_type": "KSamplerAdvanced", "field": "sampler_name", "all": true},
+      "shift": {"class_type": "ModelSamplingSD3", "field": "shift", "all": true},
+      "prompt": {"class_type": "CLIPTextEncode", "field": "text", "title": "Positive prompt"},
+      "negative": {"class_type": "CLIPTextEncode", "field": "text", "title": "Negative prompt"},
+      "width": {"class_type": "WanImageToVideo", "field": "width"},
+      "height": {"class_type": "WanImageToVideo", "field": "height"},
+      "length": {"class_type": "WanImageToVideo", "field": "length"},
+      "fps": {"class_type": "H3SaveShot", "field": "fps"},
+      "shot_id": {"class_type": "H3SaveShot", "field": "shot_id"},
+      "audio_policy": {"class_type": "H3SaveShot", "field": "audio_policy"},
+      "text_encoder": {"class_type": "CLIPLoader", "field": "clip_name"},
+      "vae": {"class_type": "VAELoader", "field": "vae_name"}
+    },
+    "review_nodes": []
+  },
+
+  "presets": {
+    "_note": "The 14B fp8 pair with lightx2v's 4-step LoRA pair (strength 1), 4 steps split 2/2, cfg 1, euler / simple, shift 5: the template's 4-step branch. Final 832x480 (Wan's 480p; the template itself says 640x640), proxy 640x352. Another target's series config block lends no size: Wan was trained at 480p/720p. The negative prompt is Wan's standard one from ComfyUI's Wan templates (it is ignored at cfg 1, used when a profile drops the LoRAs for cfg > 1).",
+    "final": {
+      "model": "wan2.2_i2v_high_noise_14B_fp8_scaled.safetensors",
+      "lora": null, "steps": 4, "width": 832, "height": 480,
+      "model_low": "wan2.2_i2v_low_noise_14B_fp8_scaled.safetensors",
+      "loras": [{"name": "wan2.2_i2v_lightx2v_4steps_lora_v1_high_noise.safetensors", "strength": 1.0, "stage": "high"},
+                {"name": "wan2.2_i2v_lightx2v_4steps_lora_v1_low_noise.safetensors", "strength": 1.0, "stage": "low"}],
+      "cfg": 1.0, "sampler": "euler", "shift": 5.0, "split": 0.5,
+      "negative": "色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走",
+      "text_encoder": "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+      "vae": "wan_2.1_vae.safetensors"
+    },
+    "proxy": {
+      "lora": null, "steps": 4, "width": 640, "height": 352,
+      "model_low": "wan2.2_i2v_low_noise_14B_fp8_scaled.safetensors",
+      "loras": [{"name": "wan2.2_i2v_lightx2v_4steps_lora_v1_high_noise.safetensors", "strength": 1.0, "stage": "high"},
+                {"name": "wan2.2_i2v_lightx2v_4steps_lora_v1_low_noise.safetensors", "strength": 1.0, "stage": "low"}],
+      "cfg": 1.0, "sampler": "euler", "shift": 5.0, "split": 0.5,
+      "negative": "色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走",
+      "text_encoder": "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+      "vae": "wan_2.1_vae.safetensors"
+    }
+  }
+}

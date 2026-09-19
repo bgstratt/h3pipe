@@ -63,9 +63,12 @@ shot 93. So:
 - `steps`, `lora` and `model` are optional per pass; see the README's **Steps, model and LoRA**.
 - `series.target` names the video model the episode renders on: `minimax_h3_ref2va`
   (MiniMax H3, the default: leave it out), `ltx2` (LTX-2.5 distilled), `ltx2_ingredients`
-  (LTX-2.3 with your character sheets and plates) or `minimax_h3_fl2va` (MiniMax H3 from
-  first/last keyframes). Single shots or sequences can render on another one; see
-  **Rendering a shot on LTX-2** and **Rendering a shot on H3 from keyframes** below.
+  (LTX-2.3 with your character sheets and plates), `minimax_h3_fl2va` (MiniMax H3 from
+  first/last keyframes), or one of the silent Wan 2.2 models: `wan22_i2v` (14B, from a
+  first frame), `wan22_ti2v` (5B, text or a first frame) or `wan22_vace` (14B with your
+  character sheets). Single shots or sequences can render on another one; see
+  **Rendering a shot on LTX-2**, **Rendering a shot on H3 from keyframes** and **Rendering a
+  shot on Wan 2.2** below.
 
 ### Render profiles
 
@@ -172,7 +175,7 @@ sound: running footsteps on grass, fabric movement
 | `extras: …` | other people in frame, described; see **Crowds and extras** |
 | `model:`, `lora:`, `steps:` | per-shot render overrides; also valid under a `#` header |
 | `profile: dialogue_close` | a render profile from the series config; also valid under a `#` header |
-| `target: ltx2` | the video model for this shot or sequence (`minimax_h3_ref2va`, `ltx2`, `ltx2_ingredients` or `minimax_h3_fl2va`); see below |
+| `target: ltx2` | the video model for this shot or sequence (`minimax_h3_ref2va`, `ltx2`, `ltx2_ingredients`, `minimax_h3_fl2va`, `wan22_i2v`, `wan22_ti2v` or `wan22_vace`); see below |
 | `NAME: line` | dialogue from someone on screen |
 | `NAME (V.O.): line` | voiceover: speaks, is not drawn, costs no reference slot |
 | `NAME (O.S.): line` | off-screen: in the space, outside the frame |
@@ -273,6 +276,57 @@ pictures**: what pins the look is the shot's keyframes. What changes for such a 
 To try a shot this way without touching the script, retarget it from the editor or with
 `h3.py override <ep> sh040 --target minimax_h3_fl2va`.
 
+### Rendering a shot on Wan 2.2: `wan22_i2v`, `wan22_ti2v`, `wan22_vace`
+
+Three Wan 2.2 targets, for pictures without sound:
+
+- **`wan22_i2v`** (label "Wan 2.2 14B I2V"): the 14B image-to-video pair (a high noise model,
+  then a low noise one, each with its 4-step turbo LoRA). It animates a picture you give
+  it: **a first frame is required** (`refs/shots/<shot>/first.png`, from continuity with
+  `h3.py keyframe` or an import in the Refs tab). A shot without one is blocked, and
+  rendering anyway can't help: "Wan 14B I2V needs a first frame: use continuity or import
+  one, or retarget to wan22_ti2v". A `last.png` too makes it a first/last-frame shot.
+- **`wan22_ti2v`** ("Wan 2.2 5B TI2V"): the small 5B model, text-to-video, or from a first
+  frame when there is one. Nothing blocks it: the fast, cheap choice for proxies, and
+  where an I2V shot without a first frame can go.
+- **`wan22_vace`** ("Wan 2.2 14B VACE (refs)"): the 14B VACE pair, which keeps your
+  characters looking like their sheets. When the shot is queued, one reference picture is
+  made from the picked refs: one panel per subject on white (each character in `who:`,
+  the face panel on a one-character `close`/`cu` shot, else the three-quarter body; then
+  each prop and vehicle in `with:`). The plate isn't used: the place is described in words.
+  A missing sheet blocks the shot, as on H3; rendering anyway leaves it off. First and last
+  keyframes are optional and pin the ends of the shot. No turbo LoRA exists for it here,
+  so it renders at 10 steps for a proxy and 20 for a final: slower than the other two.
+
+What every Wan shot has in common:
+
+- **No sound at all.** Wan makes none. Every shot renders a mute mp4 whatever its
+  `policy:` says (the take's notes say so), and the review cut lays silence under it. A
+  dialogue shot gets a `--check` warning ("no audio or lip-sync on Wan"): the lines are
+  **acted silently** (the prompt says who talks and how, mouth moving), so the recording or
+  another take's sound goes on at the edit. Keep dialogue shots on a target with sound if
+  you need lip-sync.
+- **Its own frame rate.** The 14B models (`wan22_i2v`, `wan22_vace`) render **16 fps**; the
+  5B renders 24. Lengths are on a `4k + 1` grid at that rate: 5 s is 81 frames at 16 fps,
+  121 at 24. The models were trained on 5 s shots; a longer one renders with a warning,
+  and past 10 s it must be split. A 16 fps take in a 24 fps episode is converted when the
+  cut is assembled (frames repeated, never sped up), and the editor's timeline and Play all
+  time it by its own duration.
+- **Prose prompts**, written for you: the look, the framing and `camera:`, who is in frame
+  from their `design`, the action, on-screen text, then the lines as silent acting. No
+  `sound:` or `music:`: they are ignored. Wan's standard (Chinese) negative prompt is
+  added for you.
+- **Size is the model's own** (Wan is trained at 480p and 720p, far above H3's proxy):
+  `wan22_i2v` and `wan22_vace` 832×480 final, 640×352 proxy (multiples of 16); `wan22_ti2v`
+  1280×704 final, 640×352 proxy (multiples of 32). A cut mixing sizes is scaled to the
+  episode's size when assembled.
+- **A `lora:` line or profile** replaces the preset's LoRAs. On the 14B models there are
+  two chains, one per stage: a LoRA whose name says `high_noise` / `low_noise` goes to that
+  stage, any other to both.
+
+To try a shot on Wan without touching the script, retarget it from the editor or with
+`h3.py override <ep> sh040 --target wan22_ti2v`.
+
 ### Letting the model time a shot: `dur: model`
 
 `dur: model` hands the shot's length to the video model: LTX-2.5 reads the prompt and
@@ -285,7 +339,7 @@ prediction between 3 and 8 seconds (without a range: 1 to 20).
   and Play all use that once it's rendered.
 - **Only `ltx2` can predict**, and only once its duration head is installed (the file
   `ltx-2.5-duration-head-bf16.safetensors` in ComfyUI's `models/model_patches`). Until then,
-  and on every other target (H3, `ltx2_ingredients`), the shot renders at the estimate:
+  and on every other target (H3, `ltx2_ingredients`, Wan), the shot renders at the estimate:
   `--check` warns and the take's notes say so.
 - Use it for silent action and establishing shots whose length you don't care to pick. A
   dialogue shot is better with `dur: auto` or an `audio:` window, which keep the lines

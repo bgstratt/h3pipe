@@ -90,6 +90,37 @@ def frame_count(path: str) -> int:
         return -1
 
 
+def frame_rate(path: str) -> float | None:
+    """The clip's frame rate (ffprobe's r_frame_rate), or None."""
+    r = run(["ffprobe", "-v", "error", "-select_streams", "v:0",
+             "-show_entries", "stream=r_frame_rate", "-of", "csv=p=0", path], timeout=60)
+    try:
+        num, _, den = r.stdout.decode().strip().partition("/")
+        v = float(num) / float(den or 1)
+        return v if v > 0 else None
+    except (ValueError, ZeroDivisionError, AttributeError):
+        return None
+
+
+def episode_fps(root: str, doc: dict) -> float:
+    """The cut's frame rate: the series config's `series.fps` (the episode's
+    folder, then its parent, as h3edit finds it), else the shotlist's, else 24.
+    Every clip is converted to it."""
+    for d in (root, os.path.dirname(os.path.normpath(root))):
+        p = os.path.join(d, "series.json")
+        if os.path.isfile(p):
+            try:
+                with open(p, encoding="utf-8") as fh:
+                    v = (json.load(fh).get("series") or {}).get("fps")
+                if isinstance(v, (int, float)) and not isinstance(v, bool) and v > 0:
+                    return float(v)
+            except (OSError, ValueError, AttributeError):
+                pass
+            break
+    v = doc.get("defaults", {}).get("fps")
+    return float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) and v > 0 else 24.0
+
+
 def video_size(path: str) -> tuple[int, int] | None:
     r = run(["ffprobe", "-v", "error", "-select_streams", "v:0",
              "-show_entries", "stream=width,height", "-of", "csv=p=0:s=x", path],
@@ -134,7 +165,8 @@ def normalise(src: str, dst: str, audio_wav: str | None, fps: float,
 
 
 def conform(src: str, dst: str, audio: str | None, fps: float, frames: int,
-            start: int = 0, size: tuple[int, int] | None = None) -> None:
+            start: int = 0, size: tuple[int, int] | None = None,
+            src_fps: float | None = None) -> None:
     """Re-encode one clip to exactly `frames` frames with a matching audio track.
 
     `audio` is the clip itself (use its own sound), a wav path, or None for
@@ -147,6 +179,12 @@ def conform(src: str, dst: str, audio: str | None, fps: float, frames: int,
     differs: a placeholder from the other pass has the other pass's size, and
     the concat demuxer needs one size for the whole cut. `-frames:v` and the
     bounded, padded audio keep the exact-frame-count guarantee either way.
+
+    `src_fps`, when it isn't `fps` (a Wan 14B take is 16 fps in a 24 fps cut),
+    converts the clip first with ffmpeg's `fps` filter: frames are repeated
+    or dropped on the clip's own clock, so nothing speeds up or slows down;
+    the last frame is held if the conversion comes up a frame short. `start`
+    and `frames` then count frames at `fps`.
     """
     dur = f"{frames / fps:.6f}"
     cmd = ["ffmpeg", "-y", "-v", "error", "-i", src]
@@ -161,6 +199,8 @@ def conform(src: str, dst: str, audio: str | None, fps: float, frames: int,
         amap = "1:a:0"
         silent = True
     vf: list[str] = []
+    if src_fps and abs(src_fps - fps) > 1e-3:
+        vf += [f"fps={fps:g}", "tpad=stop_mode=clone:stop_duration=1"]
     af = ["apad"]
     if start > 0:
         # Frame-exact head trim: `trim` counts decoded frames (seeking with -ss
@@ -294,7 +334,8 @@ def main() -> int:
         # shotlist.<target>[_proxy].json; the cut follows script order
         shots = [d["shots"][i] for d, i in h3jobs.episode_shots(root, pass_)]
     by_id = {s["id"]: s for s in shots}
-    fps = 24.0
+    # the cut's frame rate; a take at another (Wan 14B's 16 fps) is converted
+    fps = episode_fps(root, doc)
     width = doc.get("defaults", {}).get("width")
     height = doc.get("defaults", {}).get("height")
 
@@ -312,6 +353,10 @@ def main() -> int:
     base_in = min(windows) if windows else 0.0
     plan, missing, orphans, bad = [], [], [], []
     rows = []              # (kind, entry, plan item or reason), in cut order
+    # clips at another frame rate are measured in seconds; the cut's clock
+    # (acc_s, the exact running time; acc_f, the frames laid so far) rounds
+    # each one so the total never drifts more than half a frame
+    acc_s, acc_f = 0.0, 0
     for e in entries:
         if e.orphan:
             orphans.append(e.shot)
@@ -344,12 +389,24 @@ def main() -> int:
             want = int(sc.get("frames") or n or want)
         if n > 0 and n != want:
             bad.append(f"{e.shot}: {n} frames on disk, shotlist says {want}")
-        on_disk = n if n > 0 else want
+        # the take's own frame rate: its sidecar's, else the file's
+        src_fps = sc.get("fps") if isinstance(sc.get("fps"), (int, float)) else None
+        src_fps = float(src_fps or frame_rate(t.paths.mp4) or fps)
+        convert = abs(src_fps - fps) > 1e-3
+        if convert:
+            # judged by duration: its frames are src_fps frames
+            clip_s = (n if n > 0 else want) / src_fps
+            on_disk = round((acc_s + clip_s) * fps) - round(acc_s * fps)
+        else:
+            on_disk = n if n > 0 else want
         if keep and keep > on_disk:
             bad.append(f"{e.shot}: window needs {keep} frames but the clip has {on_disk}")
             keep = on_disk
         span = keep or on_disk
         used = span - trim_in - trim_out
+        if convert and not keep:
+            # the exact running time decides this clip's frames at the cut's rate
+            used = round((acc_s + clip_s - (trim_in + trim_out) / fps) * fps) - acc_f
         if used < 1:
             why = (f"trim_in {trim_in} + trim_out {trim_out} leave nothing of "
                    f"t{t.take:02d}'s {span} frames")
@@ -361,7 +418,14 @@ def main() -> int:
              "keep": keep, "trim_in": trim_in, "trim_out": trim_out,
              "frames": n, "used": used, "audio_in": s.get("audio_in"),
              "wav": t.paths.h3_wav if os.path.isfile(t.paths.h3_wav) else None,
-             "expected": s["length"], "policy": s.get("audio_policy", "?")}
+             "expected": s["length"], "policy": s.get("audio_policy", "?"),
+             "src_fps": src_fps, "convert": convert,
+             "size": video_size(t.paths.mp4)}
+        if convert and not keep:
+            acc_s += clip_s - (trim_in + trim_out) / fps
+        else:
+            acc_s += used / fps
+        acc_f += used
         plan.append(p)
         rows.append(("ok", e, p))
 
@@ -409,6 +473,17 @@ def main() -> int:
     if placeholders:
         print(f"  {len(placeholders)} placeholder(s) from the {other} pass, "
               f"scaled to {width}x{height}")
+    converted = [p for p in plan if p["convert"]]
+    if converted:
+        rates = sorted({f"{p['src_fps']:g}" for p in converted})
+        print(f"  converting {len(converted)} clip(s) from {'/'.join(rates)} fps to "
+              f"{fps:g} fps (frames repeated, no speed change)")
+    cut_size = (int(width), int(height)) if width and height else None
+    resized = [p for p in plan if not p["placeholder"] and cut_size and p["size"]
+               and p["size"] != cut_size]
+    if resized:
+        print(f"  {len(resized)} clip(s) at another size, scaled to {width}x{height}: "
+              + ", ".join(f"{p['id']} {p['size'][0]}x{p['size'][1]}" for p in resized[:8]))
     if bad:
         print("  frame-count mismatches (the edit will drift):")
         for b in bad:
@@ -443,6 +518,8 @@ def main() -> int:
             flags = []
             if p["placeholder"]:
                 flags.append(f"placeholder({p['src']})")
+            if p["convert"]:
+                flags.append(f"{p['src_fps']:g}fps->{fps:g}")
             if has_cut and not p["listed"]:
                 flags.append("not in cut.json")
             if not p["wav"]:
@@ -466,9 +543,10 @@ def main() -> int:
     # Dialogue windows, cut.json trims and placeholders all need a re-encode;
     # once one clip is re-encoded every clip is, so the concat demuxer sees one
     # set of stream parameters.
-    reencode = bool(windowed or trimmed or placeholders)
+    # So do clips at another frame rate or size (a mixed-target cut).
+    reencode = bool(windowed or trimmed or placeholders or converted or resized)
     size = None
-    if placeholders:
+    if placeholders or resized:
         if width and height:
             size = (int(width), int(height))
         else:
@@ -495,7 +573,8 @@ def main() -> int:
                     conform(src, norm, None if args.audio in ("none", "master") else
                             (p["wav"] if args.audio == "h3" or not has_audio(src) else src),
                             fps, p["used"], start=p["trim_in"],
-                            size=size if p["placeholder"] else None)
+                            size=size if (p["placeholder"] or p in resized) else None,
+                            src_fps=p["src_fps"])
                 elif args.audio == "h3" or not has_audio(src) or args.audio in ("none", "master"):
                     normalise(src, norm, wav, fps, p.get("frames", 0))
                 else:
@@ -539,6 +618,7 @@ def main() -> int:
                      f"{p['used']:>7}  {p['policy']}"
                      + (f"  rec {p['audio_in']:.3f}" if p["audio_in"] is not None else "")
                      + (f"  placeholder({p['src']})" if p["placeholder"] else "")
+                     + (f"  from {p['src_fps']:g}fps" if p["convert"] else "")
                      + (f"  trim {p['trim_in']}/{p['trim_out']}"
                         if p["trim_in"] or p["trim_out"] else "")
                      + "\n")

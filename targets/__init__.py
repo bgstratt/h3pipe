@@ -472,9 +472,12 @@ class Target:
         model this is (GET /h3pipe/targets)."""
         r = self.recipe
         return {"policies": self.policies, "duration": self.duration,
+                # "none": the model makes no sound (Wan 2.2): every take is silent
+                "audio": (self.spec.get("capabilities") or {}).get("audio") or "generate",
                 "policy_fallback": (r.get("policy_fallback") or {}).get("to"),
                 "voice_reference": bool(r.get("voice_slots")),
-                "subject_refs": bool(r.get("subject_slots") or r.get("reference_sheet")),
+                "subject_refs": bool(r.get("subject_slots") or r.get("reference_sheet")
+                                     or r.get("reference_image")),
                 "reference_sheet": bool(r.get("reference_sheet")),
                 "keyframes": list(r.get("keyframes") or []),
                 "prompt": r.get("prompt", "sections" if r.get("subject_slots") else "prose"),

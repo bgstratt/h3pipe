@@ -1,0 +1,99 @@
+{
+  "id": "wan22_ti2v",
+  "kind": "video",
+  "label": "Wan 2.2 5B TI2V",
+  "short": "Wan 5B",
+  "code": "compile.py",
+
+  "capabilities": {
+    "_note": "audio: none. Wan 2.2 makes no sound: every take is a mute mp4, whatever the shot's audio policy (it renders `silent`, with a note in the take), and assemble lays silence under it.",
+    "audio": "none"
+  },
+
+  "models": {
+    "_note": "Glob patterns (case-insensitive) naming the files each model parameter of the binding takes, for the model identification that reads them; `family` is its id for the file header check (high vs low noise is decided by the name: the headers are identical).",
+    "model": {"patterns": ["wan2.2_ti2v_5B*", "*wan2*2*ti2v*5b*"], "family": "wan2.2-ti2v-5b",
+             "class_type": "UNETLoader", "field": "unet_name"},
+    "text_encoder": {"patterns": ["umt5_xxl*", "*umt5*"], "family": "umt5-xxl",
+                    "class_type": "CLIPLoader", "field": "clip_name"},
+    "vae": {"patterns": ["wan2.2_vae*", "*wan2*2*vae*"], "family": "wan2.2-vae",
+           "class_type": "VAELoader", "field": "vae_name"}
+  },
+
+  "template": {
+    "_note": "Wan 2.2 5B (TI2V) renders 4k+1 frames at 24 fps (the user's saved workflow saves at 24; the model card's 121 frames = 5 s at 24 fps is what it was trained on, so a longer shot is a warning, and past 241 frames, 10 s, it must be split). Width and height are multiples of 32 (Wan22ImageToVideoLatent's step: the 5B VAE compresses 16x); sizes that aren't legal are snapped down, then shrunk under 1280x704 (the model's optimal size).",
+    "fps": 24,
+    "frames": {"step": 4, "base": 5, "max": 241},
+    "size_multiple": 32,
+    "size_fit": "snap",
+    "max_size": {"long_side": 1280, "pixels": 901120},
+    "trained_frames": 121
+  },
+
+  "recipe": {
+    "_note": "Text to video, or image to video from an optional first keyframe (shot:<id>:first, Wan22ImageToVideoLatent's start_image); a shot without one renders from the prompt alone, so nothing ever blocks it: the fast, cheap choice for proxies, and where a wan22_i2v shot without a first frame can go. No identity references: subjects are written in words. No sound: every policy renders silent and says so.",
+    "policies": ["silent"],
+    "policy_fallback": {"to": "silent", "why": "Wan 2.2 makes no sound (lay the soundtrack in at the edit)"},
+    "keyframes": ["first"],
+    "keyframe_path": "refs/shots/{shot}/{end}.png",
+    "prompt": "prose",
+    "size_hints": {
+      "keyframe": "the render size (any size works: it is scaled and centre-cropped to the frame)"
+    }
+  },
+
+  "binding": {
+    "_note": "An API graph with the nodes of the user's saved Wan 2.2 5B workflow (image_to_video_wan22_5B.json: UNETLoader, ModelSamplingSD3, the UMT5 CLIPLoader, the 2.2 VAE, Wan22ImageToVideoLatent, KSampler, VAEDecode), ending in CreateVideo/SaveVideo instead of its WEBM/WEBP previews. patch_graph feeds the first keyframe into Wan22ImageToVideoLatent's start_image, or disconnects it for text to video. The workflow has no LoRA loader: one is inserted after the UNETLoader when a profile names LoRAs. H3SaveShot takes the place of CreateVideo/SaveVideo (no audio input: the mp4 is mute) at the job's fps.",
+    "workflow": "workflow.json",
+    "workflow_name": "h3pipe_wan22_5b_ti2v.json",
+    "env": "H3_WAN22_TI2V_WORKFLOW",
+    "saver": {"class_type": "H3SaveShot",
+              "inputs": {"root": "project_root", "subfolder": "subfolder", "take": "take",
+                         "sidecar": "sidecar"},
+              "replace": {"class_type": "CreateVideo", "inputs": {"images": "images", "audio": "audio"}},
+              "drop": ["SaveVideo"],
+              "set": {"save_frames": false}},
+    "prune": true,
+    "params": {
+      "model": {"class_type": "UNETLoader", "field": "unet_name"},
+      "loras": {"class_type": "LoraLoaderModelOnly", "name": "lora_name",
+                "strength": "strength_model", "input": "model", "chain": true,
+                "insert_after": {"class_type": "UNETLoader", "output": 0}},
+      "steps": {"class_type": "KSampler", "field": "steps"},
+      "seed": {"class_type": "KSampler", "field": "seed"},
+      "cfg": {"class_type": "KSampler", "field": "cfg"},
+      "sampler": {"class_type": "KSampler", "field": "sampler_name"},
+      "shift": {"class_type": "ModelSamplingSD3", "field": "shift"},
+      "prompt": {"class_type": "CLIPTextEncode", "field": "text", "title": "Positive prompt"},
+      "negative": {"class_type": "CLIPTextEncode", "field": "text", "title": "Negative prompt"},
+      "width": {"class_type": "Wan22ImageToVideoLatent", "field": "width"},
+      "height": {"class_type": "Wan22ImageToVideoLatent", "field": "height"},
+      "length": {"class_type": "Wan22ImageToVideoLatent", "field": "length"},
+      "fps": {"class_type": "H3SaveShot", "field": "fps"},
+      "shot_id": {"class_type": "H3SaveShot", "field": "shot_id"},
+      "audio_policy": {"class_type": "H3SaveShot", "field": "audio_policy"},
+      "text_encoder": {"class_type": "CLIPLoader", "field": "clip_name"},
+      "vae": {"class_type": "VAELoader", "field": "vae_name"}
+    },
+    "review_nodes": []
+  },
+
+  "presets": {
+    "_note": "wan2.2_ti2v_5B_fp16, KSampler uni_pc / simple, cfg 5, shift 8 (ComfyUI's Wan 2.2 5B template; the user's saved copy has 30 steps and shift ~5). Final 1280x704 at 20 steps (the model's optimal size); proxy 640x352 at 12 steps, the cheap preview. Another target's series config block lends no size. The negative prompt is Wan's standard one from ComfyUI's Wan templates.",
+    "final": {
+      "model": "wan2.2_ti2v_5B_fp16.safetensors",
+      "lora": null, "steps": 20, "width": 1280, "height": 704,
+      "cfg": 5.0, "sampler": "uni_pc", "shift": 8.0,
+      "negative": "色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走",
+      "text_encoder": "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+      "vae": "wan2.2_vae.safetensors"
+    },
+    "proxy": {
+      "lora": null, "steps": 12, "width": 640, "height": 352,
+      "cfg": 5.0, "sampler": "uni_pc", "shift": 8.0,
+      "negative": "色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走",
+      "text_encoder": "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+      "vae": "wan2.2_vae.safetensors"
+    }
+  }
+}

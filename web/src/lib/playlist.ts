@@ -36,14 +36,28 @@ export function clipTake(s: ShotStatus, other: EpisodeStatus | undefined): TakeS
  * cut.json trims are frames dropped from the head (`trim_in`) and tail
  * (`trim_out`) of a clip `frames` long, as h3assemble applies them. Returns the
  * window in seconds, or null when the trims leave nothing (assemble skips it).
+ * `clipFps` is the clip's own rate when it isn't the cut's (`fps`): its
+ * `frames` are at that rate, the trims at the cut's (assemble converts first).
  */
-export function trimWindow(frames: number, trimIn: number, trimOut: number, fps: number): { inT: number; outT: number; dur: number } | null {
+export function trimWindow(frames: number, trimIn: number, trimOut: number, fps: number, clipFps?: number | null): { inT: number; outT: number; dur: number } | null {
   const f = fps > 0 ? fps : 24;
+  const c = clipFps && clipFps > 0 ? clipFps : f;
   const a = Math.max(0, Math.floor(trimIn || 0));
   const b = Math.max(0, Math.floor(trimOut || 0));
-  const used = frames - a - b;
-  if (!(frames > 0) || used < 1) return null;
-  return { inT: a / f, outT: (frames - b) / f, dur: used / f };
+  if (c === f) {
+    const used = frames - a - b;
+    if (!(frames > 0) || used < 1) return null;
+    return { inT: a / f, outT: (frames - b) / f, dur: used / f };
+  }
+  const len = frames / c;
+  if (!(frames > 0) || len * f - a - b < 1) return null;
+  return { inT: a / f, outT: len - b / f, dur: len - (a + b) / f };
+}
+
+/** The frame rate of a shot's frames in the cut: the take's, else the cut's
+ * (the take's or the shot's target's), else the episode's. */
+export function fpsOf(s: ShotStatus, fps: number, take?: TakeSummary): number {
+  return take?.fps || s.cut.fps || fps || 24;
 }
 
 /** The shot's length in frames: the cut take's real count when the server
@@ -70,13 +84,14 @@ export function buildPlaylist(st: EpisodeStatus | undefined, other?: EpisodeStat
     if (s.orphan) continue;
     const take = clipTake(s, s.cut.placeholder ? other : undefined);
     const frames = framesOf(s, fps, take);
+    const rate = fpsOf(s, fps, take);
     const usable = !!take && take.status === "ok" && take.has_video && !!take.mp4;
-    const win = trimWindow(frames, s.cut.trim_in, s.cut.trim_out, fps);
+    const win = trimWindow(frames, s.cut.trim_in, s.cut.trim_out, fps, rate);
     let item: Omit<PlayItem, "start" | "index">;
     if (usable && win) {
       item = { shot: s.shot, pass: s.cut.placeholder ? s.cut.pass : st.pass, take: take!.take, mp4: take!.mp4, why: "", ...win };
     } else {
-      const dur = win?.dur ?? frames / fps;
+      const dur = win?.dur ?? frames / rate;
       const why = !take
         ? s.cut.take == null ? "no take" : `${s.cut.placeholder ? `${s.cut.pass} ` : ""}${tn(s.cut.take)} not found`
         : !usable ? `${tn(take.take)} ${take.status === "ok" ? "has no video" : take.status}` : "trimmed to nothing";

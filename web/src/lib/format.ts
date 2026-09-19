@@ -108,13 +108,15 @@ export interface SequenceGroup {
 }
 
 /**
- * How long a shot lasts in the cut: its cut take's real frame count at the
- * episode's fps when the server sends one (a `dur: model` take's length is the
- * model's), else the build's `seconds`. Null when neither is known.
+ * How long a shot lasts in the cut: its cut take's real frame count at that
+ * take's fps (`cut.fps`: a Wan take is 16 fps), else the episode's, when the
+ * server sends one (a `dur: model` take's length is the model's), else the
+ * build's `seconds`. Null when neither is known.
  */
 export function shotSeconds(s: ShotStatus, fps: number | undefined): number | null {
   const f = s.cut?.frames;
-  if (f != null && f > 0) return f / (fps && fps > 0 ? fps : 24);
+  const rate = s.cut?.fps || fps;
+  if (f != null && f > 0) return f / (rate && rate > 0 ? rate : 24);
   return s.seconds;
 }
 

@@ -656,8 +656,8 @@ class H3SaveShot:
         <shot_id>_t<take>_strip.jpg    STRIP_FRAMES frames side by side, 192 px
                                        wide each, for hover scrub
         <shot_id>_t<take>.json         the take's sidecar, when `sidecar` is set:
-                                       status, finished, frames, mp4, thumb,
-                                       strip and save_notes are filled in,
+                                       status, finished, frames, fps, mp4,
+                                       thumb, strip and save_notes are filled in,
                                        every other field is left alone
         frames/<shot_id>_t<take>_%06d.png   optional PNG sequence
 
@@ -783,7 +783,7 @@ class H3SaveShot:
                 self._finish_sidecar(
                     sidecar, os.path.normpath(project_root), shot_id, take, notes,
                     stem=stem, status="ok" if mp4_ok else "failed",
-                    frames=int(images.shape[0]),
+                    frames=int(images.shape[0]), fps=float(fps),
                     mp4=os.path.basename(mp4) if mp4_ok else None,
                     thumb=thumb, strip=strip)
             except Exception as exc:
@@ -821,7 +821,7 @@ class H3SaveShot:
     @staticmethod
     def _finish_sidecar(sidecar: str, root: str, shot_id: str, take: int,
                         notes: list[str], *, stem: str, status: str, frames: int,
-                        mp4, thumb, strip) -> None:
+                        mp4, thumb, strip, fps: float | None = None) -> None:
         """Close the take's record: set the saver's fields, leave the rest alone.
 
         Warnings go into `notes` first, so they reach both save_notes and the
@@ -848,6 +848,9 @@ class H3SaveShot:
         data.update(status=status, finished=_now(), frames=frames,
                     mp4=mp4, thumb=thumb, strip=strip,
                     save_notes=f"{stem}: " + "; ".join(notes))
+        if fps:
+            # the mp4's frame rate (the target's: Wan 14B saves 16 fps)
+            data["fps"] = float(fps)
         _write_json_atomic(path, data)
 
     # -- thumbnails --------------------------------------------------------

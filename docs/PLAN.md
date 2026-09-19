@@ -3,10 +3,11 @@
 Status (2026-09-19): Phases 0–3 and 5–8 done; Phase 4 (evaluate) continues through use. Targets:
 `minimax_h3_ref2va` (default), `ltx2` (LTX-2.5, text/keyframes), `ltx2_ingredients` (LTX-2.3 + IC-LoRA
 reference sheet from the picked refs: character identity on LTX), `minimax_h3_fl2va` (H3 from first/last
-keyframes, or text; dub anchors the recording). Keyframe continuity (the previous shot's
-last frame becomes this shot's first) is in the CLI, the routes and the editor. Next candidates: Wan 2.2
-(VACE, with references), the Phase 9 editor items. The open LTX items are under
-**Phase 8 — as built**.
+keyframes, or text; dub anchors the recording), and three silent Wan 2.2 targets: `wan22_i2v`
+(14B from a first frame), `wan22_ti2v` (5B text/first frame) and `wan22_vace` (14B with a
+reference image of the picked refs); see **Wan 2.2 — as built**. Keyframe continuity (the previous shot's
+last frame becomes this shot's first) is in the CLI, the routes and the editor. Next candidates:
+the Phase 9 editor items. The open LTX items are under **Phase 8 — as built**.
 This is the working plan for the next round of development. `CLAUDE.md` points here.
 
 ## Goals
@@ -720,6 +721,109 @@ H3 FL2VA (first/last frames)", short `H3 FL2V`)
   file loaded on the model, which the user doesn't have yet. With it, `ltx2` could declare
   `clone` (the subject's `voice_sample` as the reference) instead of falling back to
   `generate`.
+
+**Wan 2.2 — as built** (2026-09-19; `targets/video/wan22_i2v`, `wan22_ti2v`, `wan22_vace`,
+shared code in `targets/video/wan/`: `common.py` the compile, ref slots and graph helpers,
+`prompt.py` the prose)
+- **Workflows:** API graphs in each target folder (no switches, primitives or subgraphs; every
+  node a binding names has a `_meta.title`), known to the binding by `h3pipe_wan22_*.json`
+  names so a canvas can't leak in. `wan22_i2v` is ComfyUI's Wan 2.2 14B I2V template as the
+  user saved it (`video_wan2_2_14B_i2v.json`), subgraph flattened, its "4steps LoRA?"
+  switches resolved to the LoRA branch. `wan22_ti2v` has the nodes of the user's
+  `image_to_video_wan22_5B.json` (Wan22ImageToVideoLatent, KSampler uni_pc), ending in
+  CreateVideo/SaveVideo instead of its WEBM/WEBP previews. `wan22_vace` was built from the
+  node set (none was saved): the Fun VACE high/low pair, one `WanVaceToVideo`, the two
+  `KSamplerAdvanced`, `TrimVideoLatent` on the node's `trim_latent`. All three pass
+  `check_graph` against the live `/object_info` (trimmed into
+  `tests/fixtures/workflows/object_info_wan.json`) in every keyframe/reference combination.
+- **Binding format, extended for two stages** (14B): `model` is the high noise UNETLoader
+  and `model_low` the low one (widget params with a `title` selector); `loras` may be a
+  **list of LoRA specs, one per stage** (`title` picks the stage's loader, `stage` names
+  it; `insert_after` may name a `title` too, for VACE, which has no loaders).
+  `h3jobs.graph_for` applies one chain per spec with `h3jobs.loras_for`: a LoRA goes to the
+  stage its `stage` names, else by its name (`*high_noise*` / `*low_noise*`), else to both;
+  an empty list leaves each stage's loader at strength 0. `binding.stages`
+  (`{high|low: {sampler, model}}` titles) is read by `wan/common.split_stages`
+  (`patch_graph`): the high noise sampler runs steps `[0, split)` with noise, the low
+  `[split, 10000)`, `split = round(steps x preset split)` (0.5), at least one step each.
+  The preset can name a per-stage LoRA list (`loras` in `defaults`): `h3jobs.plan_job` uses
+  it when no `lora` string names one (a script `lora:` line or profile still replaces it).
+  `preset_hash` includes `model_low` / `loras` only when a shotlist has them.
+- **Templates:** `4k+1` frames; 14B at **16 fps** (the template's CreateVideo and its
+  `floor(s * 16 + 1)`), 5B at **24** (the saved workflow's savers), whatever `series.fps`
+  says. Trained 81 / 121 frames (a warning past them), max 161 / 241 (10 s; an error:
+  split). Sizes: multiples of 16 (14B: WanImageToVideo / WanVaceToVideo's step) or 32 (5B:
+  Wan22ImageToVideoLatent's), snapped under 720p. Presets: 14B 832x480 final (Wan's 480p;
+  the template says 640x640), 640x352 proxy; 5B 1280x704 / 640x352. Another target's
+  series block lends **no size** (H3's 448x256 proxy is far below Wan's 480p).
+- **wan22_i2v:** the lightx2v 4-step LoRA pair at 1.0, 4 steps split 2/2, cfg 1, euler,
+  shift 5. The first keyframe is **required with no render-anyway**: its ref slot carries
+  `anyway: false` and `why` ("Wan 14B I2V needs a first frame: use continuity or import
+  one, or retarget to wan22_ti2v"); `plan_job` keeps such a shot `blocked` even with
+  `allow_missing_refs`, `Job.blocked_reason()` is what `h3render`, `queue_shots` (the
+  render route's `skipped[].reason`) and the editor show, and `episode_status` passes
+  `anyway`/`why` in `missing_refs`. The build warns once per episode. A last keyframe too
+  swaps `WanImageToVideo` for `WanFirstLastFrameToVideo` (same inputs plus `end_image`).
+- **wan22_ti2v:** 20 / 12 steps, cfg 5, uni_pc, shift 8; text-to-video, or its optional
+  first keyframe into `start_image` (disconnected, LoadImage pruned, without one).
+- **wan22_vace:** no turbo LoRA fits it (the lightx2v pair is for the I2V models), so cfg 3.5,
+  20 steps final / **10 proxy** (5 + 5), euler, shift 8. **Identity:** `WanVaceToVideo`
+  takes ONE `reference_image` (the first of a batch, scaled and centre-cropped to the render
+  size, encoded as an extra leading latent frame that `TrimVideoLatent` removes). It is
+  composed at queue time by `comfy_nodes/h3_refsheet.py` (new `background: "white"`: VACE
+  pads its references on a white canvas), one panel per subject at the render size (the
+  ingredients' view rule), **no plate** (`reference_image.plate: false`; a scene beside the
+  subjects reads as another subject; the prose places them), kept as
+  `<shot>_tNN_reference.png`. Panels are required refs (blocked like ingredients; render
+  anyway drops them; none left disconnects the input). **Keyframes** are the standard VACE
+  first/last control: `control_video` = [first] + mid-grey `EmptyImage` frames + [last]
+  (`ImageScale` centre crop to size, `ImageBatch`), `control_masks` = `ImageToMask` of
+  black (keep) / white (generate) frames.
+- **Audio:** `capabilities.audio: "none"` (new in `Target.capabilities`, `"generate"`
+  elsewhere); `recipe.policies: ["silent"]` with `policy_fallback` silent, so every intent
+  renders silent with an `audio_note` in the entry and the take's `notes`. The build warns
+  once ("makes no sound: N shot(s) render silent") and once for dialogue ("no audio or
+  lip-sync on Wan (the lines are acted silently)"). `H3SaveShot` gets no `audio` input and
+  writes a mute mp4; assemble lays silence under it.
+- **Prompt** (`wan/prompt.py`): the `ltx2` paragraph's structure (look, framing and camera,
+  subjects from `design`, extras, action, on-screen text) without sound or music; each run
+  of lines is acted silently ("Ada talks, warmly, mouth moving with the words."), a V.O.
+  by someone in frame keeps their lips closed, an O.S. line adds nothing. Negative prompt:
+  Wan's standard Chinese one from ComfyUI's templates (a preset value).
+- **fps mixing:** every sidecar records `fps` (`h3jobs.sidecar_for`; `H3SaveShot` also writes
+  it, from the next ComfyUI start; the H3 graph snapshot allows the new key at 24.0).
+  `h3assemble` converts each clip to the episode fps (`series.fps`, else the shotlist's, else
+  24) with `fps=<rate>` + a cloned-tail `tpad` in `conform` (no speed change), judging a
+  converted clip by duration on a running clock (`acc_s` exact seconds, `acc_f` frames laid:
+  each clip's frames are `round((acc_s + its seconds) * fps) - acc_f`, so the cut never
+  drifts more than half a frame), and also scales any clip whose size isn't the cut's (a
+  mixed-target cut used to concat mismatched sizes). `episode_status` adds `takes[].fps` and
+  `cut.fps` (the take's, else the shot's target's) and computes `seconds` at the shot's own
+  rate; the editor's `shotSeconds`, `trimWindow` (a `clipFps`) and Play all use them; the
+  viewer steps a frame at the take's rate.
+- **Model families:** each `target.json` has `models: {param: {patterns, family, class_type,
+  field}}` (`model`, `model_low`, `text_encoder`, `vae`) with the family ids the model
+  identification uses.
+- **Live check (2026-09-19, scratch copy of ep05, proxy, CLI `--target` after `--dry-run
+  --check-nodes`, no restart):** `wan22_ti2v` sh060 text-only: 21 s, 77 frames at 24 fps,
+  640x352, mute; Dean from his `design` alone (cap, goggles, blue shirt). `wan22_i2v` sh050
+  from its continuity first frame: 21 s (both 14B models loaded), 49 frames at 16 fps,
+  frame 0 vs the keyframe 32.9 dB PSNR (mean abs error 4.0/255); Whiskers crawls in beside
+  Dean's jar. `wan22_vace` sh020 with Dean's sheet: 66 s at 10 steps / cfg 3.5, 65 frames at
+  16 fps; Dean on model (cap, blue shirt, suspenders, khaki trousers, brown boots) though
+  seen from behind and in a darker workshop than the style asks. sh060 on `wan22_i2v`
+  without a first frame: blocked with the reason. The mixed H3 / LTX / ingredients / Wan
+  proxy cut (7 shots) assembled in 4 s: 665 frames, 27.708 s video, 27.729 s audio, the
+  16 fps clip laid as 73 frames; at 0, 1, 1.5, 2.5 and 3 s into it the cut's frame
+  matches the source frame of that time (no speed change); four clips of other sizes
+  (512x288 ingredients, 640x352 Wan) scaled to 448x256.
+- **Left:** a turbo LoRA for VACE (a lightx2v T2V A14B pair) to bring its proxy near the
+  others' speed; whether the plate helps VACE as a second reference (ComfyUI's node takes
+  one image; several would need the latent-concatenating node); Wan's negative prompt
+  says "风格/画作" (style, painting), which may fight a cartoon look (a series-specific
+  negative is a preset value away); final-quality renders (832x480 I2V/VACE, 1280x704 5B)
+  not yet tried; the editor's model picker for `model_low`; `H3SaveShot` writing `fps`
+  needs a ComfyUI restart to take effect (the queuer's value covers it until then).
 
 **Phase 9 — later**
 - Script pane: `epNN.md` in a text editor with live `--check` errors beside the lines;

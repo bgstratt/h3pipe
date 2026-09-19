@@ -74,6 +74,11 @@ describe("groupBySequence", () => {
     expect(shotSeconds(shots[1], 24)).toBe(2);
     expect(shotSeconds(shot({ cut: { ...cut, frames: null } }), 24)).toBe(4.458);
   });
+  it("a cut take at another frame rate counts at its own (a 16 fps Wan take)", () => {
+    const cut = { ...shot().cut, frames: 81, fps: 16 };
+    expect(shotSeconds(shot({ cut }), 24)).toBe(81 / 16);
+    expect(groupBySequence([shot({ cut }), shot({ shot: "b", seconds: 2 })], 24)[0].seconds).toBeCloseTo(81 / 16 + 2);
+  });
 });
 
 describe("paths", () => {

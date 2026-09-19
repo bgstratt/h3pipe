@@ -262,8 +262,9 @@ def main() -> int:
                 print(f"    ! {len(vals)} different {key}s here — ComfyUI reloads on "
                       f"every change, so expect a pause at those shots")
         for j in blocked[:8]:
-            print(f"    ! {j.id}: missing {j.missing_note()}")
-        if blocked:
+            print(f"    ! {j.id}: " + (j.blocked_reason() if j.no_anyway
+                                       else f"missing {j.missing_note()}"))
+        if any(not j.no_anyway for j in blocked):
             print("    ! make the refs (h3.py refs), or --allow-missing-refs to render "
                   "those shots with flat grey stand-ins")
         for j in errors:

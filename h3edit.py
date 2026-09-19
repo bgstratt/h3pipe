@@ -259,6 +259,21 @@ def take_frames(t: T.Take | None) -> int | None:
     return int(n) if isinstance(n, (int, float)) and not isinstance(n, bool) and n > 0 else None
 
 
+def take_fps(t: T.Take | None) -> float | None:
+    """The frame rate a take was rendered at (its sidecar's `fps`: a Wan 14B
+    take is 16 fps in a 24 fps episode), else None (a take from before
+    sidecars recorded it: the episode's)."""
+    n = ((t.sidecar or {}) if t else {}).get("fps")
+    return float(n) if isinstance(n, (int, float)) and not isinstance(n, bool) and n > 0 else None
+
+
+def shot_fps(doc: dict, shot: dict | None, fallback: float) -> float:
+    """The frame rate a shot's build renders at (its target's)."""
+    v = (shot or {}).get("fps", doc.get("defaults", {}).get("fps"))
+    return float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) and v > 0 \
+        else fallback
+
+
 def episode_status(root: str, pass_: str, folder: str | None = None) -> dict:
     """Every shot in cut order with its takes, the take the cut uses, and its
     override. Plain data, ready to serve as JSON. Shots come from every
@@ -284,6 +299,7 @@ def episode_status(root: str, pass_: str, folder: str | None = None) -> dict:
         # what the next render reads: the retargeted entry when retargeted
         cur = J.current_entry(root, pass_, doc, shot, target, cache) if shot else None
         rdoc, rshot = cur if cur else (doc, shot)
+        sfps = shot_fps(doc, shot, fps)
         out.append({
             "shot": e.shot,
             "orphan": e.orphan,
@@ -292,11 +308,14 @@ def episode_status(root: str, pass_: str, folder: str | None = None) -> dict:
             "profile": shot.get("profile") if shot else None,
             "sequence": shot.get("sequence") if shot else None,
             "length": shot.get("length") if shot else None,
-            "seconds": round(shot["length"] / fps, 3) if shot else None,
+            # at the shot's own frame rate (its target's; the episode's for
+            # every target that renders at it)
+            "seconds": round(shot["length"] / sfps, 3) if shot else None,
             "size": shot.get("size") if shot else None,
             "subjects": shot.get("subjects", []) if shot else [],
             "audio_policy": shot.get("audio_policy") if shot else None,
-            "missing_refs": [{k: r.get(k) for k in ("slot", "kind", "path", "subject")
+            "missing_refs": [{k: r.get(k) for k in ("slot", "kind", "path", "subject",
+                                                    "anyway", "why")
                               if r.get(k) is not None}
                              for r in J.missing_refs(root, rdoc, rshot)] if shot else [],
             **({"retarget_error": f"can't compile {e.shot} for {target} "
@@ -308,7 +327,10 @@ def episode_status(root: str, pass_: str, folder: str | None = None) -> dict:
                     "note": e.note, "in_cut_file": e.in_cut_file,
                     # the cut take's real length (its sidecar's saved frame
                     # count; a `dur: model` take's is the model's), or None
-                    "frames": take_frames(chosen) if chosen_ok else None},
+                    "frames": take_frames(chosen) if chosen_ok else None,
+                    # the frame rate of those frames (the take's, else the
+                    # shot's build): Wan 14B takes are 16 fps in a 24 fps cut
+                    "fps": (take_fps(chosen) if chosen_ok else None) or sfps},
             "override": {"fields": sorted([k for k in o if k != "base_hash"]
                                           + (["target"] if T.shot_target(ov, e.shot) else [])),
                          "stale": bool(o.get("base_hash"))
@@ -317,6 +339,7 @@ def episode_status(root: str, pass_: str, folder: str | None = None) -> dict:
                 "take": t.take, "status": t.status, "has_video": t.has_video,
                 "seed": (t.sidecar or {}).get("seed"),
                 "frames": take_frames(t),
+                "fps": take_fps(t),
                 "seed_source": (t.sidecar or {}).get("seed_source"),
                 "target": (t.sidecar or {}).get("target"),
                 "note": (t.sidecar or {}).get("note", ""),
@@ -637,8 +660,7 @@ def queue_shots(root: str, pass_: str, shot_ids: list[str] | None,
                                    "reason": "has a usable take (pass redo: true)"})
             continue
         if job.action == "blocked":
-            out["skipped"].append({"shot": sid, "reason": "missing refs: " + job.missing_note()
-                                   + " (pass allow_missing_refs: true to render anyway)",
+            out["skipped"].append({"shot": sid, "reason": job.blocked_reason(),
                                    "missing_refs": job.missing})
             continue
         if job.action == "error":

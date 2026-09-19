@@ -1,0 +1,175 @@
+{
+ "1": {
+  "class_type": "UNETLoader",
+  "inputs": {
+   "unet_name": "wan2.2_ti2v_5B_fp16.safetensors",
+   "weight_dtype": "default"
+  },
+  "_meta": {
+   "title": "Wan 5B model"
+  }
+ },
+ "2": {
+  "class_type": "ModelSamplingSD3",
+  "inputs": {
+   "model": [
+    "1",
+    0
+   ],
+   "shift": 8.0
+  },
+  "_meta": {
+   "title": "Wan shift"
+  }
+ },
+ "3": {
+  "class_type": "CLIPLoader",
+  "inputs": {
+   "clip_name": "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+   "type": "wan",
+   "device": "default"
+  },
+  "_meta": {
+   "title": "Wan text encoder"
+  }
+ },
+ "4": {
+  "class_type": "VAELoader",
+  "inputs": {
+   "vae_name": "wan2.2_vae.safetensors"
+  },
+  "_meta": {
+   "title": "Wan VAE"
+  }
+ },
+ "5": {
+  "class_type": "CLIPTextEncode",
+  "inputs": {
+   "clip": [
+    "3",
+    0
+   ],
+   "text": "A cartoon fox waves at the camera in a sunny meadow, the camera remains static."
+  },
+  "_meta": {
+   "title": "Positive prompt"
+  }
+ },
+ "6": {
+  "class_type": "CLIPTextEncode",
+  "inputs": {
+   "clip": [
+    "3",
+    0
+   ],
+   "text": "色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走"
+  },
+  "_meta": {
+   "title": "Negative prompt"
+  }
+ },
+ "7": {
+  "class_type": "LoadImage",
+  "inputs": {
+   "image": "example.png"
+  },
+  "_meta": {
+   "title": "First frame"
+  }
+ },
+ "8": {
+  "class_type": "Wan22ImageToVideoLatent",
+  "inputs": {
+   "vae": [
+    "4",
+    0
+   ],
+   "start_image": [
+    "7",
+    0
+   ],
+   "width": 1280,
+   "height": 704,
+   "length": 121,
+   "batch_size": 1
+  },
+  "_meta": {
+   "title": "Wan 2.2 image to video latent"
+  }
+ },
+ "9": {
+  "class_type": "KSampler",
+  "inputs": {
+   "model": [
+    "2",
+    0
+   ],
+   "positive": [
+    "5",
+    0
+   ],
+   "negative": [
+    "6",
+    0
+   ],
+   "latent_image": [
+    "8",
+    0
+   ],
+   "seed": 0,
+   "steps": 20,
+   "cfg": 5.0,
+   "sampler_name": "uni_pc",
+   "scheduler": "simple",
+   "denoise": 1.0
+  },
+  "_meta": {
+   "title": "KSampler"
+  }
+ },
+ "10": {
+  "class_type": "VAEDecode",
+  "inputs": {
+   "samples": [
+    "9",
+    0
+   ],
+   "vae": [
+    "4",
+    0
+   ]
+  },
+  "_meta": {
+   "title": "VAE Decode"
+  }
+ },
+ "11": {
+  "class_type": "CreateVideo",
+  "inputs": {
+   "images": [
+    "10",
+    0
+   ],
+   "fps": 24.0,
+   "bit_depth": 8
+  },
+  "_meta": {
+   "title": "Create Video"
+  }
+ },
+ "12": {
+  "class_type": "SaveVideo",
+  "inputs": {
+   "video": [
+    "11",
+    0
+   ],
+   "filename_prefix": "video/h3pipe_wan22_ti2v",
+   "format": "auto",
+   "codec": "auto"
+  },
+  "_meta": {
+   "title": "Save Video"
+  }
+ }
+}
