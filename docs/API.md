@@ -945,3 +945,60 @@ left it open).
   series_target}` (the status fields). 400 for a target that isn't a video target, or a
   body without `target`; 404 for an episode with no build. CLI: `h3.py override <ep>
   --episode-target <id>`; `built` (or `none` / `series`) clears it.
+
+## Phase 8.5: refs, image targets, keyframes as needed refs, negatives (contract written before building, 2026-09-19)
+
+### Image targets
+- `targets/image/<id>/`, alongside `krea2`, built from the user's saved workflows:
+  - `z_image_turbo`: fast text-to-image;
+  - `flux2_klein`: text-to-image, **and** `flux2_klein_edit`: image edit with reference images;
+  - `flux_kontext`: edit, one reference;
+  - optionally an Illustrious/SDXL text-to-image target.
+- Each has presets, `models` tiers, downloads and readiness, like the video targets.
+- `capabilities`: `{"mode": "t2i" | "edit", "max_refs": N}`.
+- **Series defaults:** the series config's `refs` block, `{"target": "<image id>", "keyframe_target": "<image id>"}`.
+  - The defaults are `krea2` and, when it is ready, `flux2_klein_edit` (else the refs `target`).
+  - A per-ref override lives in `refs/_overrides.json` as `target`.
+  - A generate request's `target` beats both.
+- **`GET /h3pipe/targets?kind=image&ready=1`** lists them, as for video.
+
+### Keyframes as needed refs
+- **The build decides which shots need keyframes**, from each shot's resolved video target:
+  - `capabilities.keyframes` says a target reads them;
+  - `requires_first` (Wan 14B I2V) makes the first keyframe required.
+- **Optional script lines** on a shot, or a sequence (as its default):
+  - `first:` / `last:` with `continuity | generate | import | none`, or a path;
+  - `none` means "don't use one", even when the target could.
+- **`GET /h3pipe/refs`** lists keyframe refs for every shot that needs one, or whose script asks for one, even before any take exists. Each carries:
+  - `need: "required" | "optional"`;
+  - `method`: the script's, else `continuity` for a shot with a previous shot, else `generate`;
+  - `shot`, `which`, and the `target` that will read it.
+  
+  The Refs tab's "this episode" filter includes them; "missing" includes only required ones plus any whose script asks.
+- **`POST /h3pipe/refs/generate` on a keyframe ref** makes a still with the keyframe image target:
+  - **Prompt:** from the shot's IR, with the look, the location description, the subjects' designs, and the action at that moment ("first": how the shot opens; "last": how it ends).
+  - **Edit targets** also receive reference images: the picked character views (face or body by shot size) and the plate, up to `max_refs`.
+  - **Size:** the shot's render size for its target and pass.
+- **`method: continuity`** means "Generate missing" (and the CLI) call `keyframe_from_take` instead, when the previous shot has a usable take; otherwise it falls back to `generate`.
+- **`DELETE /h3pipe/refs/pick?ep=…&ref=…[&view=…]` unpicks a ref:**
+  - its live file is removed (the take stays);
+  - for a keyframe this is **Clear**, and the shot no longer uses a keyframe;
+  - for series refs it's allowed, but the UI warns.
+  
+  It emits `h3pipe.ref` with status `cleared`, then `h3pipe.episode`.
+
+### Negatives
+Any target (video or image) with a `negative` param takes, in order: the request's
+`negative`, then the shot's `negative` override, then the episode's `negative.txt`, then
+the series config's `negative`, then the target preset's.
+- The take records `negative_source`.
+- H3 targets have no negative param and are unaffected.
+- `kreagen --negative-file` still beats everything for its run.
+- The negative still has no effect at cfg ≤ 1 (turbo); the take notes that.
+
+### Inspector: the refs a shot uses
+**`GET /h3pipe/shot`** gains `refs_used`: `[{id, kind, role ("subject" | "plate" | "first" | "last" | "reference_sheet"), path, exists, need, thumb}]` for the shot's current target. A take's detail gains `reference_image`: the refsheet or VACE reference that the take rendered with, if kept.
+
+### Small items
+- **An estimated length** (`dur: model` before a take exists): episode shots carry `length_estimated: true`, and the UI marks them "≈".
+- **Wan's `model_low`** gets a picker, like `model`: `GET /h3pipe/models?param=model_low`, and the override field `model_low`.

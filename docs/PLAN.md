@@ -830,6 +830,26 @@ shared code in `targets/video/wan/`: `common.py` the compile, ref slots and grap
   not yet tried; the editor's model picker for `model_low`; `H3SaveShot` writing `fps`
   needs a ComfyUI restart to take effect (the queuer's value covers it until then).
 
+**Phase 8.5 — refs and keyframes** (planned 2026-09-19; contract in `docs/API.md`, "Phase 8.5")
+- **More image models for refs, chosen like video targets:** `z_image_turbo`, `flux2_klein` (t2i),
+  `flux2_klein_edit` (edit with reference images), `flux_kontext`, from the user's saved
+  workflows. The series config's `refs` block holds the defaults; the UI can override them per ref.
+- **Keyframes are needed refs, decided by the build from each shot's target** (Wan I2V needs a
+  first frame; LTX / H3 FL2V can use first/last). The optional script lines `first:` / `last:`
+  (`continuity | generate | import | none | <path>`) choose how each is filled. Generate makes a
+  still from the shot's own description; an edit model also gets the picked character views
+  and plate, so identity carries into the keyframe.
+- **Clear:** unpick a ref (a keyframe: the shot stops using one).
+- **Negatives:** the episode's `negative.txt` feeds every target that takes a negative (Wan,
+  LTX, image models). Precedence: request → shot → `negative.txt` → series config → preset.
+- **Inspector:** a read-only strip of the refs the shot uses, and the reference sheet a take
+  rendered with. Generating and picking stay in the Refs tab.
+- **Small:** a "≈" mark on shots whose length is an estimate; a picker for Wan's low-noise model;
+  image targets resolve model files by family at queue time.
+- **Dropped:** one shared series config per series. It lives in each episode folder, and copies
+  are cheap.
+- **Afterwards:** revisit Phases 1–8 for anything missing or worth doing, then Phase 9.
+
 **Phase 9 — later**
 - Script pane: `epNN.md` in a text editor with live `--check` errors beside the lines;
   save → rebuild.
