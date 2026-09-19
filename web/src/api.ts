@@ -69,11 +69,16 @@
 //  - TODO(contract): the model/LoRA pickers read choices from ComfyUI's own
 //    `/object_info/<class_type>` for a `{class_type, field}` widget (as API.md
 //    suggests); a LoRA widget names its file field `name`, not `field`.
+//
+// Continuity keyframes:
+//  - TODO(contract): there is no route to unpick or delete a ref take, so the
+//    inspector's Keyframes section has no "Clear".
 
 import type {
   AssembleResult, BrowseFiles, BrowseResult, BuildResult, CancelResult, ComfyQueue, Config, CutEntry,
   CutFile, EpisodeStatus, EpisodeSummary, OverrideRequest, OverrideResult, Pass, PickRequest, Ref,
-  RefGenerateRequest, RefGenerateResult, RefImportRequest, RefList, RefOverrideRequest, RefPickRequest,
+  RefGenerateRequest, RefGenerateResult, RefImportRequest, RefKeyframeRequest, RefList, RefOverrideRequest,
+  RefPickRequest,
   RefTake, RenderRequest, RenderResult, Seed, ShotDetail, TakeRef, TargetKind, TargetList,
 } from "./types";
 import { comboChoices } from "./lib/targets";
@@ -105,6 +110,9 @@ export interface Api {
   refsGenerate(req: RefGenerateRequest): Promise<RefGenerateResult>;
   refsPick(req: RefPickRequest): Promise<Ref>;
   refsImport(req: RefImportRequest): Promise<RefTake & { view?: string | null }>;
+  /** A shot's first / last keyframe from a frame of a video take (continuity);
+   * returns the keyframe ref as `refs` lists it. */
+  refsKeyframe(req: RefKeyframeRequest): Promise<Ref>;
   putRefOverride(req: RefOverrideRequest): Promise<unknown>;
   deleteRefOverride(ep: string, ref: string, view?: string | null): Promise<unknown>;
   /** ComfyUI's own lists (not h3pipe routes). */
@@ -249,6 +257,7 @@ export function createHttpApi(t: Transport): Api {
     },
     refsPick: (req) => call("PUT", "/h3pipe/refs/pick", req),
     refsImport: (req) => call("POST", "/h3pipe/refs/import", req),
+    refsKeyframe: (req) => call("POST", "/h3pipe/refs/keyframe", req),
     putRefOverride: (req) => {
       const s = req.fields.seed;
       if (s !== undefined && s !== null && !isSeed(s)) {

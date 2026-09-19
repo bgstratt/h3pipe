@@ -45,9 +45,10 @@ describe("refs grouping", () => {
   });
   it("filters: used by this episode (per pass), all, missing only; totals kept", () => {
     const used = groupRefs(refs, "episode", "proxy");
-    expect(used.flatMap((x) => x.refs.map((r) => r.id))).toEqual(["subject:ada", "subject:bo", "location:street", "voice:ada"]);
+    // a shot keyframe is this episode's whatever its target (H3 reads none)
+    expect(used.flatMap((x) => x.refs.map((r) => r.id))).toEqual(["subject:ada", "subject:bo", "location:street", "voice:ada", "shot:sh010:first"]);
     expect(used[0].total).toBe(2);
-    expect(groupRefs(refs, "episode", "final").flatMap((x) => x.refs)).toEqual([]);
+    expect(groupRefs(refs, "episode", "final").flatMap((x) => x.refs.map((r) => r.id))).toEqual(["shot:sh010:first"]);
     expect(groupRefs(refs, "missing", "proxy").flatMap((x) => x.refs.map((r) => r.id))).toEqual(["subject:bo", "subject:kettle", "location:street"]);
     expect(groupRefs([], "all", "proxy").every((x) => x.refs.length === 0)).toBe(true);
     expect(usedBy(ref("a:b", "prop", { used_by: {} }), "proxy")).toEqual([]);

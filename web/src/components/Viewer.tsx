@@ -10,6 +10,7 @@ import {
 } from "../actions";
 import { api } from "../host";
 import { fmtClock, realStale, tn } from "../lib/format";
+import { frameAt } from "../lib/keyframes";
 import {
   atOutPoint, clipOffset, cutTime, locate, nextVideo, totalDuration, type PlayItem,
 } from "../lib/playlist";
@@ -264,6 +265,12 @@ function TakesView({ ep, v }: { ep: string; v: ViewerState }) {
           playsInline
           autoPlay={which === "a"}
           loop
+          onContextMenu={(e) => {
+            // the take's menu, knowing the frame on screen ("use this frame as the next shot's first frame")
+            e.preventDefault();
+            const el = e.currentTarget;
+            openMenu(e.clientX, e.clientY, v.shot, t.take, v.pass, frameAt(el.currentTime, fps, el.duration, el.ended));
+          }}
           onError={(e) => console.warn("h3pipe viewer: video error", (e.currentTarget as HTMLVideoElement).error)}
         />
       ) : (

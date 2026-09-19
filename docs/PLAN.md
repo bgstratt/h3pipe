@@ -523,10 +523,16 @@ real ComfyUI, a `kreagen` dry run, and workflows still read from ComfyUI's saved
     `final` profile, series-size finals (1344×768 fits the 1 MP cap), exposing the
     `ManualSigmas` schedules as a preset value, and whether 25 fps (LTX's native) should be
     offered per series.
-  - **Keyframe generation:** keyframes are imported (Refs tab) or cut from another take by
-    hand. Generating them — a still from the shot's prose prompt through the image target,
-    or the previous shot's last frame for continuous sequences — is the next step; the
-    storage, takes and pick already exist (`shot:<id>:first|last`).
+  - **Keyframe generation:** a still from the shot's prose prompt through the image target
+    is still to do. **Continuity is done (2026-09-19):** `h3refs.keyframe_from_take` cuts
+    the previous shot's last frame (cut order, the take the cut uses; or any shot, take and
+    frame) into a `shot:<id>:first` take (`source: "frame"`), and the next shot's first
+    frame into `last`; `h3.py keyframe`, `POST /h3pipe/refs/keyframe`, and in the editor the
+    shot/take context menu (the viewer passes its frame), the inspector's Keyframes section
+    and the Refs tab. A take rendered without an optional keyframe is now `ref`-stale once
+    the keyframe exists. Live check on the scratch ep05: sh050's first frame from sh040 t03's
+    last frame, then an LTX proxy render: its frame 0 is within 27.4 dB PSNR (mean abs error
+    7.7/255) of the keyframe. No route yet to unpick or delete a ref take.
   - The editor's target picker (Inspector and redo dialog) against `GET /h3pipe/targets`.
   - Per-target pass blocks in the series config (`targets.ltx2.series` / `.proxy`) if one
     series needs different LTX model/steps than the target's presets.

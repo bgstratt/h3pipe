@@ -11,8 +11,9 @@ from refs_todo, so a character nobody uses yet can still be generated:
     location:<id>           the location's `plate`
     voice:<id>              a subject's `voice_sample` (imported takes only)
     shot:<shot>:first|last  a shot's first / last keyframe, at
-                            refs/shots/<shot>/<first|last>.png (storage, takes
-                            and pick only: nothing generates keyframes yet)
+                            refs/shots/<shot>/<first|last>.png: imported, or
+                            cut out of another shot's take (keyframe_from_take:
+                            the previous shot's last frame, for continuity)
 
 Where things live. Series refs belong to the folder holding series.json (the
 episode, or its parent when the series config is shared by a series); shot
@@ -30,8 +31,10 @@ handed to callers (the API) are relative to the episode, with forward slashes.
 
 A take's sidecar follows h3takes' rules (exclusive-create reservation, atomic
 updates, statuses queued/ok/failed). Queuer fields: version, ref, view, take,
-ep, status, queued, comfy_prompt_id, source ("generated" | "imported"), seed,
-seed_source, prompt, model, loras, steps, cfg, width, height, overrides, note.
+ep, status, queued, comfy_prompt_id, source ("generated" | "imported" |
+"frame"), seed, seed_source, prompt, model, loras, steps, cfg, width, height,
+overrides, note; a "frame" take adds source_shot, source_take, source_pass,
+source_frame, source_frames, source_mp4 and source_sha1.
 The saver (the H3SaveRefTake node, or kreagen's fallback) sets status,
 finished, image, width, height and save_notes.
 
@@ -351,7 +354,8 @@ def can_generate(s: Series, ref: Ref) -> str | None:
     if ref.kind == "voice":
         return "nothing generates voices yet: import a recording"
     if ref.kind == "keyframe":
-        return "nothing generates keyframes yet: import an image"
+        return ("keyframes aren't generated: use another shot's frame "
+                "(h3.py keyframe) or import an image")
     if built_prompt(s, ref, VIEW_TAGS[0] if ref.has_views else None) is None:
         what = "description" if ref.kind == "location" else "design"
         return f"no {what} in {os.path.basename(s.config_file)} for {ref.id}"
@@ -812,6 +816,186 @@ def import_take(s: Series, ref: Ref, view: str | None, source_path: str,
 
 
 # ---------------------------------------------------------------------------
+# keyframes from a video take's frame (continuity)
+# ---------------------------------------------------------------------------
+#
+# A shot's first keyframe is usually the previous shot's last frame: the cut
+# then runs on without a jump. `keyframe_from_take` cuts that frame out of the
+# take the cut uses (ffmpeg, as a subprocess, like h3assemble) and adds it as a
+# keyframe ref take with source "frame". The symmetric case, a shot's last
+# keyframe from the next shot's first frame, is there for FL2V targets.
+
+class FfmpegMissing(RuntimeError):
+    """ffmpeg / ffprobe aren't on PATH (500)."""
+
+
+def _ffmpeg(tool: str) -> str:
+    exe = shutil.which(tool)
+    if not exe:
+        raise FfmpegMissing(f"cutting a frame out of a take needs {tool} on PATH "
+                            f"(install ffmpeg: https://ffmpeg.org/download.html)")
+    return exe
+
+
+def _run(cmd: list[str], timeout: int) -> tuple[int, str]:
+    import subprocess
+    try:
+        r = subprocess.run(cmd, capture_output=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return 1, f"{os.path.basename(cmd[0])} took longer than {timeout}s"
+    return r.returncode, (r.stdout + b"\n" + r.stderr).decode("utf-8", "replace")
+
+
+def video_frames(mp4: str, timeout: int = 300) -> int:
+    """How many frames the video really has (decoded and counted, not the
+    container's estimate)."""
+    rc, out = _run([_ffmpeg("ffprobe"), "-v", "error", "-select_streams", "v:0",
+                    "-count_frames", "-show_entries", "stream=nb_read_frames",
+                    "-of", "csv=p=0", mp4], timeout)
+    try:
+        n = int(out.strip().splitlines()[0].strip().rstrip(","))
+    except (ValueError, IndexError):
+        raise RefError(f"can't count the frames of {os.path.basename(mp4)}: "
+                       f"{out.strip()[-300:] or 'ffprobe said nothing'}") from None
+    if rc != 0 or n < 1:
+        raise RefError(f"{os.path.basename(mp4)} has no video frames")
+    return n
+
+
+def frame_index(frame, count: int) -> int:
+    """A frame spec ("first", "last", or an index; negative counts from the
+    end, -1 being the last) as an index into `count` frames."""
+    if frame == "first":
+        return 0
+    if frame == "last":
+        return count - 1
+    if isinstance(frame, bool) or not isinstance(frame, int):
+        raise RefError(f"frame must be \"first\", \"last\" or a frame number, not {frame!r}")
+    i = frame + count if frame < 0 else frame
+    if not 0 <= i < count:
+        raise RefError(f"frame {frame} is outside the take ({count} frames: 0 to {count - 1})")
+    return i
+
+
+def extract_frame(mp4: str, index: int, out: str, timeout: int = 300) -> None:
+    """Write frame `index` (0-based, counted in decode order) of `mp4` to `out`
+    as a PNG. `select` counts decoded frames, so the frame is exact (seeking
+    with -ss lands on timestamps)."""
+    rc, msg = _run([_ffmpeg("ffmpeg"), "-y", "-v", "error", "-i", mp4,
+                    "-vf", f"select=eq(n\\,{index})", "-fps_mode", "passthrough",
+                    "-frames:v", "1", "-update", "1", "-f", "image2", "-c:v", "png", out],
+                   timeout)
+    if rc != 0 or not os.path.isfile(out) or os.path.getsize(out) == 0:
+        raise RefError(f"ffmpeg couldn't cut frame {index} out of {os.path.basename(mp4)}: "
+                       f"{msg.strip()[-400:] or 'no image written'}")
+
+
+@dataclass
+class KeyframeResult:
+    ref: Ref
+    take: RefTake
+    picked: bool
+    source: dict                     # shot, take, pass, frame, frames, mp4
+
+
+def keyframe_source(s: Series, shot: str, which: str, pass_: str,
+                    source_shot: str | None = None,
+                    source_take: int | None = None) -> tuple[T.Take, str]:
+    """The video take a keyframe is cut from, and its pass. By default the
+    shot before (for `first`) or after (for `last`) in the pass's cut order,
+    and the take that shot's cut entry uses (a pick, a placeholder from the
+    other pass, else its latest usable take). Raises RefError (no neighbour),
+    UnknownRef (no such shot or take), NotUsable (no usable take)."""
+    if source_shot is None:
+        try:
+            e = E.cut_neighbour(s.ep, pass_, shot, -1 if which == "first" else 1)
+        except KeyError as err:
+            raise UnknownRef(err.args[0]) from None
+        if e is None:
+            raise RefError(f"{shot} is the {'first' if which == 'first' else 'last'} shot of "
+                           f"the {pass_} cut: there is no "
+                           f"{'previous' if which == 'first' else 'next'} shot to take a "
+                           f"frame from")
+        source_shot = e.shot
+    if source_take is not None:
+        t = T.get_take(s.ep, pass_, source_shot, source_take)
+        if t is None:
+            raise UnknownRef(f"{source_shot} has no {pass_} take {source_take}")
+        if not t.usable:
+            raise NotUsable(f"{source_shot} {pass_} t{source_take:02d} is {t.status}"
+                            + ("" if t.has_video else " with no mp4"))
+        return t, pass_
+    entries = E.cut_entries(s.ep, pass_)
+    e = next((x for x in entries if x.shot == source_shot), None)
+    if e is None:
+        if not T.list_takes(s.ep, pass_, source_shot):
+            raise UnknownRef(f"{source_shot} is not in the {pass_} cut and has no takes")
+        e = T.CutEntry(shot=source_shot, pass_=pass_)
+    t, n, ok = E.cut_take(s.ep, e)
+    if n is None:
+        raise NotUsable(f"{source_shot} has no usable {e.pass_} take to take a frame from "
+                        f"(render it first)")
+    if not ok:
+        why = "missing" if t is None else (t.status + ("" if t.has_video else " with no mp4"))
+        raise NotUsable(f"the {pass_} cut uses {source_shot} {e.pass_} t{n:02d}, which is {why}")
+    return t, e.pass_
+
+
+def keyframe_from_take(s: Series, shot: str, which: str = "first",
+                       source_shot: str | None = None, source_take: int | None = None,
+                       frame=None, pass_: str = "proxy", pick: bool | None = None,
+                       note: str = "") -> KeyframeResult:
+    """Make `shot`'s `which` keyframe from a frame of a video take: by default
+    the previous shot's last frame (`first`), or the next shot's first frame
+    (`last`); see keyframe_source for which take. `frame` is "first", "last"
+    or an index (negative from the end). The frame becomes a new take of
+    shot:<shot>:<which> (source "frame"; the sidecar records the source shot,
+    take, pass and frame index), picked when the keyframe has no live file yet
+    (or always with pick=True; never with pick=False)."""
+    if which not in KEYFRAME_ENDS:
+        raise RefError(f"which must be first or last, not {which!r}")
+    if pass_ not in T.PASSES:
+        raise RefError(f"pass must be final or proxy, not {pass_!r}")
+    ref = find_ref(s, f"shot:{shot}:{which}")
+    src, src_pass = keyframe_source(s, shot, which, pass_, source_shot, source_take)
+    if frame is None:
+        frame = "last" if which == "first" else "first"
+    count = video_frames(src.paths.mp4)
+    idx = frame_index(frame, count)
+    d = takes_dir(ref)
+    os.makedirs(d, exist_ok=True)
+    tmp = os.path.join(d, f".tmp_{uuid.uuid4().hex}.png")
+    try:
+        extract_frame(src.paths.mp4, idx, tmp)
+        source = {"shot": src.shot, "take": src.take, "pass": src_pass, "frame": idx,
+                  "frames": count, "mp4": ep_rel(s.ep, src.paths.mp4),
+                  "sha1": T.file_sha1(src.paths.mp4)}
+        t = reserve_take(ref, None, {
+            "status": "queued", "queued": T.now(), "ep": s.ep, "source": "frame",
+            "source_shot": src.shot, "source_take": src.take, "source_pass": src_pass,
+            "source_frame": idx, "source_frames": count, "source_mp4": source["mp4"],
+            "source_sha1": source["sha1"], "comfy_prompt_id": None, "seed": None,
+            "seed_source": None, "prompt": None, "model": None, "loras": None,
+            "steps": None, "note": note})
+        os.replace(tmp, t.paths.image)
+    finally:
+        if os.path.isfile(tmp):
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+    wh = image_size(t.paths.image) or (None, None)
+    t.sidecar = T.update_sidecar(
+        t.paths.sidecar, status="ok", finished=T.now(), width=wh[0], height=wh[1],
+        save_notes=f"frame {idx} of {count} of {src.shot} {src_pass} t{src.take:02d}")
+    picked = False
+    if pick or (pick is None and not os.path.isfile(ref.file)):
+        pick_take(s, ref, None, t.take)
+        picked = True
+    return KeyframeResult(ref, t, picked, source)
+
+
+# ---------------------------------------------------------------------------
 # generating
 # ---------------------------------------------------------------------------
 
@@ -1154,7 +1338,12 @@ def take_json(ep: str, ref: Ref, t: RefTake) -> dict:
             "overrides": sc.get("overrides", []),
             "queued": sc.get("queued"), "finished": sc.get("finished"),
             "comfy_prompt_id": sc.get("comfy_prompt_id"),
-            "save_notes": sc.get("save_notes", "")}
+            "save_notes": sc.get("save_notes", ""),
+            # a keyframe cut out of a video take (source "frame")
+            **({"from": {"shot": sc.get("source_shot"), "take": sc.get("source_take"),
+                         "pass": sc.get("source_pass"), "frame": sc.get("source_frame"),
+                         "frames": sc.get("source_frames")}}
+               if sc.get("source") == "frame" else {})}
 
 
 def effective(s: Series, ref: Ref, view: str | None, ov_data: dict,

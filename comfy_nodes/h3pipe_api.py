@@ -882,6 +882,51 @@ def post_refs_import(ctx: Context, body):
     return 200, seeds_out(R.take_json(ep, ref, t))
 
 
+@handler
+def post_refs_keyframe(ctx: Context, body):
+    """A shot's first (or last) keyframe from a frame of another shot's take:
+    by default the previous (next) shot in the pass's cut, the take its cut
+    entry uses, its last (first) frame (h3refs.keyframe_from_take)."""
+    body = body_dict(body)
+    ep = check_ep(ctx, body.get("ep"))
+    pass_ = check_pass(body.get("pass"))
+    shot = check_shot(body.get("shot"))
+    which = body.get("which") or "first"
+    if which not in ("first", "last"):
+        raise ApiError(400, f"which must be \"first\" or \"last\", not {which!r}")
+    source_shot = body.get("source_shot")
+    if source_shot is not None and (not isinstance(source_shot, str) or not source_shot):
+        raise ApiError(400, "source_shot must be a shot id or null")
+    source_take = check_take(body.get("source_take"), "source_take", nullable=True)
+    frame = body.get("frame")
+    if isinstance(frame, str) and re.fullmatch(r"\s*-?\d+\s*", frame):
+        frame = int(frame)
+    if frame is not None and frame not in ("first", "last") and (
+            isinstance(frame, bool) or not isinstance(frame, int)):
+        raise ApiError(400, "frame must be a frame number, \"first\", \"last\" or null")
+    pick = body.get("pick")
+    if pick is not None and not isinstance(pick, bool):
+        raise ApiError(400, "pick must be true, false or null")
+    note = _opt_str(body, "note") or ""
+    s = _series(ep)
+    try:
+        res = R.keyframe_from_take(s, shot, which, source_shot, source_take, frame, pass_,
+                                   pick=pick, note=note)
+    except R.RefError as e:
+        raise ApiError(400, str(e))
+    except R.UnknownRef as e:
+        raise ApiError(404, str(e))
+    except R.NotUsable as e:
+        raise ApiError(409, str(e))
+    except R.FfmpegMissing as e:
+        raise ApiError(500, str(e))
+    ref_event(ctx, ep, res.ref.id, None, res.take.take, res.take.status)
+    if res.picked:
+        ref_event(ctx, ep, res.ref.id, None, res.take.take, "picked")
+    episode_event(ctx, ep)
+    return 200, seeds_out(R.ref_json(s, res.ref, R.used_by(s, [res.ref])))
+
+
 REF_OVERRIDE_FIELDS = ("prompt", "seed", "model", "loras", "steps", "note")
 
 
@@ -970,6 +1015,7 @@ ROUTES = [
     ("POST", "/h3pipe/refs/generate", post_refs_generate, "body"),
     ("PUT", "/h3pipe/refs/pick", put_refs_pick, "body"),
     ("POST", "/h3pipe/refs/import", post_refs_import, "body"),
+    ("POST", "/h3pipe/refs/keyframe", post_refs_keyframe, "body"),
     ("PUT", "/h3pipe/refs/override", put_refs_override, "body"),
     ("DELETE", "/h3pipe/refs/override", delete_refs_override, "query"),
 ]

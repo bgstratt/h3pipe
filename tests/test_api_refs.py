@@ -10,6 +10,7 @@ import os
 import shutil
 import sys
 import unittest
+from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -194,6 +195,75 @@ class RefsApiTest(ApiTest):
                      ("PUT", "/h3pipe/refs/pick"), ("POST", "/h3pipe/refs/import"),
                      ("PUT", "/h3pipe/refs/override"), ("DELETE", "/h3pipe/refs/override")):
             self.assertIn(want, got)
+
+
+@unittest.skipUnless(test_api.HAVE_FF, "needs ffmpeg and ffprobe on PATH")
+class KeyframeApiTest(ApiTest):
+    """POST /h3pipe/refs/keyframe: continuity keyframes (h3refs.keyframe_from_take)."""
+
+    def kf(self, **body):
+        return A.post_refs_keyframe(self.ctx, dict({"ep": self.ep, "pass": "proxy"}, **body))
+
+    def refs(self):
+        data = self.ok(A.get_refs(self.ctx, {"ep": self.ep}))
+        return {r["id"]: r for r in data["refs"]}
+
+    def test_from_the_previous_shot(self):
+        from test_keyframes import make_take, rgb_frames
+        src = make_take(self.ep, "proxy", "sh010")
+        r = self.ok(self.kf(shot="sh020"))
+        # the ref as GET /h3pipe/refs lists it
+        self.assertEqual(r, self.refs()["shot:sh020:first"])
+        self.assertEqual((r["id"], r["kind"], r["exists"], r["picked"], r["path"]),
+                         ("shot:sh020:first", "keyframe", True, 1, "refs/shots/sh020/first.png"))
+        (t,) = r["takes"]
+        self.assertEqual((t["source"], t["from"]), ("frame", {"shot": "sh010", "take": 1,
+                                                               "pass": "proxy", "frame": 16,
+                                                               "frames": 17}))
+        (px,) = rgb_frames(os.path.join(self.ep, t["image"]))
+        self.assertEqual(px, rgb_frames(src.paths.mp4)[-1])
+        self.assertEqual(self.events_of("h3pipe.ref"),
+                         [{"ep": self.ep, "ref": "shot:sh020:first", "view": None, "take": 1,
+                           "status": "ok"},
+                          {"ep": self.ep, "ref": "shot:sh020:first", "view": None, "take": 1,
+                           "status": "picked"}])
+        self.assertEqual(self.events_of("h3pipe.episode"), [{"ep": self.ep}])
+        # a given frame (a string from a form works too), not picked over the live one
+        self.events.clear()
+        r = self.ok(self.kf(shot="sh020", source_shot="sh010", source_take="1", frame="3"))
+        self.assertEqual((r["picked"], r["takes"][1]["from"]["frame"]), (1, 3))
+        self.assertEqual([e["status"] for e in self.events_of("h3pipe.ref")], ["ok"])
+        r = self.ok(self.kf(shot="sh020", frame="first", pick=True))
+        self.assertEqual((r["picked"], r["takes"][2]["from"]["frame"]), (3, 0))
+        # the symmetric last keyframe, from the next shot's first frame
+        make_take(self.ep, "proxy", "sh030")
+        r = self.ok(self.kf(shot="sh020", which="last"))
+        self.assertEqual((r["id"], r["takes"][0]["from"]["shot"], r["takes"][0]["from"]["frame"]),
+                         ("shot:sh020:last", "sh030", 0))
+
+    def test_errors(self):
+        from test_keyframes import make_take
+        self.err(self.kf(shot="sh010"), 400)                         # no previous shot
+        self.assertIn("no usable proxy take", self.err(self.kf(shot="sh020"), 409))
+        make_take(self.ep, "proxy", "sh010")
+        self.err(self.kf(shot="sh999"), 404)                         # not in a build
+        self.err(self.kf(shot="sh020", source_shot="sh010", source_take=4), 404)
+        self.err(self.kf(shot="sh020", which="middle"), 400)
+        self.err(self.kf(shot="sh020", frame=99), 400)
+        self.err(self.kf(shot="sh020", frame=1.5), 400)
+        self.err(self.kf(shot="sh020", pick="yes"), 400)
+        self.err(self.kf(shot="sh020", source_take=0), 400)
+        self.err(self.kf(shot="sh020", **{"pass": "rough"}), 400)
+        self.err(self.kf(), 400)
+        self.err(A.post_refs_keyframe(self.ctx, {"ep": os.path.join(self.tmp, "x"),
+                                                 "shot": "sh020"}), 403)
+        with mock.patch.object(R.shutil, "which", return_value=None):
+            self.assertIn("ffprobe", self.err(self.kf(shot="sh020"), 500))
+        self.assertEqual(self.events_of("h3pipe.ref"), [])
+        self.assertNotIn("shot:sh020:first", self.refs())
+
+    def test_route_listed(self):
+        self.assertIn(("POST", "/h3pipe/refs/keyframe"), {(m, p) for m, p, _, _ in A.ROUTES})
 
 
 class ParentSeriesConfigApiTest(ApiTest):

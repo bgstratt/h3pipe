@@ -119,6 +119,8 @@ export interface MenuState {
   shot: string;
   pass: Pass;
   take: number | null;
+  /** the frame the viewer showed when it opened the menu (continuity keyframes) */
+  frame?: number | "last" | null;
 }
 
 export interface RedoState {

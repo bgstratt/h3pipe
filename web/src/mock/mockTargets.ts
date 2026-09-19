@@ -11,7 +11,8 @@ export const LTX = "ltx2";
 export const MOCK_TARGETS: TargetList = {
   targets: [
     {
-      id: H3, kind: "video", label: "MiniMax H3 Ref2VA", default: true,
+      id: H3, kind: "video", label: "MiniMax H3 Ref2VA", default: true, short: "H3",
+      capabilities: { keyframes: [], policies: ["generate", "dub", "dub_keep_foley", "clone"], voice_reference: true, subject_refs: true, prompt: "sections" },
       presets: {
         final: {
           model: "minimax_h3_ref2va_pruned_int8_convrot.safetensors",
@@ -34,7 +35,8 @@ export const MOCK_TARGETS: TargetList = {
       template: { fps: 24, frames: { step: 17, base: 5, max: 3592 }, size_multiple: 32 },
     },
     {
-      id: LTX, kind: "video", label: "LTX-2",
+      id: LTX, kind: "video", label: "LTX-2", short: "LTX-2",
+      capabilities: { keyframes: ["first", "last"], policies: ["generate"], voice_reference: false, subject_refs: false, prompt: "prose" },
       presets: {
         final: { model: "ltx-2-19b-dev-fp8.safetensors", lora: null, steps: 20, width: 1280, height: 704 },
         proxy: { model: "ltx-2-19b-distilled-fp8.safetensors", lora: null, steps: 8, width: 640, height: 352 },

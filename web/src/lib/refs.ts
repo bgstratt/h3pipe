@@ -63,6 +63,8 @@ export interface RefGroup {
 export function passesFilter(r: Ref, filter: RefFilter, pass: Pass): boolean {
   if (filter === "all") return true;
   if (filter === "missing") return !r.exists;
+  // a shot's keyframe belongs to this episode, whether or not its target reads it
+  if (groupOf(r) === "keyframes") return true;
   return usedBy(r, pass).length > 0;
 }
 
@@ -102,7 +104,8 @@ export function isAudioRef(r: Pick<Ref, "kind">): boolean {
   return r.kind === "voice";
 }
 
-/** Generation isn't offered for voices (nothing generates them yet) or keyframes (FL2V, later). */
+/** Generation isn't offered for voices (nothing generates them yet) or keyframes
+ * (they come from another shot's frame, or an import). */
 export function canGenerate(r: Pick<Ref, "kind" | "scope"> & { can_generate?: boolean }): boolean {
   // the server knows best (a character with no sheet or no design can't be
   // generated); the kind rule is the fallback
