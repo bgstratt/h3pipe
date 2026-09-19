@@ -1,14 +1,22 @@
 ---
-name: h3-episode-script
-description: Write episode scripts and series configs for the h3pipe MiniMax H3 shot-list pipeline — the .md script format with sequences, shots and who/size/dur/plate/camera/sound fields, plus the series config (series.json) of subjects, locations and voices. Use when drafting or extending an episode, breaking a scene into shots, adding characters or locations to a series config, re-timing shots whose dialogue does not fit, or fixing a script h3build rejected.
+name: h3pipe-episode-script
+description: Write episode scripts and series configs for h3pipe, the script-to-episode AI video pipeline on ComfyUI. Covers the epNN.md script format (sequences, shots, ALL-CAPS dialogue lines, who/with/size/dur/plate/camera/sound fields, target lines and first/last keyframe lines) and the series config (series.json) of subjects, locations, voices, profiles and targets. Shots render on a video target chosen per shot or episode, MiniMax H3 by default, or LTX-2, Wan 2.2 and others. Use it whenever the user wants to write, draft, outline or extend an episode, break a screenplay or scene into shots, adapt spec-format pages, add characters, props or location angles to a series config, choose which model renders a shot, re-time shots whose dialogue doesn't fit, or fix a script h3build rejected, even if they never name h3build or the file formats.
 ---
 
 # Writing an episode for h3pipe
 
-You are writing for the h3pipe pipeline. Follow this format exactly: the
-output is compiled by `h3build.py`, and anything that does not match is a build error, not a
-style preference. Validate with `h3build.py series.json <script> --check` and `--pace` before
-calling a script finished.
+You are writing for h3pipe. Follow this format exactly: the output is compiled
+by `h3build.py`, and anything that does not match is a build error, not a style preference.
+
+Before writing anything, ask for the series config (`series.json`) if the series has one.
+Adding a character means adding to that file, not inventing a new one: if you write `riley`
+when the series config already has `riley_freeman`, every reference path breaks. With no
+series config yet you are starting a series: write both files.
+
+Write the film, not the model. Leave `target:` lines out unless a shot needs something only
+one model does (see **Choosing a video target**); advice that holds for one target only is
+marked with that target's name. Validate with `h3build.py series.json <script> --check` and
+`--pace` before calling a script finished.
 
 ## The one thing that shapes every decision
 
@@ -22,6 +30,37 @@ shot 93. So:
   or it does not exist.
 - Character descriptions live in the series config, written once, injected into every prompt they
   appear in. Never repeat a character's appearance in the script.
+
+## Choosing a video target
+
+| target | what pins the look | sound | keyframes | length grid | good for |
+|---|---|---|---|---|---|
+| `minimax_h3_ref2va` (default) | your sheets and plate, as four reference pictures | generated, dubbed to a recording, or cloned from voice samples | not read | `17k+5` frames at 24 fps | recurring characters who talk; lip sync to your recording |
+| `minimax_h3_fl2va` | the shot's first/last keyframes, plus words | generated or dubbed (no clone) | optional | `17k+5` at 24 fps, best 5–15 s | picking up exactly where the previous shot ended |
+| `ltx2` | words, plus keyframes when there are any | always generated | optional | `8k+1` at 24 fps, up to ~20 s | fast text-to-video with sound; `dur: model` |
+| `ltx2_ingredients` | a reference sheet made from your refs (required) | always generated | not read | `8k+1` at 24 fps, 2–20 s, best 5.04 s | identity on LTX |
+| `wan22_i2v` | a first frame (required) | none | first required, last optional | `4k+1` at 16 fps, best 5 s | animating a still |
+| `wan22_ti2v` | words, or a first frame | none | first optional | `4k+1` at 24 fps | cheap proxies; where an I2V shot without a first frame can go |
+| `wan22_vace` | a reference picture made from your sheets | none | optional | `4k+1` at 16 fps | identity without sound |
+
+- **Leave the target out** unless the choice is a decision about the film. Shots with no
+  `target:` render on the episode's target (set in the editor) or the series config's
+  `series.target`, so a whole episode can be moved to another model without touching the
+  script.
+- **Name it** (`target:` on a shot, or under a `#` header for its sequence) when a shot
+  needs something only one model does: a silent insert on Wan, a continuity shot on
+  `minimax_h3_fl2va`, a shot whose length you want LTX to choose (`dur: model`).
+- **Dialogue needs a target with sound**, and lip sync to a recording needs an H3 target.
+  Wan acts the lines silently.
+- **On a target that takes no reference pictures** (`ltx2`, `minimax_h3_fl2va`, `wan22_i2v`,
+  `wan22_ti2v`; `wan22_vace` takes the sheets but not the plate), the `design` and location
+  `description` sentences are what the model knows about the look, apart from any
+  keyframe. Keep them complete.
+- A keyframe is a picture: plan `first:` / `last:` lines (see **Keyframes**) for the
+  targets that read them.
+
+Details per target are under **Rendering a shot on …** below; `python h3.py targets` says
+which ones your ComfyUI can render.
 
 ## The series config: series.json
 
@@ -61,10 +100,15 @@ shot 93. So:
 
 - `kind` is `character`, `prop` or `vehicle`. Only characters speak.
 - `pronoun` is used in the lips-closed clause on voiceover shots.
-- `audio.mode` is `clone` (H3 speaks the written lines in each character's sampled voice) or
-  `source_track` (you supply a recorded mix; see `RECORDED_DIALOGUE.md`).
-- Resolution must be a multiple of 32 on both axes. **1280×720 is illegal**, because 720 is
-  not. 1344×768 is H3's native canvas.
+- `audio.mode` sets how dialogue shots sound: `clone` (the model speaks the written lines in
+  each character's sampled voice), `source_track` (the default: you supply a recorded mix,
+  `audio.track`, and shots dub to it; see `RECORDED_DIALOGUE.md`) or `generate` (the model
+  invents the voices from each `voice` line; no recordings or samples needed).
+  `proxy.audio_mode` can use another mode for the animatic (`generate` is the usual one),
+  `audio.default_policy` forces one policy for every dialogue shot, and `audio.retention`
+  sets the dub `retention:` default. A target that can't do a mode says so and generates.
+- Resolution must be a multiple of 32 on both axes for H3. **1280×720 is illegal**, because
+  720 is not. 1344×768 is H3's native canvas. The other targets snap it to their own sizes.
 - `steps`, `lora` and `model` are optional per pass; see the README's **Steps, model and LoRA**.
 - `series.target` names the video model the episode renders on: `minimax_h3_ref2va`
   (MiniMax H3, the default: leave it out), `ltx2` (LTX-2.5 distilled), `ltx2_ingredients`
@@ -273,11 +317,11 @@ sound: running footsteps on grass, fabric movement
 | `= id  Title` | episode header, once at the top |
 | `# sqNN  location` | sequence; the location must be a series config key |
 | `## shNNN` | a shot. **Every `##` is a cut** — no `CUT TO:` needed |
-| `who: a, b` | characters on screen, becoming `<Picture 1..3>` in this order |
-| `with: x, y` | props and vehicles, taking the next free slot |
-| `size: close/medium/wide` | shot size; decides how much of the sheet is used |
+| `who: a, b` | characters on screen, in this order (on H3 Ref2VA they become `<Picture 1..3>`); `cast:` is the same |
+| `with: x, y` | props and vehicles, after the characters; `props:` is the same |
+| `size: close/medium/wide` | shot size (`cu`, `ms`, `ws` also work); decides the framing and how much of the sheet is used |
 | `plate: street_gate` | this shot's angle; defaults to the sequence's location |
-| `dur: 3.04` | duration in seconds, from the grid below |
+| `dur: 3.04` | duration in seconds, from the grid below (`duration:` is the same) |
 | `dur: auto` | derive the duration from the dialogue at this shot's pace |
 | `dur: model` / `dur: model 3-8` | let the video model choose the length when it renders, optionally between 3 and 8 seconds; see **Letting the model time a shot** |
 | `audio: 3.10-7.40` | window on a locked dialogue mix; sets the duration instead |
@@ -286,17 +330,25 @@ sound: running footsteps on grass, fabric movement
 | `sound: …` | ambience and physical action sounds |
 | `music: …` | audience-only score; omit for none |
 | `extras: …` | other people in frame, described; see **Crowds and extras** |
+| `text: OPEN 24 HOURS` | on-screen text the picture must show (a sign, a title card), quoted into the prompt |
+| `policy: generate` | this shot's audio: `generate` (the model makes all of it), `dub` (lip sync to the recording's `audio:` window, which becomes the soundtrack), `dub_keep_foley` (the same, keeping the model's sound effects under it) or `clone` (spoken in each speaker's `voice_sample`). Without it, dialogue shots follow `audio.mode` and silent ones generate |
+| `retention: partially_copy` | how closely a dubbed shot copies the recording: `fully_copy`, `partially_copy` or `reference` (H3 Ref2VA; dub shots only) |
 | `model:`, `lora:`, `steps:` | per-shot render overrides; also valid under a `#` header |
 | `profile: dialogue_close` | a render profile from the series config; also valid under a `#` header |
 | `target: ltx2` | the video model for this shot or sequence (`minimax_h3_ref2va`, `ltx2`, `ltx2_ingredients`, `minimax_h3_fl2va`, `wan22_i2v`, `wan22_ti2v` or `wan22_vace`); see below |
 | `first: continuity` / `last: generate` | how this shot's first / last keyframe is made: `continuity`, `generate`, `import`, `none`, or a path to an image; also valid under a `#` header (the default of its shots); see **Keyframes** |
-| `NAME: line` | dialogue from someone on screen |
+| `NAME: line` | dialogue from someone on screen (the name is a character's key, in capitals) |
+| `NAME (breathless): line` | a delivery direction, written into the prompt |
 | `NAME (V.O.): line` | voiceover: speaks, is not drawn, costs no reference slot |
 | `NAME (O.S.): line` | off-screen: in the space, outside the frame |
+| `NAME (V.O., into phone): line` | a voice marker and a delivery together |
 | `continuous: yes` | under a `#` header: the sequence is one unbroken take |
 | `// text` | comment |
 
-Any other line is action prose.
+Any other line is action prose. Prose under a `#` header before its first shot is a
+scene-setting note and is ignored. A line under a `#` header (`model:`, `lora:`, `steps:`,
+`profile:`, `target:`, `first:`, `last:`) is the default for every shot in the sequence; a
+shot's own line beats it.
 
 ### Rendering a shot on LTX-2
 
@@ -473,6 +525,12 @@ first: refs/stills/sh030_open.png
 | a path | this image is imported as the keyframe (relative to the episode) |
 | `none` | no keyframe, even where the target could use one (a required one stays required) |
 
+**Continuity is for a shot that picks up the previous one's picture**: the same framing
+carrying on, or a match on action. After a real cut (a new subject, a new angle, a
+different size) the previous shot's last frame is the wrong opening picture, so write
+`first: generate` on that shot. A good pattern is `first: generate` under the `#` header and
+`first: continuity` on the shots that continue.
+
 **Generating a keyframe** writes a still from the shot: the look, the framing and the
 location, who is in frame (their `design`), and the action at that moment: for `first` how
 the shot opens (the action's first sentence, about to happen); for `last` how it ends (its
@@ -508,8 +566,13 @@ prediction between 3 and 8 seconds (without a range: 1 to 20).
 
 ## Durations land on a grid
 
-H3 only accepts `17k + 5` frames. Anything else rounds **up**, and you pay for frames you
-throw away. At 24fps these are free:
+Every video model takes only certain frame counts, and a `dur:` between two of them rounds
+**up**, so you pay for frames you throw away. The grid is the target's: `17k + 5` frames on
+the H3 targets, `8k + 1` on LTX, `4k + 1` on Wan (at 16 fps on the 14B models). The build
+snaps each shot to its own target's grid, and `--check` warns about wasted padding.
+
+Write for H3's grid, the default; the other grids are fine-grained enough that these
+lengths land close on them too. At 24fps these are free on H3:
 
 | Frames | Seconds | Use for |
 |---|---|---|
@@ -526,9 +589,10 @@ than short ones. Cartoon pacing, 2 to 5 seconds, is both better filmmaking and c
 
 ## Dialogue has to fit the shot
 
-This is the easiest way to wreck an episode, and it does not announce itself: H3 will fit any
-line into any window by speeding the delivery up. The words are all there, the lip sync is
-fine, and the performance is gone.
+This is the easiest way to wreck an episode, and it does not announce itself: a model that
+speaks (H3, LTX) will fit any line into any window by speeding the delivery up. The words
+are all there, the lip sync is fine, and the performance is gone. On Wan, which acts the
+lines silently, the recording laid in at the edit still needs the room.
 
 A 2.33s shot holds about **seven syllables**. Never guess — the compiler measures it:
 
@@ -547,7 +611,9 @@ Three ways out of a crammed shot, in the order worth trying:
 
 ## Camera moves use H3's vocabulary
 
-The `camera:` line is inserted after the words "The camera", so write the verb phrase only.
+Every target inserts the `camera:` line after the words "The camera", so write the verb
+phrase only. Without one, the camera holds still. The vocabulary below is H3's training
+vocabulary; the other models read it as plain English.
 Compose from **motion + amplitude + speed**; the last two are optional.
 
 **Motion:** zooms in / out · pushes in / pulls out · pans left / right · trucks left / right ·
@@ -586,7 +652,11 @@ changes seeds and invalidates renders. An ID is unique across the whole episode,
 sequence: continue the numbering (`sh110` in the next sequence, or keep counting) rather than
 restarting at `sh010`.
 
-## Reference slots
+## Reference slots (H3 Ref2VA)
+
+This section is about the default target, `minimax_h3_ref2va`. The other targets take no
+slots (their limits are under **Rendering a shot on …**), but the three-subject rule is a
+good habit everywhere: a shot about more than three things is usually two shots.
 
 Every shot hands H3 four images. Slots 1–3 are the subjects — characters first, then props
 and vehicles, in the order `who:` and `with:` list them. **Slot 4 is always the location
@@ -603,7 +673,7 @@ over it.
 
 ### Crowds and extras
 
-By default a shot's prompt states that exactly one person appears in it per referenced
+On H3 Ref2VA a shot's prompt states that exactly one person appears in it per referenced
 character, which is what stops H3 drawing the same face twice. The moment the action puts
 someone else in frame — a dance partner, a mob, a crowd at a door — that sentence contradicts
 the action, and H3 resolves the contradiction by **duplicating the referenced character**,
@@ -625,7 +695,7 @@ masked dancers" is rebuilt as figures that compete with the subject and feed the
 — describe the empty space and let the far background fall off into bokeh. And **name the
 subject in the camera move**: "arcs around them" leaves the model to decide who "them" is.
 
-`size:` also decides how hard the plate pulls: `partially_preserved` on a wide or medium,
+On H3 Ref2VA, `size:` also decides how hard the plate pulls: `partially_preserved` on a wide or medium,
 `weak_reference` on a close-up, because a plate declared authoritative behind a face competes
 with the sheet in exactly the shot where identity matters most.
 
@@ -641,8 +711,8 @@ kitchen`, `# sq04 phone_room`, `# sq05 kitchen`.
 Keep a sequence intact and vary the shots with `plate:` rather than splitting a scene into
 one-shot sequences, which re-seeds every shot in it.
 
-`continuous: yes` chains a sequence into one unbroken take, carrying motion across the joins.
-Use it rarely: it costs 22 frames per shot after the first, which is 30% of a 3-second shot.
+`continuous: yes` chains a sequence into one unbroken take on H3 Ref2VA, carrying motion
+across the joins. Use it rarely: it costs 22 frames per shot after the first, which is 30% of a 3-second shot.
 
 ## What goes on which line
 
@@ -663,10 +733,16 @@ python h3build.py series.json ep01.md --check     # counts, runtime, references,
 python h3build.py series.json ep01.md --pace      # dialogue pacing per shot
 ```
 
+(`python h3.py check <episode folder>` runs both.) The check compiles every shot for the
+target it renders on, so it also reports each target's limits.
+
 Errors name the line and quote it. Common ones: a name in `who:` that is not in the series config; a
 location with no plate; an ALL-CAPS `NAME:` line for someone who cannot speak (usually a typo,
-which would otherwise become action prose); more than three subjects; a shot with neither
-`dur:` nor `audio:`; `dur: auto` on a shot with no dialogue; a `dur: model` range that isn't
-`min-max` seconds with min below max.
+which would otherwise become action prose); more than three subjects on H3 Ref2VA; a shot
+with neither `dur:` nor `audio:`; `dur: auto` on a shot with no dialogue; a `dur: model`
+range that isn't `min-max` seconds with min below max; a `target:` or `profile:` name that
+doesn't exist; a `first:` / `last:` that isn't a method or an image path. Warnings cover
+crammed dialogue, wasted grid padding, and what a target can't do (a dialogue shot on Wan,
+a `clone` shot on LTX).
 
 A script that does not compile is not a draft, it is a bug. Fix and re-run until it is clean.

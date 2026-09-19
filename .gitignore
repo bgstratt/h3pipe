@@ -48,3 +48,6 @@ web/node_modules/
 web/dist-dev/
 web/*.tsbuildinfo
 !web/mock/media/**
+
+# tools/make_prompts.py: the script-writing skill folder and zip
+build/

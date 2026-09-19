@@ -3,7 +3,7 @@
     "path": "refs/_bg/kitchen.png",
     "kind": "background plate",
     "prompt": "A background plate drawn as a flat vector cartoon with thick even outlines and a limited pastel palette. An empty establishing view of a cramped diner kitchen with steel counters, a hanging ticket rail and cold fluorescent light from overhead. No characters, no props, no figures in frame — the environment only. Wide framing that shows the layout of the space.",
-    "target": "1344x768 (the render resolution)",
+    "size_hint": "1344x768 (the render resolution)",
     "exists": false,
     "blocks_shots": [
       "sh010",
@@ -21,7 +21,7 @@
     "path": "refs/ada/ada_sheet_4panel.png",
     "kind": "character sheet",
     "prompt": "A character model sheet on a plain flat background: FOUR panels side by side in a single horizontal strip, left to right — three-quarter body, side profile full body, back view full body, and a head-and-shoulders facial close-up. The SAME character in all four. a tall woman in her thirties with a short grey bob, a mustard apron over a striped shirt, and round red glasses. Drawn as a flat vector cartoon with thick even outlines and a limited pastel palette. Output 4096x1024 or larger.",
-    "target": "4096x1024 or larger (horizontal 4-panel strip)",
+    "size_hint": "4096x1024 or larger (horizontal 4-panel strip)",
     "exists": false,
     "blocks_shots": [
       "sh010",
@@ -38,7 +38,7 @@
     "path": "refs/bo/bo_sheet_4panel.png",
     "kind": "character sheet",
     "prompt": "A character model sheet on a plain flat background: FOUR panels side by side in a single horizontal strip, left to right — three-quarter body, side profile full body, back view full body, and a head-and-shoulders facial close-up. The SAME character in all four. a stocky teenage boy with a shaved head, an oversized green bomber jacket and orange high-tops. Drawn as a flat vector cartoon with thick even outlines and a limited pastel palette. Output 4096x1024 or larger.",
-    "target": "4096x1024 or larger (horizontal 4-panel strip)",
+    "size_hint": "4096x1024 or larger (horizontal 4-panel strip)",
     "exists": false,
     "blocks_shots": [
       "sh020",
@@ -54,7 +54,7 @@
     "path": "refs/props/kettle.png",
     "kind": "prop reference",
     "prompt": "A single clean three-quarter view of one object on a plain flat background, no scene around it. a dented chrome kettle with a black bakelite handle and a whistle cap on a chain. Drawn as a flat vector cartoon with thick even outlines and a limited pastel palette. Output 1024x1024 or larger.",
-    "target": "1024x1024 or larger",
+    "size_hint": "1024x1024 or larger",
     "exists": false,
     "blocks_shots": [
       "sh020",
@@ -65,7 +65,7 @@
     "path": "refs/props/van.png",
     "kind": "vehicle reference",
     "prompt": "A single clean three-quarter view of one object on a plain flat background, no scene around it. a boxy white delivery van with a sky-blue stripe and a cracked left headlight. Drawn as a flat vector cartoon with thick even outlines and a limited pastel palette. Output 1024x1024 or larger.",
-    "target": "1024x1024 or larger",
+    "size_hint": "1024x1024 or larger",
     "exists": false,
     "blocks_shots": [
       "sh040"
@@ -75,7 +75,7 @@
     "path": "refs/cy/cy_sheet_4panel.png",
     "kind": "character sheet",
     "prompt": "A character model sheet on a plain flat background: FOUR panels side by side in a single horizontal strip, left to right — three-quarter body, side profile full body, back view full body, and a head-and-shoulders facial close-up. The SAME character in all four. a small girl with two puffball pigtails, a purple raincoat and yellow rubber boots. Drawn as a flat vector cartoon with thick even outlines and a limited pastel palette. Output 4096x1024 or larger.",
-    "target": "4096x1024 or larger (horizontal 4-panel strip)",
+    "size_hint": "4096x1024 or larger (horizontal 4-panel strip)",
     "exists": false,
     "blocks_shots": [
       "sh050",
@@ -87,7 +87,7 @@
     "path": "refs/rex/rex_sheet_4panel.png",
     "kind": "character sheet",
     "prompt": "A character model sheet on a plain flat background: FOUR panels side by side in a single horizontal strip, left to right — three-quarter body, side profile full body, back view full body, and a head-and-shoulders facial close-up. The SAME character in all four. a scruffy brown terrier with one white ear and a red collar. Drawn as a flat vector cartoon with thick even outlines and a limited pastel palette. Output 4096x1024 or larger.",
-    "target": "4096x1024 or larger (horizontal 4-panel strip)",
+    "size_hint": "4096x1024 or larger (horizontal 4-panel strip)",
     "exists": false,
     "blocks_shots": [
       "sh050"
@@ -97,7 +97,7 @@
     "path": "refs/_bg/street.png",
     "kind": "background plate",
     "prompt": "A background plate drawn as a flat vector cartoon with thick even outlines and a limited pastel palette. An empty establishing view of a wet night street outside the diner, neon sign reflected in the puddles, light from the left. No characters, no props, no figures in frame — the environment only. Wide framing that shows the layout of the space.",
-    "target": "1344x768 (the render resolution)",
+    "size_hint": "1344x768 (the render resolution)",
     "exists": false,
     "blocks_shots": [
       "sh110",
@@ -110,7 +110,7 @@
     "path": "refs/_bg/kitchen_window.png",
     "kind": "background plate",
     "prompt": "A background plate drawn as a flat vector cartoon with thick even outlines and a limited pastel palette. An empty establishing view of the diner's pass-through window looking out to the counter, warm tungsten light spilling in from the dining room. No characters, no props, no figures in frame — the environment only. Wide framing that shows the layout of the space.",
-    "target": "1344x768 (the render resolution)",
+    "size_hint": "1344x768 (the render resolution)",
     "exists": false,
     "blocks_shots": [
       "sh130",

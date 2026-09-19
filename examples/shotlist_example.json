@@ -1,5 +1,5 @@
 {
-  "_comment": "shotlist.json — what the H3 Shot List Loader reads. One entry per shot. Emitted by h3plan.py, or hand-authored. Paths are relative to project_root.",
+  "_comment": "shotlist.json — what the H3 Shot List Loader reads. One entry per shot. Emitted by h3build.py, or hand-authored. Paths are relative to project_root.",
 
   "prompt_prefix": "The target video is a 2D hand-drawn cartoon animation with flat 2D illustration, clean black line art, flat solid colors, and cel-shaded artwork. <Picture 4> defines the series art style: line weight, color palette, and shading treatment.",
 

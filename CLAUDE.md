@@ -26,7 +26,6 @@ IR + targets). Read it before changing `h3build.py`, `h3render.py`, `kreagen.py`
 - `comfy_nodes/` — the ComfyUI custom node pack (loader, info, save)
 - `docs/AUTHORING.md` — the script/series config format (source of truth; `prompts/` is
   generated from it by `python tools/make_prompts.py`)
-- `h3plan.py` — legacy, don't extend
 
 ## Rules
 
