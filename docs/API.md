@@ -1173,3 +1173,125 @@ that is `queued` (cancel it first).
   the characters' reference panels pasted over the plate (side by side, bottom-aligned,
   about two thirds of the frame height), made by `h3_refsheet.py` and uploaded like any
   reference; the sidecar's `references` records `role: "composite"` with its parts.
+
+### Phase 8.6 as built
+
+Everything above is implemented. As for 8.5, each point is **[differs]** (the contract
+said otherwise), **[added]** (the contract said nothing) or **[settled]** (the contract
+left it open). Nothing here changes a field the contract named.
+
+**Discarding**
+- **[settled]** `POST /h3pipe/discard`: `pass` defaults to `proxy`, as on every route; the
+  response also carries `pass`. `moved` lists the files' **new** paths (under `_trash/`),
+  relative to the episode. What moves: the sidecar, every file sharing the take's stem
+  (`.mp4`, `.jpg`, `_strip.jpg`, `.shotlist.json`, `_h3.wav`, a kept `_reference.png` or
+  sheet), and any other file the sidecar names in the shot folder. 404 for no such take,
+  409 for a queued one ("cancel it first").
+- **[settled] The cut:** every `cut.json` entry, in either pass's list, whose take comes
+  from the discarded pass and names that take loses its `take`. A placeholder keeps its
+  `pass`, so it falls back to the other pass's latest usable take. `cut_changed` says
+  whether anything was dropped.
+- **[added] Numbers aren't reused.** The next take of that shot (or ref, or view) skips
+  every number still in the trash, so `t03` is never two different takes. If a name is
+  already in the trash anyway (an explicit `--take N` re-render discarded twice), the
+  whole set goes into `_trash/<shot>/<YYYYmmdd-HHMMSS>/`. Nothing is overwritten.
+- **[added] `POST /h3pipe/refs/discard`** needs `view` for a character (else 400), and is
+  404 for no such take and 409 for a queued one. `h3pipe.ref` carries status
+  **`discarded`**, then `cleared` if it was the pick, then `h3pipe.episode`. A voice's take
+  is only moved: voices aren't cleared, so a picked voice keeps its live file.
+- **[settled] `_trash/` is never listed.** Video takes are listed per shot folder, so
+  `renders/_trash/` is never read. Ref takes live under `refs/_takes/<key>/`, and the
+  sweep of queued ref takes skips `refs/_takes/_trash/`.
+- **[added] CLI:** `h3.py discard <ep> <shot> <take> [--proxy]` accepts `3` or `t03`.
+  `kreagen --discard REF[:VIEW]:TAKE` is repeatable and accepts `location:kitchen:3`,
+  `subject:ada:02_side:t2` or `shot:sh020:first:1`. `kreagen --clear` and `--discard` no
+  longer need `refs_todo.json`.
+
+**Generate missing**
+- **[settled] Which series refs count as missing:** those this episode uses in `pass`
+  (`used_by`, which is what the Refs tab's plan used), with no live file and not cleared.
+  A ref is skipped if any of its candidates is queued, or has finished and waits to be
+  picked (auto-pick takes it on the next `GET /h3pipe/refs`). This is the UI's
+  `inFlight` rule. A character missing all four views gets one generate with
+  `view: null` (the four share a seed). Otherwise each missing view is queued alone, and
+  a skip for one view carries `view`. A ref that can't be generated (a voice) is in
+  `skipped` with the reason.
+- **[settled] `pass`** defaults to `proxy`, like `/refs/keyframe`. It sets both the cut
+  that continuity reads and the render size a keyframe still is made for, as
+  `h3.py keyframe --missing` does. `kinds` defaults to both kinds.
+- **[settled] Keyframes:** a keyframe is filled only if it is required or asked for by the
+  script, and it must have no live file and not be cleared (`missing_keyframes`, shared
+  with the CLI). It is skipped if a candidate is queued or waiting.
+  - **Continuity:** the frame is cut, and the result goes into `picked` (it is always
+    picked, since the keyframe had no live file). If the frame can't be cut (no usable
+    take, or a bad source), a still is queued instead. If ffmpeg is missing, the keyframe
+    goes to `errors`.
+  - **Still:** it goes into `queued` with `method: "generate"`, and `target` is the image
+    target.
+  - **Script path:** the file is imported and picked (`method: "import"`).
+
+  The CLI and the route share `h3refs.keyframe_plan`, `import_keyframe` and
+  `missing_keyframes`. The CLI waits for each still; the route doesn't.
+- **[added]** `queued[]` entries also carry `seed_source`. In a dry run, `seed` is null
+  when a new random seed would be drawn, and continuity and import entries appear in
+  `picked` with `take: null`. `errors[]` are `queue_generate`'s, so they include
+  `missing_files` when a model isn't installed.
+- **[added] Events:** `h3pipe.ref` with status `queued` for each queued candidate, then
+  `ok` and `picked` for each picked one, then `h3pipe.episode`. A dry run emits nothing.
+- **[added] Errors:** 404 when `pass` has no build. 400 for a bad `kinds`, a `target` /
+  `keyframe_target` that isn't an image target, or a `dry_run` that isn't a boolean.
+
+**Upload**
+- **[settled]** The aiohttp adapter streams the `file` part to a temporary file, never
+  holding it in memory, and deletes it after the handler. The handler takes it through
+  the same `import_take` as the JSON form. **413** comes either from a `Content-Length`
+  over 65 MB (answered before anything is read), or from passing 64 MB while streaming.
+  **400** covers an extension the ref can't use (the type is judged by the upload's file
+  name), a `file` field that isn't a file, and a body that is neither JSON nor multipart.
+- **[added]** Ref-take sidecars and take entries carry `original_name` only for uploads;
+  an upload's sidecar has `source_path: null`. The form also takes `note`.
+- **[settled] `pick`:** a form sends `"1"` / `"true"` / `"yes"` / `"on"` or `"0"` /
+  `"false"` / `"no"` / `"off"` / `""`; JSON sends `true`, `false` or null. When picked,
+  the events are `ok` then `picked`, and the returned take is re-read after the pick. A
+  stitch failure is 500, as on `PUT /h3pipe/refs/pick`.
+
+**Keyframe polish**
+- **[settled] The wording** (`targets/image/common.py`): after "The first/last frame of a
+  <size> of <place>, one still picture." comes a framing sentence:
+  - **close-up:** "Framing: a close-up. Ada's face fills the frame, large: from the chin to
+    the top of the head, cut off at the shoulders. No full body, no wide view of the
+    room." With several characters it reads "Ada and Bo's faces fill"; with only props,
+    they fill the frame; with nothing, one detail of the place;
+  - **medium shot:** "... seen from the waist up, filling most of the frame's height" (no
+    sentence without characters);
+  - **wide shot:** "The whole place in view, ... small and full-length in it."
+
+  "Drawn as <look>, framed as a close-up." and a closing "Framing: a close-up." repeat the
+  size. The golden outputs don't contain keyframe prompts, so they are unchanged.
+- **[settled] When a composite is made:** for a target whose `max_refs` is 1, when more
+  than one reference image is on disk.
+  - **Parts:** the figures (characters, then props and vehicles, at most 4), then the
+    plate. Without a plate, the figures go on white. With one image only, that image is
+    sent as it is.
+  - **Layout:** the composite is the keyframe's generation size. The plate covers the
+    frame. The figures sit side by side, centred, standing on the bottom edge, two thirds
+    of the frame tall (scaled down together if they'd be wider than the frame less 3%
+    each side), 2% of the width apart. Each is pasted as a rectangle, background included.
+- **[added]** The composite is kept at `refs/_takes/<key>/_composites/<sha1>.png`.
+  - **Sidecar:** it records `{role: "composite", kind, name, path, sha1, parts: [{role,
+    subject | location, name, kind, view?, crop?, path, sha1}]}`.
+  - **Listing:** a keyframe's `edit_refs` shows `{id: null, role: "composite", path:
+    null, name, parts: [...]}`. There is no file until a generate composes one.
+  - **Prompt:** "The image shows Ada, Bo, and the diner kettle in front of the background
+    (kitchen): draw each of them exactly as in the image (the same face, body, clothes
+    and colours), and use its background's setting, layout, colours and light for the
+    scene. The image is only a reference collage: pose and frame each of them for this
+    shot."
+- **[added] Without PIL:** composing runs `comfy_nodes/h3_refsheet.py` as a subprocess of
+  the running Python, as the ingredients sheet does. Under ComfyUI (the routes) that
+  Python has PIL, and so does a CLI whose Python has it.
+  - **Fallback:** when there is no PIL, the job sends one part alone. That is the first
+    figure not cut from a sheet, else the plate, else the first figure.
+  - **The prompt** is rewritten for that one image, unless it was typed or overridden.
+  - **The sidecar's `notes`** say so: "couldn't compose one reference from N (...); sent
+    Ada alone".

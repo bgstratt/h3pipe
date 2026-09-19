@@ -107,7 +107,7 @@ def render_todo(report: dict, root: str) -> str:
         lines += ["Everything the episode needs is already on disk.", ""]
         return "\n".join(lines)
 
-    lines += ["| # | Path | Kind | Target | Shots blocked |",
+    lines += ["| # | Path | Kind | Size hint | Shots blocked |",
               "|---|---|---|---|---|"]
     for i, (path, v) in enumerate(missing, start=1):
         lines.append(f"| {i} | `{path}` | {v['kind']} | "
@@ -117,7 +117,7 @@ def render_todo(report: dict, root: str) -> str:
     for i, (path, v) in enumerate(missing, start=1):
         sh = blocked.get(path, [])
         lines += [f"## {i}. `{path}`",
-                  f"**{v['kind']}** · target {hints.get(v['kind'], 'see prompt')}"
+                  f"**{v['kind']}** · size hint {hints.get(v['kind'], 'see prompt')}"
                   + (f" · blocks {len(sh)} shot(s): {', '.join(sh[:8])}"
                      f"{' …' if len(sh) > 8 else ''}" if sh else ""), "",
                   "```", v["prompt"].strip(), "```", ""]
@@ -297,7 +297,7 @@ def main() -> int:
     with open(todo_json, "w", encoding="utf-8") as fh:
         json.dump([
             {"path": p, "kind": v["kind"], "prompt": v["prompt"],
-             "target": report.get("size_hints", SIZE_HINT).get(v["kind"], ""),
+             "size_hint": report.get("size_hints", SIZE_HINT).get(v["kind"], ""),
              "exists": os.path.isfile(os.path.join(args.out, p)),
              "blocks_shots": report.get("blocked_shots", {}).get(p, [])}
             for p, v in report["needed"].items()

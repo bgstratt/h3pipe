@@ -18,6 +18,7 @@ cut, set per-shot overrides. The command-line face of what the editor does;
     python h3.py override Shows\\ep05 --episode-target ltx2    # the episode's target (built: undo)
     python h3.py keyframe Shows\\ep05 sh020 [--from-prev | --from sh010[:3]] [--first | --last]
                                           [--frame N] [--proxy] [--pick | --no-pick]
+    python h3.py discard  Shows\\ep05 sh020 3 [--proxy]          # move a take to the trash
     python h3.py targets  [Shows\\ep05] [--json]               # readiness of every target
 
 `takes` shows every take with its status, why it is stale (script / ref /
@@ -35,6 +36,9 @@ retarget, or, while an episode target is set, pins the shot there.
 none (overrides.json's episode.target; series.json is never written).
 `targets` shows which targets the running ComfyUI can render (readiness) and
 what to download for the others.
+`discard` moves a take's files to renders[_proxy]/_trash/<shot>/ (nothing is
+deleted, and nothing lists the trash); a cut entry that picked it goes back
+to the latest usable take. A queued take must be cancelled first.
 `keyframe` cuts a frame out of another shot's take and adds it as the shot's
 first (or last) keyframe: by default the previous shot's last frame, from the
 take that shot's cut entry uses (continuity). It is picked when the shot has no
@@ -774,6 +778,62 @@ def cancel_take(root: str, pass_: str, shot_id: str, take: int, comfy,
     return t
 
 
+def take_files(root: str, t: T.Take) -> list[str]:
+    """Every file of a take in its shot folder: the sidecar and whatever
+    shares its stem (mp4, thumbnail, strip, frozen shotlist, H3 wav, kept
+    reference sheet), plus any file the sidecar names there."""
+    files = set(T.stem_files(t.paths.dir, t.paths.stem))
+    sc = t.sidecar or {}
+    named = [sc.get(k) for k in ("mp4", "thumb", "strip")]
+    named += [r.get("path") for r in (sc.get("refs") or [])
+              if isinstance(r, dict) and r.get("role") in ("sheet", "reference")]
+    here = os.path.normcase(os.path.abspath(t.paths.dir))
+    for n in named:
+        if not isinstance(n, str) or not n:
+            continue
+        if os.path.isabs(n):
+            full = n
+        elif os.path.basename(n) == n:                    # a file name: beside the sidecar
+            full = os.path.join(t.paths.dir, n)
+        else:                                            # relative to the episode
+            full = os.path.join(root, n)
+        full = os.path.abspath(full)
+        if os.path.normcase(os.path.dirname(full)) == here and os.path.isfile(full):
+            files.add(full)
+    return sorted(files)
+
+
+def discard_take(root: str, pass_: str, shot_id: str, take: int,
+                 folder: str | None = None) -> dict:
+    """Move a take (its sidecar and every output: take_files) to
+    <renders>/_trash/<shot>/, names kept, so nothing lists it and it can be
+    put back by hand; its number is not given out again. A cut entry that
+    picks it (in either pass's list, when its take comes from `pass_`) goes
+    back to the latest usable take. Returns {"shot", "take", "pass", "moved":
+    [the new paths, relative to the episode], "cut_changed"}. Raises
+    LookupError for no such take, T.StillQueued for a queued one (cancel it
+    first)."""
+    t = T.get_take(root, pass_, shot_id, take, folder)
+    if t is None:
+        raise LookupError(f"{shot_id} has no take {take} in {pass_}")
+    if t.status == "queued":
+        raise T.StillQueued(f"{shot_id} {pass_} t{take:02d} is queued: cancel it first")
+    moved = T.discard_files(take_files(root, t), T.trash_dir(root, pass_, shot_id, folder))
+    cut = T.load_cut(root)
+    changed = False
+    for list_pass in T.PASSES:
+        for e in cut.get(list_pass) or []:
+            if (isinstance(e, dict) and e.get("shot") == shot_id and e.get("take") == take
+                    and (e.get("pass") or list_pass) == pass_):
+                del e["take"]
+                changed = True
+    if changed:
+        T.save_cut(root, cut)
+    return {"shot": shot_id, "take": take, "pass": pass_,
+            "moved": [os.path.relpath(m, root).replace(os.sep, "/") for m in moved],
+            "cut_changed": changed}
+
+
 def queue_shots(root: str, pass_: str, shot_ids: list[str] | None,
                 template: J.RenderRequest, comfy, base,
                 folder: str | None = None, model_resolve=J.DEFAULT,
@@ -1206,6 +1266,32 @@ def cmd_pick(root: str, argv: list[str]) -> int:
     return 0
 
 
+def cmd_discard(root: str, argv: list[str]) -> int:
+    ap = argparse.ArgumentParser(
+        prog="h3.py discard",
+        description="Move a take to renders[_proxy]/_trash/<shot>/ (nothing is deleted); "
+                    "a cut entry that picked it goes back to the latest usable take.")
+    ap.add_argument("shot")
+    ap.add_argument("take", help="take number (3 or t03)")
+    ap.add_argument("--proxy", action="store_true", help="a proxy take")
+    args = ap.parse_args(argv)
+    pass_ = _pass(args)
+    try:
+        take = int(args.take.lstrip("tT"))
+    except ValueError:
+        print(f"  !! take must be a number, not {args.take!r}")
+        return 2
+    try:
+        res = discard_take(root, pass_, args.shot, take)
+    except (LookupError, T.StillQueued) as e:
+        print(f"  !! {e}")
+        return 1
+    where = os.path.dirname(res["moved"][0]) if res["moved"] else "the trash"
+    print(f"  {args.shot} {pass_} t{take:02d}: moved {len(res['moved'])} file(s) to {where}"
+          + ("; the cut no longer picks it (latest usable take)" if res["cut_changed"] else ""))
+    return 0
+
+
 def cmd_override(root: str, argv: list[str]) -> int:
     ap = argparse.ArgumentParser(prog="h3.py override")
     ap.add_argument("shot", nargs="?", help="the shot (not needed with only --episode-target)")
@@ -1511,9 +1597,7 @@ def _keyframe_action(R, root: str, args, pass_: str, which: str) -> int:
                 req = R.GenRequest(f"shot:{sh}:{w}", target=args.target, pass_=pass_)
                 if args.dry_run:
                     (job,) = R.plan_generate(s, req, ready=R.target_ready(listing))
-                    refs = ", ".join(f"{r.get('subject') or r.get('location')}"
-                                     f"{' ' + r['view'] if r.get('view') else ''}"
-                                     for r in job.references)
+                    refs = R.references_text(job.references)
                     print(f"  shot:{sh}:{w}: {job.target.id} at {job.width}x{job.height}"
                           f" (renders {job.render_size[0]}x{job.render_size[1]} on "
                           f"{job.video_target}), seed {job.seed}"
@@ -1535,4 +1619,4 @@ def _keyframe_action(R, root: str, args, pass_: str, which: str) -> int:
 
 
 COMMANDS = {"takes": cmd_takes, "pick": cmd_pick, "override": cmd_override,
-            "keyframe": cmd_keyframe}
+            "keyframe": cmd_keyframe, "discard": cmd_discard}

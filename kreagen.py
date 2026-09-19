@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-kreagen.py — generate every missing H3 reference image on a local ComfyUI, as
+kreagen.py — generate every missing reference image on a local ComfyUI, as
 ref takes (h3refs.py), and put each one at the path the series config names.
 
     python3 kreagen.py --project-root .
@@ -8,6 +8,9 @@ ref takes (h3refs.py), and put each one at the path the series config names.
     python3 kreagen.py --project-root . --all            # every ref in the series config
     python3 kreagen.py --project-root . --list
     python3 kreagen.py --project-root . --dry-run
+    python3 kreagen.py --project-root . --clear location:kitchen     # unpick a ref
+    python3 kreagen.py --project-root . --discard subject:ada:02_side:3
+                                                     # a candidate to refs/_takes/_trash/
 
 Reads  <project_root>/refs_todo.json (what this episode uses; --all: every ref)
        and series.json, the series config (in the episode folder or its parent)
@@ -32,8 +35,11 @@ subject whose `sheet` is the path, whatever the file is called.
 
 Voice samples are skipped; they are not images.
 
-The graph is krea2_refs_t2i.json (the copy saved in the running ComfyUI, else
-this repo's), or a built-in krea2 turbo graph. Its SaveImage is replaced by the
+The image target (--target, else the episode's: the editor's choice, the series
+config's refs.target, else krea2) decides the graph, and the banner names it. For
+krea2 it is krea2_refs_t2i.json (the copy saved in the running ComfyUI, else
+this repo's), or a built-in krea2 turbo graph; any other target uses its own
+workflow (targets/image/<id>/). Its SaveImage is replaced by the
 node pack's H3SaveRefTake, which writes the take and closes its sidecar; on a
 ComfyUI whose node pack predates that node, SaveImage stays and kreagen fetches
 the image over HTTP. When a LoRA is given, the text encoder reads the LoRA's
@@ -117,6 +123,36 @@ def job_name(j: dict, job: R.GenJob) -> str:
     return f"{j['name']}:{job.view}" if job.view else j["name"]
 
 
+def parse_discard(spec: str) -> tuple[str, str | None, int]:
+    """REF[:VIEW]:TAKE -> (ref id, view or None, take). ValueError if malformed."""
+    rid, _, tk = spec.rpartition(":")
+    if not rid or not re.fullmatch(r"[tT]?\d+", tk):
+        raise ValueError(f"--discard takes REF[:VIEW]:TAKE (e.g. location:kitchen:3), "
+                         f"not {spec!r}")
+    view = None
+    m = re.fullmatch(r"(subject:[^:]+):(\d\d_[a-z]+)", rid)
+    if m:
+        rid, view = m.group(1), m.group(2)
+    return rid, view, int(tk.lstrip("tT"))
+
+
+def discard(s, ep: str, specs: list[str]) -> int:
+    """kreagen --discard: move each candidate to refs/_takes/_trash/."""
+    failed = 0
+    for spec in specs:
+        try:
+            rid, view, take = parse_discard(spec)
+            res = R.discard_take(s, R.find_ref(s, rid), view, take)
+        except (ValueError, R.UnknownRef, R.T.StillQueued) as e:
+            print(f"  !! {spec}: {e}")
+            failed += 1
+            continue
+        where = os.path.relpath(os.path.dirname(res.moved[0]), ep) if res.moved else "the trash"
+        print(f"  {spec}: moved {len(res.moved)} file(s) to {where}"
+              + ("; it was the pick, so the ref is cleared" if res.cleared else ""))
+    return 1 if failed else 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -156,6 +192,10 @@ def main() -> int:
                     help="unpick a ref (e.g. location:kitchen, subject:ada:02_side): its file "
                          "goes, the takes stay, and nothing re-picks it until you pick; "
                          "repeatable")
+    ap.add_argument("--discard", metavar="REF[:VIEW]:TAKE", action="append",
+                    help="move a candidate to refs/_takes/_trash/ (e.g. location:kitchen:3, "
+                         "subject:ada:02_side:2, shot:sh020:first:1); nothing is deleted, and "
+                         "if it was the pick the ref is cleared as --clear does; repeatable")
     ap.add_argument("--negative-file",
                     help="text file with a negative prompt; only bites at --cfg > 1, so "
                          "it is for non-distilled models, not krea2 turbo")
@@ -186,8 +226,11 @@ def main() -> int:
     except ValueError as e:
         print(f"error: series.json: {e}", file=sys.stderr)
         return 1
+    if args.discard:
+        return discard(s, ep, args.discard)
+
     todo = None
-    if not args.all:
+    if not args.all and not args.clear:
         todo_p = os.path.join(root, "refs_todo.json")
         if not os.path.isfile(todo_p):
             print(f"error: {todo_p} not found. Run h3build first (or pass --all to work "
@@ -239,12 +282,29 @@ def main() -> int:
         except Exception as e:
             print(f"  ! {REFS_WORKFLOW} could not be read ({e}) — using the built-in graph")
             base, wf = None, ""
+    # The banner names the graph the refs actually render with: the image
+    # target --target names, else the episode's (the editor's choice, the
+    # series config's refs.target, else krea2). A ref's own override can
+    # still pick another; its job line says so.
+    graphs: dict = {}
+    try:
+        tgt = R.TG.load_target(args.target or R.image_defaults(s)["target"], "image")
+    except (R.RefError, R.TG.TargetError, ValueError) as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 1
+    if tgt.id == R.TG.DEFAULT_IMAGE_TARGET:
+        graph = wf if wf else f"built-in ({UNET})"
+    else:
+        try:
+            graphs[tgt.id], twf = R.resolve_workflow(args.comfy, None, tgt)
+            graph = twf
+        except Exception as e:
+            graph = f"{tgt.id}: its workflow could not be read ({e})"
 
     print(f"\n  {len(jobs)} asset(s) · comfy {args.comfy} · "
           f"{args.steps or 'preset'} steps · cfg "
-          f"{args.cfg if args.cfg is not None else 'preset'}"
-          f"{' · ' + args.target if args.target else ''}\n"
-          f"  graph {wf if wf else 'built-in (' + UNET + ')'}\n"
+          f"{args.cfg if args.cfg is not None else 'preset'} · {tgt.id}\n"
+          f"  graph {graph}\n"
           f"  {'-' * 62}")
     todo_now = []
     for j in jobs:
@@ -286,7 +346,6 @@ def main() -> int:
 
     listing = J.model_lister(comfy)
     cache = R.TG.modelid.temp_cache()
-    graphs: dict = {}
     failed = []
     for j in todo_now:
         r = j["ref"]

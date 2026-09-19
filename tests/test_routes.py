@@ -114,6 +114,54 @@ class RoutesTest(unittest.TestCase):
             self.assertEqual(await r.json(), [])
         self.run_client(fn)
 
+    def test_multipart_import(self):
+        """POST /h3pipe/refs/import as multipart/form-data (Phase 8.6): the file
+        is streamed to a temporary file, imported, and the temporary file goes."""
+        from aiohttp import FormData
+        from test_render import FIXTURE, png_bytes
+        shutil.copy(os.path.join(FIXTURE, "series.json"), self.ep)
+        uploads = []
+        real_mkstemp = tempfile.mkstemp
+
+        def mkstemp(*a, **kw):
+            fd, p = real_mkstemp(*a, **kw)
+            if os.path.basename(p).startswith("h3pipe_upload_"):
+                uploads.append(p)
+            return fd, p
+
+        def form(name, data, **fields):
+            f = FormData()
+            for k, v in dict({"ep": self.ep, "ref": "location:kitchen"}, **fields).items():
+                f.add_field(k, v)
+            f.add_field("file", data, filename=name, content_type="application/octet-stream")
+            return f
+
+        async def fn(c):
+            r = await c.put("/h3pipe/config", json={"roots": [self.shows]})
+            self.assertEqual(r.status, 200)
+            with mock.patch.object(self.R.tempfile, "mkstemp", mkstemp):
+                r = await c.post("/h3pipe/refs/import",
+                                 data=form("Kitchen.png", png_bytes(8, 8), pick="1"))
+                self.assertEqual(r.status, 200, await r.text())
+                t = await r.json()
+                self.assertEqual((t["take"], t["original_name"]), (1, "Kitchen.png"))
+                self.assertTrue(os.path.isfile(os.path.join(self.ep, "refs", "_bg",
+                                                            "kitchen.png")))
+                r = await c.post("/h3pipe/refs/import", data=form("notes.txt", b"hello"))
+                self.assertEqual(r.status, 400)
+                with mock.patch.object(self.R.A, "MAX_UPLOAD", 100):
+                    r = await c.post("/h3pipe/refs/import",
+                                     data=form("big.png", png_bytes(64, 64, (1, 2, 3))))
+                    self.assertEqual(r.status, 413)
+            # the JSON form still works on the same route
+            r = await c.post("/h3pipe/refs/import", json={"ep": self.ep, "ref": "location:kitchen",
+                                                          "source_path": "rel.png"})
+            self.assertEqual(r.status, 400)
+            self.assertIn("absolute", (await r.json())["error"])
+        self.run_client(fn)
+        self.assertEqual(len(uploads), 3)
+        self.assertEqual([p for p in uploads if os.path.exists(p)], [])
+
     def test_models_through_folder_paths(self):
         """GET /h3pipe/models inside ComfyUI: the list and the paths come from
         folder_paths, the fingerprints are cached in the user folder."""

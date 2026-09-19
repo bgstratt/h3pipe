@@ -517,7 +517,11 @@ def picked_view_file(s: Series, subject: str, view: str) -> str | None:
     return t.paths.image if t is not None and os.path.isfile(t.paths.image) else None
 
 
-def reference_images(s: Series, sh, sq, target=None, limit: int | None = None) -> list[dict]:
+COMPOSITE_FIGURES = 4       # at most this many figures in a composed reference
+
+
+def reference_images(s: Series, sh, sq, target=None, limit: int | None = None,
+                     compose: bool | None = None) -> list[dict]:
     """The reference images an edit target reads for a keyframe of shot `sh`
     (ir.Shot, `sq` its ir.Sequence), in order: its characters (script
     order), then its props and vehicles, then the location plate, each only
@@ -526,11 +530,42 @@ def reference_images(s: Series, sh, sq, target=None, limit: int | None = None) -
     close-up, else the three-quarter body; its picked take of that view,
     else that panel cut out of its live 4-panel sheet (`crop`). Each is
     {"role": "subject" | "plate", "subject" | "location", "name", "kind",
-    "view"?, "path" (absolute), "crop"?: {"panels", "index"}}."""
+    "view"?, "path" (absolute), "crop"?: {"panels", "index"}}.
+
+    A single-reference target (max_refs 1: Kontext; `compose` None means
+    "when the target's max_refs is 1") with more than one of these gets ONE
+    composed reference instead: {"role": "composite", "kind": "composite",
+    "name", "parts": [the figures (at most COMPOSITE_FIGURES), then the
+    plate]}, with no `path` until stage_references composes it (the
+    figures pasted over the plate, comfy_nodes/h3_refsheet.py)."""
     if limit is None:
         limit = target.capabilities().get("max_refs", 0) if target is not None else 0
     if not limit:
         return []
+    if compose is None:
+        compose = (limit == 1 and target is not None
+                   and target.capabilities().get("max_refs") == 1)
+    out = _reference_parts(s, sh, sq)
+    if compose and limit == 1 and len(out) > 1:
+        figures = [r for r in out if r["role"] == "subject"][:COMPOSITE_FIGURES]
+        plate = [r for r in out if r["role"] == "plate"]
+        name = _and_names([r["name"] for r in figures])
+        if plate:
+            name = f"{name} over {plate[0]['name']}" if figures else plate[0]["name"]
+        return [{"role": "composite", "kind": "composite", "name": name,
+                 "parts": figures + plate}]
+    return out[:limit]
+
+
+def _and_names(names: list[str]) -> str:
+    if len(names) <= 1:
+        return "".join(names)
+    return ", ".join(names[:-1]) + " and " + names[-1]
+
+
+def _reference_parts(s: Series, sh, sq) -> list[dict]:
+    """Every reference image a keyframe of `sh` could read (reference_images'
+    order and rules, before `limit`)."""
     book = s.series_cfg["subjects"]
     subjects = list(sh.cast) + [p for p in sh.props if p not in sh.cast]
     chars = [x for x in subjects if (book.get(x) or {}).get("kind", "character") == "character"]
@@ -563,7 +598,7 @@ def reference_images(s: Series, sh, sq, target=None, limit: int | None = None) -
     if loc.get("plate") and os.path.isfile(ref_file(s.home, loc["plate"])):
         out.append({"role": "plate", "location": loc_key, "name": loc.get("name", loc_key),
                     "kind": "plate", "path": ref_file(s.home, loc["plate"])})
-    return out[:limit]
+    return out
 
 
 def keyframe_prompt(s: Series, ref: Ref, target=None, refs: list[dict] | None = None
@@ -719,6 +754,11 @@ def takes_dir(ref: Ref) -> str:
     return os.path.join(ref.home, "refs", "_takes", ref.key)
 
 
+def trash_dir(ref: Ref) -> str:
+    """Where a ref's discarded takes go: refs/_takes/_trash/<key>/."""
+    return os.path.join(ref.home, "refs", "_takes", T.TRASH, ref.key)
+
+
 def take_base(ref: Ref, view: str | None) -> str:
     return f"{ref.key}_{view}" if view else ref.key
 
@@ -766,7 +806,9 @@ def reserve_take(ref: Ref, view: str | None, sidecar: dict,
         (nums[-1] + 1) if nums else 1,
         lambda k: os.path.join(d, f"{base}_t{k:02d}.json"),
         lambda k: dict(sidecar, version=T.SIDECAR_VERSION, ref=ref.id, view=view, take=k,
-                       image=f"{base}_t{k:02d}{ext}"))
+                       image=f"{base}_t{k:02d}{ext}"),
+        # a discarded take's number is not given out again
+        taken=lambda k: T.in_trash(trash_dir(ref), f"{base}_t{k:02d}"))
     return _take_from(ref, view, n, data)
 
 
@@ -1135,6 +1177,35 @@ def clear_pick(s: Series, ref: Ref, view: str | None = None) -> ClearResult:
     return ClearResult(ref, view, removed, was)
 
 
+@dataclass
+class DiscardResult:
+    take: RefTake
+    moved: list[str]                 # where the files went
+    cleared: ClearResult | None      # it was the pick: the ref (the view) was cleared
+
+
+def discard_take(s: Series, ref: Ref, view: str | None, take: int) -> DiscardResult:
+    """Move a candidate (its sidecar and its image or audio) to
+    refs/_takes/_trash/<key>/, names kept: nothing lists it, its number is
+    not given out again, and it can be put back by hand. If it is the ref's
+    (the view's) pick, the ref is cleared as clear_pick does. Raises
+    UnknownRef (no such take), T.StillQueued (queued: let it finish first)."""
+    view = check_view(ref, view, required=True)
+    t = get_take(ref, view, take)
+    if t.status == "queued":
+        raise T.StillQueued(f"{ref.id}{' ' + view if view else ''} t{take:02d} is queued: "
+                            f"let it finish first")
+    cleared = None
+    if not ref.is_audio and picked_take(load_picks(ref.home), ref.id, view) == take:
+        cleared = clear_pick(s, ref, view)
+    files = set(T.stem_files(takes_dir(ref), f"{take_base(ref, view)}_t{take:02d}"))
+    for p in (t.paths.sidecar, t.paths.image):
+        if os.path.isfile(p):
+            files.add(os.path.abspath(p))
+    moved = T.discard_files(sorted(files), trash_dir(ref))
+    return DiscardResult(t, moved, cleared)
+
+
 def mksheet_path() -> str:
     return os.path.join(os.path.dirname(os.path.abspath(__file__)), "mksheet.py")
 
@@ -1170,9 +1241,23 @@ def stitch_sheet(views: list[str], out: str, panel_height: int = 1024,
 # import
 # ---------------------------------------------------------------------------
 
+def check_import_type(ref: Ref, name: str) -> str:
+    """The extension a file called `name` is imported with (lower case), or
+    RefError when this ref can't use that kind of file."""
+    ext = os.path.splitext(name or "")[1].lower()
+    allowed = AUDIO_EXTS if ref.is_audio else IMAGE_EXTS
+    if ext not in allowed:
+        raise RefError(f"{ref.id} takes {'audio' if ref.is_audio else 'an image'} "
+                       f"({', '.join(allowed)}), not {ext or 'a file with no extension'}")
+    return ext
+
+
 def import_take(s: Series, ref: Ref, view: str | None, source_path: str,
-                note: str = "") -> RefTake:
-    """Add a file from disk as a new take (source "imported"), status ok."""
+                note: str = "", original_name: str | None = None) -> RefTake:
+    """Add a file from disk as a new take (source "imported"), status ok.
+    `original_name` is an upload's own file name (POST /h3pipe/refs/import
+    as multipart): `source_path` is then the upload's temporary file, which
+    is not recorded, and the type is judged by the original name."""
     view = check_view(ref, view, required=True)
     if not isinstance(source_path, str) or not source_path:
         raise RefError("source_path is required: a file on this machine")
@@ -1180,13 +1265,11 @@ def import_take(s: Series, ref: Ref, view: str | None, source_path: str,
         raise RefError(f"source_path must be absolute, not {source_path!r}")
     if not os.path.isfile(source_path):
         raise FileNotFoundError(f"no file at {source_path}")
-    ext = os.path.splitext(source_path)[1].lower()
-    allowed = AUDIO_EXTS if ref.is_audio else IMAGE_EXTS
-    if ext not in allowed:
-        raise RefError(f"{ref.id} takes {'audio' if ref.is_audio else 'an image'} "
-                       f"({', '.join(allowed)}), not {ext or 'a file with no extension'}")
+    ext = check_import_type(ref, original_name or source_path)
+    origin = ({"source_path": None, "original_name": os.path.basename(original_name)}
+              if original_name else {"source_path": source_path})
     t = reserve_take(ref, view, {"status": "queued", "queued": T.now(), "ep": s.ep,
-                                 "source": "imported", "source_path": source_path,
+                                 "source": "imported", **origin,
                                  "comfy_prompt_id": None, "seed": None, "seed_source": None,
                                  "prompt": None, "model": None, "loras": None,
                                  "steps": None, "note": note}, ext=ext)
@@ -1198,7 +1281,9 @@ def import_take(s: Series, ref: Ref, view: str | None, source_path: str,
     wh = (None, None) if ref.is_audio else (image_size(t.paths.image) or (None, None))
     t.sidecar = T.update_sidecar(t.paths.sidecar, status="ok", finished=T.now(),
                                  width=wh[0], height=wh[1],
-                                 save_notes=f"imported from {source_path}")
+                                 save_notes=(f"uploaded as {os.path.basename(original_name)}"
+                                             if original_name
+                                             else f"imported from {source_path}"))
     return t
 
 
@@ -1582,6 +1667,29 @@ def plan_generate(s: Series, req: GenRequest, overrides: dict | None = None,
     return jobs
 
 
+def reference_record(s: Series, r: dict) -> dict:
+    """A reference image as a ref take's sidecar records it: its path relative
+    to the episode and its sha1 (a composite's parts too; a composite not
+    composed, in a dry run, has path and sha1 null)."""
+    out = {k: v for k, v in r.items() if k not in ("tmp", "parts")}
+    path = r.get("path")
+    out.update(path=ep_rel(s.ep, path) if path else None,
+               sha1=T.file_sha1(path) if path else None)
+    if r.get("parts"):
+        out["parts"] = [reference_record(s, p) for p in r["parts"]]
+    return out
+
+
+def references_text(refs: list[dict]) -> str:
+    """The reference images in one line, for the CLI's dry runs."""
+    def one(r):
+        if r.get("role") == "composite":
+            return "one image composed of " + references_text(r.get("parts") or [])
+        return (f"{r.get('subject') or r.get('location')}"
+                f"{' ' + r['view'] if r.get('view') else ''}")
+    return ", ".join(one(r) for r in refs)
+
+
 def start_gen(s: Series, job: GenJob) -> RefTake:
     """Reserve the take and write its `queued` sidecar. No ComfyUI yet."""
     extra = {}
@@ -1590,10 +1698,7 @@ def start_gen(s: Series, job: GenJob) -> RefTake:
     if job.negative_source != "none":
         extra.update(negative=job.negative, negative_source=job.negative_source)
     if job.references:
-        extra["references"] = [
-            {k: v for k, v in dict(r, path=ep_rel(s.ep, r["path"]),
-                                   sha1=T.file_sha1(r["path"])).items() if k != "tmp"}
-            for r in job.references]
+        extra["references"] = [reference_record(s, r) for r in job.references]
     if job.inputs:
         extra["inputs"] = dict(job.inputs)
     if job.render_size:
@@ -1752,6 +1857,58 @@ def resolve_job_models(job: GenJob, listing, resolve=None, cache=None,
     return r["blocked"]
 
 
+COMPOSITE_FIGURE_HEIGHT = 2 / 3     # a composed reference's figures, of the frame's height
+COMPOSITES = "_composites"          # refs/_takes/<key>/_composites/<sha1>.png
+
+
+def compose_composite(s: Series, job: GenJob) -> None:
+    """Compose a job's single composite reference (reference_images): its
+    figures side by side over the plate, bottom-aligned, about two thirds of
+    the frame's height, at the job's size (comfy_nodes/h3_refsheet.py, run as
+    a PIL subprocess of this Python). The file is kept, named by its sha1, in
+    refs/_takes/<key>/_composites/, and becomes the reference's `path`.
+
+    A Python without PIL (a CLI run outside ComfyUI) can't compose: the job
+    falls back to the first part alone (the first character, else the plate),
+    its prompt is rewritten for that one reference (unless overridden) and a
+    note says so."""
+    from targets.video.ltx2_ingredients import sheet as SH
+    comp = job.references[0]
+    parts = comp.get("parts") or []
+    figures = [p for p in parts if p.get("role") != "plate"]
+    plate = next((p for p in parts if p.get("role") == "plate"), None)
+    d = os.path.join(takes_dir(job.ref), COMPOSITES)
+    os.makedirs(d, exist_ok=True)
+    tmp = os.path.join(d, f".tmp_{uuid.uuid4().hex}.png")
+    spec = {"mode": "composite", "width": job.width, "height": job.height,
+            "background": "white", "figure_height": COMPOSITE_FIGURE_HEIGHT,
+            "plate": ({"path": os.path.abspath(plate["path"])} if plate else None),
+            "figures": [{"path": os.path.abspath(f["path"]),
+                         **({"crop": f["crop"]} if f.get("crop") else {})} for f in figures]}
+    try:
+        SH.compose(spec, tmp)
+        out = os.path.join(d, f"{T.file_sha1(tmp)}.png")
+        os.replace(tmp, out)
+        comp["path"] = out
+    except SH.SheetError as e:
+        # a view cut from a sheet needs PIL too: an uncut figure, else the plate
+        first = dict(next((f for f in figures if not f.get("crop")), None)
+                     or plate or figures[0])
+        was = job.ref.kind == "keyframe" and job.prompt == keyframe_prompt(
+            s, job.ref, job.target, [comp])
+        job.references = [first]
+        job.notes.append(f"couldn't compose one reference from {len(parts)} ({e}); "
+                         f"sent {first['name']} alone")
+        if was:                                           # not a typed or override prompt
+            job.prompt = keyframe_prompt(s, job.ref, job.target, job.references)
+    finally:
+        if os.path.isfile(tmp):
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+
+
 def stage_references(s: Series, job: GenJob, comfy=None) -> dict:
     """Upload a job's reference images to ComfyUI's input folder
     (h3pipe/<sha1>.png, through POST /upload/image) and record their names in
@@ -1762,6 +1919,11 @@ def stage_references(s: Series, job: GenJob, comfy=None) -> dict:
     if not job.references:
         job.inputs = {}
         return {}
+    if job.references[0].get("role") == "composite":
+        if comfy is None:
+            job.inputs = {"references": [f"{J.INPUT_SUBFOLDER}/dry_run_composite.png"]}
+            return job.inputs
+        compose_composite(s, job)
     names = []
     for r in job.references:
         path = r["path"]
@@ -1952,6 +2114,50 @@ class FillResult:
     take: int | None = None
 
 
+@dataclass
+class KeyframePlan:
+    method: str                      # skip | import | continuity | generate
+    detail: str = ""                 # skip: why; import: the script's path
+    path: str | None = None          # import: the file
+    source: T.Take | None = None     # continuity: the video take the frame comes from
+    fallback: str = ""               # generate after continuity: why there is no frame
+
+
+def keyframe_plan(s: Series, shot: str, which: str, pass_: str = "proxy",
+                  need: dict | None = None) -> KeyframePlan:
+    """How "generate missing" fills one keyframe (keyframe_needs' method):
+    `continuity` when the neighbouring shot has a usable take in the pass's
+    cut (keyframe_source), else `generate` (with `fallback` saying why); a
+    script path is `import`; `none`, or `import` with no path, is `skip`.
+    Shared by the CLI (fill_keyframe) and the route (generate_missing)."""
+    if need is None:
+        need = keyframe_needs(s.ep).get((shot, which)) or {"method": "generate"}
+    method = need["method"]
+    if method == "none":
+        return KeyframePlan("skip", "the script says none")
+    if method == "import" and need.get("import_path"):
+        src = need["import_path"]
+        full = src if os.path.isabs(src) else os.path.normpath(os.path.join(s.ep, src))
+        return KeyframePlan("import", src, path=full)
+    if method == "import":
+        return KeyframePlan("skip", "the script says import: import one (the editor, or "
+                                    "POST /h3pipe/refs/import)")
+    if method == "continuity":
+        try:
+            src, _ = keyframe_source(s, shot, which, pass_)
+            return KeyframePlan("continuity", source=src)
+        except (NotUsable, RefError, UnknownRef) as e:
+            return KeyframePlan("generate", fallback=str(e))
+    return KeyframePlan("generate")
+
+
+def import_keyframe(s: Series, ref: Ref, plan: KeyframePlan) -> RefTake:
+    """Import the script's file for a keyframe (plan.method "import") and pick it."""
+    t = import_take(s, ref, None, plan.path, note="from the script's line")
+    pick_take(s, ref, None, t.take)
+    return t
+
+
 def fill_keyframe(s: Series, shot: str, which: str, comfy=None, pass_: str = "proxy",
                   base=None, listing=None, resolve=None, cache=None, dry_run: bool = False,
                   target: str | None = None, timeout: float = 900, log=print) -> FillResult:
@@ -1961,41 +2167,34 @@ def fill_keyframe(s: Series, shot: str, which: str, comfy=None, pass_: str = "pr
     path in the script is imported; `generate` makes a still with the
     keyframe image target (generate_and_wait, the size of the shot in
     `pass_`). A dry run says what it would do, and the prompt."""
-    need = keyframe_needs(s.ep).get((shot, which)) or {"method": "generate"}
     ref = find_ref(s, f"shot:{shot}:{which}")
-    method = need["method"]
-    if method == "none":
-        return FillResult(ref.id, "skip", "the script says none")
-    if method == "import" and need.get("import_path"):
-        src = need["import_path"]
-        full = src if os.path.isabs(src) else os.path.normpath(os.path.join(s.ep, src))
+    plan = keyframe_plan(s, shot, which, pass_)
+    if plan.method == "skip":
+        return FillResult(ref.id, "skip", plan.detail)
+    if plan.method == "import":
         if dry_run:
-            return FillResult(ref.id, "import", f"would import {full}")
-        t = import_take(s, ref, None, full, note="from the script's line")
-        pick_take(s, ref, None, t.take)
-        return FillResult(ref.id, "import", f"imported {src}", t.take)
-    if method == "import":
-        return FillResult(ref.id, "skip", "the script says import: import one (the editor, "
-                                          "or POST /h3pipe/refs/import)")
-    if method == "continuity":
+            return FillResult(ref.id, "import", f"would import {plan.path}")
+        t = import_keyframe(s, ref, plan)
+        return FillResult(ref.id, "import", f"imported {plan.detail}", t.take)
+    if plan.method == "continuity":
+        if dry_run:
+            return FillResult(ref.id, "continuity",
+                              f"would cut the {'last' if which == 'first' else 'first'} "
+                              f"frame of {plan.source.shot} {pass_} t{plan.source.take:02d}")
         try:
-            src, _ = keyframe_source(s, shot, which, pass_)
-            if dry_run:
-                return FillResult(ref.id, "continuity",
-                                  f"would cut the {'last' if which == 'first' else 'first'} "
-                                  f"frame of {src.shot} {pass_} t{src.take:02d}")
             res = keyframe_from_take(s, shot, which, pass_=pass_)
             return FillResult(ref.id, "continuity",
                               f"frame {res.source['frame']} of {res.source['shot']} "
                               f"t{res.source['take']:02d}"
                               + ("" if res.picked else " (not picked)"), res.take.take)
         except (NotUsable, RefError, UnknownRef) as e:
-            log(f"  .. {ref.id}: no continuity ({e}); generating a still instead")
+            plan.fallback = str(e)
+    if plan.fallback:
+        log(f"  .. {ref.id}: no continuity ({plan.fallback}); generating a still instead")
     req = GenRequest(ref.id, target=target, pass_=pass_)
     if dry_run:
         (job,) = plan_generate(s, req, rng=random.Random(0), ready=target_ready(listing))
-        refs = ", ".join(f"{r.get('subject') or r.get('location')}"
-                         f"{' ' + r['view'] if r.get('view') else ''}" for r in job.references)
+        refs = references_text(job.references)
         return FillResult(ref.id, "generate",
                           f"would generate with {job.target.id} at {job.width}x{job.height}"
                           + (f", references: {refs}" if refs else "") + f"\n{job.prompt}")
@@ -2019,6 +2218,146 @@ def missing_keyframes(s: Series) -> list[tuple[str, str, dict]]:
     return out
 
 
+MISSING_KINDS = ("series", "keyframe")
+
+
+def _waiting(takes: list[RefTake]) -> str | None:
+    """Why a ref with these takes needs no new candidate: one is queued, or
+    one has finished and waits to be picked (auto-pick takes it)."""
+    if any(t.status == "queued" for t in takes):
+        return "a candidate is queued"
+    if any(t.usable for t in takes):
+        return "a finished candidate is waiting to be picked"
+    return None
+
+
+def missing_series(s: Series, pass_: str = "proxy") -> tuple[list[tuple[Ref, str | None]],
+                                                             list[dict]]:
+    """The series refs "generate missing" queues: every one this episode
+    uses in `pass_` (used_by) with no live file, not cleared and with no
+    candidate queued or waiting, as [(ref, view)] (view None: the ref, or a
+    character's four views sharing a seed; else the views still missing),
+    and [{"ref", "view"?, "reason"}] for missing ones it leaves alone."""
+    refs = series_refs(s)
+    usage = used_by(s, refs)
+    todo, skipped = [], []
+    for ref in refs:
+        if not usage.get(ref.id, {}).get(pass_) or not ref.path or os.path.isfile(ref.file):
+            continue
+        why = can_generate(s, ref)
+        if why:
+            skipped.append({"ref": ref.id, "reason": why})
+            continue
+        picks = load_picks(ref.home)
+        if is_cleared(picks, ref.id):
+            skipped.append({"ref": ref.id, "reason": "cleared: pick a candidate to use one"})
+            continue
+        if not ref.has_views:
+            why = _waiting(list_takes(ref))
+            if why:
+                skipped.append({"ref": ref.id, "reason": why})
+            else:
+                todo.append((ref, None))
+            continue
+        need = []
+        for v in VIEW_TAGS:
+            if picked_take(picks, ref.id, v) is not None:
+                continue
+            why = ("cleared: pick a candidate to use one" if is_cleared(picks, ref.id, v)
+                   else _waiting(list_takes(ref, v)))
+            if why:
+                skipped.append({"ref": ref.id, "view": v, "reason": why})
+            else:
+                need.append(v)
+        if len(need) == len(VIEW_TAGS):
+            todo.append((ref, None))
+        else:
+            todo += [(ref, v) for v in need]
+    return todo, skipped
+
+
+def generate_missing(s: Series, comfy, pass_: str = "proxy", kinds=MISSING_KINDS,
+                     target: str | None = None, keyframe_target: str | None = None,
+                     dry_run: bool = False, base=None, listing=None, resolve=None,
+                     cache=None, save_node: bool = True) -> dict:
+    """POST /h3pipe/refs/generate-missing: fill every missing ref at once,
+    without waiting. Series refs (missing_series) get one candidate each
+    (queue_generate, the image target `target` or each ref's default);
+    needed keyframes (missing_keyframes: required ones and ones the script
+    asks for) are filled as `h3.py keyframe --missing` does (keyframe_plan):
+    a frame of the neighbouring shot's take (continuity, picked), else a
+    still queued with `keyframe_target`; a script path is imported and
+    picked. A keyframe with a candidate queued or waiting is skipped.
+
+    Returns {"queued": [{ref, view, take, prompt_id, seed, seed_source,
+    target, method}], "picked": [{ref, take, method}], "skipped": [{ref,
+    view?, reason}], "errors": [{ref, view?, error, ...}]}. A dry run returns
+    the same with nothing written or queued: take and prompt_id null."""
+    out = {"queued": [], "picked": [], "skipped": [], "errors": []}
+    ready = target_ready(listing)
+
+    def queue(ref: Ref, view, tid, method):
+        req = GenRequest(ref.id, view, target=tid, pass_=pass_, note="generate missing")
+        try:
+            if dry_run:
+                for job in plan_generate(s, req, rng=random.Random(0), ready=ready):
+                    out["queued"].append({
+                        "ref": ref.id, "view": job.view, "take": None, "prompt_id": None,
+                        "seed": job.seed if job.seed_source != "new" else None,
+                        "seed_source": job.seed_source, "target": job.target.id,
+                        "method": method})
+                return
+            res = queue_generate(s, req, comfy, base, save_node=save_node, listing=listing,
+                                 resolve=resolve, cache=cache)
+        except (RefError, UnknownRef) as e:
+            out["errors"].append({"ref": ref.id, "view": view, "error": str(e)})
+            return
+        out["queued"] += [dict(q, method=method) for q in res["queued"]]
+        out["errors"] += res["errors"]
+
+    if "series" in kinds:
+        todo, skipped = missing_series(s, pass_)
+        out["skipped"] += skipped
+        for ref, view in todo:
+            queue(ref, view, target, "generate")
+    if "keyframe" in kinds:
+        for shot, which, need in missing_keyframes(s):
+            ref = keyframe_ref(s.ep, shot, which)
+            why = _waiting(list_takes(ref))
+            if why:
+                out["skipped"].append({"ref": ref.id, "reason": why})
+                continue
+            plan = keyframe_plan(s, shot, which, pass_, need)
+            try:
+                if plan.method == "skip":
+                    out["skipped"].append({"ref": ref.id, "reason": plan.detail})
+                    continue
+                if plan.method == "import":
+                    t = None if dry_run else import_keyframe(s, ref, plan)
+                    out["picked"].append({"ref": ref.id, "take": t.take if t else None,
+                                          "method": "import"})
+                    continue
+                if plan.method == "continuity":
+                    if dry_run:
+                        out["picked"].append({"ref": ref.id, "take": None,
+                                              "method": "continuity"})
+                        continue
+                    try:
+                        # picked: the keyframe has no live file and isn't cleared
+                        res = keyframe_from_take(s, shot, which, pass_=pass_)
+                        out["picked"].append({"ref": ref.id, "take": res.take.take,
+                                              "method": "continuity"})
+                        continue
+                    except (NotUsable, RefError, UnknownRef):
+                        pass                              # no frame: a still instead
+            except (RefError, UnknownRef, NotUsable, FfmpegMissing, StitchError,
+                    OSError) as e:
+                out["errors"].append({"ref": ref.id, "view": None, "error": str(e)[:800]})
+                continue
+            queue(ref, None, keyframe_target, "generate")
+    return out
+
+
 # ---------------------------------------------------------------------------
 # sweeping: queued takes whose job is gone
 # ---------------------------------------------------------------------------
@@ -2036,6 +2375,8 @@ def all_takes(s: Series) -> list[RefTake]:
     out = []
     for home in homes(s):
         for sc_path in glob.glob(os.path.join(home, "refs", "_takes", "*", "*_t*.json")):
+            if os.path.basename(os.path.dirname(sc_path)) == T.TRASH:
+                continue                                  # discarded: never swept or listed
             data = T.read_sidecar(sc_path)
             m = re.search(r"_t(\d+)\.json$", sc_path)
             if not m:
@@ -2138,6 +2479,8 @@ def take_json(ep: str, ref: Ref, t: RefTake) -> dict:
             "queued": sc.get("queued"), "finished": sc.get("finished"),
             "comfy_prompt_id": sc.get("comfy_prompt_id"),
             "save_notes": sc.get("save_notes", ""),
+            # an upload's own file name (POST /h3pipe/refs/import, multipart)
+            **({"original_name": sc["original_name"]} if sc.get("original_name") else {}),
             # a keyframe cut out of a video take (source "frame")
             **({"from": {"shot": sc.get("source_shot"), "take": sc.get("source_take"),
                          "pass": sc.get("source_pass"), "frame": sc.get("source_frame"),
@@ -2171,8 +2514,10 @@ def edit_refs(s: Series, ref: Ref, target) -> list[dict]:
     sh, sq = shot_ir(s.ep, shot)
     if sh is None:
         return []
-    out = []
-    for r in reference_images(s, sh, sq, target):
+    def one(r):
+        if r["role"] == "composite":
+            return {"id": None, "role": "composite", "path": None, "name": r["name"],
+                    "parts": [one(p) for p in r["parts"]]}
         d = {"id": f"subject:{r['subject']}" if r["role"] == "subject"
              else f"location:{r['location']}", "role": r["role"],
              "path": ep_rel(s.ep, r["path"])}
@@ -2180,8 +2525,8 @@ def edit_refs(s: Series, ref: Ref, target) -> list[dict]:
             d["view"] = r["view"]
         if r.get("crop"):
             d["crop"] = dict(r["crop"])
-        out.append(d)
-    return out
+        return d
+    return [one(r) for r in reference_images(s, sh, sq, target)]
 
 
 def ref_json(s: Series, ref: Ref, usage: dict | None = None,

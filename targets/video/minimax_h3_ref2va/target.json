@@ -90,7 +90,7 @@
     },
     "proxy": {
       "lora": "minimax_h3_ref2v_lightx2v_turbo_4step_v0.1_resized_avg_rank_20_bf16.safetensors",
-      "steps": 4, "width": 480, "height": 272,
+      "steps": 4, "width": 512, "height": 288,
       "base": {"loras": [], "steps": 20, "sampler": "res_multistep"}
     }
   },

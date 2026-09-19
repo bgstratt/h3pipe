@@ -43,7 +43,7 @@ So each view is generated on its own at 1024×1024 and `mksheet.py` stitches
 them, which is exactly what mksheet's docstring says it's for: *"Generate the
 four views however you like… this assembles them into the one layout H3
 actually wants."* Four square panels stitch to exactly 4096×1024, which is the
-target h3build states.
+size hint h3build writes in refs_todo.
 
 The four views of one character share a seed, which is most of what keeps them
 on model. Per-view files land in `views/<char>/` so you can regenerate one bad

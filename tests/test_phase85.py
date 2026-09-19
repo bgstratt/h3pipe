@@ -58,6 +58,7 @@ def built(fixture: str, name: str) -> str:
 def tearDownModule():
     for ep in _BUILT.values():
         shutil.rmtree(os.path.dirname(ep), ignore_errors=True)
+    _BUILT.clear()                           # another module (test_phase86) may build again
 
 
 def write_png(path: str, w: int = 64, h: int = 64, rgb=(10, 20, 30)) -> str:
@@ -470,7 +471,9 @@ class KeyframeGenerateTest(Episode):
         self.assertEqual(out["errors"], [])
         g = self.comfy.graphs[-1]
         loads = [v["inputs"]["image"] for v in g.values() if v["class_type"] == "LoadImage"]
-        self.assertEqual(len(loads), 1)                    # Kontext: one reference, Ada
+        # Kontext: one reference (Phase 8.6: composed of Ada over the plate;
+        # test_phase86 has the rest)
+        self.assertEqual(len(loads), 1)
         self.assertEqual(J.check_graph(g, OBJECT_INFO), [])
         refs = {r["id"]: r for r in R.list_refs(self.ep)}
         ov = R.load_overrides(self.s.home)
@@ -479,8 +482,10 @@ class KeyframeGenerateTest(Episode):
         R.save_overrides(self.s.home, ov)
         r = R.ref_json(self.s, R.find_ref(self.s, "shot:sh020:first"))
         self.assertEqual(r["effective"]["target"], "flux_kontext")
-        self.assertEqual([(e["id"], e["role"]) for e in r["edit_refs"]],
-                         [("subject:ada", "subject")])
+        (comp,) = r["edit_refs"]
+        self.assertEqual(comp["role"], "composite")
+        self.assertEqual([(e["id"], e["role"]) for e in comp["parts"]][0],
+                         ("subject:ada", "subject"))
         self.assertTrue(refs["shot:sh020:first"]["can_generate"])
 
     def test_default_keyframe_target_and_t2i(self):

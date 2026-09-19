@@ -125,7 +125,7 @@ class PresetTest(unittest.TestCase):
                          (h3build.FINAL_MODEL, 8, 1344, 768))
         p = t.preset("proxy", {"series": {"model": "m.safetensors"}})
         self.assertEqual((p.model, p.lora, p.steps, p.width, p.height),
-                         ("m.safetensors", h3build.PROXY_LORA, 4, 480, 272))
+                         ("m.safetensors", h3build.PROXY_LORA, 4, 512, 288))
         p = t.preset("proxy", {"series": {}, "proxy": {"model": "p", "steps": 6, "width": 448}})
         self.assertEqual((p.model, p.steps, p.width), ("p", 6, 448))
         with self.assertRaises(KeyError):

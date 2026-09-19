@@ -1197,7 +1197,7 @@ episode target** is the contract; its "as built" notes list where the build diff
 - Generic loader node vs one loader per target. H3's loader does real work (panel
   cropping, audio policy). Start with per-target loaders; revisit after Phase 8.
 - Package name/layout: keep flat scripts as thin CLIs over a package, or restructure fully?
-- `h3plan.py` (legacy chained compiler): keep, move to `legacy/`, or delete?
+- ~~`h3plan.py` (legacy chained compiler): keep, move to `legacy/`, or delete?~~ Resolved: deleted 2026-09-19.
 - Where does the editor live: this repo (`comfy_nodes/` + `web/`) or its own repo?
 - Take cleanup: a "discard take" that moves files to `renders/_trash/` rather than deleting?
 - Layered LoRAs from several levels (series + profile + shot): does a lower level
