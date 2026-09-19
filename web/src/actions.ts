@@ -6,8 +6,11 @@ import { reachable, sameDir } from "./lib/browse";
 import { absPath, promptText, sameEp, tn } from "./lib/format";
 import { normPath, splitByMissingRefs } from "./lib/missingRefs";
 import { buildPlaylist, startOf, totalDuration, type PlayItem } from "./lib/playlist";
-import { keyframeRefId, keyframeSource, type KeyframeEnd } from "./lib/keyframes";
-import { hasViews, missingPlan, viewLabel, type RefFilter } from "./lib/refs";
+import { generateTarget, refDefaults, type RefTargetKind } from "./lib/imageTargets";
+import {
+  clearKeyframeText, clearSeriesRefText, isKeyframeRef, keyframeOf, keyframePlan, keyframeRefId, keyframeSource, type KeyframeEnd,
+} from "./lib/keyframes";
+import { hasViews, missingPlan, passesFilter, usedBy, viewLabel, type RefFilter } from "./lib/refs";
 import { folderPath, isMissingFileSkip, readinessOf, skipMissingFiles } from "./lib/readiness";
 import { overrideTargetValue, renderWarnings, seriesDefaultTarget, shotTarget } from "./lib/targets";
 import {
@@ -1159,11 +1162,11 @@ export function loadRefs(ep = get().ep): Promise<Ref[] | undefined> {
   const p = (async () => {
     set((s) => ({ refsLoading: { ...s.refsLoading, [ep]: true } }));
     try {
-      const { refs } = await api().refs(ep);
+      const { refs, defaults } = await api().refs(ep);
       set((s) => {
         const refsError = { ...s.refsError };
         delete refsError[ep];
-        return { refs: { ...s.refs, [ep]: refs }, refsError };
+        return { refs: { ...s.refs, [ep]: refs }, refsError, refDefaults: { ...s.refDefaults, [ep]: defaults ?? null } };
       });
       learnRefPrompts(ep, refs);
       return refs;
@@ -1262,37 +1265,145 @@ export async function generateMissing(): Promise<void> {
   const s = get();
   const ep = s.ep;
   if (!ep) return;
-  const plan = missingPlan(s.refs[ep] ?? [], s.pass);
-  if (!plan.length) {
+  const refs = s.refs[ep] ?? [];
+  const plan = missingPlan(refs, s.pass);
+  // Phase 8.5: keyframes too (required ones, optional ones the script asks for):
+  // continuity from the neighbour's take when that's the method and it has one, else a still
+  const kplan = keyframePlan(refs, s.status[statusKey(ep, s.pass)]);
+  if (!plan.length && !kplan.length) {
     host().toast("info", "Nothing to generate", "Every missing ref already has a candidate queued or waiting.");
     return;
   }
-  const views = plan.reduce((n, p) => n + (p.view == null && isCharacterRef(s.refs[ep], p.ref) ? 4 : 1), 0);
-  if (!confirm(`Generate ${plan.length} missing ref${plan.length > 1 ? "s" : ""} (${views} image${views > 1 ? "s" : ""}) on ComfyUI?\n\n`
-    + plan.map((p) => `• ${p.label}`).join("\n")
+  const views = plan.reduce((n, p) => n + (p.view == null && isCharacterRef(refs, p.ref) ? 4 : 1), 0) + kplan.filter((k) => k.mode === "generate").length;
+  const frames = kplan.filter((k) => k.mode === "continuity").length;
+  const total = plan.length + kplan.length;
+  if (!confirm(`Generate ${total} missing ref${total > 1 ? "s" : ""} (${views} image${views === 1 ? "" : "s"} on ComfyUI${frames ? `, ${frames} frame${frames > 1 ? "s" : ""} from neighbouring takes` : ""})?\n\n`
+    + [...plan.map((p) => `• ${p.label}`), ...kplan.map((k) => `• ${k.label}`)].join("\n")
     + "\n\nEach becomes live automatically when it finishes (you can pick another candidate later).")) return;
   await withBusy("refgen|missing", async () => {
     let queued = 0;
+    let cut = 0;
     const failed: string[] = [];
     const learned: Record<string, RefTakeRef> = {};
-    for (const p of plan) {
+    const gen = async (ref: string, view: string | null, label: string) => {
+      const r = refs.find((x) => x.id === ref);
+      const target = r ? refGenerateTarget(r) : null;
       try {
-        const r = await api().refsGenerate({
-          ep, ref: p.ref, view: p.view, count: 1, seed_mode: "auto", seed: null,
-          prompt: null, model: null, loras: null, steps: null, note: "generate missing",
+        const res = await api().refsGenerate({
+          ep, ref, view, count: 1, seed_mode: "auto", seed: null,
+          prompt: null, model: null, loras: null, steps: null, note: "generate missing", ...(target ? { target } : {}),
         });
-        for (const q of r.queued) learned[q.prompt_id] = { ep, ref: q.ref, view: q.view ?? null, take: q.take };
-        queued += r.queued.length;
-        for (const x of r.errors) failed.push(`${p.label}: ${x.error}`);
+        for (const q of res.queued) learned[q.prompt_id] = { ep, ref: q.ref, view: q.view ?? null, take: q.take };
+        queued += res.queued.length;
+        for (const x of res.errors) failed.push(`${label}: ${x.error}`);
       } catch (e) {
-        failed.push(`${p.label}: ${errText(e)}`);
+        failed.push(`${label}: ${errText(e)}`);
+      }
+    };
+    for (const p of plan) await gen(p.ref, p.view, p.label);
+    for (const k of kplan) {
+      if (k.mode === "generate") {
+        await gen(k.ref, null, k.label);
+        continue;
+      }
+      try {
+        await api().refsKeyframe({ ep, pass: s.pass, shot: k.shot, which: k.which, source_shot: null, source_take: null, frame: null, pick: null });
+        cut++;
+      } catch (e) {
+        failed.push(`${k.label}: ${errText(e)}`);
       }
     }
     set((st) => ({ refPrompts: { ...st.refPrompts, ...learned } }));
-    if (queued) host().toast("success", `Queued ${queued} image${queued > 1 ? "s" : ""} for ${plan.length - failed.length} missing ref${plan.length - failed.length === 1 ? "" : "s"}`, "They go live as they finish.");
+    const done = total - failed.length;
+    if (queued || cut) {
+      host().toast(
+        "success",
+        `${[queued ? `Queued ${queued} image${queued > 1 ? "s" : ""}` : "", cut ? `cut ${cut} keyframe${cut > 1 ? "s" : ""} from neighbouring takes` : ""].filter(Boolean).join(", ")} for ${done} missing ref${done === 1 ? "" : "s"}`,
+        queued ? "They go live as they finish." : undefined,
+      );
+    }
     if (failed.length) host().toast("error", `${failed.length} didn't queue`, failed.join("\n"));
     scheduleRefsRefresh(0);
+    if (cut) scheduleRefresh(0);
   });
+}
+
+/** The image target a generate of `r` should send (the Refs tab's session
+ * choice, unless the ref has its own override), or null. */
+export function refGenerateTarget(r: Ref): string | null {
+  const s = get();
+  const defaults = refDefaults(s.targets, s.ep ? s.refDefaults[s.ep] : null);
+  return generateTarget(r, defaults, s.refTargetChoice);
+}
+
+/** The Refs tab's image-model choice for this session (null: the series default). */
+export function setRefTargetChoice(kind: RefTargetKind, target: string | null) {
+  set((s) => ({ refTargetChoice: { ...s.refTargetChoice, [kind]: target } }));
+}
+
+/** A still for a shot's keyframe, with the keyframe image model. */
+export async function generateKeyframe(shot: string, which: KeyframeEnd = "first"): Promise<boolean> {
+  const ep = get().ep;
+  if (!ep) return false;
+  const id = keyframeRefId(shot, which);
+  const r = get().refs[ep]?.find((x) => x.id === id);
+  const target = r ? refGenerateTarget(r) : generateTarget({ id, kind: "keyframe", scope: "shot" }, refDefaults(get().targets, get().refDefaults[ep]), get().refTargetChoice);
+  set({ menu: null });
+  return generateRef({
+    ref: id, view: null, count: 1, seed_mode: "auto", seed: null, prompt: null, model: null, loras: null, steps: null, note: "",
+    ...(target ? { target } : {}),
+  });
+}
+
+/**
+ * Unpick a ref (DELETE /h3pipe/refs/pick): its live file goes, its candidates
+ * stay. For a keyframe this is Clear: the shot renders without one. Asks
+ * first (a series ref gets a stronger warning).
+ */
+export async function clearRef(ref: string, view: string | null = null, ask = true): Promise<boolean> {
+  const s = get();
+  const ep = s.ep;
+  if (!ep) return false;
+  const r = s.refs[ep]?.find((x) => x.id === ref);
+  const kf = isKeyframeRef(r ?? { id: ref, kind: "keyframe", scope: "shot" }) && /^shot:/.test(ref);
+  const text = kf
+    ? clearKeyframeText(r ?? { id: ref, need: null })
+    : clearSeriesRefText(refLabel(ref, view), r ? usedBy(r, s.pass).length : 0);
+  set({ menu: null });
+  if (ask && !confirm(text)) return false;
+  return withBusy(`refclear|${ref}`, async () => {
+    try {
+      const out = await api().refsUnpick(ep, ref, view);
+      if (out) replaceRef(ep, out);
+      const k = kf ? keyframeOf(r ?? { id: ref }) : null;
+      host().toast("info", kf && k ? `${k.shot}'s ${k.which} keyframe cleared` : `${refLabel(ref, view)} cleared`,
+        kf ? (r?.need === "required" ? `${k?.shot} can't render until it has one again.` : `${k?.shot} renders without it; its candidates stay.`) : "Its candidates stay; pick one to make it live again.");
+      scheduleRefsRefresh(0);
+      scheduleRefresh(0);
+      const shot = get().shot;
+      if (shot) void loadDetail(shot, get().pass, true, ep);
+      return true;
+    } catch (e) {
+      report(`Couldn't clear ${refLabel(ref, view)}`, e);
+      return false;
+    }
+  });
+}
+
+/** Open the Refs tab on one ref, scrolled to it and expanded. */
+export function focusRef(id: string) {
+  set((s) => ({
+    menu: null,
+    // keep the filter unless it would hide the ref
+    refsFilter: (() => {
+      const r = s.ep ? s.refs[s.ep]?.find((x) => x.id === id) : undefined;
+      return r && passesFilter(r, s.refsFilter, s.pass) ? s.refsFilter : "all";
+    })(),
+    refOpen: { ...s.refOpen, [id]: true },
+    refFocus: { id, n: (s.refFocus?.n ?? 0) + 1 },
+  }));
+  host().show("refs");
+  void loadRefs();
 }
 
 function isCharacterRef(refs: Ref[] | undefined, id: string): boolean {

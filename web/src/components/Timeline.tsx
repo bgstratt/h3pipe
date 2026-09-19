@@ -4,7 +4,9 @@ import {
   setZoom, showMissingRefs, toggleCutPlay,
 } from "../actions";
 import { host } from "../host";
-import { fmtClock, fmtSeconds, groupBySequence, shotBadges, shotSeconds, tn } from "../lib/format";
+import {
+  ESTIMATE_TITLE, fmtClock, fmtSeconds, fmtShotSeconds, groupBySequence, lengthEstimated, shotBadges, shotSeconds, tn,
+} from "../lib/format";
 import { missingRefsSummary } from "../lib/missingRefs";
 import { clipTake, locate } from "../lib/playlist";
 import { targetBadges } from "../lib/targets";
@@ -57,7 +59,7 @@ const Clip = memo(function Clip({ ep, pass, s, other, zoom, height, aspect, sele
   );
   const cls = ["h3-clip", selected && "h3-sel", s.cut.placeholder && "h3-placeholder", s.orphan && "h3-orphan"].filter(Boolean).join(" ");
   const title = [
-    `${s.shot} · ${fmtSeconds(secs)}${s.size ? ` · ${s.size}` : ""}`,
+    `${s.shot} · ${fmtShotSeconds(s, secs)}${s.size ? ` · ${s.size}` : ""}${lengthEstimated(s) ? `\n≈ ${ESTIMATE_TITLE}` : ""}`,
     take ? `${s.cut.placeholder ? `${s.cut.pass} ` : ""}${tn(take.take)} (${take.status})` : "no take in the cut",
     ...badges.map((b) => b.title),
     "click: select (jumps there while playing all) · double-click: viewer · right-click: menu",
@@ -93,6 +95,7 @@ const Clip = memo(function Clip({ ep, pass, s, other, zoom, height, aspect, sele
       )}
       <div className="h3-clip-bottom">
         <b>{s.shot}</b>
+        {lengthEstimated(s) && <span className="h3-est" title={ESTIMATE_TITLE}>≈</span>}
         {take && width > 60 && <span>{tn(take.take)}</span>}
       </div>
       {progress && <Progress value={progress.value} max={progress.max} />}

@@ -412,3 +412,23 @@
 .h3-table td { padding: 4px 6px; border-bottom: 1px solid color-mix(in srgb, var(--h3-border) 50%, transparent); max-width: 240px; }
 .h3-table tbody tr { cursor: pointer; }
 .h3-table tbody tr:hover { background: var(--h3-hover); }
+
+/* ---- Phase 8.5: refs, keyframes as needed refs ---- */
+.h3-warn { color: var(--h3-queued); }
+.h3-b-kf-required { color: var(--h3-failed); font-weight: 600; }
+.h3-b-kf-optional { color: var(--h3-muted); }
+.h3-kf-shot { border-top: 1px solid var(--h3-border); }
+.h3-kf-shot-head { padding: 3px 8px 0 22px; gap: 6px; }
+.h3-flash { outline: 2px solid var(--h3-accent); outline-offset: -2px; }
+.h3-est { color: var(--h3-queued); font-weight: 700; margin: 0 2px; cursor: help; }
+.h3-refs-used { display: flex; flex-wrap: wrap; gap: 6px; align-items: flex-start; }
+.h3-ru { display: flex; flex-direction: column; gap: 1px; width: 64px; border-radius: 4px; }
+.h3-ru-link { cursor: pointer; }
+.h3-ru-link:hover { background: var(--h3-hover); }
+.h3-ru .h3-thumb { border: 2px solid transparent; box-sizing: border-box; }
+.h3-ru-live .h3-thumb { border-color: var(--h3-ok); }
+.h3-ru-missing .h3-thumb { border-color: var(--h3-border); border-style: dashed; }
+.h3-ru-required .h3-thumb { border-color: var(--h3-failed); border-style: dashed; }
+.h3-ru-status { color: var(--h3-muted); }
+.h3-ru-live .h3-ru-status { color: var(--h3-ok); }
+.h3-ru-required .h3-ru-status { color: var(--h3-failed); }

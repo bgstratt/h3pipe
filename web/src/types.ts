@@ -101,6 +101,9 @@ export interface ShotStatus {
    * (a shot/sequence line or a profile), or the episode default. Absent from
    * older servers. */
   target_source?: ShotTargetSource | null;
+  /** Phase 8.5: the length is an estimate (`dur: model` before a take exists):
+   * the model decides it at render time. The UI marks it "≈". */
+  length_estimated?: boolean;
 }
 
 /** "series" / "default": the shot has no target of its own and follows the episode's
@@ -170,6 +173,9 @@ export interface Sidecar {
   note?: string;
   /** How each model param resolved to an installed file when the take was queued. */
   resolved?: Record<string, Resolution> | null;
+  /** Phase 8.5: the negative prompt the take rendered with, and where it came from */
+  negative?: string | null;
+  negative_source?: NegativeSource | null;
   [key: string]: unknown;
 }
 
@@ -182,6 +188,9 @@ export interface TakeDetail {
   stale: StaleReason[];
   sidecar: Sidecar | null;
   files: Partial<Record<TakeFileKind, string>>;
+  /** Phase 8.5: the reference sheet (or VACE reference) the take rendered
+   * with, relative to the episode, when it was kept. */
+  reference_image?: string | null;
 }
 
 /** A pass's effective override, as shot_detail returns it (no base_hash). */
@@ -192,9 +201,22 @@ export interface Override {
   loras?: Lora[] | null;
   steps?: number | null;
   note?: string | null;
-  /** Phase 8: the shot's video target, shared by both passes. */
+  /** Phase 8: the shot's video target, shared by both passes. (On a ref's
+   * override: the image target it generates with.) */
   target?: string | null;
+  /** Phase 8.5: the negative prompt, per pass (targets with a `negative` param). */
+  negative?: string | null;
+  /** Phase 8.5: a two-stage target's (Wan) low-noise model, per pass. */
+  model_low?: string | null;
 }
+
+/**
+ * Where a negative prompt comes from (API.md "Negatives"): the request, the
+ * shot's override, the episode's negative.txt, the series config, the target's
+ * preset. TODO(contract): the value strings aren't pinned down; lib/negative.ts
+ * reads the likely spellings.
+ */
+export type NegativeSource = "request" | "override" | "negative.txt" | "episode" | "series" | "preset" | (string & {});
 
 export interface Effective {
   prompt: string;
@@ -208,6 +230,28 @@ export interface Effective {
   width?: number | null;
   height?: number | null;
   length?: number | null;
+  /** Phase 8.5 (TODO(contract): only takes are said to record it): the
+   * negative a render would use now, and where it comes from. */
+  negative?: string | null;
+  negative_source?: NegativeSource | null;
+  /** a two-stage target's low-noise model a render would use now */
+  model_low?: string | null;
+}
+
+/** What a ref is to a shot (API.md "Inspector: the refs a shot uses"). */
+export type RefRole = "subject" | "plate" | "first" | "last" | "reference_sheet";
+
+/** One ref a shot's current target reads (`GET /h3pipe/shot` `refs_used`). */
+export interface RefUsed {
+  id: string;
+  kind: string;
+  role: RefRole | (string & {});
+  /** the live file, relative like a ref's `path` */
+  path: string | null;
+  exists: boolean;
+  need?: KeyframeNeed | null;
+  /** a small picture of it, when the server has one (else `path`) */
+  thumb?: string | null;
 }
 
 export interface ShotDetail {
@@ -224,6 +268,8 @@ export interface ShotDetail {
   target?: string | null;
   built_target?: string | null;
   profile?: string | null;
+  /** Phase 8.5: the refs the shot's current target reads. Absent from older servers. */
+  refs_used?: RefUsed[];
 }
 
 export interface BuildPassResult {
@@ -332,8 +378,12 @@ export interface OverrideFields {
   loras?: Lora[] | null;
   steps?: number | null;
   note?: string | null;
-  /** Phase 8: the shot's video target, shared by both passes; null = the built one. */
+  /** Phase 8: the shot's video target, shared by both passes; null = the built one.
+   * (A ref override: its image target.) */
   target?: string | null;
+  /** Phase 8.5: per pass; null clears */
+  negative?: string | null;
+  model_low?: string | null;
 }
 
 export interface OverrideRequest {
@@ -450,6 +500,8 @@ export interface RefTake {
   /** image size, once the saver or the import has written it */
   width?: number | null;
   height?: number | null;
+  /** Phase 8.5 (not in the contract's list): the image target it was generated with */
+  target?: string | null;
 }
 
 export interface RefView {
@@ -466,6 +518,30 @@ export interface RefEffective {
   model: string;
   loras: Lora[] | null;
   steps: number;
+  /** Phase 8.5 (TODO(contract)): the image target a generate uses now */
+  target?: string | null;
+}
+
+/** Phase 8.5: whether a shot's target needs a keyframe to render. */
+export type KeyframeNeed = "required" | "optional";
+/** How a keyframe is filled: the script's `first:` / `last:` line, else
+ * continuity (a shot with a previous shot), else generate. A path is also
+ * allowed (the script names a file). */
+export type KeyframeMethod = "continuity" | "generate" | "import" | "none" | (string & {});
+
+/** A reference image an edit target receives with a keyframe generate. */
+export interface EditRef {
+  id: string;
+  view?: string | null;
+  path?: string | null;
+}
+
+/** The series config's `refs` block, as the editor sees it. */
+export interface RefDefaults {
+  /** the image target series refs generate with */
+  target?: string | null;
+  /** the image target keyframes generate with */
+  keyframe_target?: string | null;
 }
 
 export interface Ref {
@@ -493,10 +569,27 @@ export interface Ref {
   override_values?: Override;
   effective?: RefEffective;
   built_prompt?: string;
+  // ---- Phase 8.5: keyframes as needed refs ----
+  /** required (e.g. Wan 14B I2V's first frame) or optional; absent from older
+   * servers, and null for a keyframe no target reads */
+  need?: KeyframeNeed | null;
+  method?: KeyframeMethod | null;
+  shot?: string | null;
+  which?: "first" | "last" | null;
+  /** a keyframe: the video target that will read it */
+  target?: string | null;
+  /** TODO(contract): the script's `first:` / `last:` line asks for this
+   * keyframe (so "missing" and Generate missing include it when optional). */
+  requested?: boolean;
+  /** TODO(contract): the references an edit target gets with a keyframe generate */
+  edit_refs?: EditRef[];
 }
 
 export interface RefList {
   refs: Ref[];
+  /** TODO(contract): the series config's `refs` defaults. Absent: the
+   * target list's image default, and the contract's keyframe rule. */
+  defaults?: RefDefaults;
 }
 
 export interface RefGenerateRequest {
@@ -511,6 +604,9 @@ export interface RefGenerateRequest {
   loras: Lora[] | null;
   steps: number | null;
   note: string;
+  /** Phase 8.5: an image target for this call, beating the ref's override and
+   * the series default. Only sent when set. */
+  target?: string | null;
 }
 
 export interface RefGenerateResult {
@@ -568,8 +664,9 @@ export interface RefEvent {
   ep: string;
   ref: string;
   view: string | null;
-  take: number;
-  status: TakeStatus;
+  take: number | null;
+  /** queued | ok | failed | picked, or cleared (DELETE /h3pipe/refs/pick) */
+  status: TakeStatus | "picked" | "cleared";
 }
 
 // ---------------------------------------------------------------------------
@@ -622,6 +719,12 @@ export interface Target {
     subject_refs?: boolean;
     prompt?: string;
     negative_prompt?: boolean;
+    /** Phase 8.5, image targets: text-to-image, or an edit with reference images */
+    mode?: "t2i" | "edit" | (string & {});
+    /** Phase 8.5, image edit targets: how many reference images it takes */
+    max_refs?: number;
+    /** Phase 8.5, video: the first keyframe is required (Wan 14B I2V) */
+    requires_first?: boolean;
     [key: string]: unknown;
   };
   template?: { fps?: number; frames?: { step?: number; base?: number; max?: number }; size_multiple?: number };

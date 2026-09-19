@@ -91,8 +91,37 @@ function svgSheet(name: string, views: string[]): string {
   return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
 }
 
+/** What the build says a shot's keyframe is (Phase 8.5), from its target and script. */
+export interface KeyframeNeedSpec {
+  shot: string;
+  which: "first" | "last";
+  need: "required" | "optional";
+  method: string;
+  target: string;
+  requested: boolean;
+}
+
+/** The image targets' presets the mock generates with. */
+const IMAGE_MODELS: Record<string, { model: string; steps: number }> = {
+  krea2: { model: MODEL, steps: STEPS },
+  z_image_turbo: { model: "z_image_turbo_bf16.safetensors", steps: 8 },
+  flux2_klein: { model: "flux2_klein_9b_fp8.safetensors", steps: 4 },
+  flux2_klein_edit: { model: "flux2_klein_9b_fp8.safetensors", steps: 4 },
+  flux_kontext: { model: "flux1-kontext-dev-fp8.safetensors", steps: 20 },
+  illustrious_sdxl: { model: "illustriousXL_v01.safetensors", steps: 8 },
+};
+export const MOCK_REF_DEFAULTS = { target: "krea2", keyframe_target: "flux2_klein_edit" };
+
 export interface MockRefs {
   list(): Ref[];
+  /** a ref's file state, for refs_used */
+  info(id: string): { path: string | null; exists: boolean; kind: string; sha1: string | null } | undefined;
+  /** the keyframes a shot needs now */
+  keyframeNeeds(shot: string): KeyframeNeedSpec[];
+  /** DELETE /h3pipe/refs/pick */
+  unpick(ref: string, view: string | null): Ref;
+  /** register a picture served by path (a take's reference image) */
+  addImage(path: string, url: string): void;
   missingFor(shot: string, index: number): MissingRef[];
   usedByShot(index: number): string[];
   image(path: string): string | undefined;
@@ -115,6 +144,8 @@ export function createMockRefs(opts: {
   enqueue: (job: () => Promise<void>) => void;
   nextPrompt: () => string;
   onLiveChange: (ref: string) => void;
+  /** Phase 8.5: every shot's keyframe needs now (they follow its target) */
+  needs?: () => KeyframeNeedSpec[];
 }): MockRefs {
   const seriesCfg = JSON.parse(seriesCfgRaw) as SeriesConfig;
   const look = seriesCfg.style?.look ?? "";
@@ -160,25 +191,66 @@ export function createMockRefs(opts: {
     return r;
   };
 
-  function effective(r: MRef): RefEffective {
+  function imageTarget(r: MRef): string {
+    return r.ov.target ?? (r.kind === "keyframe" ? MOCK_REF_DEFAULTS.keyframe_target : MOCK_REF_DEFAULTS.target);
+  }
+
+  function effective(r: MRef, target = imageTarget(r)): RefEffective {
+    const m = IMAGE_MODELS[target] ?? IMAGE_MODELS.krea2;
     return {
       prompt: typeof r.ov.prompt === "string" ? r.ov.prompt : r.base_prompt,
       seed: r.ov.seed ?? stableSeed(r.id),
-      model: r.ov.model ?? MODEL,
+      model: r.ov.model ?? m.model,
       loras: r.ov.loras !== undefined ? r.ov.loras ?? null : null,
-      steps: r.ov.steps ?? STEPS,
+      steps: r.ov.steps ?? m.steps,
+      target,
     };
   }
 
-  function addTake(r: MRef, view: string | null, opts: { status: RefTake["status"]; seed: string; source?: RefTake["source"]; note?: string; ext?: string; sourceName?: string }): RefTake {
+  /** A shot's keyframe ref, made on first use (no takes). */
+  function ensureKeyframe(shot: string, which: "first" | "last"): MRef {
+    const id = `shot:${shot}:${which}`;
+    let r = refs.find((x) => x.id === id);
+    if (!r) {
+      const base_prompt = `The ${which === "first" ? "opening" : "closing"} frame of ${shot}: ${look}. How the shot ${which === "first" ? "opens" : "ends"}, the location and the characters as designed.`;
+      r = {
+        id, scope: "shot", kind: "keyframe", name: `${shot} ${which} frame`, path: `refs/shots/${shot}/${which}.png`,
+        exists: false, sha1: null, used_by: { final: [], proxy: [] }, prompt: base_prompt, base_prompt,
+        override: { fields: [], stale: false }, ov: {}, takes: [], picked: null, can_generate: true,
+        shot, which,
+      };
+      refs.push(r);
+    }
+    return r;
+  }
+
+  /** Put the build's keyframe needs on the keyframe refs (listing needed ones before any take exists). */
+  function syncKeyframes() {
+    const needs = opts.needs?.() ?? [];
+    const byId = new Map(needs.map((n) => [`shot:${n.shot}:${n.which}`, n]));
+    for (const n of needs) ensureKeyframe(n.shot, n.which);
+    for (const r of refs) {
+      if (r.kind !== "keyframe") continue;
+      const n = byId.get(r.id);
+      r.need = n?.need ?? null;
+      r.method = n?.method ?? null;
+      r.target = n?.target ?? null;
+      r.requested = n?.requested ?? false;
+      r.used_by = n ? { final: [n.shot], proxy: [n.shot] } : { final: [], proxy: [] };
+    }
+  }
+
+  function addTake(r: MRef, view: string | null, opts: { status: RefTake["status"]; seed: string; source?: RefTake["source"]; note?: string; ext?: string; sourceName?: string; target?: string | null }): RefTake {
     const list = view ? r.views!.find((v) => v.view === view)!.takes : r.takes;
     const take = (list[list.length - 1]?.take ?? 0) + 1;
-    const eff = effective(r);
+    const eff = effective(r, opts.target ?? imageTarget(r));
+    const gen = opts.source !== "imported" && opts.source !== "frame";
     const t: RefTake = {
       take, status: opts.status, seed: opts.source === "imported" ? null : opts.seed, image: null,
-      source: opts.source ?? "generated", note: opts.note ?? "", prompt: opts.source === "imported" ? undefined : eff.prompt,
-      model: opts.source === "imported" ? undefined : eff.model, steps: opts.source === "imported" ? undefined : eff.steps,
+      source: opts.source ?? "generated", note: opts.note ?? "", prompt: gen ? eff.prompt : undefined,
+      model: gen ? eff.model : undefined, steps: gen ? eff.steps : undefined,
       loras: eff.loras, queued: new Date().toISOString(), finished: null, save_notes: "",
+      ...(gen ? { target: eff.target } : {}),
     };
     list.push(t);
     if (opts.status === "ok") finishTake(r, view, t, opts.ext, opts.sourceName);
@@ -189,7 +261,12 @@ export function createMockRefs(opts: {
     t.status = "ok";
     t.finished = new Date().toISOString();
     t.image = takePath(r, view, t.take, ext ?? (r.kind === "voice" ? "wav" : "png"));
-    if (r.kind !== "voice") {
+    if (r.kind === "keyframe") {
+      const sub = sourceName ? `imported: ${sourceName}` : `still · t${String(t.take).padStart(2, "0")} · ${t.target ?? ""}`;
+      images.set(t.image, svgImage(r.name, sub, `${t.seed ?? sourceName}`, "location", 448, 256));
+      t.width = 448;
+      t.height = 256;
+    } else if (r.kind !== "voice") {
       const sub = sourceName ? `imported: ${sourceName}` : `${view ? view.replace(/^\d+_/, "") + " · " : ""}t${String(t.take).padStart(2, "0")} · ${t.seed}`;
       images.set(t.image, svgImage(r.name, sub, `${t.seed ?? sourceName}${view ?? ""}`, r.kind));
     }
@@ -245,6 +322,11 @@ export function createMockRefs(opts: {
     va.picked = 1;
     va.exists = true;
     va.sha1 = "5eed0000";
+    // Phase 8.5: sh070 (Wan 2.2 I2V) has a generated first frame, live
+    const kf = ensureKeyframe("sh070", "first");
+    addTake(kf, null, { status: "ok", seed: seedOf(kf, 0) });
+    kf.picked = 1;
+    setLive(kf);
   }
 
   // ---- which refs each mock shot uses -----------------------------------------
@@ -310,7 +392,34 @@ export function createMockRefs(opts: {
   }
 
   return {
-    list: () => refs.map(view),
+    list: () => {
+      syncKeyframes();
+      return refs.map(view);
+    },
+    info(id) {
+      const r = refs.find((x) => x.id === id);
+      return r ? { path: r.path, exists: r.exists, kind: r.kind, sha1: r.sha1 } : undefined;
+    },
+    keyframeNeeds: (shot) => (opts.needs?.() ?? []).filter((n) => n.shot === shot),
+    addImage: (path, url) => void images.set(path, url),
+    unpick(ref, v) {
+      const r = byId(ref);
+      if (r.views && r.views.length) {
+        if (!v) throw new RefError(`${r.name} is a character: clear one view`, 400);
+        const rv = r.views.find((x) => x.view === v);
+        if (!rv) throw new RefError(`No view ${v}`, 404);
+        rv.picked = null;
+      } else {
+        r.picked = null;
+      }
+      r.exists = false;
+      r.sha1 = null;
+      if (r.path) images.delete(r.path);
+      opts.onLiveChange(r.id);
+      opts.emit("h3pipe.ref", { ep: opts.ep, ref: r.id, view: v, take: null, status: "cleared" });
+      syncKeyframes();
+      return view(r);
+    },
     usedByShot: (i) => usesOf(i).map((u) => u.ref),
     missingFor(_shot, i) {
       const out: MissingRef[] = [];
@@ -326,9 +435,11 @@ export function createMockRefs(opts: {
     },
     image: (path) => images.get(path),
     generate(req) {
-      const r = byId(req.ref);
+      const m = /^shot:(.+):(first|last)$/.exec(req.ref);
+      const r = m ? ensureKeyframe(m[1], m[2] as "first" | "last") : byId(req.ref);
       if (r.kind === "voice") throw new RefError("Nothing generates voices yet: import a recording.", 400);
-      if (req.count < 1 || req.count > 4) throw new RefError("count is 1 to 4", 400);
+      if (req.count < 1 || req.count > 16) throw new RefError("count is 1 to 16", 400);
+      if (req.target != null && !IMAGE_MODELS[req.target]) throw new RefError(`${req.target} isn't an image target`, 400);
       const views: (string | null)[] = r.views ? (req.view ? [req.view] : VIEWS.map((v) => v.view)) : [null];
       const out: RefGenerateResult = { queued: [], errors: [] };
       for (let c = 0; c < req.count; c++) {
@@ -338,7 +449,7 @@ export function createMockRefs(opts: {
           // count > 1: each candidate gets a new seed
           const seed: string = shared ?? pickSeed(r, list, req.seed_mode, req.seed, req.count > 1);
           shared = seed;
-          const t = addTake(r, v, { status: "queued", seed, note: req.note });
+          const t = addTake(r, v, { status: "queued", seed, note: req.note, target: req.target ?? null });
           // one-off settings for this call land in the candidate's record
           if (req.prompt != null) t.prompt = req.prompt;
           if (req.model != null) t.model = req.model;
@@ -391,16 +502,7 @@ export function createMockRefs(opts: {
     },
     keyframe(req) {
       const id = `shot:${req.shot}:${req.which}`;
-      let r = refs.find((x) => x.id === id);
-      if (!r) {
-        r = {
-          id, scope: "shot", kind: "keyframe", name: `${req.shot} ${req.which} frame`, path: `refs/shots/${req.shot}/${req.which}.png`,
-          exists: false, sha1: null, used_by: { final: [], proxy: [] }, prompt: null, base_prompt: "",
-          override: { fields: [], stale: false }, ov: {}, takes: [], picked: null, can_generate: false,
-          why_not: "keyframes aren't generated: use another shot's frame or import an image",
-        };
-        refs.push(r);
-      }
+      const r = ensureKeyframe(req.shot, req.which);
       const f = req.from;
       const t = addTake(r, null, { status: "queued", seed: "", source: "frame" });
       t.seed = null;

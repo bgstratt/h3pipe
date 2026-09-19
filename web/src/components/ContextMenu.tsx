@@ -1,10 +1,10 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
-  cancelTake, closeMenu, copyText, keyframeFromTake, openInspector, openRedo, openSidecar, openViewer, pickTake, playAll,
-  requestRender, showMissingRefs,
+  cancelTake, clearRef, closeMenu, copyText, generateKeyframe, keyframeFromTake, loadRefs, openInspector, openRedo, openSidecar,
+  openViewer, pickTake, playAll, requestRender, showMissingRefs,
 } from "../actions";
 import { absPath, tn } from "../lib/format";
-import { cutNeighbour, keyframeNote } from "../lib/keyframes";
+import { cutNeighbour, keyframeNote, keyframeRefId } from "../lib/keyframes";
 import { missingOf } from "../lib/missingRefs";
 import { shotTarget } from "../lib/targets";
 import { statusKey, useApp } from "../store";
@@ -20,6 +20,7 @@ export function ContextMenu() {
   const ref = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
   const { list: targets, seriesDefault } = useTargets();
+  const refs = useApp((s) => (s.ep ? s.refs[s.ep] : undefined));
 
   useLayoutEffect(() => {
     if (!menu || !ref.current) return setPos(null);
@@ -48,6 +49,11 @@ export function ContextMenu() {
     };
   }, [menu]);
 
+  // "Clear keyframe" needs to know whether the shot has one
+  useEffect(() => {
+    if (menu && ep && !refs) void loadRefs(ep);
+  }, [menu, ep, refs]);
+
   if (!menu || !ep) return null;
   const shot = st?.shots.find((x) => x.shot === menu.shot);
   const take = menu.take != null ? shot?.takes.find((t) => t.take === menu.take) : undefined;
@@ -74,6 +80,7 @@ export function ContextMenu() {
     const n = keyframeNote(targets, shotTarget(s, seriesDefault));
     return n ? `\nKeyframes are ${n}.` : "";
   };
+  const firstKf = refs?.find((r) => r.id === keyframeRefId(menu.shot, "first"));
   const frameLabel = menu.frame == null || menu.frame === "last" ? "its last frame" : `frame ${menu.frame}`;
   const keyframes = (
     <>
@@ -103,6 +110,21 @@ export function ContextMenu() {
           <span className="h3-muted"> ({frameLabel === "its last frame" ? "last frame" : frameLabel})</span>
         </button>
       )}
+      <button
+        title={`A still of ${menu.shot}'s opening moment, made by the keyframe image model; it goes live if ${menu.shot} has no first keyframe yet` + kfNote(shot)}
+        onClick={run(() => void generateKeyframe(menu.shot, "first"))}
+      >
+        <i className="pi pi-sparkles" /> Generate first frame
+      </button>
+      <button
+        disabled={!firstKf?.exists}
+        title={firstKf?.exists
+          ? `Remove ${menu.shot}'s live first keyframe (its candidates stay)${firstKf.need === "required" ? `; ${menu.shot} can't render without one` : `; ${menu.shot} then renders without it`}`
+          : `${menu.shot} has no live first keyframe`}
+        onClick={run(() => void clearRef(keyframeRefId(menu.shot, "first")))}
+      >
+        <i className="pi pi-times" /> Clear keyframe
+      </button>
     </>
   );
   const common = (

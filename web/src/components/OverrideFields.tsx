@@ -35,6 +35,11 @@ export interface OverrideFieldsProps {
   /** Phase 8: the prompt can't be overridden (a retargeted shot): show this
    * note and the effective prompt read-only instead of the editor. */
   promptLocked?: { note: ReactNode; text: string } | null;
+  /** Phase 8.5: the negative field (targets with a `negative` param); absent hides it.
+   * `effective` is the negative a render uses without an override, `source` where it comes from. */
+  negative?: { effective: string; source: string; note?: string | null } | null;
+  /** Phase 8.5: a two-stage target's low-noise model picker; absent hides it */
+  modelLow?: { placeholder: string; files?: ModelList; choices?: string[] } | null;
 }
 
 export function OverrideFields(p: OverrideFieldsProps) {
@@ -87,6 +92,18 @@ export function OverrideFields(p: OverrideFieldsProps) {
         ) : (
           <ModelSelect value={form.model} onChange={(model) => set({ model })} placeholder={p.modelPlaceholder} choices={p.modelChoices} grouped={p.modelFiles} />
         )}
+        {p.modelLow && (
+          <>
+            <label title="The second (low-noise) stage of a two-stage target (Wan 2.2 14B)">Low-noise model</label>
+            <ModelSelect
+              value={form.modelLow}
+              onChange={(modelLow) => set({ modelLow })}
+              placeholder={p.modelLow.placeholder}
+              choices={p.modelLow.choices ?? p.modelLow.files?.files.map((f) => f.name)}
+              grouped={p.modelLow.files}
+            />
+          </>
+        )}
         {p.loraChoices !== null && (
           <>
             <label>LoRAs</label>
@@ -115,6 +132,27 @@ export function OverrideFields(p: OverrideFieldsProps) {
         )}
         <label>Steps</label>
         <input className="h3-in" inputMode="numeric" placeholder={p.stepsPlaceholder} value={form.steps} onChange={(e) => set({ steps: e.target.value.replace(/[^\d]/g, "") })} />
+        {p.negative && (
+          <>
+            <label title="What the model should avoid. Empty = the episode's negative.txt, else series.json's, else the target's">Negative</label>
+            <div className="h3-col" style={{ gap: 2 }}>
+              <textarea
+                className="h3-in"
+                rows={2}
+                value={form.negative}
+                placeholder={p.negative.effective ? `${p.negative.effective}` : "(none)"}
+                onChange={(e) => set({ negative: e.target.value })}
+                spellCheck={false}
+              />
+              <span className="h3-small h3-muted">
+                {form.negative.trim()
+                  ? "shot override (this pass)"
+                  : p.negative.source ? `${p.negative.source}${p.negative.effective ? "" : " (empty)"}` : "no override"}
+                {p.negative.note ? ` · ${p.negative.note}` : ""}
+              </span>
+            </div>
+          </>
+        )}
         <label>Note</label>
         <input className="h3-in" value={form.note} placeholder="why this override" onChange={(e) => set({ note: e.target.value })} />
       </div>

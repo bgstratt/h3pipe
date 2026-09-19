@@ -3,9 +3,10 @@
 
 import { useSyncExternalStore } from "react";
 import type { ToastAction } from "./host";
+import type { RefTargetChoice } from "./lib/imageTargets";
 import type { RefFilter } from "./lib/refs";
 import type {
-  BuildResult, Config, EpisodeStatus, EpisodeSummary, ModelList, Pass, Ref, ShotDetail, TakeRef, TargetList,
+  BuildResult, Config, EpisodeStatus, EpisodeSummary, ModelList, Pass, Ref, RefDefaults, ShotDetail, TakeRef, TargetList,
 } from "./types";
 
 // ---------------------------------------------------------------------------
@@ -185,6 +186,12 @@ export interface AppState {
   refSel: { ref: string; view: string | null; take: number } | null;
   /** ComfyUI prompt id -> the ref take it generates */
   refPrompts: Record<string, RefTakeRef>;
+  /** Phase 8.5: the series config's `refs` defaults as /refs sends them, by episode */
+  refDefaults: Record<string, RefDefaults | null>;
+  /** Phase 8.5: the Refs tab's image-model choice for this session (null: the series default) */
+  refTargetChoice: RefTargetChoice;
+  /** Phase 8.5: the Refs tab scrolls to this ref (n changes on every request) */
+  refFocus: { id: string; n: number } | null;
   menu: MenuState | null;
   redo: RedoState | null;
   sidecar: { shot: string; pass: Pass; take: number } | null;
@@ -249,6 +256,9 @@ export function initialState(prefs: Prefs = {}): AppState {
     refOpen: {},
     refSel: null,
     refPrompts: {},
+    refDefaults: {},
+    refTargetChoice: {},
+    refFocus: null,
     menu: null,
     redo: null,
     sidecar: null,

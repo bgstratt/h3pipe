@@ -3,20 +3,22 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  baseRender, closeInspector, keyframeFromTake, loadDetail, loadRefs, openKeyframesInRefs, openRedo, openViewer, queueRender,
+  baseRender, clearRef, closeInspector, focusRef, keyframeFromTake, loadDetail, loadRefs, openRedo, openViewer, queueRender,
   renderShots, revertOverride, saveOverride, setShotTarget,
 } from "../actions";
 import { errText } from "../api";
 import { api, host } from "../host";
-import { cutTake, fmtSeconds, shortName, shotBadges, tn } from "../lib/format";
-import { KEYFRAME_ENDS, cutNeighbour, keyframeNote, keyframeSource, liveTake, shotKeyframes } from "../lib/keyframes";
+import { ESTIMATE_TITLE, cutTake, fmtShotSeconds, lengthEstimated, shortName, shotBadges, tn } from "../lib/format";
+import { KEYFRAME_ENDS, cutNeighbour, keyframeNote, keyframeRefId, shotKeyframes, usesKeyframes } from "../lib/keyframes";
 import { missingOf } from "../lib/missingRefs";
+import { negativeNoEffect, negativeSourceLabel, takesNegative } from "../lib/negative";
 import { formFromDetail, isDirty, overrideFields, type OverrideForm } from "../lib/overrideForm";
-import { isRetargeted, retargetNote, shotTarget, targetBadges, targetLabel } from "../lib/targets";
+import { shotRefTiles } from "../lib/refsUsed";
+import { findTarget, isRetargeted, retargetNote, shotTarget, targetBadges, targetLabel } from "../lib/targets";
 import { useApp } from "../store";
 import type { ShotDetail } from "../types";
 import { FloatingWindow, defaultInspectorRect } from "./FloatingWindow";
-import { aspectOf, useDetail, useDetailError, useShotStatus, useStatus } from "./hooks";
+import { useDetail, useDetailError, useShotStatus, useStatus } from "./hooks";
 import { MissingRefsNote } from "./MissingRefs";
 import { OverrideFields } from "./OverrideFields";
 import { ResolvedNotes, TargetReadinessNote } from "./Readiness";
@@ -93,67 +95,103 @@ function TakeResolved({ d, take }: { d: ShotDetail; take: number | null }) {
 }
 
 /**
- * The shot's first / last keyframes (refs `shot:<id>:first|last`), with the
- * continuity action. There is no route to unpick or delete a ref take yet, so
- * no "Clear" (see api.ts).
+ * "Refs this shot uses" (read-only): a tile per ref the shot's current target
+ * reads (subjects, plate, first / last keyframes, reference sheet) with its
+ * status. A click opens the Refs tab on it; generating and picking stay there.
+ * Keyframes keep two quick actions: From previous, and Clear.
  */
-function Keyframes({ shot }: { shot: string }) {
+function RefsUsed({ shot, d }: { shot: string; d: ShotDetail | undefined }) {
   const ep = useApp((s) => s.ep);
   const pass = useApp((s) => s.pass);
   const refs = useApp((s) => (s.ep ? s.refs[s.ep] : undefined));
-  const busy = useApp((s) => !!s.busy[`keyframe|${shot}|first`]);
+  const busyPrev = useApp((s) => !!s.busy[`keyframe|${shot}|first`]);
+  const busyClear = useApp((s) => !!s.busy[`refclear|${keyframeRefId(shot, "first")}`] || !!s.busy[`refclear|${keyframeRefId(shot, "last")}`]);
   const st = useStatus();
   const s = useShotStatus(shot);
   const { list, seriesDefault } = useTargets();
   useEffect(() => {
     if (ep && !refs) void loadRefs(ep);
   }, [ep, refs]);
+  const { tiles, exact } = useMemo(() => shotRefTiles(d?.refs_used, refs, shot, pass), [d?.refs_used, refs, shot, pass]);
   if (!ep) return null;
-  const kf = shotKeyframes(refs, shot);
   const prev = cutNeighbour(st, shot, -1);
+  const kf = shotKeyframes(refs, shot);
+  const reads = usesKeyframes(list, shotTarget(s, seriesDefault));
   const note = keyframeNote(list, shotTarget(s, seriesDefault));
+  const hasKfTile = tiles.some((t) => t.keyframe);
+  const known = new Set((refs ?? []).map((r) => r.id));
   return (
     <div className="h3-col" style={{ gap: 4 }}>
       <div className="h3-row">
-        <span className="h3-h">Keyframes</span>
-        {note && <span className="h3-small h3-muted" title="Whether this shot's target reads keyframes (GET /h3pipe/targets capabilities)">{note}</span>}
+        <span className="h3-h">Refs this shot uses</span>
+        {!exact && <span className="h3-small h3-muted" title="This server doesn't send refs_used: read from each ref's used_by">(from the refs list)</span>}
       </div>
-      <div className="h3-row h3-wrap" style={{ alignItems: "flex-start" }}>
-        {KEYFRAME_ENDS.map((end) => {
-          const r = kf[end];
-          const t = liveTake(r);
-          const from = keyframeSource(t);
-          const url = r?.exists && r.path ? api().refFileUrl(ep, r.path, r.sha1) : null;
+      {!tiles.length && <span className="h3-small h3-muted">None: its target reads no reference images.</span>}
+      <div className="h3-refs-used">
+        {tiles.map((t) => {
+          const url = t.image ? api().refFileUrl(ep, t.image, t.version) : null;
+          const canOpen = known.has(t.id);
           return (
-            <div key={end} className="h3-col" style={{ gap: 2, width: 128 }}>
+            <div
+              key={t.id}
+              className={`h3-ru h3-ru-${t.status}${canOpen ? " h3-ru-link" : ""}`}
+              title={canOpen ? t.title : t.title.replace(/\nClick:.*$/, "")}
+              onClick={() => canOpen && focusRef(t.id)}
+            >
               <div
                 className={`h3-thumb${url ? "" : " h3-empty"}`}
-                style={{ width: 128, aspectRatio: aspectOf(st), ...(url ? { backgroundImage: `url("${url}")`, backgroundSize: "contain" } : {}) }}
-                title={r?.path ?? `refs/shots/${shot}/${end}.png`}
+                style={{ width: 64, height: 44, ...(url ? { backgroundImage: `url("${url}")`, backgroundSize: "contain" } : {}) }}
               >
-                {!url && <span className="h3-muted h3-small">{r ? "not picked" : "none"}</span>}
-                <span className="h3-thumb-label">{end}{t ? ` ${tn(t.take)}` : ""}</span>
+                {!url && <span className="h3-small">{t.status === "live" ? "" : "—"}</span>}
               </div>
-              <span className="h3-small h3-muted h3-ell" title={from ?? ""}>{from ? `← ${from}` : r && t ? t.source : ""}</span>
+              <span className="h3-small h3-ell" style={{ maxWidth: 64 }}>{t.label}</span>
+              <span className={`h3-small h3-ru-status`}>{t.statusText}</span>
             </div>
           );
         })}
       </div>
-      <div className="h3-row h3-wrap">
-        <button
-          className="h3-btn"
-          disabled={busy || !prev}
-          title={prev
-            ? `${shot}'s first frame = ${prev}'s last frame, from the take the ${pass} cut uses. A new candidate; it goes live if ${shot} has no first keyframe yet.`
-            : `${shot} is the first shot of the ${pass} cut`}
-          onClick={() => void keyframeFromTake({ shot, which: "first" })}
-        >
-          <i className={busy ? "pi pi-spin pi-spinner" : "pi pi-link"} /> From previous shot{prev ? ` (${prev})` : ""}
-        </button>
-        <button className="h3-btn" title="The keyframes' candidates, pick and import" onClick={() => openKeyframesInRefs(shot)}>
-          <i className="pi pi-palette" /> Open in Refs
-        </button>
-      </div>
+      {(hasKfTile || reads || kf.first || kf.last) && (
+        <div className="h3-row h3-wrap">
+          <button
+            className="h3-btn"
+            disabled={busyPrev || !prev}
+            title={(prev
+              ? `${shot}'s first frame = ${prev}'s last frame, from the take the ${pass} cut uses. A new candidate; it goes live if ${shot} has no first keyframe yet.`
+              : `${shot} is the first shot of the ${pass} cut`) + (note ? `\nKeyframes are ${note}.` : "")}
+            onClick={() => void keyframeFromTake({ shot, which: "first" })}
+          >
+            <i className={busyPrev ? "pi pi-spin pi-spinner" : "pi pi-link"} /> From previous{prev ? ` (${prev})` : ""}
+          </button>
+          {KEYFRAME_ENDS.filter((end) => end === "first" || kf.last?.exists).map((end) => (
+            <button
+              key={end}
+              className="h3-btn h3-danger"
+              disabled={busyClear || !kf[end]?.exists}
+              title={kf[end]?.exists ? `Remove ${shot}'s live ${end} keyframe (its candidates stay)` : `${shot} has no live ${end} keyframe`}
+              onClick={() => void clearRef(keyframeRefId(shot, end))}
+            >
+              <i className="pi pi-times" /> Clear {end === "first" ? "keyframe" : "last keyframe"}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** The reference sheet (or VACE reference) the selected take rendered with. */
+function TakeReference({ d, take }: { d: ShotDetail; take: number | null }) {
+  const ep = useApp((s) => s.ep);
+  const t = d.takes.find((x) => x.take === take);
+  const path = t?.reference_image;
+  if (!ep || !t || !path) return null;
+  const url = api().fileUrl(ep, path);
+  return (
+    <div className="h3-col" style={{ gap: 2 }}>
+      <span className="h3-small h3-muted">{tn(t.take)} rendered with this reference image:</span>
+      <a href={url} target="_blank" rel="noreferrer" title={`${path}\nOpen full size`}>
+        <div className="h3-thumb" style={{ width: 192, aspectRatio: "16 / 9", backgroundImage: `url("${url}")`, backgroundSize: "contain" }} />
+      </a>
     </div>
   );
 }
@@ -260,6 +298,7 @@ function OverrideEditor({ d, shot }: { d: ShotDetail; shot: string }) {
   const { list, seriesDefault } = useTargets();
   const target = shotTarget(d, seriesDefault);
   const pickers = useTargetPickers(target);
+  const tgt = findTarget(list, target);
   const retargeted = isRetargeted(d);
   const promptLocked = retargeted
     ? {
@@ -307,6 +346,20 @@ function OverrideEditor({ d, shot }: { d: ShotDetail; shot: string }) {
         modelFiles={pickers.modelFiles}
         loraChoices={pickers.loras}
         promptLocked={promptLocked}
+        negative={takesNegative(tgt, eff)
+          ? {
+              // what applies without a shot override (unknown while one is saved)
+              effective: eff.negative_source !== "override" ? eff.negative ?? "" : "",
+              source: eff.negative_source === "override" ? "" : negativeSourceLabel(eff.negative_source),
+              note: negativeNoEffect(tgt?.presets?.[pass]?.cfg) ? "no effect at cfg ≤ 1 (turbo)" : null,
+            }
+          : null}
+        modelLow={pickers.twoStage
+          ? {
+              placeholder: `(${whose}) ${ov.model_low == null ? shortName(eff.model_low ?? String(tgt?.presets?.[pass]?.model_low ?? ""), 40) : ""}`,
+              files: pickers.modelLowFiles,
+            }
+          : null}
       />
       <label className="h3-check" title="Prompt, model, LoRAs and steps are per pass; this writes them to final and proxy. Seed, note and target are always shared.">
         <input type="checkbox" checked={both} onChange={(e) => setBoth(e.target.checked)} /> Apply to both passes
@@ -378,8 +431,9 @@ export function Inspector() {
           <Badges badges={badges} />
           <TargetPicker d={d} shot={shot} />
           {d && <TakeResolved d={d} take={selTake ?? ct?.take ?? null} />}
+          {d && <TakeReference d={d} take={selTake ?? ct?.take ?? null} />}
           <MissingRefsNote blocked={missing.length ? [{ shot, refs: missing }] : []} allow={allowMissing} setAllow={setAllowMissing} />
-          <Keyframes shot={shot} />
+          <RefsUsed shot={shot} d={d} />
           <div className="h3-row h3-wrap">
             <button
               className="h3-btn h3-primary"
@@ -431,7 +485,11 @@ export function InspectorWindow() {
     <>
       <i className="pi pi-sliders-h h3-muted" />
       <b>{shot ?? "Inspector"}</b>
-      {s && <span className="h3-muted h3-small">{s.sequence} · {fmtSeconds(s.seconds)}{s.size ? ` · ${s.size}` : ""}</span>}
+      {s && (
+        <span className="h3-muted h3-small" title={lengthEstimated(s) ? ESTIMATE_TITLE : undefined}>
+          {s.sequence} · {fmtShotSeconds(s, s.seconds)}{s.size ? ` · ${s.size}` : ""}
+        </span>
+      )}
       <span className="h3-grow" />
       {ep && <PassToggle />}
       <button className="h3-btn h3-icon" title="Close" onClick={closeInspector}><i className="pi pi-times" /></button>
