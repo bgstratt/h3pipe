@@ -1,7 +1,7 @@
 // Play all: trim maths, the playlist, and stepping through it on one clock.
 import { describe, expect, it } from "vitest";
 import {
-  atOutPoint, buildPlaylist, clipOffset, cutTime, fileTime, locate, nextVideo, startOf, totalDuration, trimWindow,
+  atOutPoint, buildPlaylist, clipOffset, cutTime, fileTime, framesOf, locate, nextVideo, startOf, totalDuration, trimWindow,
   type PlayItem,
 } from "../src/lib/playlist";
 import type { CutInfo, EpisodeStatus, ShotStatus, TakeSummary } from "../src/types";
@@ -83,6 +83,21 @@ describe("buildPlaylist", () => {
   });
   it("uses seconds when the length is unknown", () => {
     expect(buildPlaylist(ep([shot("a", 0, { length: null, seconds: 2.5 })]))[0].dur).toBe(2.5);
+  });
+  it("a take's real frames beat the build's length (dur: model)", () => {
+    // built at an estimate of 121 frames; the model chose 199 (8.29 s)
+    const items = buildPlaylist(ep([
+      shot("a", 121, { takes: [take(1, { mp4: "r/a/t1.mp4", frames: 199 })] }, { frames: 199 }),
+      shot("b", 48),
+    ]));
+    expect(items[0]).toMatchObject({ mp4: "r/a/t1.mp4", inT: 0, outT: 199 / 24, dur: 199 / 24 });
+    expect(items[1].start).toBe(199 / 24);
+    // trims come off the real length
+    const [c] = buildPlaylist(ep([shot("c", 121, { takes: [take(1, { frames: 199 })] }, { trim_out: 7 })]));
+    expect(c.dur).toBe(192 / 24);
+    // the cut's frames count when the take summary has none (an older take list)
+    expect(buildPlaylist(ep([shot("d", 121, {}, { frames: 73 })]))[0].dur).toBe(73 / 24);
+    expect(framesOf(shot("e", 121), 24)).toBe(121);
   });
 });
 

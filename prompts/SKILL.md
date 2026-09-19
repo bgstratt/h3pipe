@@ -168,6 +168,7 @@ sound: running footsteps on grass, fabric movement
 | `plate: street_gate` | this shot's angle; defaults to the sequence's location |
 | `dur: 3.04` | duration in seconds, from the grid below |
 | `dur: auto` | derive the duration from the dialogue at this shot's pace |
+| `dur: model` / `dur: model 3-8` | let the video model choose the length when it renders, optionally between 3 and 8 seconds; see **Letting the model time a shot** |
 | `audio: 3.10-7.40` | window on a locked dialogue mix; sets the duration instead |
 | `pace: slow/normal/fast` | 3.6 / 4.4 / 5.4 syllables per second |
 | `camera: pushes in…` | camera move, **without** the words "The camera" |
@@ -229,10 +230,10 @@ plate). Everything above about LTX-2 holds (generated sound, `camera:`, retarget
 - **Give important things their own panel.** The model only reproduces what is on the
   sheet, and bigger panels carry over better: a crowded shot (many `who:`/`with:`) gets
   small panels. Keep the plate clean.
-- **One length: 121 frames (5.04 s).** The IC-LoRA was trained on 768×448, 121 frames,
-  24 fps, so every shot renders exactly that. A shorter shot is padded up to 5.04 s (a
-  dialogue window is trimmed back in the review cut; trim others in the cut) and a longer
-  one is an error: split it.
+- **The shot's own length**, on LTX's `8k + 1` grid from 2 s (49 frames) to 20 s (481 frames)
+  at 24 fps. The IC-LoRA was trained on 121 frames (5.04 s), so any other length gets a
+  soft warning in `--check` (identity may weaken); it still renders. Longer than 20 s is an
+  error: split the shot.
 - **Size is the model's**: 768×448 for the final, 512×288 for the proxy, whatever the series
   config's pass blocks say.
 - **A two-part prompt**, written for you: `Reference sheet:` names each panel in order (the
@@ -276,6 +277,24 @@ pictures**: what pins the look is the shot's keyframes. What changes for such a 
 
 To try a shot this way without touching the script, retarget it from the editor or with
 `h3.py override <ep> sh040 --target minimax_h3_fl2va`.
+
+### Letting the model time a shot: `dur: model`
+
+`dur: model` hands the shot's length to the video model: LTX-2.5 reads the prompt and
+predicts how long the shot naturally runs, then renders that. `dur: model 3-8` keeps the
+prediction between 3 and 8 seconds (without a range: 1 to 20).
+
+- **The build still needs a length** for the cut and the runtime, so it writes an
+  **estimate**: the `dur: auto` length when the shot has dialogue, else 5 seconds, inside
+  your range. The take records the real length it came out at, and the editor's timeline
+  and Play all use that once it's rendered.
+- **Only `ltx2` can predict**, and only once its duration head is installed (the file
+  `ltx-2.5-duration-head-bf16.safetensors` in ComfyUI's `models/model_patches`). Until then,
+  and on every other target (H3, `ltx2_ingredients`), the shot renders at the estimate:
+  `--check` warns and the take's notes say so.
+- Use it for silent action and establishing shots whose length you don't care to pick. A
+  dialogue shot is better with `dur: auto` or an `audio:` window, which keep the lines
+  their room.
 
 ## Durations land on a grid
 
@@ -437,6 +456,7 @@ python h3build.py series.json ep01.md --pace      # dialogue pacing per shot
 Errors name the line and quote it. Common ones: a name in `who:` that is not in the series config; a
 location with no plate; an ALL-CAPS `NAME:` line for someone who cannot speak (usually a typo,
 which would otherwise become action prose); more than three subjects; a shot with neither
-`dur:` nor `audio:`; `dur: auto` on a shot with no dialogue.
+`dur:` nor `audio:`; `dur: auto` on a shot with no dialogue; a `dur: model` range that isn't
+`min-max` seconds with min below max.
 
 A script that does not compile is not a draft, it is a bug. Fix and re-run until it is clean.

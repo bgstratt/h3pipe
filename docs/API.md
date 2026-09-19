@@ -57,10 +57,10 @@ queued takes whose ComfyUI job is gone (`h3takes.sweep_queued`, with `as_of` tak
    "seconds": 4.458, "size": "medium", "subjects": ["dean"], "audio_policy": "generate",
    "cut": {"take": 1, "picked": true, "pass": "proxy", "placeholder": false,
            "usable": true, "trim_in": 0, "trim_out": 0, "locked": false, "note": "",
-           "in_cut_file": true},
+           "in_cut_file": true, "frames": 107},
    "override": {"fields": ["prompt", "seed"], "stale": false},
    "takes": [{"take": 1, "status": "ok", "has_video": true,
-              "seed": "6430499148929255544", "seed_source": "stable", "note": "",
+              "seed": "6430499148929255544", "seed_source": "stable", "frames": 107, "note": "",
               "overrides": [], "stale": [],
               "thumb": "renders_proxy/sh020/sh020_t01.jpg",
               "strip": "renders_proxy/sh020/sh020_t01_strip.jpg",
@@ -74,6 +74,13 @@ queued takes whose ComfyUI job is gone (`h3takes.sweep_queued`, with `as_of` tak
 - `stale` holds any of `script`, `ref`, `preset`; `unknown` means a take from before
   sidecars.
 - `thumb`, `strip` and `mp4` are null when the file is missing.
+- `length` / `seconds` are the build's. A take's `frames` is its real frame count, from
+  the saver (its sidecar's `frames`), or null (not rendered, or a take from before the
+  saver wrote it). `cut.frames` is the cut take's `frames` when that take is usable, else
+  null. They differ for a `dur: model` shot: the build writes an estimate
+  (`length_estimated` on the entry) and the model picks the length when it renders (the
+  sidecar's `length_source` is `predicted`, versus `estimate` or `script`). The
+  timeline and Play all use `cut.frames` / the take's `frames` at `fps` when present.
 - The strip is `STRIP_FRAMES` (8) cells of equal width, left to right, evenly spaced
   through the clip. Hover scrub picks a cell from the pointer's x position.
 
@@ -542,7 +549,7 @@ open, and what was added:
 - **`GET /h3pipe/targets`** adds, per target:
   - `short`: a short label ("H3", "LTX-2").
   - `capabilities`: `{policies, policy_fallback, voice_reference, subject_refs,
-    keyframes, prompt ("sections" | "prose"; `minimax_h3_fl2va`: "fields"), negative_prompt}`.
+    keyframes, prompt ("sections" | "prose"; `minimax_h3_fl2va`: "fields"), negative_prompt, duration ("predict" | "script")}`.
   - `template` may carry `fps: "series"` (the target renders at the series config's fps),
     `max_size` (`{long_side, pixels}`) and `size_fit: "snap"`.
   - `widgets` values are always single specs (for a param patched into several widgets,
@@ -554,6 +561,13 @@ open, and what was added:
   fallbacks, an ignored prompt override, a `steps` value the target doesn't use). An `ltx2`
   take's `refs` lists its keyframes with `role` and `optional: true`, `sha1: null` when the
   file didn't exist.
+- **Shot lengths (`dur: model`)**: `capabilities.duration` is `"predict"` (only `ltx2`: the
+  model's duration head can choose the length) or `"script"`. Every take sidecar has
+  `length_source`: `script` (the build's length), `estimate` (`dur: model` rendered at the
+  build's estimate: the target can't predict, or the duration head isn't installed; a
+  `notes` entry says which) or `predicted` (the saver's `frames` is the length; `length`
+  is the estimate). A `dur: model` entry has `length_estimated: true`, and on a predicting
+  target `duration_predict: {min_seconds, max_seconds}`.
 - **Files:** an episode that mixes targets has `shotlist/shotlist.<target>.json` and
   `shotlist.<target>_proxy.json` beside `shotlist.json` / `shotlist_proxy.json`, each with a
   top-level `"target"`. `shotlist.json` is always the series target's, even when no shot is

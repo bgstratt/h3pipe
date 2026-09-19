@@ -301,6 +301,38 @@ def audio_intent(shot_ir, series_cfg: dict, pass_: str) -> str:
     return audio_cfg.get("default_policy", speaking)
 
 
+# `dur: model`: preset values a target may give (target.json presets). They are
+# read at build and queue time from the target, not written into a shotlist's
+# `defaults`, so a shotlist without `dur: model` shots is what it always was.
+DURATION_PRESET_KEYS = ("duration_head", "default_seconds", "min_seconds", "max_seconds")
+DEFAULT_SHOT_SECONDS = 5.0          # a silent `dur: model` shot's estimate without a preset
+PREDICT_RANGE = (1.0, 20.0)         # the predictor's clamp without a script's or a preset's
+
+
+def duration_estimate(target: "Target", timing: dict, preset: "Preset | None",
+                      speech_s: float | None = None) -> tuple[float, dict | None, str]:
+    """A `dur: model` shot ({"model": true, "min"?, "max"?}) at build time:
+    (the estimate the shotlist writes, the predictor's range {"min_seconds",
+    "max_seconds"} or None, a warning or ""). The estimate is `speech_s` (the
+    dialogue's `dur: auto` length) for a shot with dialogue, else the preset's
+    `default_seconds`; it keeps inside the script's clamp. A target without
+    `capabilities.duration: "predict"` renders the estimate, and says so."""
+    extra = preset.extra if preset is not None else {}
+    lo, hi = timing.get("min"), timing.get("max")
+    est = float(speech_s if speech_s is not None
+                else extra.get("default_seconds", DEFAULT_SHOT_SECONDS))
+    predict = None
+    if target.duration == "predict":
+        lo = float(lo if lo is not None else extra.get("min_seconds", PREDICT_RANGE[0]))
+        hi = float(hi if hi is not None else extra.get("max_seconds", PREDICT_RANGE[1]))
+        predict = {"min_seconds": lo, "max_seconds": hi}
+    if lo is not None:
+        est = min(max(est, float(lo)), float(hi))
+    note = "" if predict else (f"`dur: model` renders the estimate, {est:.2f}s: "
+                               f"{target.short} can't predict a shot's length")
+    return est, predict, note
+
+
 def voice_prompt(name: str, voice: str) -> str:
     """What a voice sample should be. No audio target exists (nothing generates
     voices); this is the note refs_todo prints for a person recording one."""
@@ -428,11 +460,18 @@ class Target:
         raise ValueError(f"{self.short} can't render audio policy {intent!r} "
                          f"(it renders {', '.join(self.policies)})")
 
+    @property
+    def duration(self) -> str:
+        """How a shot's length is decided: "predict" (target.json
+        `capabilities.duration`: the model can predict it at render time, so
+        `dur: model` means something) or "script" (the build's length)."""
+        return (self.spec.get("capabilities") or {}).get("duration") or "script"
+
     def capabilities(self) -> dict:
         """What a picker or the core may need to know without asking which
         model this is (GET /h3pipe/targets)."""
         r = self.recipe
-        return {"policies": self.policies,
+        return {"policies": self.policies, "duration": self.duration,
                 "policy_fallback": (r.get("policy_fallback") or {}).get("to"),
                 "voice_reference": bool(r.get("voice_slots")),
                 "subject_refs": bool(r.get("subject_slots") or r.get("reference_sheet")),

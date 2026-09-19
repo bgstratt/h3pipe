@@ -163,7 +163,8 @@ def print_pacing(story: ir.Episode, series_cfg: dict, fps: float = 24.0,
             t = shot.timing or {}
             if "audio_in" in t:
                 dur = t["audio_out"] - t["audio_in"]
-            elif t.get("auto"):
+            elif t.get("auto") or t.get("model"):
+                # `dur: model`: the build's estimate is the dialogue's length
                 dur = speech_seconds(dialogue, pace)
             else:
                 dur = t.get("seconds", 0.0)

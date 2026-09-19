@@ -554,6 +554,39 @@
    "GUIDER"
   ]
  },
+ "LTXVDurationPredictor": {
+  "input": {
+   "required": {
+    "model": [
+     "MODEL"
+    ],
+    "positive": [
+     "CONDITIONING"
+    ],
+    "duration_head": [
+     "MODEL_PATCH"
+    ],
+    "frame_rate": [
+     "FLOAT"
+    ],
+    "min_seconds": [
+     "FLOAT"
+    ],
+    "max_seconds": [
+     "FLOAT"
+    ]
+   },
+   "optional": {}
+  },
+  "output": [
+   "INT",
+   "FLOAT"
+  ],
+  "output_name": [
+   "num_frames",
+   "seconds"
+  ]
+ },
  "LTXVEmptyLatentAudio": {
   "input": {
    "required": {
@@ -766,6 +799,22 @@
   ],
   "output_name": [
    "SIGMAS"
+  ]
+ },
+ "ModelPatchLoader": {
+  "input": {
+   "required": {
+    "name": [
+     "COMBO"
+    ]
+   },
+   "optional": {}
+  },
+  "output": [
+   "MODEL_PATCH"
+  ],
+  "output_name": [
+   "MODEL_PATCH"
   ]
  },
  "PreviewAny": {

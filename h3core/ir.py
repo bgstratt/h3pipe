@@ -17,8 +17,11 @@ passes.
     Line      speaker, mode ("on" | "vo" | "os"), delivery, line
 
 `timing` is one of {"audio_in", "audio_out"} (a window on the recorded
-dialogue), {"seconds"}, {"auto": true} (derive from the dialogue at `pace`), or
-null (the script gave none; the target decides whether that is an error).
+dialogue), {"seconds"}, {"auto": true} (derive from the dialogue at `pace`),
+{"model": true, "min"?, "max"?} (`dur: model [min-max]`: the video model
+predicts the length at render time, within the clamp in seconds; the build
+writes an estimate, targets.duration_estimate), or null (the script gave none;
+the target decides whether that is an error).
 `pace` is the shot's own `pace:` or null for the series config's default; it applies to
 every dialogue shot, not only `auto` ones.
 

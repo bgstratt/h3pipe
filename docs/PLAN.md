@@ -550,7 +550,9 @@ saved `template_ltx2_3_ic_lora_ingredients.json`; label "LTX-2.3 ingredients
   output (`LTXVAddGuide` asserts it), so a shorter output isn't possible without leaving
   the bucket: short shots pad up (a warning; dialogue windows trim back in assemble),
   longer ones are a build error ("split the shot"). Sizes are multiples of 32 (one
-  stage, no upscaler); another target's series block lends no size.
+  stage, no upscaler); another target's series block lends no size. (**Superseded
+  2026-09-19**, see **Shot lengths — as built**: ComfyUI's only rule is that the guide is
+  no longer than the output, so a shot now renders its own length, 49–481 frames.)
 - **Presets:** both `ltx-2.3-22b-distilled-fp8.safetensors` (checkpoint, audio VAE and
   text-encoder projection all read it) + `ltx-2.3-22b-ic-lora-ingredients-0.9.safetensors`
   at 1.0 (the template's; the card's 1.4 is for dev at 30 steps) as the preset LoRA,
@@ -595,7 +597,7 @@ saved `template_ltx2_3_ic_lora_ingredients.json`; label "LTX-2.3 ingredients
   close-up): 21 s; Dean's face matches the face panel, framed through the sill's window.
 - **Left:** a dev-model final profile and whether the card's LoRA 1.4 / STG help;
   per-character face + body panels (the card's advice) instead of H3's one-panel rule;
-  shots longer than the bucket (split automatically, or allow up to ~10 s with a warning);
+  ~~shots longer than the bucket~~ (done: any length to 20 s, with a warning off 121);
   the editor showing the take's refsheet.
 
 **MiniMax H3 FL2VA — as built** (`targets/video/minimax_h3_fl2va/`, from ComfyUI's H3
@@ -651,6 +653,73 @@ H3 FL2VA (first/last frames)", short `H3 FL2V`)
 - **Left:** a live dub render (ep05 has no recording; the wiring is tested offline);
   whether `retention:` should map onto anything here; the anchored dialogue's lip sync
   quality; an FL2VA final at 8 steps checked by eye.
+
+**Shot lengths — as built** (2026-09-19): LTX shots aren't forced into 5-second chunks, and
+`dur: model` lets LTX-2.5 choose.
+- **`ltx2_ingredients` renders the shot's own length.** Checked in ComfyUI's
+  `comfy_extras/nodes_lt.py`: `LTXVAddGuide` crops a guide to 8n+1 frames and asserts
+  `latent_idx + guide_frames <= latent_length`, i.e. the guide is no longer than the output;
+  nothing enforces ≥121 (that is the model card's training bucket). The sheet already loops
+  through `RepeatImageBatch`, whose `amount` is bound to `length`, so the template is
+  `frames {step 8, base 49, max 481}` (2–20 s on the 8k+1 grid). Lengths other than
+  `recipe.trained_frames` (121) get one soft `--check` warning listing them ("the IC-LoRA was
+  trained at 121 frames; identity may weaken at other lengths"); past 481 frames is the
+  "split the shot" error. The old "renders the whole bucket; trim it" warning is gone.
+  `tests/golden/ltx2_ingredients` changed for this (lengths, `delivered_s`/`pad_frames`,
+  the warnings).
+- **`dur: model [min-max]`** (script) → `timing: {"model": true, "min"?, "max"?}` (IR). Every
+  other `dur:` form, and every existing golden (the local real episodes included), is
+  byte-identical. The build writes an **estimate** (`targets.duration_estimate`): the
+  `dur: auto` length for a dialogue shot, else the preset's `default_seconds` (5), inside
+  the clamp; the entry gets `length_estimated: true`. `print_pacing` measures the estimate.
+- **Capability:** target.json `capabilities.duration: "predict"`, only on `ltx2`
+  (`Target.duration`, and `capabilities.duration` in `GET /h3pipe/targets`). Its entries also
+  carry `duration_predict: {min_seconds, max_seconds}` (the script's clamp, else the preset's
+  1–20 s, capped at the template's 481 frames, at least the node's 0.5 s). H3 and
+  `ltx2_ingredients` (LTX 2.3, no duration head) render the estimate: a `--check` warning
+  and a take note.
+- **Preset values** `duration_head` (`ltx-2.5-duration-head-bf16.safetensors`),
+  `default_seconds`, `min_seconds`, `max_seconds` (`targets.DURATION_PRESET_KEYS`) are read
+  from the target at build/queue time and kept out of the shotlist's `defaults`, so a
+  shotlist without `dur: model` shots is unchanged.
+- **Queue time** (`h3jobs.plan_duration`, run by `stage_inputs`): the head must be among
+  `/object_info/ModelPatchLoader`'s `name` choices and `LTXVDurationPredictor` known.
+  Yes: `graph_for` adds `ModelPatchLoader` + `LTXVDurationPredictor` (model and positive from
+  the binding's `duration_predictor`: what feeds `LTXVDualCFGGuider.model` and
+  `LTXVConditioning.positive`; `frame_rate` the job's fps) and links `num_frames` into every
+  widget of the binding's `length` param (video and audio latents). No, or no ComfyUI to
+  ask: the estimate renders, with a note ("LTX-2 duration head not installed
+  (models/model_patches: …); used the estimate N s"). Never a failure. `h3render --dry-run
+  --check-nodes` asks too (read-only).
+- **Sidecar:** `length_source` `script` | `estimate` | `predicted` on every take (the H3
+  graph snapshot test allows the new key, `script`, as it did Phase 7's `target`); the saver's
+  `frames` is the real length. `h3assemble` already cut by the frames on disk (ffprobe); a
+  predicted take is no longer reported as a frame-count mismatch against its estimate.
+- **Status and editor:** `episode_status` adds `takes[].frames` and `cut.frames` (the
+  usable cut take's saved frame count). The timeline's clip widths, sequence lengths and
+  total, and Play all's clip lengths use them at the episode fps (`shotSeconds`,
+  `framesOf`), so a predicted 8.3 s take shows at 8.3 s.
+- **Live check (2026-09-19, scratch copy of ep05, proxy, CLI):** sh030 (Bolt, `dur: 3.04`)
+  `--target ltx2_ingredients`: 73 frames (was 121), 512×288, sidecar `frames` 73, 33 s; Bolt
+  on model (coffee-can body and stripes, chain arms, bottle-cap eyes, spring legs; hands
+  came out gloved rather than clothespins). sh050 rewritten `dur: model 1-3` (H3 build:
+  the warning; estimate 3 s) `--target ltx2`: rendered at the estimate, 73 frames, sidecar
+  `length_source: estimate` and the not-installed note. The predictor graph (head forced)
+  passes `check_graph` against the live `/object_info` (35 nodes). The partial proxy cut
+  assembled with no frame-count mismatch.
+- **Left:** install `ltx-2.5-duration-head-bf16.safetensors` in `models/model_patches`
+  (from `Lightricks/LTX-2.5`, `model_patches/`, 3.8 MB) and render one `dur: model` shot for
+  real; an editor mark for an estimated length.
+- **Later, not built: a `clone` audio policy for LTX.** ComfyUI's `LTXVReferenceAudio`
+  ("LTXV Reference Audio (ID-LoRA)", `nodes_lt.py`) transfers a speaker's identity: inputs
+  `model`, `positive`, `negative`, `reference_audio` (AUDIO, ~5 s recommended, its training
+  length), `audio_vae` (the LTXV audio VAE, which encodes it into the conditioning),
+  `identity_guidance_scale` (default 3.0; each step runs an extra pass without the
+  reference and amplifies the difference; 0 turns that off), plus `start_percent` /
+  `end_percent`; outputs the patched model and both conditionings. It needs an LTX ID-LoRA
+  file loaded on the model, which the user doesn't have yet. With it, `ltx2` could declare
+  `clone` (the subject's `voice_sample` as the reference) instead of falling back to
+  `generate`.
 
 **Phase 9 — later**
 - Script pane: `epNN.md` in a text editor with live `--check` errors beside the lines;

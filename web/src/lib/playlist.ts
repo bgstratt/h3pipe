@@ -46,8 +46,12 @@ export function trimWindow(frames: number, trimIn: number, trimOut: number, fps:
   return { inT: a / f, outT: (frames - b) / f, dur: used / f };
 }
 
-/** The shot's length in frames: `length`, else from `seconds`. */
-function framesOf(s: ShotStatus, fps: number): number {
+/** The shot's length in frames: the cut take's real count when the server
+ * sends it (its sidecar's; a `dur: model` take's is the model's choice), else
+ * the build's `length`, else from `seconds`. */
+export function framesOf(s: ShotStatus, fps: number, take?: TakeSummary): number {
+  const real = take?.frames ?? s.cut.frames;
+  if (real != null && real > 0) return real;
   if (s.length != null && s.length > 0) return s.length;
   return Math.max(1, Math.round((s.seconds ?? 1) * (fps || 24)));
 }
@@ -64,8 +68,8 @@ export function buildPlaylist(st: EpisodeStatus | undefined, other?: EpisodeStat
   let t = 0;
   for (const s of st.shots) {
     if (s.orphan) continue;
-    const frames = framesOf(s, fps);
     const take = clipTake(s, s.cut.placeholder ? other : undefined);
+    const frames = framesOf(s, fps, take);
     const usable = !!take && take.status === "ok" && take.has_video && !!take.mp4;
     const win = trimWindow(frames, s.cut.trim_in, s.cut.trim_out, fps);
     let item: Omit<PlayItem, "start" | "index">;
