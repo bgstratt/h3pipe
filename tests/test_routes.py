@@ -162,6 +162,63 @@ class RoutesTest(unittest.TestCase):
         self.assertEqual(len(uploads), 3)
         self.assertEqual([p for p in uploads if os.path.exists(p)], [])
 
+    def test_source_and_promote(self):
+        """Phase 9a through aiohttp: the source routes' JSON, a 409 with the
+        file's hash and text, a JSON refusal with line/col, the promote plan
+        and its 409 (test_phase9a has the rest)."""
+        from test_render import FIXTURE
+        shutil.copy(os.path.join(FIXTURE, "series.json"), self.ep)
+        shutil.copy(os.path.join(FIXTURE, "script.md"), os.path.join(self.ep, "ep01.md"))
+
+        async def fn(c):
+            r = await c.put("/h3pipe/config", json={"roots": [self.shows]})
+            self.assertEqual(r.status, 200)
+            r = await c.get("/h3pipe/source", params={"ep": self.ep, "file": "script"})
+            self.assertEqual(r.status, 200, await r.text())
+            src = await r.json()
+            self.assertEqual(src["path"], "ep01.md")
+            self.assertEqual(src["shots"][0]["id"], "sh010")
+            r = await c.get("/h3pipe/source", params={"ep": self.ep, "file": "script",
+                                                      "hash_only": "1"})
+            self.assertEqual(set(await r.json()), {"file", "hash", "mtime"})
+            r = await c.post("/h3pipe/source/check", json={
+                "ep": self.ep, "file": "script", "text": src["text"].replace("size: ws",
+                                                                             "size: huge")})
+            chk = await r.json()
+            self.assertEqual((chk["ok"], chk["errors"][0]["line"]), (False, 12))
+            r = await c.put("/h3pipe/source", json={"ep": self.ep, "file": "script",
+                                                    "text": "x", "base_hash": "stale",
+                                                    "rebuild": False})
+            self.assertEqual(r.status, 409)
+            body = await r.json()
+            self.assertEqual((body["error"], body["hash"], body["text"]),
+                             ("changed on disk", src["hash"], src["text"]))
+            s = await (await c.get("/h3pipe/source",
+                                   params={"ep": self.ep, "file": "series"})).json()
+            r = await c.put("/h3pipe/source", json={"ep": self.ep, "file": "series",
+                                                    "text": s["text"] + "}",
+                                                    "base_hash": s["hash"], "rebuild": False})
+            self.assertEqual(r.status, 400)
+            self.assertIn("line", await r.json())
+            r = await c.put("/h3pipe/source", json={"ep": self.ep, "file": "script",
+                                                    "text": src["text"] + "\n",
+                                                    "base_hash": src["hash"], "rebuild": False})
+            self.assertEqual(r.status, 200, await r.text())
+            saved = await r.json()
+            self.assertIsNone(saved["build"])
+            self.assertTrue(saved["check"]["ok"])
+            r = await c.get("/h3pipe/promote", params={"ep": self.ep})
+            self.assertEqual(r.status, 200, await r.text())
+            plan = await r.json()
+            self.assertEqual((plan["items"], plan["hashes"]["script"]), ([], saved["hash"]))
+            r = await c.post("/h3pipe/promote", json={"ep": self.ep, "items": "all",
+                                                      "hashes": {"script": src["hash"],
+                                                                 "series": s["hash"]}})
+            self.assertEqual(r.status, 409)
+            self.assertEqual((await r.json())["file"], "script")
+        self.run_client(fn)
+        self.assertIn(("h3pipe.episode", {"ep": self.ep}), self.sent)
+
     def test_models_through_folder_paths(self):
         """GET /h3pipe/models inside ComfyUI: the list and the paths come from
         folder_paths, the fingerprints are cached in the user folder."""

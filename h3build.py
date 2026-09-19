@@ -77,6 +77,15 @@ def compile_episode(ep: dict, series_cfg: dict, proxy: bool) -> tuple[dict, dict
     return _h3.compile_legacy(DEFAULT_TARGET, ep, series_cfg, "proxy" if proxy else "final")
 
 
+def compile_groups(story: ir.Episode, series_cfg: dict, pass_: str,
+                   groups=None) -> list[tuple[TG.Target, dict, dict]]:
+    """[(target, shotlist doc, report)] for one pass: each target the episode
+    uses compiles its own shots (TG.episode_targets), the series target first.
+    What a build writes and what --check reports (and the editor's check)."""
+    groups = TG.episode_targets(story, series_cfg) if groups is None else groups
+    return [(t, *t.compile_episode(story, series_cfg, pass_, only=ids)) for t, ids in groups]
+
+
 # ---------------------------------------------------------------------------
 
 def mmss(sec: float) -> str:
@@ -227,9 +236,7 @@ def main() -> int:
             per_shot = {sid: t.template for t, ids in groups[1:] for sid in ids}
             return print_pacing(story, series_cfg, template=target.template,
                                 templates=per_shot)
-        pass_ = "proxy" if args.proxy else "final"
-        built = [(t, *t.compile_episode(story, series_cfg, pass_, only=ids))
-                 for t, ids in groups]
+        built = compile_groups(story, series_cfg, "proxy" if args.proxy else "final", groups)
         _, doc, report = built[0]
     except (ScriptError, ValueError, KeyError) as exc:
         print(f"\n  error in {os.path.basename(args.script)}: {exc}\n", file=sys.stderr)

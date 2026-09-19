@@ -1144,6 +1144,22 @@ def script_targets(root: str) -> dict[str, str | None] | None:
     return out
 
 
+def built_values(shot: dict, dflt: dict) -> tuple[str, list[dict] | None, int]:
+    """(model, LoRA list, steps) a shotlist entry renders with before any
+    override: the entry's, else its shotlist's `defaults`. The LoRA list is
+    None when neither names one (the workflow's LoRA is left alone)."""
+    model = shot.get("model") or dflt.get("model", "")
+    if "loras" in shot:                                # a profile's list
+        loras = [dict(lo) for lo in shot["loras"]]
+    else:
+        built_lora = shot.get("lora") or dflt.get("lora", "")
+        loras = parse_lora(built_lora) if built_lora else None
+        if loras is None and isinstance(dflt.get("loras"), list):
+            # a preset that names a LoRA per stage (Wan 2.2 14B's turbo pair)
+            loras = [dict(lo) for lo in dflt["loras"]]
+    return model, loras, int(shot.get("steps", dflt.get("steps", 4)))
+
+
 def plan_job(root: str, pass_: str, doc: dict, index: int, req: RenderRequest,
              overrides: dict | None = None, folder: str | None = None,
              rng: random.Random | None = None) -> Job:
@@ -1216,18 +1232,11 @@ def plan_job(root: str, pass_: str, doc: dict, index: int, req: RenderRequest,
         missing_mode = "recompiled" if recompiled is not None else "blank"
     source = recompiled or shot
 
-    model = pick("model", shot.get("model") or dflt.get("model", ""), req.model)
-    if "loras" in shot:                                # a profile's list
-        built_loras = [dict(lo) for lo in shot["loras"]]
-    else:
-        built_lora = shot.get("lora") or dflt.get("lora", "")
-        built_loras = parse_lora(built_lora) if built_lora else None
-        if built_loras is None and isinstance(dflt.get("loras"), list):
-            # a preset that names a LoRA per stage (Wan 2.2 14B's turbo pair)
-            built_loras = [dict(lo) for lo in dflt["loras"]]
+    built_model, built_loras, built_steps = built_values(shot, dflt)
+    model = pick("model", built_model, req.model)
     loras = pick("loras", built_loras, req.loras)
-    steps = int(pick("steps", int(shot.get("steps", dflt.get("steps", 4))), req.steps))
-    if steps != int(shot.get("steps", dflt.get("steps", 4))) and not target.binding.specs("steps"):
+    steps = int(pick("steps", built_steps, req.steps))
+    if steps != built_steps and not target.binding.specs("steps"):
         notes.append(f"steps {steps} is recorded but not used: {target.short} has no steps "
                      f"setting (its sampling schedule is fixed in the workflow)")
     prompt = pick("prompt", source.get("prompt", ""), req.prompt)

@@ -16,6 +16,14 @@ def load_series_config(path: str) -> dict:
     no subjects)."""
     with open(path, encoding="utf-8") as fh:
         series_cfg = json.load(fh)
+    return series_config_from(series_cfg)
+
+
+def series_config_from(series_cfg: dict) -> dict:
+    """`load_series_config` for a series config already parsed (it is changed in
+    place and returned). ValueError as there."""
+    if not isinstance(series_cfg, dict):
+        raise ValueError("series.json must be a JSON object")
     series_cfg["subjects"] = {k: v for k, v in series_cfg.get("subjects", {}).items()
                          if not k.startswith("_") and isinstance(v, dict)}
     series_cfg["locations"] = {k: v for k, v in series_cfg.get("locations", {}).items()
