@@ -50,6 +50,9 @@ export interface TakeSummary {
   /** The take's real frame count, as the saver wrote it (null: not rendered;
    * absent from older servers). A `dur: model` take's is the model's choice. */
   frames?: number | null;
+  /** The frame rate the take was rendered at, from its sidecar (a Wan 14B
+   * take is 16 fps in a 24 fps episode); null/absent: the episode's. */
+  fps?: number | null;
 }
 
 export interface CutInfo {
@@ -67,6 +70,9 @@ export interface CutInfo {
    * `seconds` is the build's (for `dur: model`, an estimate); the timeline and
    * Play all use this when present. Absent from older servers. */
   frames?: number | null;
+  /** The frame rate of `frames` (and of the build's `length` when there is no
+   * take): the cut take's, else the shot's target's. Absent: the episode's. */
+  fps?: number | null;
 }
 
 export interface ShotStatus {
@@ -100,6 +106,10 @@ export interface MissingRef {
   /** relative to the episode (or its series config) */
   path: string;
   subject?: string;
+  /** false: the shot can't be rendered without it, even with render anyway
+   * (Wan 14B I2V's first frame); `why` says what to do instead */
+  anyway?: boolean;
+  why?: string;
 }
 
 export interface EpisodeStatus {

@@ -88,6 +88,9 @@ class GraphSnapshotTest(unittest.TestCase):
                     if "length_source" not in w["sidecar"]:
                         self.assertEqual(got[ps][sid]["sidecar"].pop("length_source", None),
                                          "script")
+                    # and its fps (Wan: mixed frame rates in one cut): H3's 24
+                    if "fps" not in w["sidecar"]:
+                        self.assertEqual(got[ps][sid]["sidecar"].pop("fps", None), 24.0)
                     for part in ("graph", "shotlist", "sidecar"):
                         self.assertEqual(got[ps][sid][part], w[part], f"{ps} {sid} {part}")
 

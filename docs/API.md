@@ -81,6 +81,11 @@ queued takes whose ComfyUI job is gone (`h3takes.sweep_queued`, with `as_of` tak
   (`length_estimated` on the entry) and the model picks the length when it renders (the
   sidecar's `length_source` is `predicted`, versus `estimate` or `script`). The
   timeline and Play all use `cut.frames` / the take's `frames` at `fps` when present.
+- A take's `fps` is the frame rate it was rendered at (its sidecar's `fps`; null for a take
+  from before sidecars recorded it: the episode's). `cut.fps` is the cut take's, else the
+  shot's target's. They differ from the episode's `fps` on Wan 2.2 14B (16 fps): the
+  timeline and Play all time such a take as `frames / fps` of its own, and trims stay in
+  the episode's frames. A shot's `seconds` is its build's `length` at its target's rate.
 - The strip is `STRIP_FRAMES` (8) cells of equal width, left to right, evenly spaced
   through the clip. Hover scrub picks a cell from the pointer's x position.
 
@@ -550,7 +555,8 @@ open, and what was added:
 - **`GET /h3pipe/targets`** adds, per target:
   - `short`: a short label ("H3", "LTX-2").
   - `capabilities`: `{policies, policy_fallback, voice_reference, subject_refs,
-    keyframes, prompt ("sections" | "prose"; `minimax_h3_fl2va`: "fields"), negative_prompt, duration ("predict" | "script")}`.
+    keyframes, prompt ("sections" | "prose"; `minimax_h3_fl2va`: "fields"), negative_prompt, duration ("predict" | "script"),
+    audio ("generate" | "none": the Wan targets make no sound)}`.
   - `template` may carry `fps: "series"` (the target renders at the series config's fps),
     `max_size` (`{long_side, pixels}`) and `size_fit: "snap"`.
   - `widgets` values are always single specs (for a param patched into several widgets,
@@ -766,3 +772,45 @@ The model picker lists the files of the target's family first, then an "Other fi
 `mismatch`, the redo dialog offers "Render anyway (model mismatch)", which sends
 `allow_model_mismatch: true`. A render that skips a shot for a mismatch shows a warning
 toast with the reason. A server without `/h3pipe/models` keeps the flat list.
+
+## The Wan 2.2 targets (as built)
+
+Three more video targets, all silent: `wan22_i2v`, `wan22_ti2v`, `wan22_vace`. What the
+existing routes now show:
+
+- **`GET /h3pipe/targets`** lists them: `label` "Wan 2.2 14B I2V" / "Wan 2.2 5B TI2V" /
+  "Wan 2.2 14B VACE (refs)", `short` "Wan I2V" / "Wan 5B" / "Wan+refs". `capabilities`:
+  `audio: "none"`, `policies: ["silent"]`, `policy_fallback: "silent"`, `prompt: "prose"`,
+  `negative_prompt: true`, `keyframes` `["first", "last"]` (I2V, VACE) or `["first"]` (5B),
+  `subject_refs` true only for VACE. `template`: 14B `fps: 16.0`, `frames: {step: 4, base: 5,
+  max: 161}`, `size_multiple: 16`; 5B `fps: 24.0`, `max: 241`, `size_multiple: 32`; all
+  `size_fit: "snap"` under 720p. Presets: I2V final 832×480 / proxy 640×352, 4 steps with
+  the lightx2v LoRA pair; 5B final 1280×704 / proxy 640×352, 20 / 12 steps; VACE final
+  832×480 / proxy 640×352, 20 / 10 steps at cfg 3.5. `widgets` add `model_low` (the 14B's
+  low noise model), `cfg`, `sampler`, `shift` (and VACE's `vace_strength`); `loras` is the
+  high noise stage's spec (a 14B binding has one LoRA chain per stage: `stage` routes a
+  LoRA, else its name's `high_noise` / `low_noise`, else both).
+- **Shotlist entries** are like `ltx2`'s (`keyframes`, `negative`, a prose `prompt` with
+  no sound and the lines as silent acting), with `audio_policy: "silent"` and
+  `audio_intent` / `audio_note` on every shot; VACE entries add `panels` (the subjects, as
+  `ltx2_ingredients`', without the plate). A shotlist's `defaults` carry `model_low`,
+  `loras` (the 14B I2V preset's per-stage list, used when no `lora` names one), `cfg`,
+  `split` (the fraction of the steps the high noise model samples) and the rest.
+- **`missing_refs`** entries may carry `anyway: false` and `why`: the shot can't render
+  without that ref even with `allow_missing_refs: true`. That is `wan22_i2v`'s first frame:
+  `{"slot": "first frame", "kind": "image", "path": "refs/shots/sh050/first.png",
+  "anyway": false, "why": "Wan 14B I2V needs a first frame: use continuity or import one,
+  or retarget to wan22_ti2v"}`. **`POST /h3pipe/render`** skips such a shot either way,
+  with `why` as its `reason`. The editor shows `why` and offers no render-anyway for it.
+- **VACE's reference image** is composed when the shot is queued, like the ingredients
+  sheet but on white (one panel per subject), uploaded as `h3pipe/<sha1>.png`, and kept as
+  `<shot>_tNN_reference.png` (`slot: "reference image"`, `role: "reference"`); its panels'
+  files are required refs (`slot: "reference panel N"`). Keyframes become VACE control
+  frames.
+- **Take sidecars** now carry `fps` on every take (the queuer writes it; the saver writes
+  it too once ComfyUI has reloaded the node pack). Wan takes are mute mp4s at their
+  target's fps (16 for 14B), with a `notes` entry saying the audio renders silent.
+- **`h3assemble`** (and the `assemble` route) convert every clip to the episode's fps (the
+  series config's `series.fps`) with ffmpeg's `fps` filter, timing each converted clip by
+  its duration on the cut's running clock, lay silence under mute clips, and scale any clip
+  of another size to the cut's.

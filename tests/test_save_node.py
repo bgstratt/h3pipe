@@ -142,7 +142,7 @@ class SaveNodeTest(unittest.TestCase):
         self.assertRegex(sc["finished"], r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d[+-]\d\d:\d\d$")
         self.assertEqual(len(sc["finished"]), len(T.now()))
         # every queuer field survives, unchanged
-        saver = {"status", "finished", "frames", "mp4", "thumb", "strip", "save_notes"}
+        saver = {"status", "finished", "frames", "fps", "mp4", "thumb", "strip", "save_notes"}
         for k, v in before.items():
             if k not in saver:
                 self.assertEqual(sc[k], v, k)
@@ -190,7 +190,7 @@ class SaveNodeTest(unittest.TestCase):
             _, status = self.save(clip(10), shot="sh030", take=2, sidecar=path)
         self.assertIn("missing", status)
         sc = T.read_json(path)
-        self.assertEqual(set(sc), {"shot", "take", "status", "finished", "frames",
+        self.assertEqual(set(sc), {"shot", "take", "status", "finished", "frames", "fps",
                                    "mp4", "thumb", "strip", "save_notes"})
         self.assertEqual((sc["shot"], sc["take"]), ("sh030", 2))
         self.assertEqual(sc["status"], "failed")

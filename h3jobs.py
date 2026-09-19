@@ -829,12 +829,18 @@ def story_hash(shot: dict) -> str:
                            if k not in PRESET_KEYS and k not in PRESET_EXTRA})
 
 
+# Preset defaults of a two-stage target (Wan 2.2 14B): the second model and
+# the per-stage LoRA list. In the hash only when the shotlist has them.
+PRESET_DEFAULTS_EXTRA = ("model_low", "loras")
+
+
 def preset_hash(doc: dict, shot: dict) -> str:
     d = doc.get("defaults", {})
     part = {k: shot.get(k) for k in PRESET_KEYS}
     part.update({k: shot[k] for k in PRESET_EXTRA if k in shot})
-    return T.content_hash({"defaults": {k: d.get(k) for k in PRESET_DEFAULTS},
-                           "shot": part})
+    dd = {k: d.get(k) for k in PRESET_DEFAULTS}
+    dd.update({k: d[k] for k in PRESET_DEFAULTS_EXTRA if k in d})
+    return T.content_hash({"defaults": dd, "shot": part})
 
 
 def stale_reasons(root: str, doc: dict, shot: dict, sidecar: dict | None) -> list[str]:
@@ -985,6 +991,21 @@ class Job:
         """Why check_models stopped the job ("" if it didn't)."""
         return "; ".join(c["message"] for c in self.model_checks if c.get("block"))
 
+    @property
+    def no_anyway(self) -> list[dict]:
+        """Missing refs the target can't render without, even when asked to
+        render anyway (a ref slot with `anyway: false`: Wan 14B I2V's first
+        frame). Their `why` says what to do instead."""
+        return [r for r in self.missing if r.get("anyway") is False]
+
+    def blocked_reason(self) -> str:
+        """Why a blocked job isn't queued, as the CLI and routes say it."""
+        hard = self.no_anyway
+        if hard:
+            return "; ".join(dict.fromkeys(r.get("why") or f"needs {r['slot']}" for r in hard))
+        return ("missing refs: " + self.missing_note()
+                + " (pass allow_missing_refs: true to render anyway)")
+
 
 def check_video_target(target_id: str) -> str:
     """`target_id` if it names a video target, else TargetError naming the known ones."""
@@ -1061,8 +1082,10 @@ def plan_job(root: str, pass_: str, doc: dict, index: int, req: RenderRequest,
     # render anyway, don't queue it at all; rendering anyway, let the target
     # write the shot without those refs when it can.
     missing = missing_refs(root, sdoc, shot)
+    # a ref the target can't do without (`anyway: false`) blocks even then
+    anyway = req.allow_missing_refs and not any(r.get("anyway") is False for r in missing)
     recompiled, missing_mode, missing_why = None, "", ""
-    if missing and req.allow_missing_refs and action not in ("skip", "busy"):
+    if missing and anyway and action not in ("skip", "busy"):
         recompiled, missing_why = recompile_without(root, pass_, sdoc, shot, missing)
         missing_mode = "recompiled" if recompiled is not None else "blank"
     source = recompiled or shot
@@ -1073,6 +1096,9 @@ def plan_job(root: str, pass_: str, doc: dict, index: int, req: RenderRequest,
     else:
         built_lora = shot.get("lora") or dflt.get("lora", "")
         built_loras = parse_lora(built_lora) if built_lora else None
+        if built_loras is None and isinstance(dflt.get("loras"), list):
+            # a preset that names a LoRA per stage (Wan 2.2 14B's turbo pair)
+            built_loras = [dict(lo) for lo in dflt["loras"]]
     loras = pick("loras", built_loras, req.loras)
     steps = int(pick("steps", int(shot.get("steps", dflt.get("steps", 4))), req.steps))
     if steps != int(shot.get("steps", dflt.get("steps", 4))) and not target.binding.specs("steps"):
@@ -1101,7 +1127,7 @@ def plan_job(root: str, pass_: str, doc: dict, index: int, req: RenderRequest,
         seed, source = built_seed, "stable"
 
     base_hash = ov.get("base_hash")
-    if missing and not req.allow_missing_refs and action not in ("skip", "busy"):
+    if missing and not anyway and action not in ("skip", "busy"):
         action = "blocked"
     if error and action not in ("skip", "busy"):
         action = "error"
@@ -1280,6 +1306,9 @@ def sidecar_for(job: Job) -> dict:
         "width": int(job.shot.get("width", d.get("width", 0))),
         "height": int(job.shot.get("height", d.get("height", 0))),
         "length": job.frames,
+        # the frame rate the take is rendered and saved at (the target's: Wan
+        # 14B renders 16 fps in a 24 fps episode; assemble converts)
+        "fps": job.fps,
         # predicted: `length` is the build's estimate, the saver's `frames` the truth
         "length_source": job.length_source,
         "shot_hash": job.shot_hash,
@@ -1382,15 +1411,18 @@ def apply_loras(g: dict, loras: list[dict], spec: dict | None = None) -> None:
     spec = dict(DEFAULT_LORA_SPEC, **(spec or {}))
     ctype, name_w, str_w, link = (spec["class_type"], spec["name"], spec["strength"],
                                   spec["input"])
-    ids = [k for k, v in g.items() if v["class_type"] == ctype]
+    title = spec.get("title")
+    # `title` picks one loader among several (a two-stage graph's per-stage LoRA)
+    ids = [k for k, v in g.items() if v["class_type"] == ctype
+           and (not title or (v.get("_meta") or {}).get("title") == title)]
     if not ids and loras and spec.get("insert_after"):
         at = spec["insert_after"]
-        src = node_of(g, at["class_type"])
+        src = select_nodes(g, {k: v for k, v in at.items() if k in ("class_type", "title")})[0]
         slot = int(at.get("output", 0))
         consumers = _consumers(g, src, slot)
         nid = str(_next_id(g))
         g[nid] = {"class_type": ctype, "inputs": {link: [src, slot], name_w: "", str_w: 1.0},
-                  "_meta": {"title": "LoRA 1 (h3jobs)"}}
+                  "_meta": {"title": title or "LoRA 1 (h3jobs)"}}
         for k, name in consumers:
             g[k]["inputs"][name] = [nid, 0]
         ids = [nid]
@@ -1420,6 +1452,29 @@ def apply_loras(g: dict, loras: list[dict], spec: dict | None = None) -> None:
         prev = nid
     for k, name in consumers:
         g[k]["inputs"][name] = [prev, 0]
+
+
+def lora_stage(lora: dict) -> str | None:
+    """The sampling stage a LoRA belongs to in a two-stage graph: its own
+    `stage`, else from its name (Wan 2.2 LoRAs come in `*high_noise*` /
+    `*low_noise*` pairs), else None (both stages)."""
+    if lora.get("stage"):
+        return str(lora["stage"])
+    name = str(lora.get("name", "")).lower().replace("-", "_")
+    for stage in ("high", "low"):
+        if f"{stage}_noise" in name or f"{stage}noise" in name:
+            return stage
+    return None
+
+
+def loras_for(loras: list[dict], spec: dict) -> list[dict]:
+    """The LoRAs one loader spec takes: all of them, or for a spec with a
+    `stage` (a binding with one LoRA chain per sampling stage) those of that
+    stage and those of none."""
+    stage = spec.get("stage")
+    if not stage:
+        return list(loras)
+    return [lo for lo in loras if lora_stage(lo) in (None, stage)]
 
 
 def job_target(job: Job) -> "TG.Target":
@@ -1559,7 +1614,9 @@ def graph_for(base: dict, job: Job, take: T.Take, *, panel_mode: str | None = No
     if job.model:
         patch_param(g, b, "model", job.model)
     if job.loras is not None:
-        apply_loras(g, job.loras, b.param("loras"))
+        # one chain per spec: a two-stage binding lists one per stage
+        for spec in b.specs("loras") or [None]:
+            apply_loras(g, loras_for(job.loras, spec or {}), spec)
     patch_param(g, b, "steps", job.steps)
     patch_param(g, b, "seed", job.seed)
     for name, value in job_values(job).items():

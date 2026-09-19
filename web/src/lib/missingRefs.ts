@@ -7,6 +7,11 @@ export function missingOf(s: Pick<ShotStatus, "missing_refs">): MissingRef[] {
   return s.missing_refs ?? [];
 }
 
+/** Refs the shot can't be rendered without, even with render anyway (`anyway: false`). */
+export function noAnyway(refs: MissingRef[]): MissingRef[] {
+  return refs.filter((r) => r.anyway === false);
+}
+
 /** "Picture 4: refs/_bg/x.png (dean)" per line, for tooltips. */
 export function missingRefsTitle(refs: MissingRef[]): string {
   return refs.map((r) => `${r.slot}: ${r.path}${r.subject ? ` (${r.subject})` : ""}`).join("\n");

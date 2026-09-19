@@ -220,7 +220,7 @@ function TakesView({ ep, v }: { ep: string; v: ViewerState }) {
     if (bEl) bEl.muted = audio !== "b";
   }, [aEl, bEl, audio, takeA?.mp4, takeB?.mp4]);
 
-  const fps = st?.fps || 24;
+  const fps = takeA?.fps || st?.fps || 24;
   useWindowKeys(winRef, useCallback((e: KeyboardEvent) => {
     if (!aEl) return;
     if (e.key === " ") {

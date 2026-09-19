@@ -3,7 +3,7 @@
 
 import { useState } from "react";
 import { showMissingRefs } from "../actions";
-import { missingRefsSummary, missingRefsTitle } from "../lib/missingRefs";
+import { missingRefsSummary, missingRefsTitle, noAnyway } from "../lib/missingRefs";
 import type { MissingRef, ShotStatus } from "../types";
 
 export const RENDER_ANYWAY_LABEL = "Render anyway (missing pictures become flat grey — close to text-to-video)";
@@ -16,30 +16,36 @@ export function MissingRefsNote({ blocked, allow, setAllow, compact }: {
 }) {
   if (!blocked.length) return null;
   const one = blocked.length === 1;
+  // shots that can't render anyway (Wan 14B I2V without a first frame) stay skipped
+  const soft = blocked.filter((b) => !noAnyway(b.refs).length).length;
   return (
     <div className={`h3-note ${allow ? "h3-note-info" : ""}`}>
       <div>
         <b>{one ? `${blocked[0].shot} is missing refs` : `${blocked.length} shots are missing refs`}</b>
-        {allow ? " and will render with stand-ins." : ` and will be skipped.`}
+        {allow && soft ? ` and will render with stand-ins${soft < blocked.length ? " (except those that can't)" : ""}.` : ` and will be skipped.`}
       </div>
       <ul className="h3-missing-list">
         {blocked.slice(0, compact ? 4 : 30).map((b) => (
           <li key={b.shot} title={missingRefsTitle(b.refs)}>
             {!one && <b>{b.shot}: </b>}
-            {b.refs.map((r, i) => (
-              <span key={i} className="h3-mono">
-                {i > 0 ? ", " : ""}{r.slot} <span className="h3-muted">{r.path}</span>
-              </span>
-            ))}
+            {noAnyway(b.refs).length
+              ? <span>{[...new Set(noAnyway(b.refs).map((r) => r.why || `needs ${r.slot}`))].join("; ")}</span>
+              : b.refs.map((r, i) => (
+                <span key={i} className="h3-mono">
+                  {i > 0 ? ", " : ""}{r.slot} <span className="h3-muted">{r.path}</span>
+                </span>
+              ))}
           </li>
         ))}
         {blocked.length > (compact ? 4 : 30) && <li className="h3-muted">…and {blocked.length - (compact ? 4 : 30)} more</li>}
       </ul>
       <div className="h3-row h3-wrap">
-        <label className="h3-check">
-          <input type="checkbox" checked={allow} onChange={(e) => setAllow(e.target.checked)} />
-          {RENDER_ANYWAY_LABEL}
-        </label>
+        {soft > 0 && (
+          <label className="h3-check">
+            <input type="checkbox" checked={allow} onChange={(e) => setAllow(e.target.checked)} />
+            {RENDER_ANYWAY_LABEL}
+          </label>
+        )}
         <span className="h3-grow" />
         <button className="h3-link" onClick={() => showMissingRefs(one ? blocked[0].shot : null)}>Show in Refs</button>
       </div>

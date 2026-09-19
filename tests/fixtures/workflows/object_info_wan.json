@@ -1,0 +1,633 @@
+{
+ "CLIPLoader": {
+  "input": {
+   "optional": {
+    "device": [
+     "COMBO"
+    ]
+   },
+   "required": {
+    "clip_name": [
+     "COMBO"
+    ],
+    "type": [
+     "COMBO"
+    ]
+   }
+  },
+  "output": [
+   "CLIP"
+  ],
+  "output_name": [
+   "CLIP"
+  ]
+ },
+ "CLIPTextEncode": {
+  "input": {
+   "required": {
+    "clip": [
+     "CLIP"
+    ],
+    "text": [
+     "STRING"
+    ]
+   }
+  },
+  "output": [
+   "CONDITIONING"
+  ],
+  "output_name": [
+   "CONDITIONING"
+  ]
+ },
+ "CreateVideo": {
+  "input": {
+   "optional": {
+    "audio": [
+     "AUDIO"
+    ],
+    "bit_depth": [
+     "COMBO"
+    ],
+    "codec": [
+     "COMBO"
+    ],
+    "color_space": [
+     "COMBO"
+    ]
+   },
+   "required": {
+    "fps": [
+     "FLOAT"
+    ],
+    "images": [
+     "IMAGE"
+    ]
+   }
+  },
+  "output": [
+   "VIDEO"
+  ],
+  "output_name": [
+   "VIDEO"
+  ]
+ },
+ "EmptyImage": {
+  "input": {
+   "required": {
+    "batch_size": [
+     "INT"
+    ],
+    "color": [
+     "INT"
+    ],
+    "height": [
+     "INT"
+    ],
+    "width": [
+     "INT"
+    ]
+   }
+  },
+  "output": [
+   "IMAGE"
+  ],
+  "output_name": [
+   "IMAGE"
+  ]
+ },
+ "H3SaveShot": {
+  "input": {
+   "optional": {
+    "audio": [
+     "AUDIO"
+    ],
+    "sidecar": [
+     "STRING"
+    ]
+   },
+   "required": {
+    "audio_policy": [
+     "STRING"
+    ],
+    "fps": [
+     "FLOAT"
+    ],
+    "images": [
+     "IMAGE"
+    ],
+    "project_root": [
+     "STRING"
+    ],
+    "save_frames": [
+     "BOOLEAN"
+    ],
+    "shot_id": [
+     "STRING"
+    ],
+    "subfolder": [
+     "STRING"
+    ],
+    "take": [
+     "INT"
+    ]
+   }
+  },
+  "output": [
+   "STRING",
+   "STRING"
+  ],
+  "output_name": [
+   "shot_dir",
+   "status"
+  ]
+ },
+ "ImageBatch": {
+  "input": {
+   "required": {
+    "image1": [
+     "IMAGE"
+    ],
+    "image2": [
+     "IMAGE"
+    ]
+   }
+  },
+  "output": [
+   "IMAGE"
+  ],
+  "output_name": [
+   "IMAGE"
+  ]
+ },
+ "ImageScale": {
+  "input": {
+   "required": {
+    "crop": [
+     "COMBO"
+    ],
+    "height": [
+     "INT"
+    ],
+    "image": [
+     "IMAGE"
+    ],
+    "upscale_method": [
+     "COMBO"
+    ],
+    "width": [
+     "INT"
+    ]
+   }
+  },
+  "output": [
+   "IMAGE"
+  ],
+  "output_name": [
+   "IMAGE"
+  ]
+ },
+ "ImageToMask": {
+  "input": {
+   "required": {
+    "channel": [
+     "COMBO"
+    ],
+    "image": [
+     "IMAGE"
+    ]
+   }
+  },
+  "output": [
+   "MASK"
+  ],
+  "output_name": [
+   "MASK"
+  ]
+ },
+ "KSampler": {
+  "input": {
+   "required": {
+    "cfg": [
+     "FLOAT"
+    ],
+    "denoise": [
+     "FLOAT"
+    ],
+    "latent_image": [
+     "LATENT"
+    ],
+    "model": [
+     "MODEL"
+    ],
+    "negative": [
+     "CONDITIONING"
+    ],
+    "positive": [
+     "CONDITIONING"
+    ],
+    "sampler_name": [
+     "COMBO"
+    ],
+    "scheduler": [
+     "COMBO"
+    ],
+    "seed": [
+     "INT"
+    ],
+    "steps": [
+     "INT"
+    ]
+   }
+  },
+  "output": [
+   "LATENT"
+  ],
+  "output_name": [
+   "LATENT"
+  ]
+ },
+ "KSamplerAdvanced": {
+  "input": {
+   "required": {
+    "add_noise": [
+     "COMBO"
+    ],
+    "cfg": [
+     "FLOAT"
+    ],
+    "end_at_step": [
+     "INT"
+    ],
+    "latent_image": [
+     "LATENT"
+    ],
+    "model": [
+     "MODEL"
+    ],
+    "negative": [
+     "CONDITIONING"
+    ],
+    "noise_seed": [
+     "INT"
+    ],
+    "positive": [
+     "CONDITIONING"
+    ],
+    "return_with_leftover_noise": [
+     "COMBO"
+    ],
+    "sampler_name": [
+     "COMBO"
+    ],
+    "scheduler": [
+     "COMBO"
+    ],
+    "start_at_step": [
+     "INT"
+    ],
+    "steps": [
+     "INT"
+    ]
+   }
+  },
+  "output": [
+   "LATENT"
+  ],
+  "output_name": [
+   "LATENT"
+  ]
+ },
+ "LoadImage": {
+  "input": {
+   "required": {
+    "image": [
+     "COMBO"
+    ]
+   }
+  },
+  "output": [
+   "IMAGE",
+   "MASK"
+  ],
+  "output_name": [
+   "IMAGE",
+   "MASK"
+  ]
+ },
+ "LoraLoaderModelOnly": {
+  "input": {
+   "required": {
+    "lora_name": [
+     "COMBO"
+    ],
+    "model": [
+     "MODEL"
+    ],
+    "strength_model": [
+     "FLOAT"
+    ]
+   }
+  },
+  "output": [
+   "MODEL"
+  ],
+  "output_name": [
+   "MODEL"
+  ]
+ },
+ "ModelSamplingSD3": {
+  "input": {
+   "required": {
+    "model": [
+     "MODEL"
+    ],
+    "shift": [
+     "FLOAT"
+    ]
+   }
+  },
+  "output": [
+   "MODEL"
+  ],
+  "output_name": [
+   "MODEL"
+  ]
+ },
+ "SaveVideo": {
+  "input": {
+   "optional": {
+    "codec": [
+     "COMFY_DYNAMICCOMBO_V3"
+    ]
+   },
+   "required": {
+    "filename_prefix": [
+     "STRING"
+    ],
+    "format": [
+     "COMFY_DYNAMICCOMBO_V3"
+    ],
+    "video": [
+     "VIDEO"
+    ]
+   }
+  },
+  "output": [
+   "VIDEO"
+  ],
+  "output_name": [
+   "video"
+  ]
+ },
+ "TrimVideoLatent": {
+  "input": {
+   "required": {
+    "samples": [
+     "LATENT"
+    ],
+    "trim_amount": [
+     "INT"
+    ]
+   }
+  },
+  "output": [
+   "LATENT"
+  ],
+  "output_name": [
+   "LATENT"
+  ]
+ },
+ "UNETLoader": {
+  "input": {
+   "required": {
+    "unet_name": [
+     "COMBO"
+    ],
+    "weight_dtype": [
+     "COMBO"
+    ]
+   }
+  },
+  "output": [
+   "MODEL"
+  ],
+  "output_name": [
+   "MODEL"
+  ]
+ },
+ "VAEDecode": {
+  "input": {
+   "required": {
+    "samples": [
+     "LATENT"
+    ],
+    "vae": [
+     "VAE"
+    ]
+   }
+  },
+  "output": [
+   "IMAGE"
+  ],
+  "output_name": [
+   "IMAGE"
+  ]
+ },
+ "VAELoader": {
+  "input": {
+   "required": {
+    "vae_name": [
+     "COMBO"
+    ]
+   }
+  },
+  "output": [
+   "VAE"
+  ],
+  "output_name": [
+   "VAE"
+  ]
+ },
+ "Wan22ImageToVideoLatent": {
+  "input": {
+   "optional": {
+    "start_image": [
+     "IMAGE"
+    ]
+   },
+   "required": {
+    "batch_size": [
+     "INT"
+    ],
+    "height": [
+     "INT"
+    ],
+    "length": [
+     "INT"
+    ],
+    "vae": [
+     "VAE"
+    ],
+    "width": [
+     "INT"
+    ]
+   }
+  },
+  "output": [
+   "LATENT"
+  ],
+  "output_name": [
+   "LATENT"
+  ]
+ },
+ "WanFirstLastFrameToVideo": {
+  "input": {
+   "optional": {
+    "clip_vision_end_image": [
+     "CLIP_VISION_OUTPUT"
+    ],
+    "clip_vision_start_image": [
+     "CLIP_VISION_OUTPUT"
+    ],
+    "end_image": [
+     "IMAGE"
+    ],
+    "start_image": [
+     "IMAGE"
+    ]
+   },
+   "required": {
+    "batch_size": [
+     "INT"
+    ],
+    "height": [
+     "INT"
+    ],
+    "length": [
+     "INT"
+    ],
+    "negative": [
+     "CONDITIONING"
+    ],
+    "positive": [
+     "CONDITIONING"
+    ],
+    "vae": [
+     "VAE"
+    ],
+    "width": [
+     "INT"
+    ]
+   }
+  },
+  "output": [
+   "CONDITIONING",
+   "CONDITIONING",
+   "LATENT"
+  ],
+  "output_name": [
+   "positive",
+   "negative",
+   "latent"
+  ]
+ },
+ "WanImageToVideo": {
+  "input": {
+   "optional": {
+    "clip_vision_output": [
+     "CLIP_VISION_OUTPUT"
+    ],
+    "start_image": [
+     "IMAGE"
+    ]
+   },
+   "required": {
+    "batch_size": [
+     "INT"
+    ],
+    "height": [
+     "INT"
+    ],
+    "length": [
+     "INT"
+    ],
+    "negative": [
+     "CONDITIONING"
+    ],
+    "positive": [
+     "CONDITIONING"
+    ],
+    "vae": [
+     "VAE"
+    ],
+    "width": [
+     "INT"
+    ]
+   }
+  },
+  "output": [
+   "CONDITIONING",
+   "CONDITIONING",
+   "LATENT"
+  ],
+  "output_name": [
+   "positive",
+   "negative",
+   "latent"
+  ]
+ },
+ "WanVaceToVideo": {
+  "input": {
+   "optional": {
+    "control_masks": [
+     "MASK"
+    ],
+    "control_video": [
+     "IMAGE"
+    ],
+    "reference_image": [
+     "IMAGE"
+    ]
+   },
+   "required": {
+    "batch_size": [
+     "INT"
+    ],
+    "height": [
+     "INT"
+    ],
+    "length": [
+     "INT"
+    ],
+    "negative": [
+     "CONDITIONING"
+    ],
+    "positive": [
+     "CONDITIONING"
+    ],
+    "strength": [
+     "FLOAT"
+    ],
+    "vae": [
+     "VAE"
+    ],
+    "width": [
+     "INT"
+    ]
+   }
+  },
+  "output": [
+   "CONDITIONING",
+   "CONDITIONING",
+   "LATENT",
+   "INT"
+  ],
+  "output_name": [
+   "positive",
+   "negative",
+   "latent",
+   "trim_latent"
+  ]
+ }
+}

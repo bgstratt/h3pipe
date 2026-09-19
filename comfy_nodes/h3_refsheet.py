@@ -23,6 +23,10 @@ of the short side) and no border. The sheet has no empty bands: the IC-LoRA
 reads the reference at the output's size and position, and a sheet framed by
 black bars came back as a letterboxed shot.
 
+`background` is "black" (the ingredients sheet) or "white" (the wan22_vace
+target's reference image: VACE's references are subjects on white); the gap
+lines and a figure's empty sides are that colour.
+
 Each image is fitted to its cell by its `fit`:
   cover   (the plate) cropped to the cell, centred: the whole cell is picture
   figure  (a character's view, a prop) cropped at the sides to the cell, but
@@ -41,7 +45,9 @@ import json
 import os
 import sys
 
-BACKGROUNDS = {"black": (0, 0, 0)}
+# black: the LTX ingredients sheet; white: the Wan VACE reference image
+# (VACE pads its references on white)
+BACKGROUNDS = {"black": (0, 0, 0), "white": (255, 255, 255)}
 MIN_KEEP = 0.6            # a figure keeps at least this much of its width
 CROP_COST = 0.5           # a cropped pixel costs half a black one
 
