@@ -15,6 +15,8 @@ cut, set per-shot overrides. The command-line face of what the editor does;
     python h3.py override Shows\\ep05 sh020 --clear prompt seed
     python h3.py override Shows\\ep05 sh020 --clear
     python h3.py override Shows\\ep05 sh020 --target ltx2      # retarget (--target built: undo)
+    python h3.py keyframe Shows\\ep05 sh020 [--from-prev | --from sh010[:3]] [--first | --last]
+                                          [--frame N] [--proxy] [--pick | --no-pick]
 
 `takes` shows every take with its status, why it is stale (script / ref /
 preset / target), and which take the cut uses. `pick` writes cut.json; `latest` puts a
@@ -25,6 +27,10 @@ and note apply to both passes. They are written to the block of the target
 the shot renders on now, so a retargeted shot's settings are its new
 target's. `--target` retargets the shot (both passes): its IR is compiled for
 that target at queue time, and a prompt override is ignored while it is.
+`keyframe` cuts a frame out of another shot's take and adds it as the shot's
+first (or last) keyframe: by default the previous shot's last frame, from the
+take that shot's cut entry uses (continuity). It is picked when the shot has no
+keyframe yet (h3refs.keyframe_from_take).
 
 Stdlib only.
 """
@@ -211,6 +217,41 @@ def take_stale(root: str, pass_: str, doc: dict, shot: dict, sidecar: dict | Non
     return out
 
 
+def cut_take(root: str, e: T.CutEntry,
+             takes: list[T.Take] | None = None) -> tuple[T.Take | None, int | None, bool]:
+    """The take a cut entry uses: (take or None, its number or None, usable).
+    A picked take (from the entry's pass: the other one for a placeholder), else
+    the latest usable take. `takes` are the entry's shot's takes in the cut's
+    own pass, when already listed."""
+    if e.placeholder or takes is None:
+        src = T.list_takes(root, e.pass_, e.shot)
+    else:
+        src = takes
+    if e.take is not None:
+        chosen = next((t for t in src if t.take == e.take), None)
+        return chosen, e.take, bool(chosen and chosen.usable)
+    chosen = T.latest_usable(src)
+    return chosen, (chosen.take if chosen else None), chosen is not None
+
+
+def cut_entries(root: str, pass_: str) -> list[T.CutEntry]:
+    """One pass's cut, reconciled with the script (every target's shots)."""
+    order = [d["shots"][i]["id"] for d, i in J.episode_shots(root, pass_)]
+    return T.resolve_cut(T.load_cut(root), pass_, order)
+
+
+def cut_neighbour(root: str, pass_: str, shot_id: str, step: int) -> T.CutEntry | None:
+    """The shot `step` places from `shot_id` in the pass's cut (-1: the one
+    before it, 1: the one after), skipping orphans as assemble does. None at
+    either end; KeyError if the shot isn't in the cut."""
+    entries = [e for e in cut_entries(root, pass_) if not e.orphan]
+    idx = next((i for i, e in enumerate(entries) if e.shot == shot_id), None)
+    if idx is None:
+        raise KeyError(f"{shot_id} is not in the {pass_} cut")
+    j = idx + step
+    return entries[j] if 0 <= j < len(entries) else None
+
+
 def episode_status(root: str, pass_: str, folder: str | None = None) -> dict:
     """Every shot in cut order with its takes, the take the cut uses, and its
     override. Plain data, ready to serve as JSON. Shots come from every
@@ -231,18 +272,7 @@ def episode_status(root: str, pass_: str, folder: str | None = None) -> dict:
         built_target = J.shotlist_target(doc).id
         target = J.effective_target(ov, e.shot, built_target)
         takes = T.list_takes(root, pass_, e.shot, folder) if shot else []
-        if e.placeholder:
-            src = T.list_takes(root, e.pass_, e.shot)
-        else:
-            src = takes
-        if e.take is not None:
-            chosen = next((t for t in src if t.take == e.take), None)
-            chosen_take = e.take
-            chosen_ok = bool(chosen and chosen.usable)
-        else:
-            chosen = T.latest_usable(src)
-            chosen_take = chosen.take if chosen else None
-            chosen_ok = chosen is not None
+        chosen, chosen_take, chosen_ok = cut_take(root, e, takes)
         o = T.shot_override(ov, e.shot, pass_, target)
         # what the next render reads: the retargeted entry when retargeted
         cur = J.current_entry(root, pass_, doc, shot, target, cache) if shot else None
@@ -911,4 +941,75 @@ def cmd_override(root: str, argv: list[str]) -> int:
     return 0
 
 
-COMMANDS = {"takes": cmd_takes, "pick": cmd_pick, "override": cmd_override}
+def _frame_arg(v: str):
+    v = v.strip().lower()
+    if v in ("first", "last"):
+        return v
+    try:
+        return int(v)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"a frame number, first or last, not {v!r}") from None
+
+
+def cmd_keyframe(root: str, argv: list[str]) -> int:
+    ap = argparse.ArgumentParser(
+        prog="h3.py keyframe",
+        description="Make a shot's first (or last) keyframe from a frame of another "
+                    "shot's take: by default the previous shot's last frame, from the "
+                    "take the cut uses.")
+    ap.add_argument("shot")
+    src = ap.add_mutually_exclusive_group()
+    src.add_argument("--from-prev", action="store_true",
+                     help="the neighbouring shot in cut order (the default): the previous "
+                          "shot for --first, the next one for --last")
+    src.add_argument("--from", dest="src", metavar="SHOT[:TAKE]",
+                     help="this shot's take (default: the one its cut entry uses)")
+    end = ap.add_mutually_exclusive_group()
+    end.add_argument("--first", action="store_true", help="write the first keyframe (default)")
+    end.add_argument("--last", action="store_true", help="write the last keyframe")
+    ap.add_argument("--frame", type=_frame_arg, metavar="N",
+                    help="frame number in the source take (0 = first, -1 = last; "
+                         "default: last for --first, first for --last)")
+    ap.add_argument("--proxy", action="store_true", help="the proxy cut and takes")
+    pk = ap.add_mutually_exclusive_group()
+    pk.add_argument("--pick", action="store_true",
+                    help="make it the live keyframe even if one exists")
+    pk.add_argument("--no-pick", action="store_true", help="only add it as a take")
+    ap.add_argument("--note", default="")
+    args = ap.parse_args(argv)
+    import h3refs as R                                   # h3refs imports this module
+    pass_ = _pass(args)
+    which = "last" if args.last else "first"
+    source_shot = source_take = None
+    if args.src:
+        source_shot, _, tk = args.src.partition(":")
+        if tk:
+            try:
+                source_take = int(tk.lstrip("tT"))
+            except ValueError:
+                print(f"  !! --from takes SHOT or SHOT:TAKE, not {args.src!r}")
+                return 2
+    try:
+        s = R.load_series(root)
+        res = R.keyframe_from_take(s, args.shot, which, source_shot, source_take,
+                                   args.frame, pass_,
+                                   pick=True if args.pick else (False if args.no_pick else None),
+                                   note=args.note)
+    except (R.RefError, R.UnknownRef, R.NotUsable, R.FfmpegMissing,
+            FileNotFoundError) as e:
+        print(f"  !! {e}")
+        return 1
+    src_ = res.source
+    print(f"  {res.ref.id} t{res.take.take:02d}: frame {src_['frame']} of {src_['frames']} "
+          f"of {src_['shot']} {src_['pass']} t{src_['take']:02d}")
+    print(f"      {R.ep_rel(root, res.take.paths.image)}")
+    if res.picked:
+        print(f"      picked: {R.ep_rel(root, res.ref.file)}")
+    else:
+        print(f"      not picked ({R.ep_rel(root, res.ref.file)} already exists; "
+              f"--pick to replace it)")
+    return 0
+
+
+COMMANDS = {"takes": cmd_takes, "pick": cmd_pick, "override": cmd_override,
+            "keyframe": cmd_keyframe}

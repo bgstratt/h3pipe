@@ -8,7 +8,7 @@ import seriesCfgRaw from "../../../tests/fixtures/kitchen_sink/series.json?raw";
 import { VIEWS } from "../lib/refs";
 import type {
   Lora, MissingRef, Override, OverrideFields, Pass, Ref, RefEffective, RefGenerateRequest, RefGenerateResult,
-  RefImportRequest, RefPickRequest, RefTake, RefView, SeedMode,
+  RefFrameSource, RefImportRequest, RefPickRequest, RefTake, RefView, SeedMode,
 } from "../types";
 import { fsFileExists } from "./mockFs";
 
@@ -99,6 +99,8 @@ export interface MockRefs {
   generate(req: RefGenerateRequest): RefGenerateResult;
   pick(req: RefPickRequest): Ref;
   import(req: RefImportRequest): RefTake & { view: string | null };
+  /** a keyframe take cut out of a video take (the api resolves the source) */
+  keyframe(req: { shot: string; which: "first" | "last"; from: RefFrameSource; pick: boolean | null }): Ref;
   putOverride(ref: string, fields: OverrideFields): void;
   deleteOverride(ref: string): void;
   /** the dependents to mark ref-stale after a pick (shot indexes) */
@@ -386,6 +388,41 @@ export function createMockRefs(opts: {
       const t = addTake(r, req.view ?? null, { status: "ok", seed: "", source: "imported", sourceName: name, ext: audio ? "wav" : "png" });
       opts.emit("h3pipe.ref", { ep: opts.ep, ref: r.id, view: req.view ?? null, take: t.take, status: "ok" });
       return { ...JSON.parse(JSON.stringify(t)), view: req.view ?? null };
+    },
+    keyframe(req) {
+      const id = `shot:${req.shot}:${req.which}`;
+      let r = refs.find((x) => x.id === id);
+      if (!r) {
+        r = {
+          id, scope: "shot", kind: "keyframe", name: `${req.shot} ${req.which} frame`, path: `refs/shots/${req.shot}/${req.which}.png`,
+          exists: false, sha1: null, used_by: { final: [], proxy: [] }, prompt: null, base_prompt: "",
+          override: { fields: [], stale: false }, ov: {}, takes: [], picked: null, can_generate: false,
+          why_not: "keyframes aren't generated: use another shot's frame or import an image",
+        };
+        refs.push(r);
+      }
+      const f = req.from;
+      const t = addTake(r, null, { status: "queued", seed: "", source: "frame" });
+      t.seed = null;
+      t.prompt = undefined;
+      t.model = undefined;
+      t.steps = undefined;
+      t.from = { ...f };
+      t.status = "ok";
+      t.finished = new Date().toISOString();
+      t.image = takePath(r, null, t.take);
+      t.width = 448;
+      t.height = 256;
+      t.save_notes = `frame ${f.frame} of ${f.frames} of ${f.shot} ${f.pass} t${String(f.take).padStart(2, "0")}`;
+      images.set(t.image, svgImage(`${f.shot} t${String(f.take).padStart(2, "0")}`, `frame ${f.frame} → ${req.shot} ${req.which}`, `${f.shot}${f.take}${f.frame}`, "location", 448, 256));
+      opts.emit("h3pipe.ref", { ep: opts.ep, ref: id, view: null, take: t.take, status: "ok" });
+      if (req.pick || (req.pick == null && !r.exists)) {
+        r.picked = t.take;
+        setLive(r);
+        opts.onLiveChange(r.id);
+        opts.emit("h3pipe.ref", { ep: opts.ep, ref: id, view: null, take: t.take, status: "picked" });
+      }
+      return view(r);
     },
     putOverride(ref, fields) {
       const r = byId(ref);

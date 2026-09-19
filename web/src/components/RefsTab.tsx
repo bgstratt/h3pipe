@@ -4,9 +4,10 @@
 
 import { memo, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import {
-  copyText, generateMissing, generateRef, loadRefs, openBrowse, openImageCompare, pickRef, revertRefOverride, saveRefOverride,
-  selectRefTake, setRefsFilter, toggleRefOpen,
+  copyText, generateMissing, generateRef, keyframeFromTake, loadRefs, openBrowse, openImageCompare, pickRef, revertRefOverride,
+  saveRefOverride, selectRefTake, setRefsFilter, toggleRefOpen,
 } from "../actions";
+import { cutNeighbour, keyframeSource, type KeyframeEnd } from "../lib/keyframes";
 import { errText } from "../api";
 import { api } from "../host";
 import { shortName, tn } from "../lib/format";
@@ -28,7 +29,7 @@ const FILTERS: { id: RefFilter; label: string; title: string }[] = [
   { id: "missing", label: "missing", title: "Refs whose file isn't on disk" },
 ];
 
-export const KEYFRAMES_EMPTY = "FL2V keyframes: generated when an FL2V model is set up";
+export const KEYFRAMES_EMPTY = "Use a previous shot's frame (right-click a shot) or import one";
 const NO_FILE = "series.json names no file for this (e.g. a voice-only character has no sheet)";
 
 /** A ref's live file (the one renders read), or a "missing" placeholder. */
@@ -92,6 +93,7 @@ const Candidate = memo(function Candidate({ ep, r, view, t, live, selected }: {
   };
   const title = [
     `${tn(t.take)} · ${t.status}${live ? " · live" : ""} · ${t.source}`,
+    keyframeSource(t) ? `from ${keyframeSource(t)}` : "",
     t.seed ? `seed ${t.seed}` : "",
     t.note ? `“${t.note}”` : "",
     t.save_notes && t.status === "failed" ? t.save_notes : "",
@@ -127,7 +129,7 @@ const Candidate = memo(function Candidate({ ep, r, view, t, live, selected }: {
         }}
       >
         {!(url && t.status === "ok") && <span className={t.status === "failed" ? "h3-err" : ""}>{t.status}</span>}
-        <span className="h3-thumb-label">{tn(t.take)}{t.source === "imported" ? " ⤓" : ""}</span>
+        <span className="h3-thumb-label">{tn(t.take)}{t.source === "imported" ? " ⤓" : t.source === "frame" && t.from ? ` ← ${t.from.shot}` : ""}</span>
         {live && <span className="h3-cand-live">live</span>}
       </div>
       {prog && <Progress value={prog.value} max={prog.max} />}
@@ -193,8 +195,9 @@ function Selection({ r }: { r: Ref }) {
           </button>
         )}
       </div>
-      {(t.prompt || t.model || t.note || (t.status === "failed" && t.save_notes)) && (
+      {(t.prompt || t.model || t.note || keyframeSource(t) || (t.status === "failed" && t.save_notes)) && (
         <div className="h3-kv">
+          {keyframeSource(t) && <><span>from</span><span>{keyframeSource(t)}</span></>}
           {t.note && <><span>note</span><span>{t.note}</span></>}
           {t.model && <><span>model</span><span title={t.model}>{shortName(t.model, 40)}</span></>}
           {t.steps != null && <><span>steps</span><span>{t.steps}</span></>}
@@ -253,6 +256,34 @@ function GenerateBar({ r }: { r: Ref }) {
         onClick={() => openBrowse({ purpose: "import", ref: r.id, view: importView, files: isAudioRef(r) ? "audio" : "image" })}
       >
         <i className="pi pi-download" /> Import…
+      </button>
+    </div>
+  );
+}
+
+/** A keyframe's continuity action: the previous shot's last frame (first), or the
+ * next shot's first frame (last), from the take the cut uses. */
+function KeyframeBar({ r }: { r: Ref }) {
+  const m = /^shot:(.+):(first|last)$/.exec(r.id);
+  const shot = m?.[1] ?? "";
+  const which = (m?.[2] ?? "first") as KeyframeEnd;
+  const pass = useApp((s) => s.pass);
+  const st = useStatus();
+  const busy = useApp((s) => !!s.busy[`keyframe|${shot}|${which}`]);
+  if (!m) return null;
+  const src = cutNeighbour(st, shot, which === "first" ? -1 : 1);
+  const label = which === "first" ? "From the previous shot's last frame" : "From the next shot's first frame";
+  return (
+    <div className="h3-row h3-wrap">
+      <button
+        className="h3-btn"
+        disabled={busy || !src}
+        title={src
+          ? `A new candidate: ${src}'s ${which === "first" ? "last" : "first"} frame, from the take the ${pass} cut uses. It goes live if ${shot} has no ${which} keyframe yet.`
+          : `${shot} has no ${which === "first" ? "previous" : "next"} shot in the ${pass} cut`}
+        onClick={() => void keyframeFromTake({ shot, which })}
+      >
+        <i className={busy ? "pi pi-spin pi-spinner" : "pi pi-link"} /> {label}{src ? ` (${src})` : ""}
       </button>
     </div>
   );
@@ -369,7 +400,8 @@ function RefDetail({ ep, r }: { ep: string; r: Ref }) {
         <CandidateGrid ep={ep} r={r} view={null} />
       )}
       <Selection r={r} />
-      {r.can_generate === false && r.why_not && (
+      {r.kind === "keyframe" && <KeyframeBar r={r} />}
+      {r.can_generate === false && r.why_not && r.kind !== "keyframe" && (
         <div className="h3-small h3-muted">Can't generate: {r.why_not}. Import a file instead.</div>
       )}
       <GenerateBar r={r} />

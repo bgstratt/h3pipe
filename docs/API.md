@@ -284,7 +284,8 @@ you supply. Refs are the same thing whatever model consumes them. Each has a `sc
 - **Shot keyframes:** Phase 5 builds their storage, takes and pick. Generating them
   (a still from the shot's prompt, or the previous shot's last frame) and feeding
   them to an FL2V target come with that target. Their home is
-  `refs/shots/<shot>/<first|last>.png`.
+  `refs/shots/<shot>/<first|last>.png`. (The previous shot's last frame is built: see
+  **Continuity keyframes** at the end.)
 - A **ref take** is one generated or imported candidate. It lives in
   `refs/_takes/<ref key>/<ref key>[_<view>]_tNN.png`, with a sidecar `…_tNN.json` in
   the video takes' format (status, seed, prompt, model, LoRAs, steps, queued,
@@ -557,3 +558,51 @@ open, and what was added:
   `shotlist.<target>_proxy.json` beside `shotlist.json` / `shotlist_proxy.json`, each with a
   top-level `"target"`. `shotlist.json` is always the series target's, even when no shot is
   left on it.
+
+## Continuity keyframes
+
+A shot's first keyframe is usually the previous shot's last frame, so the cut runs on
+without a jump. `ltx2` reads `shot:<shot>:first` / `last` (Phase 8); `minimax_h3_ref2va`
+doesn't use keyframes (`GET /h3pipe/targets`: `capabilities.keyframes` is `[]`).
+
+### `POST /h3pipe/refs/keyframe`
+Cuts one frame out of a video take with ffmpeg and adds it as a new take of the shot's
+keyframe ref.
+```json
+{"ep": "…", "pass": "proxy", "shot": "sh020", "which": "first",
+ "source_shot": null, "source_take": null, "frame": null, "pick": null, "note": ""}
+```
+- **`which`**: `"first"` (default) or `"last"`: the keyframe written.
+- **`source_shot`**: default the neighbouring shot **in the pass's cut order**
+  (`cut.json` reconciled with the script, orphans skipped): the previous shot for
+  `first`, the next shot for `last`.
+- **`source_take`**: default the take that shot's cut entry uses, as `GET /h3pipe/episode`
+  reports it in `cut.take`: its pick (a placeholder's take comes from the other pass), else
+  its latest usable take. A given `source_take` is a take of `pass`.
+- **`frame`**: a frame number (0-based, in decode order; negative counts from the end,
+  `-1` being the last), `"first"` or `"last"`. Default `"last"` for `which: first`, `"first"`
+  for `which: last`. The frame is exact: ffmpeg's `select` counts decoded frames.
+- **`pick`** (added): `null` (default) picks the new take only when the keyframe has no
+  live file yet (the auto-pick rule); `true` always picks it; `false` never does.
+- **Returns** the ref as `GET /h3pipe/refs` lists it.
+- **Events:** `h3pipe.ref` `{ref, view: null, take, status: "ok"}`, then `status: "picked"`
+  if it was picked, then `h3pipe.episode`.
+- **Errors:** 400 for a shot with no previous (next) shot in the cut, a bad `which` /
+  `frame` / `pick`, or a frame outside the take; 404 for a shot in no build or a
+  `source_take` that doesn't exist; 409 when the source shot has no usable take, or its cut
+  entry names one that isn't usable (queued, failed, no mp4); 500 without ffmpeg / ffprobe
+  on ComfyUI's PATH.
+- **The take's sidecar** has `source: "frame"` and `source_shot`, `source_take`,
+  `source_pass`, `source_frame` (the index used), `source_frames` (the take's frame count),
+  `source_mp4` (relative to the episode) and `source_sha1`. `width`/`height` are the
+  frame's. `GET /h3pipe/refs` shows such a take with
+  `"from": {"shot", "take", "pass", "frame", "frames"}`.
+- **Staleness:** video takes record each keyframe's sha1 (`refs` in the sidecar), so
+  re-extracting and picking a new frame marks the takes that used the old one `ref`-stale.
+  Also new: a take rendered **without** an optional keyframe (sha1 `null`) is `ref`-stale
+  once that keyframe exists, because a render would now use it.
+- The CLI is `python h3.py keyframe <ep> <shot> [--from-prev | --from <shot>[:take]]
+  [--first | --last] [--frame N] [--proxy] [--pick | --no-pick]` (final pass unless
+  `--proxy`, like the other edit commands).
+- **Not yet:** there is no route to unpick or delete a ref take, so the editor has no
+  "Clear" for a keyframe.

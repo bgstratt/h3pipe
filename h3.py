@@ -19,7 +19,10 @@ your projects, with the pipeline scripts beside it (see the README).
     python h3.py pick     Shows\\ep05 sh020 latest   # back to the newest usable take
     python h3.py override Shows\\ep05 sh020 --seed 1234 --prompt-file p.txt
                                                     # overrides.json: used by the next render/redo
-    (see h3edit.py for every takes/pick/override flag)
+    python h3.py keyframe Shows\\ep05 sh020 --from-prev
+                                                    # sh020's first keyframe = the previous
+                                                    # shot's last frame (continuity)
+    (see h3edit.py for every takes/pick/override/keyframe flag)
 
 The episode can be a folder (any name) holding series.json and one script .md,
 or several folders at once, or a parent with --each:
@@ -39,7 +42,7 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 STAGES = ("align", "build", "check", "refs", "render", "assemble", "all")
-EDIT = ("takes", "pick", "override")          # in-process, see h3edit.py
+EDIT = ("takes", "pick", "override", "keyframe")          # in-process, see h3edit.py
 
 
 def script(name: str) -> str:

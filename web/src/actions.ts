@@ -6,6 +6,7 @@ import { reachable, sameDir } from "./lib/browse";
 import { absPath, promptText, sameEp, tn } from "./lib/format";
 import { normPath, splitByMissingRefs } from "./lib/missingRefs";
 import { buildPlaylist, startOf, totalDuration, type PlayItem } from "./lib/playlist";
+import { keyframeRefId, keyframeSource, type KeyframeEnd } from "./lib/keyframes";
 import { hasViews, missingPlan, viewLabel, type RefFilter } from "./lib/refs";
 import { renderWarnings } from "./lib/targets";
 import {
@@ -370,8 +371,9 @@ export function closeViewer() {
   set((s) => ({ viewer: null, cutPlay: { ...s.cutPlay, playing: false } }));
 }
 
-export function openMenu(x: number, y: number, shot: string, take: number | null, pass = get().pass) {
-  set({ menu: { x, y, shot, take, pass } });
+export function openMenu(x: number, y: number, shot: string, take: number | null, pass = get().pass,
+  frame: number | "last" | null = null) {
+  set({ menu: { x, y, shot, take, pass, ...(frame != null ? { frame } : {}) } });
 }
 
 export function closeMenu() {
@@ -1173,6 +1175,73 @@ export async function pickRef(ref: string, view: string | null, take: number): P
       report(`Couldn't pick ${refLabel(ref, view)} ${tn(take)}`, e);
       return false;
     }
+  });
+}
+
+/**
+ * A shot's first (or last) keyframe from a frame of a video take
+ * (POST /h3pipe/refs/keyframe). With no source: the neighbouring shot in the
+ * cut (previous for first, next for last) and the take its cut entry uses.
+ */
+export async function keyframeFromTake(opts: {
+  shot: string;
+  which?: KeyframeEnd;
+  sourceShot?: string | null;
+  sourceTake?: number | null;
+  frame?: number | "first" | "last" | null;
+  pass?: Pass;
+}): Promise<Ref | null> {
+  const ep = get().ep;
+  if (!ep) return null;
+  const which = opts.which ?? "first";
+  const pass = opts.pass ?? get().pass;
+  return withBusy(`keyframe|${opts.shot}|${which}`, async () => {
+    try {
+      const r = await api().refsKeyframe({
+        ep, pass, shot: opts.shot, which,
+        source_shot: opts.sourceShot ?? null, source_take: opts.sourceTake ?? null, frame: opts.frame ?? null,
+      });
+      upsertRef(ep, r);
+      const t = r.takes[r.takes.length - 1];
+      const from = keyframeSource(t);
+      const live = !!t && r.picked === t.take;
+      host().toast(
+        "success",
+        `${opts.shot}: ${which} frame${from ? ` from ${from}` : ""}`,
+        live
+          ? `${tn(t.take)} is the live ${which} keyframe.`
+          : `Added as ${tn(t?.take)}; ${opts.shot} already has a ${which} keyframe (${tn(r.picked)}). Pick the new one in the Refs tab to use it.`,
+      );
+      // the live keyframe may have changed: takes that used the old one go ref-stale
+      scheduleRefsRefresh(0);
+      scheduleRefresh(0);
+      return r;
+    } catch (e) {
+      report(`Couldn't make ${opts.shot}'s ${which} keyframe`, e);
+      return null;
+    }
+  });
+}
+
+/** Open the Refs tab on a shot's keyframes. */
+export function openKeyframesInRefs(shot: string) {
+  set((s) => ({
+    menu: null,
+    refsFilter: s.refsFilter === "missing" ? "episode" : s.refsFilter,
+    refOpen: { ...s.refOpen, [keyframeRefId(shot, "first")]: true, [keyframeRefId(shot, "last")]: true },
+  }));
+  host().show("refs");
+  void loadRefs();
+}
+
+/** A ref from a route: replace it in the list, or add it (a new keyframe). */
+function upsertRef(ep: string, ref: Ref) {
+  if (!ref || typeof ref !== "object" || !("id" in ref)) return;
+  set((s) => {
+    const list = s.refs[ep];
+    if (!list) return {};
+    const has = list.some((r) => r.id === ref.id);
+    return { refs: { ...s.refs, [ep]: has ? list.map((r) => (r.id === ref.id ? ref : r)) : [...list, ref] } };
   });
 }
 

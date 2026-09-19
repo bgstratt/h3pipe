@@ -3,19 +3,20 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  baseRender, closeInspector, loadDetail, openRedo, openViewer, queueRender, renderShots, revertOverride, saveOverride,
-  setShotTarget,
+  baseRender, closeInspector, keyframeFromTake, loadDetail, loadRefs, openKeyframesInRefs, openRedo, openViewer, queueRender,
+  renderShots, revertOverride, saveOverride, setShotTarget,
 } from "../actions";
 import { errText } from "../api";
-import { host } from "../host";
+import { api, host } from "../host";
 import { cutTake, fmtSeconds, shortName, shotBadges, tn } from "../lib/format";
+import { KEYFRAME_ENDS, cutNeighbour, keyframeNote, keyframeSource, liveTake, shotKeyframes } from "../lib/keyframes";
 import { missingOf } from "../lib/missingRefs";
 import { formFromDetail, isDirty, overrideFields, type OverrideForm } from "../lib/overrideForm";
 import { isRetargeted, retargetNote, shotTarget, targetBadges, targetLabel } from "../lib/targets";
 import { useApp } from "../store";
 import type { ShotDetail } from "../types";
 import { FloatingWindow, defaultInspectorRect } from "./FloatingWindow";
-import { useDetail, useDetailError, useShotStatus } from "./hooks";
+import { aspectOf, useDetail, useDetailError, useShotStatus, useStatus } from "./hooks";
 import { MissingRefsNote } from "./MissingRefs";
 import { OverrideFields } from "./OverrideFields";
 import { PassToggle } from "./ShotsTab";
@@ -55,6 +56,72 @@ function TargetPicker({ d, shot }: { d: ShotDetail | undefined; shot: string }) 
         )}
       </div>
       {note && <span className="h3-small h3-muted">{note}</span>}
+    </div>
+  );
+}
+
+/**
+ * The shot's first / last keyframes (refs `shot:<id>:first|last`), with the
+ * continuity action. There is no route to unpick or delete a ref take yet, so
+ * no "Clear" (see api.ts).
+ */
+function Keyframes({ shot }: { shot: string }) {
+  const ep = useApp((s) => s.ep);
+  const pass = useApp((s) => s.pass);
+  const refs = useApp((s) => (s.ep ? s.refs[s.ep] : undefined));
+  const busy = useApp((s) => !!s.busy[`keyframe|${shot}|first`]);
+  const st = useStatus();
+  const s = useShotStatus(shot);
+  const { list, seriesDefault } = useTargets();
+  useEffect(() => {
+    if (ep && !refs) void loadRefs(ep);
+  }, [ep, refs]);
+  if (!ep) return null;
+  const kf = shotKeyframes(refs, shot);
+  const prev = cutNeighbour(st, shot, -1);
+  const note = keyframeNote(list, shotTarget(s, seriesDefault));
+  return (
+    <div className="h3-col" style={{ gap: 4 }}>
+      <div className="h3-row">
+        <span className="h3-h">Keyframes</span>
+        {note && <span className="h3-small h3-muted" title="Whether this shot's target reads keyframes (GET /h3pipe/targets capabilities)">{note}</span>}
+      </div>
+      <div className="h3-row h3-wrap" style={{ alignItems: "flex-start" }}>
+        {KEYFRAME_ENDS.map((end) => {
+          const r = kf[end];
+          const t = liveTake(r);
+          const from = keyframeSource(t);
+          const url = r?.exists && r.path ? api().refFileUrl(ep, r.path, r.sha1) : null;
+          return (
+            <div key={end} className="h3-col" style={{ gap: 2, width: 128 }}>
+              <div
+                className={`h3-thumb${url ? "" : " h3-empty"}`}
+                style={{ width: 128, aspectRatio: aspectOf(st), ...(url ? { backgroundImage: `url("${url}")`, backgroundSize: "contain" } : {}) }}
+                title={r?.path ?? `refs/shots/${shot}/${end}.png`}
+              >
+                {!url && <span className="h3-muted h3-small">{r ? "not picked" : "none"}</span>}
+                <span className="h3-thumb-label">{end}{t ? ` ${tn(t.take)}` : ""}</span>
+              </div>
+              <span className="h3-small h3-muted h3-ell" title={from ?? ""}>{from ? `← ${from}` : r && t ? t.source : ""}</span>
+            </div>
+          );
+        })}
+      </div>
+      <div className="h3-row h3-wrap">
+        <button
+          className="h3-btn"
+          disabled={busy || !prev}
+          title={prev
+            ? `${shot}'s first frame = ${prev}'s last frame, from the take the ${pass} cut uses. A new candidate; it goes live if ${shot} has no first keyframe yet.`
+            : `${shot} is the first shot of the ${pass} cut`}
+          onClick={() => void keyframeFromTake({ shot, which: "first" })}
+        >
+          <i className={busy ? "pi pi-spin pi-spinner" : "pi pi-link"} /> From previous shot{prev ? ` (${prev})` : ""}
+        </button>
+        <button className="h3-btn" title="The keyframes' candidates, pick and import" onClick={() => openKeyframesInRefs(shot)}>
+          <i className="pi pi-palette" /> Open in Refs
+        </button>
+      </div>
     </div>
   );
 }
@@ -277,6 +344,7 @@ export function Inspector() {
           <Badges badges={badges} />
           <TargetPicker d={d} shot={shot} />
           <MissingRefsNote blocked={missing.length ? [{ shot, refs: missing }] : []} allow={allowMissing} setAllow={setAllowMissing} />
+          <Keyframes shot={shot} />
           <div className="h3-row h3-wrap">
             <button
               className="h3-btn h3-primary"

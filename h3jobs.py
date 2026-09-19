@@ -826,8 +826,13 @@ def stale_reasons(root: str, doc: dict, shot: dict, sidecar: dict | None) -> lis
         out.append("script")
     for r in sidecar.get("refs") or []:
         p = r.get("path")
-        if p and r.get("sha1") and T.file_sha1(
-                p if os.path.isabs(p) else os.path.join(root, p)) != r["sha1"]:
+        if not p or not (r.get("sha1") or r.get("optional")):
+            continue
+        now = T.file_sha1(p if os.path.isabs(p) else os.path.join(root, p))
+        # a file that changed; or an optional one (an LTX keyframe) the take
+        # rendered without that exists now: a render would use it
+        if (r.get("sha1") and now != r["sha1"]) or (r.get("optional") and not r.get("sha1")
+                                                    and now):
             out.append("ref")
             break
     if sidecar.get("preset_hash") and sidecar["preset_hash"] != preset_hash(doc, shot):

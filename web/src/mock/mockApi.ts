@@ -485,6 +485,45 @@ export function createMockApi(emit: Emit, opts: MockOptions = {}): Api {
       need(req.ep);
       return refs.import(req);
     },
+    async refsKeyframe(req) {
+      await wait(250);
+      need(req.ep);
+      const which = req.which ?? "first";
+      if (which !== "first" && which !== "last") throw new MockError(`which must be "first" or "last", not ${String(which)}`, 400);
+      const shots = st(req.pass).shots.filter((s) => !s.orphan);
+      const i = shots.findIndex((s) => s.shot === req.shot);
+      if (i < 0) throw new MockError(`${req.shot} is not in the ${req.pass} cut`, 404);
+      let src: ShotStatus | undefined;
+      if (req.source_shot) {
+        src = st(req.pass).shots.find((s) => s.shot === req.source_shot);
+        if (!src) throw new MockError(`${req.source_shot} is not in the ${req.pass} cut and has no takes`, 404);
+      } else {
+        src = shots[i + (which === "first" ? -1 : 1)];
+        if (!src) {
+          throw new MockError(`${req.shot} is the ${which} shot of the ${req.pass} cut: there is no ${which === "first" ? "previous" : "next"} shot to take a frame from`, 400);
+        }
+      }
+      const takeNo = req.source_take ?? src.cut.take;
+      if (takeNo == null) throw new MockError(`${src.shot} has no usable ${req.pass} take to take a frame from (render it first)`, 409);
+      const t = src.takes.find((x) => x.take === takeNo);
+      if (!t) throw new MockError(`${src.shot} has no ${req.pass} take ${takeNo}`, 404);
+      if (t.status !== "ok" || !t.has_video) throw new MockError(`${src.shot} ${req.pass} t${String(takeNo).padStart(2, "0")} is ${t.status}`, 409);
+      const frames = src.length ?? 73;
+      const spec = req.frame ?? (which === "first" ? "last" : "first");
+      const frame = spec === "first" ? 0 : spec === "last" ? frames - 1 : spec < 0 ? spec + frames : spec;
+      if (!Number.isInteger(frame) || frame < 0 || frame >= frames) throw new MockError(`frame ${String(spec)} is outside the take (${frames} frames: 0 to ${frames - 1})`, 400);
+      const r = refs.keyframe({ shot: req.shot, which, from: { shot: src.shot, take: takeNo, pass: req.pass, frame, frames }, pick: req.pick ?? null });
+      if (r.picked === r.takes[r.takes.length - 1]?.take) {
+        // the shot's takes that used the old keyframe are ref-stale now
+        for (const pass of ["final", "proxy"] as Pass[]) {
+          for (const x of status[pass]?.shots.find((s) => s.shot === req.shot)?.takes ?? []) {
+            if (x.status === "ok" && !x.stale.includes("ref")) x.stale = [...x.stale.filter((y) => y !== "unknown"), "ref"];
+          }
+        }
+      }
+      emit("h3pipe.episode", { ep: EP });
+      return r;
+    },
     async putRefOverride(req) {
       await wait();
       need(req.ep);

@@ -378,7 +378,10 @@ export interface RefTake {
   seed: Seed | null;
   /** the candidate file (image, or audio for a voice), relative like `path` */
   image: string | null;
-  source: "generated" | "imported";
+  /** "frame": a keyframe cut out of a video take (POST /h3pipe/refs/keyframe) */
+  source: "generated" | "imported" | "frame";
+  /** where a "frame" take came from */
+  from?: RefFrameSource;
   note: string;
   /** Not in the contract's list example; read if a server sends them. */
   prompt?: string;
@@ -474,6 +477,31 @@ export interface RefImportRequest {
   source_path: string;
 }
 
+/** A keyframe take's source: shot, take and pass, and the frame index used. */
+export interface RefFrameSource {
+  shot: string;
+  take: number | null;
+  pass: Pass | null;
+  frame: number | null;
+  frames?: number | null;
+}
+
+/** POST /h3pipe/refs/keyframe: a shot's first / last keyframe from a frame of a take. */
+export interface RefKeyframeRequest {
+  ep: string;
+  pass: Pass;
+  shot: string;
+  which: "first" | "last";
+  /** default: the previous (first) / next (last) shot in the cut */
+  source_shot?: string | null;
+  /** default: the take that shot's cut entry uses */
+  source_take?: number | null;
+  /** a frame number (negative from the end), "first" or "last"; default: last for first, first for last */
+  frame?: number | "first" | "last" | null;
+  /** null: picked only if the keyframe has no live file; true: always; false: never */
+  pick?: boolean | null;
+}
+
 export interface RefOverrideRequest {
   ep: string;
   ref: string;
@@ -529,6 +557,18 @@ export interface Target {
   workflow?: string;
   loader?: string;
   saver?: string;
+  /** Phase 8: a short label ("H3", "LTX-2") */
+  short?: string;
+  /** Phase 8: what the target can use; `keyframes` lists the ends it reads ([] for none) */
+  capabilities?: {
+    keyframes?: string[];
+    policies?: string[];
+    voice_reference?: boolean;
+    subject_refs?: boolean;
+    prompt?: string;
+    negative_prompt?: boolean;
+    [key: string]: unknown;
+  };
   template?: { fps?: number; frames?: { step?: number; base?: number; max?: number }; size_multiple?: number };
 }
 

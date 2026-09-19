@@ -1,11 +1,14 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
-  cancelTake, closeMenu, copyText, openInspector, openRedo, openSidecar, openViewer, pickTake, playAll, requestRender,
-  showMissingRefs,
+  cancelTake, closeMenu, copyText, keyframeFromTake, openInspector, openRedo, openSidecar, openViewer, pickTake, playAll,
+  requestRender, showMissingRefs,
 } from "../actions";
 import { absPath, tn } from "../lib/format";
+import { cutNeighbour, keyframeNote } from "../lib/keyframes";
 import { missingOf } from "../lib/missingRefs";
+import { shotTarget } from "../lib/targets";
 import { statusKey, useApp } from "../store";
+import { useTargets } from "./Targets";
 
 /** The thumbnail context menu, the same in the bin, the timeline and the viewer strip. */
 export function ContextMenu() {
@@ -16,6 +19,7 @@ export function ContextMenu() {
   const cutSt = useApp((s) => (s.ep ? s.status[statusKey(s.ep, s.pass)] : undefined));
   const ref = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
+  const { list: targets, seriesDefault } = useTargets();
 
   useLayoutEffect(() => {
     if (!menu || !ref.current) return setPos(null);
@@ -62,8 +66,48 @@ export function ContextMenu() {
   const missing = shot ? missingOf(shot) : [];
   // the timeline plays the current pass's cut
   const inCut = !!cutShot && !cutShot.orphan;
+  // continuity keyframes: neighbours in the menu's pass's cut
+  const prev = cutNeighbour(st, menu.shot, -1);
+  const next = cutNeighbour(st, menu.shot, 1);
+  const nextSt = next ? st?.shots.find((x) => x.shot === next) : undefined;
+  const kfNote = (s: typeof shot) => {
+    const n = keyframeNote(targets, shotTarget(s, seriesDefault));
+    return n ? `\nKeyframes are ${n}.` : "";
+  };
+  const frameLabel = menu.frame == null || menu.frame === "last" ? "its last frame" : `frame ${menu.frame}`;
+  const keyframes = (
+    <>
+      <div className="h3-menu-sep" />
+      <button
+        disabled={!prev}
+        title={(prev
+          ? `${menu.shot}'s first keyframe = ${prev}'s last frame, from the take the ${menu.pass} cut uses`
+          : `${menu.shot} is the first shot of the ${menu.pass} cut`) + kfNote(shot)}
+        onClick={run(() => void keyframeFromTake({ shot: menu.shot, which: "first", pass: menu.pass }))}
+      >
+        <i className="pi pi-link" /> Use previous shot's last frame as first frame
+      </button>
+      {take && (
+        <button
+          disabled={!next || !usable}
+          title={(!usable
+            ? "Only a finished take with video has frames"
+            : next
+              ? `${next}'s first keyframe = ${frameLabel} of ${menu.shot} ${tn(take.take)}`
+              : `${menu.shot} is the last shot of the ${menu.pass} cut`) + kfNote(nextSt)}
+          onClick={run(() => next && void keyframeFromTake({
+            shot: next, which: "first", sourceShot: menu.shot, sourceTake: take.take, frame: menu.frame ?? "last", pass: menu.pass,
+          }))}
+        >
+          <i className="pi pi-arrow-right" /> Use this frame as the next shot's first frame
+          <span className="h3-muted"> ({frameLabel === "its last frame" ? "last frame" : frameLabel})</span>
+        </button>
+      )}
+    </>
+  );
   const common = (
     <>
+      {keyframes}
       <div className="h3-menu-sep" />
       <button disabled={!inCut} title="Play the cut from this shot, in the viewer" onClick={run(() => playAll(menu.shot))}>
         <i className="pi pi-forward" /> Play from here
