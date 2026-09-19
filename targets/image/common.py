@@ -98,6 +98,29 @@ def ref_label(ref: dict) -> str:
     return ref.get("name") or ref.get("subject") or "a reference"
 
 
+def composite_intro(r: dict, n: str) -> str:
+    """How a composed reference (one image: the figures pasted over the
+    plate) is named: who is in it, what to keep from each, and that the
+    pose and framing are this shot's, not the collage's."""
+    parts = r.get("parts") or []
+    figures = [p for p in parts if p.get("role") != "plate"]
+    plate = next((p for p in parts if p.get("role") == "plate"), None)
+    names = _and([ref_label(p) for p in figures])
+    people = any(p.get("kind", "character") == "character" for p in figures)
+    keep = "face, body, clothes and colours" if people else "shape and colours"
+    who = "each of them" if len(figures) > 1 else ("them" if people else "it")
+    if figures and plate:
+        return (f"{n.capitalize()} shows {names} in front of {ref_label(plate)}: draw "
+                f"{who} exactly as in {n} (the same {keep}), and use its background's "
+                f"setting, layout, colours and light for the scene. {n.capitalize()} is only "
+                f"a reference collage: pose and frame {who} for this shot.")
+    if figures:
+        return (f"{n.capitalize()} shows {names}: draw {who} exactly as in {n} (the same "
+                f"{keep}), posed and framed for this shot.")
+    return (f"{n.capitalize()} is the background plate: use its setting, layout, colours "
+            f"and light for the scene.")
+
+
 def reference_intro(refs: list[dict], word: str = "image") -> str:
     """The sentences that name each reference image by its number, and what
     to take from it: a character's or object's look, the plate's setting."""
@@ -106,6 +129,9 @@ def reference_intro(refs: list[dict], word: str = "image") -> str:
     out = []
     for i, r in enumerate(refs, 1):
         n = f"{word} {i}" if len(refs) > 1 else f"the {word}"
+        if r.get("role") == "composite":
+            out.append(composite_intro(r, n))
+            continue
         if r.get("role") == "plate":
             out.append(f"{n.capitalize()} is the background plate: use its setting, layout, "
                        f"colours and light for the scene.")
@@ -138,13 +164,19 @@ def keyframe_prompt(shot, seq, series_cfg: dict, which: str,
     size = SIZE_WORDS.get(shot.size, "medium shot")
     parts.append(_sentence(f"the {end} frame of {_article(size)}"
                            f"{' of ' + env if env else ''}, one still picture"))
-    if look:
-        parts.append(f"Drawn as {look}.")
 
     def name_of(s: str) -> str:
         return (book.get(s) or {}).get("name", s)
 
     on_screen = list(shot.cast) + [p for p in shot.props if p not in shot.cast]
+    people = [name_of(s) for s in shot.cast
+              if (book.get(s) or {}).get("kind", "character") == "character"]
+    things = [name_of(s) for s in on_screen if name_of(s) not in people]
+    frame = framing(size, people, things)
+    if frame:
+        parts.append(frame)
+    if look:
+        parts.append(f"Drawn as {look}, framed as {_article(size)}.")
     plain = []
     for s in on_screen:
         design = ((book.get(s) or {}).get("design") or "").strip().rstrip(".")
@@ -168,7 +200,36 @@ def keyframe_prompt(shot, seq, series_cfg: dict, which: str,
     if not on_screen:
         parts.append("Nobody named is in frame.")
     parts.append("No text, captions, speech bubbles or borders.")
+    parts.append(_sentence(f"framing: {_article(size)}"))
     return " ".join(p for p in parts if p)
+
+
+def framing(size: str, people: list[str], things: list[str]) -> str:
+    """The framing, said plainly (an image model left to itself draws a
+    medium-wide view whatever the size word): a close-up fills the frame
+    with the face, a medium shot is waist up, a wide shot shows the whole
+    place with small full-length figures. `people` are the characters'
+    names, `things` the props' and vehicles'."""
+    if size == "close-up":
+        if people:
+            faces = (f"{people[0]}'s face fills" if len(people) == 1
+                     else f"{_and(people)}'s faces fill")
+            return (f"Framing: a close-up. {faces} the frame, large: from the chin to the "
+                    f"top of the head, cut off at the shoulders. No full body, no wide view "
+                    f"of the room.")
+        if things:
+            return (f"Framing: a close-up. {_and(things)} {'fills' if len(things) == 1 else 'fill'}"
+                    f" the frame, large and close. No wide view of the room.")
+        return "Framing: a close-up of one detail of the place, large and close. No wide view."
+    if size == "medium shot":
+        if people:
+            return (f"Framing: a medium shot. {_and(people)} seen from the waist up, filling "
+                    f"most of the frame's height.")
+        return ""
+    if people:
+        return (f"Framing: a wide shot. The whole place in view, {_and(people)} small and "
+                f"full-length in it.")
+    return "Framing: a wide shot. The whole place in view."
 
 
 # ---------------------------------------------------------------------------

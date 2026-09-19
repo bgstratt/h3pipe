@@ -590,6 +590,25 @@ def post_cancel(ctx: Context, body):
                  "save_notes": sc.get("save_notes", ""), "finished": sc.get("finished")}
 
 
+@handler
+def post_discard(ctx: Context, body):
+    """Move a take to renders[_proxy]/_trash/<shot>/ (h3edit.discard_take);
+    a cut entry that picked it goes back to the latest usable take."""
+    body = body_dict(body)
+    ep = check_ep(ctx, body.get("ep"))
+    pass_ = check_pass(body.get("pass"))
+    shot = check_shot(body.get("shot"))
+    take = check_take(body.get("take"))
+    try:
+        res = E.discard_take(ep, pass_, shot, take)
+    except T.StillQueued as e:
+        raise ApiError(409, str(e))
+    except LookupError as e:
+        raise ApiError(404, str(e))
+    episode_event(ctx, ep)
+    return 200, res
+
+
 # ---------------------------------------------------------------------------
 # cut and overrides
 # ---------------------------------------------------------------------------
@@ -1132,23 +1151,164 @@ def put_refs_pick(ctx: Context, body):
     return 200, seeds_out(R.ref_json(s, ref, R.used_by(s, [ref])))
 
 
+MAX_UPLOAD = 64 * 1024 * 1024        # POST /h3pipe/refs/import as multipart
+
+
+class Upload:
+    """A file the adapter received in a multipart POST /h3pipe/refs/import
+    and saved to a temporary file (it deletes it after the handler)."""
+
+    def __init__(self, path: str, filename: str, size: int):
+        self.path, self.filename, self.size = path, filename, size
+
+
+def _pick_flag(v) -> bool:
+    """`pick` from JSON (true/false/null) or a form field ("1", "true", "0", "")."""
+    if v is None or v is False or v == "":
+        return False
+    if v is True:
+        return True
+    if isinstance(v, str) and v.strip().lower() in ("1", "true", "yes", "on"):
+        return True
+    if isinstance(v, str) and v.strip().lower() in ("0", "false", "no", "off"):
+        return False
+    raise ApiError(400, "pick must be true or false (a form sends \"1\" or \"0\")")
+
+
 @handler
 def post_refs_import(ctx: Context, body):
+    """A file as a new take (source "imported"): `source_path`, a file on
+    this machine (JSON), or `file`, an upload (multipart, which the adapter
+    hands over as an Upload). `pick` picks it."""
     body = body_dict(body)
     ep = check_ep(ctx, body.get("ep"))
     s = _series(ep)
     ref = _ref(s, body.get("ref"))
-    view = _view(ref, body.get("view"), required=True)
-    src = body.get("source_path")
-    if not isinstance(src, str) or not src.strip():
-        raise ApiError(400, "source_path is required: the file's absolute path on this machine")
+    view = _view(ref, body.get("view") or None, required=True)
+    pick = _pick_flag(body.get("pick"))
+    up = body.get("file")
+    if isinstance(up, Upload):
+        if up.size > MAX_UPLOAD:
+            raise ApiError(413, f"the file is over {MAX_UPLOAD // (1024 * 1024)} MB")
+        src, name = up.path, up.filename or ""
+        try:
+            R.check_import_type(ref, name)
+        except R.RefError as e:
+            raise ApiError(400, str(e))
+    elif up is not None:
+        raise ApiError(400, "file must be sent as multipart/form-data")
+    else:
+        src, name = body.get("source_path"), None
+        if not isinstance(src, str) or not src.strip():
+            raise ApiError(400, "source_path is required: the file's absolute path on this "
+                                "machine (or upload it as multipart `file`)")
+        src = src.strip()
     try:
-        t = R.import_take(s, ref, view, src.strip(), note=_opt_str(body, "note") or "")
+        t = R.import_take(s, ref, view, src, note=_opt_str(body, "note") or "",
+                          original_name=name)
     except R.RefError as e:
         raise ApiError(400, str(e))
     ref_event(ctx, ep, ref.id, view, t.take, t.status)
+    if pick:
+        try:
+            R.pick_take(s, ref, view, t.take)
+        except R.StitchError as e:
+            ref_event(ctx, ep, ref.id, view, t.take, "picked")
+            episode_event(ctx, ep)
+            raise ApiError(500, f"imported and picked, but the sheet could not be stitched: {e}")
+        except (R.RefError, R.NotUsable) as e:
+            episode_event(ctx, ep)
+            raise ApiError(400, f"imported as take {t.take}, but not picked: {e}")
+        ref_event(ctx, ep, ref.id, view, t.take, "picked")
+        t = R.get_take(ref, view, t.take)
     episode_event(ctx, ep)
     return 200, seeds_out(R.take_json(ep, ref, t))
+
+
+@handler
+def post_refs_discard(ctx: Context, body):
+    """Move a ref candidate to refs/_takes/_trash/ (h3refs.discard_take); if it
+    was the pick, the ref (view) is cleared as DELETE /h3pipe/refs/pick does.
+    Returns the ref as GET /h3pipe/refs lists it."""
+    body = body_dict(body)
+    ep = check_ep(ctx, body.get("ep"))
+    s = _series(ep)
+    ref = _ref(s, body.get("ref"))
+    view = _view(ref, body.get("view") or None, required=True)
+    take = check_take(body.get("take"))
+    try:
+        res = R.discard_take(s, ref, view, take)
+    except T.StillQueued as e:
+        raise ApiError(409, str(e))
+    except R.UnknownRef as e:
+        raise ApiError(404, str(e))
+    except R.RefError as e:
+        raise ApiError(400, str(e))
+    ref_event(ctx, ep, ref.id, view, take, "discarded")
+    if res.cleared is not None:
+        ref_event(ctx, ep, ref.id, view, take, "cleared")
+    episode_event(ctx, ep)
+    return 200, seeds_out(R.ref_json(s, ref, R.used_by(s, [ref]), ready=image_ready(ctx)))
+
+
+def _opt_image_target(body: dict, key: str) -> str | None:
+    v = body.get(key)
+    if v is None or v == "":
+        return None
+    if not isinstance(v, str):
+        raise ApiError(400, f"{key} must be an image target id or null")
+    try:
+        TG.load_target(v, "image")
+    except TG.TargetError as e:
+        raise ApiError(400, str(e))
+    return v
+
+
+@handler
+def post_refs_generate_missing(ctx: Context, body):
+    """Every missing ref at once (h3refs.generate_missing): a candidate for
+    each series ref this pass uses with no live file (not cleared, nothing
+    queued or waiting), and every needed keyframe filled as `h3.py keyframe
+    --missing` does. Returns {queued, picked, skipped, errors}; `dry_run`
+    writes and queues nothing."""
+    body = body_dict(body)
+    ep = check_ep(ctx, body.get("ep"))
+    pass_ = check_pass(body.get("pass"))
+    kinds = body.get("kinds")
+    if kinds is None:
+        kinds = list(R.MISSING_KINDS)
+    if (not isinstance(kinds, list) or not kinds
+            or not all(k in R.MISSING_KINDS for k in kinds)):
+        raise ApiError(400, "kinds must be a list of \"series\" and/or \"keyframe\"")
+    target = _opt_image_target(body, "target")
+    keyframe_target = _opt_image_target(body, "keyframe_target")
+    dry_run = body.get("dry_run", False)
+    if not isinstance(dry_run, bool):
+        raise ApiError(400, "dry_run must be true or false")
+    s = _series(ep)
+    J.load_shotlist(ep, pass_)                           # 404 without a build
+    base = None
+    if not dry_run:
+        try:
+            base, _ = R.resolve_workflow(ctx.comfy_url)
+        except Exception as e:
+            raise ApiError(500, f"{R.REFS_WORKFLOW} can't be read: {e}")
+    listing = J.model_lister(ctx.comfy, ctx.model_choices)
+    result = R.generate_missing(s, None if dry_run else ctx.comfy, pass_, kinds, target,
+                                keyframe_target, dry_run, base, listing=listing,
+                                resolve=ctx.model_resolve, cache=ctx.model_cache)
+    if not dry_run:
+        for q in result["queued"]:
+            ref_event(ctx, ep, q["ref"], q["view"], q["take"], "queued")
+        for p in result["picked"]:
+            ref_event(ctx, ep, p["ref"], None, p["take"], "ok")
+            ref_event(ctx, ep, p["ref"], None, p["take"], "picked")
+        for err in result["errors"]:
+            if err.get("take"):
+                ref_event(ctx, ep, err["ref"], err.get("view"), err["take"], "failed")
+        if result["queued"] or result["picked"] or any(e.get("take") for e in result["errors"]):
+            episode_event(ctx, ep)
+    return 200, seeds_out(result)
 
 
 @handler
@@ -1267,7 +1427,8 @@ def delete_refs_override(ctx: Context, query: dict):
     return 200, seeds_out({"override": _ref_override_json(s, ref, view)})
 
 
-# (method, path, handler, what it takes: "query" or "body")
+# (method, path, handler, what it takes: "query", "body" (JSON) or "form" (JSON, or
+# multipart/form-data whose file field arrives as an Upload))
 ROUTES = [
     ("GET", "/h3pipe/config", get_config, "query"),
     ("PUT", "/h3pipe/config", put_config, "body"),
@@ -1279,6 +1440,7 @@ ROUTES = [
     ("GET", "/h3pipe/file", get_file, "query"),
     ("POST", "/h3pipe/render", post_render, "body"),
     ("POST", "/h3pipe/cancel", post_cancel, "body"),
+    ("POST", "/h3pipe/discard", post_discard, "body"),
     ("PUT", "/h3pipe/pick", put_pick, "body"),
     ("PUT", "/h3pipe/cut", put_cut, "body"),
     ("PUT", "/h3pipe/override", put_override, "body"),
@@ -1292,7 +1454,9 @@ ROUTES = [
     ("PUT", "/h3pipe/refs/pick", put_refs_pick, "body"),
     ("DELETE", "/h3pipe/refs/pick", delete_refs_pick, "query"),
     ("PUT", "/h3pipe/refs/defaults", put_refs_defaults, "body"),
-    ("POST", "/h3pipe/refs/import", post_refs_import, "body"),
+    ("POST", "/h3pipe/refs/import", post_refs_import, "form"),
+    ("POST", "/h3pipe/refs/discard", post_refs_discard, "body"),
+    ("POST", "/h3pipe/refs/generate-missing", post_refs_generate_missing, "body"),
     ("POST", "/h3pipe/refs/keyframe", post_refs_keyframe, "body"),
     ("PUT", "/h3pipe/refs/override", put_refs_override, "body"),
     ("DELETE", "/h3pipe/refs/override", delete_refs_override, "query"),
