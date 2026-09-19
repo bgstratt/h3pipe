@@ -5,7 +5,7 @@ windows h3build needs for lip-synced (dub) shots.
 
     python h3align.py DeanStories\\ep05 audio\\ep05_dialogue.wav --dry-run
     python h3align.py DeanStories\\ep05 audio\\ep05_dialogue.wav
-    python h3align.py DeanStories\\ep05                     # re-align; track from the bible
+    python h3align.py DeanStories\\ep05                     # re-align; track from the series config
 
 What it does
     1. Transcribes the recording with word timestamps (faster-whisper), and
@@ -19,7 +19,7 @@ What it does
        With --snap (default) a speaking shot's window is lengthened to H3's
        17k+5 frame grid when the pause has room, so nothing is padded.
     4. Rewrites the script: `audio: in-out` on every shot it placed, old `dur:`
-       lines kept as comments. Points the bible at the recording
+       lines kept as comments. Points the series config at the recording
        (audio.mode = source_track). Both files are backed up as .bak first.
 
 Because the windows are contiguous, the assembled picture lines up with the
@@ -65,9 +65,9 @@ SCALE_OK = (0.6, 1.8)   # silent-shot stretch the pause may impose without a war
 # inputs
 
 def episode_files(ep: str) -> tuple[str, str]:
-    bible = os.path.join(ep, "series.json")
-    if not os.path.isfile(bible):
-        sys.exit(f"  !! {bible} not found")
+    series_cfg = os.path.join(ep, "series.json")
+    if not os.path.isfile(series_cfg):
+        sys.exit(f"  !! {series_cfg} not found")
     base = os.path.basename(os.path.normpath(ep))
     md = os.path.join(ep, f"{base}.md")
     if not os.path.isfile(md):
@@ -78,7 +78,7 @@ def episode_files(ep: str) -> tuple[str, str]:
             sys.exit(f"  !! can't tell which script to use in {ep}: "
                      f"{[os.path.basename(c) for c in cands]}")
         md = cands[0]
-    return bible, md
+    return series_cfg, md
 
 
 def load_pcm(path: str) -> "np.ndarray":
@@ -337,7 +337,7 @@ def main() -> int:
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("episode", help="episode folder (holds series.json and the script)")
     ap.add_argument("recording", nargs="?",
-                    help="dialogue recording (default: the bible's audio.track)")
+                    help="dialogue recording (default: audio.track in series.json)")
     ap.add_argument("--script", help="script .md, if the folder holds more than one")
     ap.add_argument("--words", help="word-timing JSON to use instead of transcribing")
     ap.add_argument("--retranscribe", action="store_true", help="ignore the cached transcript")
@@ -350,22 +350,22 @@ def main() -> int:
     ap.add_argument("--no-snap", dest="snap", action="store_false",
                     help="don't lengthen windows to H3's frame grid")
     ap.add_argument("--policy", choices=["dub", "dub_keep_foley"],
-                    help="set the bible's default policy for speaking shots")
+                    help="set the default policy in series.json for speaking shots")
     ap.add_argument("--retention", choices=["fully_copy", "partially_copy", "reference"],
-                    help="set the bible's audio.retention (default depends on policy)")
+                    help="set audio.retention in series.json (default depends on policy)")
     ap.add_argument("--dry-run", action="store_true", help="report only; change no files")
     args = ap.parse_args()
 
     ep = args.episode
-    bible_p, md_p = episode_files(ep)
+    series_cfg_p, md_p = episode_files(ep)
     if args.script:
         md_p = args.script
-    bible = json.load(open(bible_p, encoding="utf-8"))
-    fps = float(bible.get("series", {}).get("fps", 24))
+    series_cfg = json.load(open(series_cfg_p, encoding="utf-8"))
+    fps = float(series_cfg.get("series", {}).get("fps", 24))
 
-    rec = args.recording or bible.get("audio", {}).get("track")
+    rec = args.recording or series_cfg.get("audio", {}).get("track")
     if not rec:
-        sys.exit("  !! give the recording path (none set in the bible)")
+        sys.exit("  !! give the recording path (none set in series.json)")
     rec_abs = rec if os.path.isabs(rec) else (
         rec if os.path.isfile(rec) else os.path.join(ep, rec))
     if not os.path.isfile(rec_abs):
@@ -379,8 +379,8 @@ def main() -> int:
     rec_rel = rec_rel.replace("\\", "/")
 
     # script
-    subjects = {k for k in bible.get("subjects", {}) if not k.startswith("_")}
-    chars = {k for k, v in bible["subjects"].items()
+    subjects = {k for k in series_cfg.get("subjects", {}) if not k.startswith("_")}
+    chars = {k for k, v in series_cfg["subjects"].items()
              if not k.startswith("_") and isinstance(v, dict)
              and v.get("kind", "character") == "character"}
     text = open(md_p, encoding="utf-8").read()
@@ -456,16 +456,16 @@ def main() -> int:
     windows = {s["id"]: s.get("window") for s in shots}
     backup(md_p)
     open(md_p, "w", encoding="utf-8").write(rewrite_script(text, windows))
-    backup(bible_p)
-    audio = dict(bible.get("audio", {}))
+    backup(series_cfg_p)
+    audio = dict(series_cfg.get("audio", {}))
     audio["mode"] = "source_track"
     audio["track"] = rec_rel
     if args.policy:
         audio["default_policy"] = args.policy
     if args.retention:
         audio["retention"] = args.retention
-    bible["audio"] = audio
-    json.dump(bible, open(bible_p, "w", encoding="utf-8"), indent=2, ensure_ascii=False)
+    series_cfg["audio"] = audio
+    json.dump(series_cfg, open(series_cfg_p, "w", encoding="utf-8"), indent=2, ensure_ascii=False)
 
     rep = os.path.join(ep, "align_report.md")
     with open(rep, "w", encoding="utf-8") as fh:
@@ -482,7 +482,7 @@ def main() -> int:
             fh.write(f"| {ln['shot']} | {ln['who']} | {ln['start']:.2f} | {ln['end']:.2f} | "
                      f"{match} | "
                      f"{ln['text']} |\n")
-    print(f"\n  -> {md_p}  (backup .bak)\n  -> {bible_p}  (audio.mode source_track, "
+    print(f"\n  -> {md_p}  (backup .bak)\n  -> {series_cfg_p}  (audio.mode source_track, "
           f"track {rec_rel}; backup .bak)\n  -> {rep}\n"
           f"  next: python h3.py build {ep}\n")
     return 0

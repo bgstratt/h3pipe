@@ -196,12 +196,12 @@ class RefsApiTest(ApiTest):
             self.assertIn(want, got)
 
 
-class ParentBibleApiTest(ApiTest):
+class ParentSeriesConfigApiTest(ApiTest):
     build = False
 
     def setUp(self):
         super().setUp()
-        # the bible moves up into the series folder (Shows/)
+        # the series config moves up into the series folder (Shows/)
         shutil.move(os.path.join(self.ep, "series.json"), os.path.join(self.shows, "series.json"))
         self.assertTrue(E.build_episode(self.ep)["ok"])
 

@@ -4,12 +4,12 @@
 // Everything else — the H3 prompt format, frame grids, seeds, reference
 // wiring, audio policy — is generated. You never touch JSON.
 //
-//   #  sequence     #  <id> <location-from-bible>
+//   #  sequence     #  <id> <location-from-series.json>
 //   ## shot         ## <id>
 //   who: names       characters in the shot  -> <Picture 1..3>
 //   with: names      props / vehicles        -> next free slot
 //   key: value      size / audio / dur / camera / sound / music
-//   NAME: line      dialogue — name must be a character in the bible
+//   NAME: line      dialogue — name must be a character in the series config
 //   NAME (V.O.): ..  voiceover — speaks but is NOT on screen, costs no slot
 //   NAME (O.S.): ..  off-screen — in the space, outside the frame
 //   plain text      action

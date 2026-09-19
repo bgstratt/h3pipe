@@ -87,7 +87,7 @@ A character model sheet on a plain flat background: FOUR panels side by side in 
 **voice sample** · target 5-15 seconds of clean speech, mono wav · blocks 2 shot(s): sh050, sh060
 
 ```
-A 5-15 second clean recording of Cy speaking. Voice: as written in the bible.
+A 5-15 second clean recording of Cy speaking. Voice: as written in series.json.
 ```
 
 ## 11. `refs/_bg/street.png`

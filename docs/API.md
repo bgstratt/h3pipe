@@ -90,7 +90,7 @@ queued takes whose ComfyUI job is gone (`h3takes.sweep_queued`, with `as_of` tak
 
 ### `POST /h3pipe/build`
 Body `{"ep"}`. Runs `h3build` for the final pass, then the proxy pass, on the
-episode's bible and script (`h3edit.episode_bible` / `episode_script`).
+episode's series config and script (`h3edit.episode_series_config` / `episode_script`).
 ```json
 {"ok": true, "passes": {"final": {"ok": true, "report": "…stdout…", "error": ""},
                         "proxy": {"ok": true, "report": "…", "error": ""}}}
@@ -213,7 +213,7 @@ No h3pipe route is needed.
     from disk (`h3jobs.finish_job`);
   - no history at all falls back to `sweep_queued`.
 - **`POST /h3pipe/assemble` and `POST /h3pipe/build`:** a failure is 200 with
-  `ok: false` and a top-level `error`. Build with no bible or no script returns
+  `ok: false` and a top-level `error`. Build with no series config or no script returns
   `{"ok": false, "error", "passes": {}}`. Build always runs both passes.
 - **`POST /h3pipe/render`:**
   - `shots: null` renders every shot.
@@ -239,11 +239,11 @@ contents.
 ```json
 {"path": "C:\Users\bgstr\ComfyProjects\DeanStories", "parent": "C:\Users\bgstr\ComfyProjects",
  "episode": false, "truncated": false,
- "dirs": [{"name": "ep05", "path": "C:\…\ep05", "episode": true, "bible": true}]}
+ "dirs": [{"name": "ep05", "path": "C:\…\ep05", "episode": true, "series_config": true}]}
 ```
 - No `path` gives the starting points: the home folder and the drives on Windows.
   `parent` is then `null`; at a drive root it is `""`.
-- `episode` means the folder has a `series.json` and a script; `bible` means it has
+- `episode` means the folder has a `series.json` and a script; `series_config` means it has
   a `series.json`.
 - Status is 404 if the folder doesn't exist, 403 if it can't be read.
 
@@ -271,10 +271,10 @@ you supply. Refs are the same thing whatever model consumes them. Each has a `sc
 
 | scope | kinds | named in | id |
 |---|---|---|---|
-| `series` | `character`, `prop`, `vehicle` (bible subjects), `location` (bible locations), `voice` (a subject's `voice_sample`) | the bible | `subject:<id>`, `location:<id>`, `voice:<id>` |
+| `series` | `character`, `prop`, `vehicle` (series config subjects), `location` (series config locations), `voice` (a subject's `voice_sample`) | the series config | `subject:<id>`, `location:<id>`, `voice:<id>` |
 | `shot` | `keyframe`: `first` / `last` frame of one shot, for FL2V and I2V models | the script (a later field) or the editor | `shot:<shot>:first`, `shot:<shot>:last` |
 
-- **Series refs are listed from the bible**, not from `refs_todo`. A character nobody
+- **Series refs are listed from the series config**, not from `refs_todo`. A character nobody
   uses yet can still be generated. `refs_todo` becomes a filter: "used by this
   episode", and which shots it blocks.
 - **Shot keyframes:** Phase 5 builds their storage, takes and pick. Generating them
@@ -288,8 +288,8 @@ you supply. Refs are the same thing whatever model consumes them. Each has a `sc
   replaced by `__`.
 - A **character** has views (`01_threequarter`, `02_side`, `03_back`, `04_face`, as
   in `kreagen.VIEWS`). Each view has its own takes and pick. Picking a view that
-  completes the set stitches the sheet with `mksheet` into the bible's `sheet` path.
-- **Picking** a take copies it to the path the bible names, which is the file renders
+  completes the set stitches the sheet with `mksheet` into the series config's `sheet` path.
+- **Picking** a take copies it to the path the series config names, which is the file renders
   read. The pick is recorded in `refs/_picks.json`, so the UI knows which take is
   live. Re-picking changes the file's sha1, so video takes that used the old file
   show `ref`-stale.
@@ -355,8 +355,8 @@ Same shape as the shot override routes, keyed by `ref` (and `view`).
 - **Extra fields on a ref take:** `view`, `usable`, `audio` (voices: `audio` set,
   `image: null`), `seed_source`, `prompt`, `model`, `loras`, `steps`, `width`,
   `height`, `queued`, `finished`, `comfy_prompt_id`, `save_notes`, `overrides`.
-- **Refs live next to the bible.** A bible in the parent folder gives paths like
-  `../refs/…`, and `/h3pipe/file` serves those only inside that bible's folder and a
+- **Refs live next to the series config.** A series config in the parent folder gives paths like
+  `../refs/…`, and `/h3pipe/file` serves those only inside that series config's folder and a
   configured root.
 - **Keyframes** are listed once they exist (a live file or a take). Any shot in a build
   can import or pick one; a shot in no build is 404.
@@ -373,16 +373,16 @@ Same shape as the shot override routes, keyed by `ref` (and `view`).
     400.
   - Pick accepts `force: true`.
 - **Import:** images png/jpg/jpeg/webp, audio wav/mp3/flac/ogg/m4a. The take keeps its
-  extension, and picking copies the bytes to the bible's path.
+  extension, and picking copies the bytes to the series config's path.
 
 ### Round 2 contract fixes (after merging the Refs tab)
 - **`GET /h3pipe/browse?path=…&files=image|audio`** also lists matching files as
   `files: [{name, path, size}]`, for import. `files` is absent without the parameter;
   an unknown type answers 400.
 - **Each ref in `GET /h3pipe/refs`** also carries `override_values` (the same as
-  `override.values`) and `built_prompt` (the bible's prompt before any override). The
+  `override.values`) and `built_prompt` (the series config's prompt before any override). The
   UI reads these flat names.
 - **Already served, which the UI can use once its TODOs are cleared:** `comfy_prompt_id`
   on ref takes and episode takes, `effective` on refs and on each character view, and
-  per-view `prompt`/`override`/`effective`. Ref files beside a parent-folder bible
+  per-view `prompt`/`override`/`effective`. Ref files beside a parent-folder series config
   come through `/h3pipe/file` as `../refs/…` paths.

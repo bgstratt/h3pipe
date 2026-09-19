@@ -3,7 +3,7 @@ h3core.ir — the story IR: an episode as the script describes it, before any
 model decision. Written to `shotlist/shots.json` by every build.
 
 Durations are seconds as the script asked for them (no frame grid). Subjects
-are bible ids in script order, with no reference slots. Nothing here names a
+are series config ids in script order, with no reference slots. Nothing here names a
 model, a prompt format or a pass, so one file serves every target and both
 passes.
 
@@ -17,7 +17,7 @@ passes.
 `timing` is one of {"audio_in", "audio_out"} (a window on the recorded
 dialogue), {"seconds"}, {"auto": true} (derive from the dialogue at `pace`), or
 null (the script gave none; the target decides whether that is an error).
-`pace` is the shot's own `pace:` or null for the bible's default; it applies to
+`pace` is the shot's own `pace:` or null for the series config's default; it applies to
 every dialogue shot, not only `auto` ones.
 
 `audio` is the script's explicit intent (generate | dub | dub_keep_foley |

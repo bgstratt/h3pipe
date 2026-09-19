@@ -48,7 +48,7 @@ The four views of one character share a seed, which is most of what keeps them
 on model. Per-view files land in `views/<char>/` so you can regenerate one bad
 angle and re-stitch without redoing the set.
 
-The view prompts are built from the bible's `design` sentence plus a framing
+The view prompts are built from the series config's `design` sentence plus a framing
 clause, not from the strip prompt in `refs_todo.md` — same source text, so the
 sheet and the 27 shot prompts still cannot drift.
 
@@ -100,7 +100,7 @@ encoder is added if the graph has none. At cfg 1.0 it prints a warning and is
 ignored.
 
 To steer a turbo graph without extra nodes, put the exclusions in the positive
-text — that is, in the bible's `style.look` and `design` sentences, where they
+text — that is, in the series config's `style.look` and `design` sentences, where they
 also reach every H3 shot prompt.
 
 **H3 itself takes no negative prompt at all.** The render graph guides with
@@ -145,5 +145,5 @@ max` will do to it. Short side must be ≥1024 or `max` is upscaling from mush.
    else is matched against. Iterate on it alone.
 2. `--only core_wide` next — most complex space, gates 6 shots, and no plate
    has been proven under this style yet. If it comes back noisy that's a
-   location-description problem in the bible, not a graph problem.
+   location-description problem in the series config, not a graph problem.
 3. Then let the rest run; the ordering is already most-blocking first.

@@ -357,13 +357,13 @@ def get_file(ctx: Context, query: dict):
 
 
 def _in_series_home(ctx: Context, ep: str, parts: list[str]) -> bool:
-    """A path like ../refs/x.png is allowed when the episode's bible lives in its
+    """A path like ../refs/x.png is allowed when the episode's series config lives in its
     parent folder (a series folder, where series refs live) and the file is
     inside that folder and inside a configured root."""
-    bible = E.episode_bible(ep)
-    if not bible:
+    series_cfg = E.episode_series_config(ep)
+    if not series_cfg:
         return False
-    home = _real(os.path.dirname(os.path.abspath(bible)))
+    home = _real(os.path.dirname(os.path.abspath(series_cfg)))
     if home == _real(ep):
         return False
     full = _real(os.path.join(ep, *[p for p in parts if p not in ("", ".")]))
@@ -651,7 +651,7 @@ def _series(ep: str):
     except FileNotFoundError as e:
         raise ApiError(404, str(e))
     except ValueError as e:
-        raise ApiError(500, f"the bible can't be read: {e}")
+        raise ApiError(500, f"series.json can't be read: {e}")
 
 
 def _ref(s, ref_id):

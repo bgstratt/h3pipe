@@ -21,17 +21,17 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SOURCE = os.path.join(ROOT, "docs", "AUTHORING.md")
 
 DESCRIPTION = (
-    "Write episode scripts and series bibles for the h3pipe MiniMax H3 shot-list "
+    "Write episode scripts and series configs for the h3pipe MiniMax H3 shot-list "
     "pipeline — the .md script format with sequences, shots and who/size/dur/plate/"
-    "camera/sound fields, plus the series.json bible of subjects, locations and voices. "
+    "camera/sound fields, plus the series config (series.json) of subjects, locations and voices. "
     "Use when drafting or extending an episode, breaking a scene into shots, adding "
-    "characters or locations to a bible, re-timing shots whose dialogue does not fit, "
+    "characters or locations to a series config, re-timing shots whose dialogue does not fit, "
     "or fixing a script h3build rejected."
 )
 
 PREAMBLE = """You are writing for the h3pipe pipeline. Follow this format exactly: the
 output is compiled by `h3build.py`, and anything that does not match is a build error, not a
-style preference. Validate with `h3build.py <bible> <script> --check` and `--pace` before
+style preference. Validate with `h3build.py series.json <script> --check` and `--pace` before
 calling a script finished."""
 
 

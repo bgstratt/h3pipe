@@ -599,7 +599,7 @@ class MissingRefsAndBrowseTest(ApiTest):
         self.assertTrue(top["dirs"])
         res = self.ok(A.get_browse(self.ctx, {"path": self.shows}))
         (d,) = res["dirs"]
-        self.assertEqual((d["name"], d["episode"], d["bible"]), ("ks01", True, True))
+        self.assertEqual((d["name"], d["episode"], d["series_config"]), ("ks01", True, True))
         self.assertEqual(os.path.normcase(res["parent"]), os.path.normcase(self.tmp))
         self.assertTrue(self.ok(A.get_browse(self.ctx, {"path": self.ep}))["episode"])
         self.err(A.get_browse(self.ctx, {"path": os.path.join(self.tmp, "nope")}), 404)

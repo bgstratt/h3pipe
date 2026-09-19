@@ -109,7 +109,7 @@ function BuildBar() {
     <div className="h3-pad h3-col" style={{ gap: 4, paddingTop: 0 }}>
       <div className="h3-row h3-wrap">
         <PassToggle />
-        <button className="h3-btn" disabled={b.busy} onClick={() => void build()} title="Run h3build for both passes from the script and bible">
+        <button className="h3-btn" disabled={b.busy} onClick={() => void build()} title="Run h3build for both passes from the script and series config">
           <i className={b.busy ? "pi pi-spin pi-spinner" : "pi pi-cog"} /> {b.busy ? "Building…" : "Build"}
         </button>
         <button

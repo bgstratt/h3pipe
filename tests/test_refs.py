@@ -1,5 +1,5 @@
 """
-h3refs: refs listed from the bible, ref takes, picks (with the character sheet
+h3refs: refs listed from the series config, ref takes, picks (with the character sheet
 stitch), import, overrides, generating against test_render's FakeComfy, and the
 kreagen CLI rebuilt on top of it.
 """
@@ -96,7 +96,7 @@ class RefsTest(unittest.TestCase):
 
 
 class ListingTest(RefsTest):
-    def test_every_bible_ref_with_usage(self):
+    def test_every_series_config_ref_with_usage(self):
         refs = self.listing()
         self.assertEqual(
             [i for i in refs],
@@ -131,7 +131,7 @@ class ListingTest(RefsTest):
             self.assertEqual(refs[rid]["prompt"], todo[path]["prompt"], rid)
         v = ada["views"][1]
         self.assertEqual(v["prompt"], R.VIEW_TMPL.format(
-            view=R.VIEW_DESC["02_side"], design=self.s.bible["subjects"]["ada"]["design"],
+            view=R.VIEW_DESC["02_side"], design=self.s.series_cfg["subjects"]["ada"]["design"],
             look=self.s.look, w=1024, h=1024))
         self.assertEqual((v["effective"]["seed"], v["effective"]["seed_source"]),
                          (R.seed_for("ada"), "stable"))
@@ -141,11 +141,11 @@ class ListingTest(RefsTest):
                           refs["location:kitchen"]["effective"]["height"]), (1344, 768))
 
     def test_unused_subject_is_listed_and_generates(self):
-        bible = json.load(open(os.path.join(self.ep, "series.json"), encoding="utf-8"))
-        bible["subjects"]["zed"] = {"name": "Zed", "design": "a lanky man in a tan trench coat",
+        series_cfg = json.load(open(os.path.join(self.ep, "series.json"), encoding="utf-8"))
+        series_cfg["subjects"]["zed"] = {"name": "Zed", "design": "a lanky man in a tan trench coat",
                                     "sheet": "refs/zed/zed_sheet_4panel.png"}
         with open(os.path.join(self.ep, "series.json"), "w", encoding="utf-8") as fh:
-            json.dump(bible, fh)
+            json.dump(series_cfg, fh)
         self.s = R.load_series(self.ep)
         zed = self.listing()["subject:zed"]
         self.assertEqual(zed["used_by"], {"final": [], "proxy": []})
@@ -154,7 +154,7 @@ class ListingTest(RefsTest):
         self.assertEqual(len(out["queued"]), 4)
         self.assertEqual({q["seed"] for q in out["queued"]}, {R.seed_for("zed")})
 
-    def test_parent_folder_bible(self):
+    def test_parent_folder_series_config(self):
         shows = os.path.join(self.tmp, "Show")
         ep = os.path.join(shows, "ep01")
         os.makedirs(ep)
@@ -481,11 +481,11 @@ class ImportAndOverrideTest(RefsTest):
         self.assertEqual(job.overridden, ["prompt", "seed", "steps"])
         (job,) = R.plan_generate(self.s, R.GenRequest("location:kitchen", seed_mode="new"))
         self.assertEqual(job.seed_source, "new")
-        # the bible changes the description: the prompt override goes stale
-        bible = json.load(open(os.path.join(self.ep, "series.json"), encoding="utf-8"))
-        bible["locations"]["kitchen"]["description"] = "a bigger kitchen"
+        # the series config changes the description: the prompt override goes stale
+        series_cfg = json.load(open(os.path.join(self.ep, "series.json"), encoding="utf-8"))
+        series_cfg["locations"]["kitchen"]["description"] = "a bigger kitchen"
         with open(os.path.join(self.ep, "series.json"), "w", encoding="utf-8") as fh:
-            json.dump(bible, fh)
+            json.dump(series_cfg, fh)
         self.s = R.load_series(self.ep)
         self.assertTrue(self.listing()["location:kitchen"]["override"]["stale"])
         # a character's prompt is per view
@@ -550,7 +550,7 @@ class KreagenTest(RefsTest):
         self.assertIn(f"--- kitchen  seed {R.seed_for('refs/_bg/kitchen.png')}\n"
                       f"A background plate", out)
         self.assertFalse(os.path.isdir(os.path.join(self.ep, "refs", "_takes")))
-        # --all works from the bible alone, no refs_todo needed
+        # --all works from the series config alone, no refs_todo needed
         os.remove(os.path.join(self.ep, "refs_todo.json"))
         self.assertEqual(self.run_kreagen("--list").returncode, 1)
         r = self.run_kreagen("--list", "--all", "--comfy", "http://127.0.0.1:9")

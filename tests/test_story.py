@@ -14,7 +14,7 @@ sys.path.insert(0, HERE)
 
 import h3build  # noqa: E402
 from h3core import ir  # noqa: E402
-from h3core.bible import character_ids, load_bible, series_info, subject_ids  # noqa: E402
+from h3core.series_config import character_ids, load_series_config, series_info, subject_ids  # noqa: E402
 from h3core.story import ScriptError, parse_script, parse_story  # noqa: E402
 from test_golden import fixtures  # noqa: E402
 
@@ -30,12 +30,12 @@ RAW = {"camera", "sound", "music", "extras", "text", "plate", "policy", "retenti
        "model", "lora"}
 
 
-def load_story(bible_path: str, script_path: str) -> tuple[ir.Episode, dict, str]:
-    bible = load_bible(bible_path)
+def load_story(series_cfg_path: str, script_path: str) -> tuple[ir.Episode, dict, str]:
+    series_cfg = load_series_config(series_cfg_path)
     with open(script_path, encoding="utf-8") as fh:
         text = fh.read()
-    story = parse_story(text, subject_ids(bible), character_ids(bible), series_info(bible))
-    return story, bible, text
+    story = parse_story(text, subject_ids(series_cfg), character_ids(series_cfg), series_info(series_cfg))
+    return story, series_cfg, text
 
 
 def without_prose(doc: dict) -> dict:
@@ -53,21 +53,21 @@ class FixtureTest(unittest.TestCase):
     """Every golden fixture, including the local real episodes when present."""
 
     def test_round_trip(self):
-        for name, (bible, script, _g) in fixtures().items():
+        for name, (series_cfg, script, _g) in fixtures().items():
             with self.subTest(fixture=name):
-                story, _, _ = load_story(bible, script)
+                story, _, _ = load_story(series_cfg, script)
                 self.assertEqual(ir.Episode.from_json(story.to_json()), story)
                 self.assertEqual(ir.Episode.loads(story.dumps()), story)
                 self.assertEqual(json.loads(story.dumps()), story.to_json())
 
     def test_no_h3_vocabulary(self):
-        for name, (bible, script, gdir) in fixtures().items():
+        for name, (series_cfg, script, gdir) in fixtures().items():
             with self.subTest(fixture=name):
                 golden = os.path.join(gdir, "shots.json")
                 self.assertTrue(os.path.isfile(golden), golden)
                 with open(golden, encoding="utf-8") as fh:
                     doc = json.load(fh)
-                story, _, _ = load_story(bible, script)
+                story, _, _ = load_story(series_cfg, script)
                 self.assertEqual(doc, story.to_json())
                 flat = json.dumps(without_prose(doc), ensure_ascii=False).lower()
                 for word in H3_WORDS:
@@ -77,10 +77,10 @@ class FixtureTest(unittest.TestCase):
         """The dict compile gets back from the IR is the parser's dict, give or
         take what compile provably ignores."""
         keep_seq = {"id", "location_key", "continuous", "shots", "model", "lora", "steps"}
-        for name, (bible_path, script, _g) in fixtures().items():
+        for name, (series_cfg_path, script, _g) in fixtures().items():
             with self.subTest(fixture=name):
-                story, bible, text = load_story(bible_path, script)
-                want = parse_script(text, subject_ids(bible), character_ids(bible))
+                story, series_cfg, text = load_story(series_cfg_path, script)
+                want = parse_script(text, subject_ids(series_cfg), character_ids(series_cfg))
                 for sq in want["sequences"]:
                     for k in set(sq) - keep_seq:
                         del sq[k]

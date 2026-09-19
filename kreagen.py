@@ -1,24 +1,24 @@
 #!/usr/bin/env python3
 """
 kreagen.py — generate every missing H3 reference image on a local ComfyUI, as
-ref takes (h3refs.py), and put each one at the path the bible names.
+ref takes (h3refs.py), and put each one at the path the series config names.
 
     python3 kreagen.py --project-root .
     python3 kreagen.py --project-root . --only sam,core_wide --redo
-    python3 kreagen.py --project-root . --all            # every ref in the bible
+    python3 kreagen.py --project-root . --all            # every ref in the series config
     python3 kreagen.py --project-root . --list
     python3 kreagen.py --project-root . --dry-run
 
-Reads  <project_root>/refs_todo.json (what this episode uses; --all: the whole
-       bible) and series.json (in the episode folder or its parent)
+Reads  <project_root>/refs_todo.json (what this episode uses; --all: every ref)
+       and series.json, the series config (in the episode folder or its parent)
 Writes refs/_takes/<ref>/…_tNN.png + .json    every candidate, kept
        refs/_bg/<location>.png          1344x768   }  the picked take, at the
-       refs/props/<name>.png            1024x1024  }  path the bible names
+       refs/props/<name>.png            1024x1024  }  path the series config names
        refs/<char>/<char>_sheet_4panel.png   4096x1024
        refs/_picks.json                 which take is live
 
 A ref with no file yet gets its first successful take picked, so a plain run
-ends as it always did: every image at its bible path. --redo makes a new take
+ends as it always did: every image at the path series.json names. --redo makes a new take
 of refs that already have a file, and leaves the live file alone unless you
 also pass --pick (pick in the editor's Refs tab otherwise). Nothing is ever
 overwritten: every take stays in refs/_takes.
@@ -27,7 +27,7 @@ Character sheets are NOT generated as one 4:1 strip — a 4096x1024 canvas is
 far outside any diffusion model's training distribution and comes back as
 smeared repetition. Each of the four views is generated square and separately,
 then stitched by mksheet.py when all four are picked. The four views of one
-character share a seed so they stay on model. The character is the bible
+character share a seed so they stay on model. The character is the series config
 subject whose `sheet` is the path, whatever the file is called.
 
 Voice samples are skipped; they are not images.
@@ -65,7 +65,7 @@ def _norm(p: str) -> str:
 
 def collect(s: R.Series, todo: list | None, only: set[str] | None) -> list[dict]:
     """One entry per ref to consider, most-blocking first. `todo` is
-    refs_todo.json (None: every image ref in the bible)."""
+    refs_todo.json (None: every image ref in the series config)."""
     refs = [r for r in R.series_refs(s) if not r.is_audio]
     usage = R.used_by(s, refs)
     by_path = {_norm(r.path): r for r in refs if r.path}
@@ -122,7 +122,7 @@ def main() -> int:
     ap.add_argument("--only", help="comma-separated filter: asset names (sam, core_wide), "
                                    "ref ids (subject:sam) or path fragments")
     ap.add_argument("--all", action="store_true",
-                    help="every ref in the bible, not only what refs_todo.json lists "
+                    help="every ref in series.json, not only what refs_todo.json lists "
                          "(no build needed)")
     ap.add_argument("--redo", action="store_true",
                     help="make a new take of refs already on disk (the live file is "
@@ -176,7 +176,7 @@ def main() -> int:
         todo_p = os.path.join(root, "refs_todo.json")
         if not os.path.isfile(todo_p):
             print(f"error: {todo_p} not found. Run h3build first (or pass --all to work "
-                  f"from the bible alone).", file=sys.stderr)
+                  f"from series.json alone).", file=sys.stderr)
             return 1
         with open(todo_p, encoding="utf-8") as fh:
             todo = json.load(fh)

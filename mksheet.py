@@ -153,7 +153,7 @@ def main() -> int:
         return 1
     if len(args.images) != 4:
         print(f"note: building a {len(args.images)}-panel sheet. The prompt template "
-              f"describes four ({', '.join(PANEL_NAMES)}) — adjust the bible's design "
+              f"describes four ({', '.join(PANEL_NAMES)}) — adjust the design in series.json "
               f"text if you mean something else.\n")
 
     info = build(args.images, args.out, bg, args.gap, args.panel_height)

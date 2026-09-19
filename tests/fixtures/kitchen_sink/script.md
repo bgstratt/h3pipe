@@ -29,7 +29,7 @@ ADA (warmly): You know that one whistles.
 BO: I know.
 BO (whispering): That's the point.
 
-// V.O. by a visible character: lips-closed clause with the bible pronoun; cu face view
+// V.O. by a visible character: lips-closed clause with the pronoun from series.json; cu face view
 ## sh030
 who: ada
 size: cu

@@ -2,7 +2,7 @@
 // (fixtures.json, made by web/scripts/make_fixtures.py). Used only by the dev page.
 // Renders are simulated: queued -> progress events -> ok, reusing real media.
 // Round 2 / Phase 5: a fake folder tree for /browse (mockFs.ts) and stateful refs
-// from the kitchen_sink bible (mockRefs.ts), which also decide each shot's
+// from the kitchen_sink series config (mockRefs.ts), which also decide each shot's
 // `missing_refs`.
 
 import type { Api } from "../api";

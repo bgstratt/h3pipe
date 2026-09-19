@@ -50,9 +50,9 @@ def script(name: str) -> str:
 
 
 def episode_files(ep: str) -> tuple[str, str]:
-    bible = os.path.join(ep, "series.json")
-    if not os.path.isfile(bible):
-        sys.exit(f"  !! {bible} not found")
+    series_cfg = os.path.join(ep, "series.json")
+    if not os.path.isfile(series_cfg):
+        sys.exit(f"  !! {series_cfg} not found")
     base = os.path.basename(os.path.normpath(ep))
     md = os.path.join(ep, f"{base}.md")
     if not os.path.isfile(md):
@@ -62,7 +62,7 @@ def episode_files(ep: str) -> tuple[str, str]:
             sys.exit(f"  !! can't tell which script to use in {ep}: "
                      f"{[os.path.basename(c) for c in cands] or 'no .md found'}")
         md = cands[0]
-    return bible, md
+    return series_cfg, md
 
 
 def run(cmd: list[str]) -> int:
@@ -74,8 +74,8 @@ def stage(name: str, ep: str, extra: list[str], skip_build: bool = False) -> int
     py = sys.executable
     proxy = "--proxy" in extra
     if name in ("build", "check"):
-        bible, md = episode_files(ep)
-        base = [py, script("h3build.py"), bible, md]
+        series_cfg, md = episode_files(ep)
+        base = [py, script("h3build.py"), series_cfg, md]
         if name == "check":
             return run(base + ["--check"]) or run(base + ["--pace"])
         rest = [a for a in extra if a != "--proxy"]

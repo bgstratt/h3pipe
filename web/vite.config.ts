@@ -25,7 +25,7 @@ export default defineConfig(({ command, mode }) => {
   return {
     plugins: [react()],
     define: extension ? { "process.env.NODE_ENV": JSON.stringify("production") } : {},
-    // the mock reads the kitchen_sink bible from tests/fixtures (outside web/)
+    // the mock reads the kitchen_sink series config from tests/fixtures (outside web/)
     server: { open: "/dev.html", fs: { allow: [resolve(HERE, "..")] } },
     build: extension
       ? {
