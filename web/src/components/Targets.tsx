@@ -2,12 +2,12 @@
 // and the widget choices a target's binding allows, and the target badge.
 
 import { useEffect, useMemo } from "react";
-import { loadTargets, loadWidgetChoices } from "../actions";
+import { loadModelFiles, loadTargets, loadWidgetChoices } from "../actions";
 import {
   findTarget, listDefaultTarget, pickerChoices, pickerSpec, seriesDefaultTarget, videoTargets, widgetKey, type WidgetSpec,
 } from "../lib/targets";
 import { useApp } from "../store";
-import type { Target, TargetList } from "../types";
+import type { ModelList, Target, TargetList } from "../types";
 import { useStatus } from "./hooks";
 
 export interface TargetsInfo {
@@ -45,6 +45,9 @@ export interface TargetPickers {
   models: string[] | null | undefined;
   loras: string[] | null | undefined;
   target: Target | undefined;
+  /** GET /h3pipe/models for the model param: the files grouped by the target's
+   * family (undefined: not loaded, or a server without the route) */
+  modelFiles: ModelList | undefined;
 }
 
 /** What the model and LoRA pickers may offer under `targetId`. */
@@ -54,7 +57,12 @@ export function useTargetPickers(targetId: string | null | undefined): TargetPic
   const spec = useMemo(() => pickerSpec(target), [target]);
   const models = useChoices(spec.model);
   const loras = useChoices(spec.loras);
-  return { models, loras, target };
+  const hasFamily = !!target?.models?.model && spec.model.kind === "node";
+  const modelFiles = useApp((s) => (hasFamily && target ? s.modelFiles[`${target.id}|model`] : undefined));
+  useEffect(() => {
+    if (hasFamily && target) void loadModelFiles(target.id, "model");
+  }, [hasFamily, target]);
+  return { models, loras, target, modelFiles };
 }
 
 /** A select of the video targets, the default marked. */

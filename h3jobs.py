@@ -52,6 +52,13 @@ so the prompt never names them; the frozen shotlist carries that entry. Any
 other target, or a build that is out of date, falls back to the loader's grey
 stand-ins with the built prompt. The sidecar's `missing_mode` says which.
 
+Model files (`check_models`, before the take is reserved): each file a job
+loads for a param its target declares a family for (target.json `models`) is
+checked by name, then by its safetensors header (targets/modelid.py). A file
+of another family stops the job (action "mismatch") unless the request says
+`allow_model_mismatch`; a fingerprint-only match or an unknown file renders
+with a note in the sidecar.
+
 Stdlib only.
 """
 from __future__ import annotations
@@ -891,6 +898,7 @@ class RenderRequest:
     note: str = ""
     allow_missing_refs: bool = False   # render anyway: blank images / no audio ref
     target: str | None = None          # render on this video target, this run only
+    allow_model_mismatch: bool = False  # render even if a model file is another family
 
 
 @dataclass
@@ -901,7 +909,7 @@ class Job:
     shot: dict                         # the entry it renders (built, or retargeted)
     doc: dict                          # its shotlist (built, or the retarget's)
     folder: str | None
-    action: str                        # render | redo | retry | overwrite | skip | busy | blocked | error
+    action: str                        # render | redo | retry | overwrite | skip | busy | blocked | error | mismatch
     take: int                          # predicted; reserve_take has the final say
     seed: int
     seed_source: str                   # stable | new | same | override | typed
@@ -935,6 +943,12 @@ class Job:
     length_source: str = "script"
     duration_head: str = ""
     duration_note: str = ""            # plan_duration's note (replaced on a re-plan)
+    # check_models: each model param's check (targets.check_model), and
+    # whether the request lets a mismatch render anyway
+    allow_model_mismatch: bool = False
+    model_checks: list = field(default_factory=list)
+    model_notes: list = field(default_factory=list)     # check_models' notes (replaced on a re-check)
+    mismatch_from: str = ""            # the action a "mismatch" job had before the check
 
     @property
     def id(self) -> str:
@@ -946,7 +960,7 @@ class Job:
 
     @property
     def runs(self) -> bool:
-        return self.action not in ("skip", "busy", "blocked", "error")
+        return self.action not in ("skip", "busy", "blocked", "error", "mismatch")
 
     @property
     def retargeted(self) -> bool:
@@ -966,6 +980,10 @@ class Job:
 
     def missing_note(self) -> str:
         return ", ".join(f"{r['slot']} {r['path'] or '(none named)'}" for r in self.missing)
+
+    def mismatch_note(self) -> str:
+        """Why check_models stopped the job ("" if it didn't)."""
+        return "; ".join(c["message"] for c in self.model_checks if c.get("block"))
 
 
 def check_video_target(target_id: str) -> str:
@@ -1097,7 +1115,7 @@ def plan_job(root: str, pass_: str, doc: dict, index: int, req: RenderRequest,
                missing=missing, allow_missing=req.allow_missing_refs, target=target.id,
                recompiled=recompiled, missing_mode=missing_mode, missing_why=missing_why,
                built_target=built_target.id, notes=notes, error=error,
-               length_source=length_source)
+               length_source=length_source, allow_model_mismatch=req.allow_model_mismatch)
 
 
 def estimate_seconds(doc: dict, shot: dict) -> str:
@@ -1671,6 +1689,137 @@ def plan_duration(job: Job, comfy=None) -> None:
                 f"the build's estimate was {est} s")
     job.notes.append(note)
     job.duration_note = note
+
+
+# ---------------------------------------------------------------------------
+# model files: is each one the family its target needs? (targets/modelid.py)
+# ---------------------------------------------------------------------------
+
+# a models folder's older names, as ComfyUI still reads them
+MODEL_FOLDER_ALIASES = {"diffusion_models": ("diffusion_models", "unet"),
+                        "text_encoders": ("text_encoders", "clip")}
+DEFAULT = object()                     # "work it out" (model_resolver, the temp cache)
+
+
+def model_resolver():
+    """How a model file's name becomes a path: inside ComfyUI (the routes),
+    folder_paths.get_full_path; else under $COMFYUI_PATH/models (the CLI);
+    else None (names only)."""
+    try:
+        import folder_paths                               # only inside ComfyUI
+        get = folder_paths.get_full_path
+    except Exception:
+        get = None
+    if get is not None:
+        def resolve(folder: str, name: str) -> str | None:
+            try:
+                return get(folder, name)
+            except Exception:
+                return None
+        return resolve
+    comfy = os.environ.get("COMFYUI_PATH", "").strip()
+    if not comfy:
+        return None
+    models = os.path.join(comfy, "models")
+
+    def resolve(folder: str, name: str) -> str | None:
+        for f in MODEL_FOLDER_ALIASES.get(folder, (folder,)):
+            p = os.path.join(models, f, *name.replace("\\", "/").split("/"))
+            if os.path.isfile(p):
+                return p
+        return None
+    return resolve
+
+
+def series_model_families(root: str) -> dict:
+    """The model_families of the series config beside the episode (or in its
+    parent folder), {} without one. ValueError on a malformed block."""
+    for d in (root, os.path.dirname(os.path.normpath(root))):
+        p = os.path.join(d, "series.json")
+        if os.path.isfile(p):
+            try:
+                with open(p, encoding="utf-8") as fh:
+                    cfg = json.load(fh)
+            except (OSError, ValueError):
+                return {}
+            return TG.series_model_families(cfg if isinstance(cfg, dict) else {})
+    return {}
+
+
+def model_values(job: Job) -> dict[str, str]:
+    """{param: file} for every model param the job's target declares a family
+    for: the job's model, the shotlist's (else the preset's) text encoder,
+    VAEs, upscaler, ..., and the duration head when the shot predicts its
+    length. A param with no file set is left out."""
+    t = job_target(job)
+    vals = job_values(job)
+    preset = t.presets.get(job.pass_) or t.presets.get("final")
+    final = t.presets.get("final")
+    out = {}
+    for param in t.models:
+        if param == "model":
+            v = job.model
+        elif param == "duration_head":
+            v = duration_head_file(job) if job.shot.get("duration_predict") else ""
+        else:
+            v = vals.get(param) or job.shot.get(param) or job.doc.get("defaults", {}).get(param)
+            for p in (preset, final):
+                if not v and p is not None:
+                    v = p.extra.get(param)
+        if isinstance(v, str) and v:
+            out[param] = v
+    return out
+
+
+def check_models(job: Job, resolve=DEFAULT, cache=DEFAULT,
+                 extra: dict | None = None) -> list[dict]:
+    """Check each model file a job would load against its target's families
+    (targets.check_model), before its take is reserved.
+
+    A name that matches passes silently. Otherwise the file's header decides
+    (`resolve`, default model_resolver(): ComfyUI's folder_paths in the
+    routes, $COMFYUI_PATH in the CLI, else names only; `cache`, default the
+    temp folder's modelid cache): the right family passes with a note in the
+    sidecar; unknown (or unchecked) passes with a note; ANOTHER family makes
+    the job "mismatch" (it doesn't run), unless the request allowed a model
+    mismatch, when it renders with a note. `extra` is the series config's
+    model_families (default: read beside the episode). Replaces any earlier
+    check's notes. Returns job.model_checks."""
+    for n in job.model_notes:
+        if n in job.notes:
+            job.notes.remove(n)
+    job.model_notes, job.model_checks = [], []
+    if job.action == "mismatch":                          # a re-check starts over
+        job.action = job.mismatch_from or "render"
+    if job.action in ("skip", "busy", "blocked", "error"):
+        return []
+    if resolve is DEFAULT:
+        resolve = model_resolver()
+    if cache is DEFAULT:
+        cache = TG.modelid.temp_cache()
+    t = job_target(job)
+    notes = []
+    if extra is None:
+        try:
+            extra = series_model_families(job.root)
+        except ValueError as e:
+            extra = {}
+            notes.append(f"series.json model_families ignored: {e}")
+    for param, name in model_values(job).items():
+        c = TG.check_model(t, param, name, resolve, extra, cache)
+        if c is None:
+            continue
+        job.model_checks.append(c)
+        if c["block"] and job.allow_model_mismatch:
+            notes.append(f"model mismatch, rendered anyway: {c['message']}")
+        elif c["message"] and not c["block"]:
+            notes.append(c["message"])
+    job.model_notes = notes
+    job.notes.extend(notes)
+    if any(c["block"] for c in job.model_checks) and not job.allow_model_mismatch:
+        job.mismatch_from, job.action = job.action, "mismatch"
+    return job.model_checks
+
 
 INPUT_SUBFOLDER = "h3pipe"
 

@@ -114,6 +114,33 @@ class RoutesTest(unittest.TestCase):
             self.assertEqual(await r.json(), [])
         self.run_client(fn)
 
+    def test_models_through_folder_paths(self):
+        """GET /h3pipe/models inside ComfyUI: the list and the paths come from
+        folder_paths, the fingerprints are cached in the user folder."""
+        from test_modelid import ltx_tensors, wan14_tensors, write_st
+        models = os.path.join(self._tmp.name, "models", "diffusion_models")
+        write_st(os.path.join(models, "renamed.safetensors"), ltx_tensors("2.5"))
+        write_st(os.path.join(models, "wan_low.safetensors"), wan14_tensors())
+        fp = sys.modules["folder_paths"]
+        fp.get_filename_list = lambda folder: (sorted(os.listdir(models))
+                                               if folder == "diffusion_models" else [])
+        fp.get_full_path = lambda folder, name: (
+            os.path.join(models, name) if folder == "diffusion_models"
+            and os.path.isfile(os.path.join(models, name)) else None)
+
+        async def fn(c):
+            r = await c.get("/h3pipe/models", params={"target": "ltx2", "param": "model"})
+            self.assertEqual(r.status, 200, await r.text())
+            data = await r.json()
+            self.assertEqual([(f["name"], f["match"], f["mismatch"]) for f in data["files"]],
+                             [("renamed.safetensors", "fingerprint", False),
+                              ("wan_low.safetensors", "other", True)])
+            r = await c.get("/h3pipe/models", params={"target": "ltx2", "param": "loras"})
+            self.assertEqual(r.status, 400)
+        self.run_client(fn)
+        self.assertTrue(os.path.isfile(os.path.join(self._tmp.name, "user", "default", "h3pipe",
+                                                    "modelid_cache.json")))
+
     def test_no_pipeline_no_routes(self):
         server = sys.modules["server"]
         server.PromptServer.instance.routes = web.RouteTableDef()

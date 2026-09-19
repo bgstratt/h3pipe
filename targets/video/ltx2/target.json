@@ -75,6 +75,17 @@
     "review_nodes": []
   },
 
+  "models": {
+    "_note": "The family each model param must be (targets/modelid.py): names first, then the file's header (LTX files carry model_version; 2.5's transformer also has keyframes_abs_pos_embedding and no video feed-forward biases). The 2.3 and 2.5 upscalers share every tensor and have no metadata: only the name tells them apart. duration_head is a preset value, not a binding widget: ModelPatchLoader reads it from models/model_patches.",
+    "model": {"family": "ltx2.5", "patterns": ["ltx-2.5*", "*ltx*2.5*", "*ltx*2_5*"]},
+    "text_encoder": {"family": "ltx2.5-text-encoder", "patterns": ["*gemma*4*ltx*2.5*"]},
+    "video_vae": {"family": "ltx2.5-video-vae", "patterns": ["*ltx*2.5*video*vae*"]},
+    "audio_vae": {"family": "ltx2.5-audio-vae", "patterns": ["*ltx*2.5*audio*vae*"]},
+    "upscaler": {"family": "ltx2.5-latent-upscaler", "patterns": ["*ltx*2.5*upscal*"]},
+    "duration_head": {"family": "ltx2.5-duration-head", "patterns": ["*ltx*2.5*duration*"],
+                      "folder": "model_patches", "class_type": "ModelPatchLoader", "field": "name"}
+  },
+
   "presets": {
     "_note": "LTX-2.5 22B distilled (int8): a fixed 8-step base schedule plus a 3-step refine (the workflow's ManualSigmas; `steps` is recorded, not patched). The final is the workflow's 768x512 unless the series config sets a size; the proxy is 448x256. Both use the same model: the distilled model is already fast. The negative prompt is the IC-LoRA model card's suggestion plus the artefacts a review cut can't use; the template's own ('pc game, ..., cartoon, childish') would fight a cartoon series' look. For `dur: model` (capabilities): duration_head is the LTX-2.5 duration head in models/model_patches (not in the shotlist's defaults; checked at queue time), default_seconds the estimate of a silent shot, min_seconds/max_seconds the predictor's range when the script gives none.",
     "final": {

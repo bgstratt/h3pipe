@@ -4,7 +4,7 @@ import { errText, parseSeed } from "../api";
 import { absPath, shortName, tn } from "../lib/format";
 import { missingOf } from "../lib/missingRefs";
 import { loraRow, parseLoras, parseSteps, type LoraRow } from "../lib/overrideForm";
-import { findTarget, isRetargeted, runSize, shotTarget, targetLabel } from "../lib/targets";
+import { findTarget, isModelMismatch, isRetargeted, MODEL_MISMATCH_LABEL, modelWarning, runSize, shotTarget, targetLabel } from "../lib/targets";
 import { useApp } from "../store";
 import type { Pass, ShotDetail, TakeDetail, TargetList } from "../types";
 import { DiffView, LoraEditor, ModelSelect } from "./Fields";
@@ -123,6 +123,7 @@ function RedoBody({ d, shot, openPass, parent }: { d: ShotDetail; shot: string; 
   const [parentPrompt, setParentPrompt] = useState<{ take: number; text: string | null; error?: string } | null>(null);
   const [showDiff, setShowDiff] = useState(false);
   const [allowMissing, setAllowMissing] = useState(false);
+  const [allowMismatch, setAllowMismatch] = useState(false);
   const targetStatus = useShotStatus(shot, f.pass);
   const missing = targetStatus ? missingOf(targetStatus) : [];
   const set = (p: Partial<RedoForm>) => {
@@ -199,6 +200,7 @@ function RedoBody({ d, shot, openPass, parent }: { d: ShotDetail; shot: string; 
       const ok = await runRedo({
         shot, pass: f.pass, parent: f.parent, seed, model: pickers.models === null ? "" : f.model, loras, steps, prompt: f.prompt, note: f.note.trim(),
         saveAsOverride: f.save && !oneOff, allowMissingRefs: allowMissing,
+        allowModelMismatch: mismatch && allowMismatch,
         target: oneOff ? f.target : null, lockPrompt,
       });
       if (ok) closeRedo();
@@ -208,6 +210,9 @@ function RedoBody({ d, shot, openPass, parent }: { d: ShotDetail; shot: string; 
   };
 
   const builtPrompt = targetD?.built_prompt ?? d.built_prompt;
+  // the model this run loads is another family than the target needs: the server skips it unless allowed
+  const runModel = f.model || (oneOff ? "" : (targetD ?? d).effective.model);
+  const mismatch = isModelMismatch(pickers.modelFiles, runModel);
   const size = runSize(targetD, runTarget, seriesDefault, list);
   const runLabel = targetLabel(list, runTarget);
   return (
@@ -258,7 +263,7 @@ function RedoBody({ d, shot, openPass, parent }: { d: ShotDetail; shot: string; 
         {pickers.models === null ? (
           <span className="h3-muted h3-small">set by the target (it has no model widget)</span>
         ) : (
-          <ModelSelect value={f.model} onChange={(model) => set({ model })} placeholder="(the workflow's model)" choices={pickers.models} />
+          <ModelSelect value={f.model} onChange={(model) => set({ model })} placeholder="(the workflow's model)" choices={pickers.models} grouped={pickers.modelFiles} />
         )}
         {pickers.loras !== null && (
           <>
@@ -326,6 +331,12 @@ function RedoBody({ d, shot, openPass, parent }: { d: ShotDetail; shot: string; 
         Save these as the shot's {f.pass} override{oneOff ? " (not for a one-off target)" : ""}
       </label>
       <MissingRefsNote blocked={missing.length ? [{ shot, refs: missing }] : []} allow={allowMissing} setAllow={setAllowMissing} />
+      {mismatch && (
+        <label className="h3-check" title={modelWarning(pickers.modelFiles, runModel) ?? ""}>
+          <input type="checkbox" checked={allowMismatch} onChange={(e) => setAllowMismatch(e.target.checked)} />
+          {MODEL_MISMATCH_LABEL}
+        </label>
+      )}
       {err && <div className="h3-note h3-note-err">{err}</div>}
       <div className="h3-row" style={{ justifyContent: "flex-end" }}>
         <span className="h3-muted h3-small h3-grow">

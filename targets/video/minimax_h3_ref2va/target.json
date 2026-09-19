@@ -62,6 +62,11 @@
     "review_nodes": ["SaveVideo", "CreateVideo"]
   },
 
+  "models": {
+    "_note": "The family each model param must be (targets/modelid.py). Names are checked first (case-insensitive globs; a series config's model_families adds more), then the file's header. Ref2VA and FL2VA share every tensor, so a file named neither is accepted as H3 with a note, and one named FL2VA is refused.",
+    "model": {"family": "minimax-h3-ref2va", "patterns": ["*h3*ref2v*", "*ref2va*"]}
+  },
+
   "presets": {
     "_note": "Turbo LoRA per pass. The final pass uses lightx2v's 8-step Ref2V v1.0, distilled at 768p for exactly 8 steps. The proxy keeps the 4-step v0.1: a distilled LoRA is trained on a fixed set of timesteps, so it does best at its own step count, and the proxy wants 4 steps for speed. The series config's `series` and `proxy` blocks override these.",
     "final": {

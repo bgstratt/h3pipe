@@ -602,14 +602,18 @@ def cancel_take(root: str, pass_: str, shot_id: str, take: int, comfy,
 
 def queue_shots(root: str, pass_: str, shot_ids: list[str] | None,
                 template: J.RenderRequest, comfy, base,
-                folder: str | None = None) -> dict:
+                folder: str | None = None, model_resolve=J.DEFAULT,
+                model_cache=J.DEFAULT) -> dict:
     """Plan and queue a take for each shot (every shot when `shot_ids` is
     None), as h3render does, without waiting for any of them.
 
     `base` is the workflow: one API graph for every shot (a single-target
     episode), or a function (target id -> API graph) for episodes whose shots
     render on different targets. A job's input images (keyframes) are
-    uploaded to ComfyUI first (h3jobs.stage_inputs).
+    uploaded to ComfyUI first (h3jobs.stage_inputs). Its model files are
+    checked first (h3jobs.check_models, with `model_resolve` and
+    `model_cache`): a file of another family skips the shot, with
+    `model_mismatch` listing the checks, unless the template allows it.
 
     Returns {"queued": [{shot, take, prompt_id, seed, seed_source, target}],
     "skipped": [{shot, take, reason}], "errors": [{shot, error, take?}]}. A
@@ -643,6 +647,12 @@ def queue_shots(root: str, pass_: str, shot_ids: list[str] | None,
             continue
         if job.action == "error":
             out["errors"].append({"shot": sid, "error": job.error})
+            continue
+        J.check_models(job, model_resolve, model_cache)
+        if job.action == "mismatch":
+            out["skipped"].append({"shot": sid, "reason": "model mismatch: " + job.mismatch_note()
+                                   + " (pass allow_model_mismatch: true to render anyway)",
+                                   "model_mismatch": [c for c in job.model_checks if c["block"]]})
             continue
         try:
             graph = base(job.target) if callable(base) else base

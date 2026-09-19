@@ -69,6 +69,9 @@ CONTENT_TYPES = {
 }
 
 
+_UNSET = object()
+
+
 class ApiError(Exception):
     def __init__(self, status: int, message: str):
         super().__init__(message)
@@ -84,15 +87,45 @@ class Context:
     comfy      an h3jobs.Comfy-like client (default: one for comfy_url, with
                client_id "h3pipe"); tests pass a fake
     env        environment for $H3PIPE_ROOTS (default os.environ)
+    model_resolve  resolve(folder, name) -> a model file's path or None
+               (default h3jobs.model_resolver(): ComfyUI's folder_paths);
+               None checks model files by name only
+    model_list list(folder, class_type, field) -> the files ComfyUI offers
+               (default: folder_paths.get_filename_list, else /object_info)
     """
 
     def __init__(self, user_dir: str, comfy_url: str = DEFAULT_COMFY, emit=None,
-                 comfy=None, env: dict | None = None):
+                 comfy=None, env: dict | None = None, model_resolve=_UNSET, model_list=None):
         self.user_dir = user_dir
         self.comfy_url = (comfy_url or DEFAULT_COMFY).rstrip("/")
         self._emit = emit
         self._comfy = comfy
         self.env = os.environ if env is None else env
+        if model_resolve is _UNSET:
+            model_resolve = J.model_resolver() if J is not None else None
+        self.model_resolve = model_resolve
+        self._model_list = model_list
+        self._model_cache = None
+
+    @property
+    def model_cache(self):
+        """identify() results, in <user_dir>/default/h3pipe/modelid_cache.json."""
+        if self._model_cache is None:
+            self._model_cache = TG.modelid.user_cache(self.user_dir)
+        return self._model_cache
+
+    def model_list(self, folder: str | None, class_type: str | None, field: str | None) -> list:
+        if self._model_list is not None:
+            return list(self._model_list(folder, class_type, field) or [])
+        if folder:
+            try:
+                import folder_paths                       # only inside ComfyUI
+                return list(folder_paths.get_filename_list(folder))
+            except Exception:
+                pass
+        if class_type and field:
+            return list(self.comfy.choices(class_type, field) or [])
+        return []
 
     @property
     def comfy(self):
@@ -455,13 +488,16 @@ def post_render(ctx: Context, body):
     allow_missing = body.get("allow_missing_refs", False)
     if not isinstance(allow_missing, bool):
         raise ApiError(400, "allow_missing_refs must be true or false")
+    allow_mismatch = body.get("allow_model_mismatch", False)
+    if not isinstance(allow_mismatch, bool):
+        raise ApiError(400, "allow_model_mismatch must be true or false")
     template = J.RenderRequest(
         shot_id="", redo=redo, seed=seed_in(body.get("seed")), seed_mode=seed_mode,
         model=_opt_str(body, "model") or None, loras=_opt_loras(body.get("loras")),
         steps=_opt_steps(body.get("steps")), prompt=_opt_prompt(body.get("prompt")),
         parent_take=check_take(body.get("parent_take"), "parent_take", nullable=True),
         note=_opt_str(body, "note") or "", allow_missing_refs=allow_missing,
-        target=_opt_target(body.get("target")))
+        target=_opt_target(body.get("target")), allow_model_mismatch=allow_mismatch)
     J.load_shotlist(ep, pass_)                           # 404 before anything else
     workflows: dict = {}
 
@@ -486,7 +522,8 @@ def post_render(ctx: Context, body):
             raise got
         return got
 
-    result = E.queue_shots(ep, pass_, shots, template, ctx.comfy, base_for)
+    result = E.queue_shots(ep, pass_, shots, template, ctx.comfy, base_for,
+                           model_resolve=ctx.model_resolve, model_cache=ctx.model_cache)
     for q in result["queued"]:
         # "queued" even if the job has already finished: the saver sends its own event
         take_event(ctx, ep, T.get_take(ep, pass_, q["shot"], q["take"]), "queued")
@@ -698,6 +735,61 @@ def get_targets(ctx: Context, query: dict):
     return 200, {"targets": [t.describe() for t in TG.list_targets(kind)],
                  "default": {"video": TG.DEFAULT_VIDEO_TARGET,
                              "image": TG.DEFAULT_IMAGE_TARGET}}
+
+
+MATCH_ORDER = {"name": 0, "fingerprint": 1, "other": 2}
+
+
+@handler
+def get_models(ctx: Context, query: dict):
+    """The files ComfyUI offers for one model param of a target, each checked
+    against the family the target wants: `match` "name" (named like it),
+    "fingerprint" (its header says so) or "other" (anything else: unknown,
+    unreadable, or another family, `mismatch` true). Matching files first, in
+    ComfyUI's order. Headers are read only for files whose name doesn't
+    match, and cached (<user dir>/default/h3pipe/modelid_cache.json). `ep`
+    (optional) adds that series config's model_families."""
+    tid = query.get("target")
+    if not tid or not isinstance(tid, str):
+        raise ApiError(400, "target is required (a target id from /h3pipe/targets)")
+    try:
+        t = TG.load_target(tid)
+    except TG.TargetError as e:
+        raise ApiError(400, str(e))
+    param = query.get("param") or "model"
+    spec = t.models.get(param)
+    if spec is None:
+        raise ApiError(400, f"{t.id} declares no model family for {param!r} "
+                            f"(it does for: {', '.join(t.models) or 'nothing'})")
+    extra = {}
+    if query.get("ep"):
+        ep = check_ep(ctx, query.get("ep"))
+        try:
+            extra = J.series_model_families(ep)
+        except ValueError as e:
+            raise ApiError(400, str(e))
+    names = ctx.model_list(spec["folder"], spec["class_type"], spec["field"])
+    files = []
+    for n in names:
+        c = TG.check_model(t, param, n, ctx.model_resolve, extra, ctx.model_cache) or {}
+        found = c.get("found") or {}
+        m = c.get("match")
+        files.append({"name": n,
+                      "match": m if m in ("name", "fingerprint") else "other",
+                      "mismatch": bool(c.get("block")),
+                      "family": spec["family"] if m == "name" else found.get("family"),
+                      "label": c.get("label") if m == "name" else found.get("label") or "",
+                      "confidence": "name" if m == "name" else found.get("confidence", "unknown"),
+                      "detail": c.get("message") or "",
+                      **({"base": found["base"]} if found.get("base") else {})})
+    files.sort(key=lambda f: MATCH_ORDER[f["match"]])        # stable: ComfyUI's order within
+    return 200, {"target": t.id, "param": param, "family": spec["family"],
+                 "label": TG.modelid.family_label(spec["family"]),
+                 "patterns": spec["patterns"] + [p for p in extra.get(spec["family"], [])
+                                                 if p not in spec["patterns"]],
+                 "folder": spec["folder"], "class_type": spec["class_type"],
+                 "field": spec["field"], "fingerprint": ctx.model_resolve is not None,
+                 "files": files}
 
 
 # ---------------------------------------------------------------------------
@@ -1011,6 +1103,7 @@ ROUTES = [
     ("DELETE", "/h3pipe/override", delete_override, "query"),
     ("POST", "/h3pipe/assemble", post_assemble, "body"),
     ("GET", "/h3pipe/targets", get_targets, "query"),
+    ("GET", "/h3pipe/models", get_models, "query"),
     ("GET", "/h3pipe/refs", get_refs, "query"),
     ("POST", "/h3pipe/refs/generate", post_refs_generate, "body"),
     ("PUT", "/h3pipe/refs/pick", put_refs_pick, "body"),

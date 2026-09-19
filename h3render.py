@@ -30,6 +30,13 @@ Targets
     composed from the shot's refs (it needs PIL in this Python) and kept in
     the take as <shot>_tNN_refsheet.png. A dry run composes nothing.
 
+Model files
+    Each model file a shot loads is checked against its target's family
+    (target.json `models`): by name, then, with $COMFYUI_PATH set, by its
+    safetensors header (targets/modelid.py, cached in the temp folder). A
+    file of another family skips the shot unless --allow-model-mismatch;
+    --dry-run --check-nodes lists every check.
+
 The script must run on the machine that runs ComfyUI: it checks
 <project>/<subfolder>/<shot>/ on disk to skip finished shots and to confirm
 each render landed.
@@ -163,6 +170,9 @@ def main() -> int:
                     help="render shots even when references are missing: a missing picture "
                          "becomes flat grey, a missing voice/recording no audio reference "
                          "(without it such shots are skipped)")
+    ap.add_argument("--allow-model-mismatch", action="store_true",
+                    help="render shots even when a model file's header says it is another "
+                         "family than its target needs (without it such shots are skipped)")
     ap.add_argument("--panel-mode", choices=["auto", "full", "pair", "face", "body"])
     fr = ap.add_mutually_exclusive_group()
     fr.add_argument("--save-frames", dest="save_frames", action="store_true", default=None,
@@ -201,7 +211,8 @@ def main() -> int:
         shot_id="", take=args.take, redo=args.redo, seed=args.seed,
         seed_mode="new" if args.new_seed else "same" if args.same_seed else "auto",
         model=args.model or None, loras=loras, steps=args.steps, note=args.note,
-        allow_missing_refs=args.allow_missing_refs, target=args.target)
+        allow_missing_refs=args.allow_missing_refs, target=args.target,
+        allow_model_mismatch=args.allow_model_mismatch)
     only = {s.strip() for s in args.only.split(",")} if args.only else None
 
     # Each job renders with its own target's workflow. --workflow replaces the
@@ -233,6 +244,10 @@ def main() -> int:
 
     plans, total_frames = [], 0
     default_id = TG.DEFAULT_VIDEO_TARGET
+    # model files are found through $COMFYUI_PATH (else checked by name only)
+    # and fingerprinted once per file version (the temp folder's cache)
+    model_resolve = J.model_resolver()
+    model_cache = TG.modelid.temp_cache()
     for root in roots:
         try:
             jobs = plan_episode(root, pass_, default=template, folder=folder, only=only)
@@ -241,16 +256,21 @@ def main() -> int:
         except FileNotFoundError as e:
             print(f"  ! {e}")
             continue
+        for j in jobs:
+            # each model file against its target's family (name, then header)
+            J.check_models(j, model_resolve, model_cache)
         todo = [j for j in jobs if j.runs]
         busy = sum(1 for j in jobs if j.action == "busy")
         blocked = [j for j in jobs if j.action == "blocked"]
         errors = [j for j in jobs if j.action == "error"]
+        mismatched = [j for j in jobs if j.action == "mismatch"]
         plans.append((root, jobs))
         total_frames += sum(j.frames for j in todo)
         print(f"\n  {os.path.basename(root)}  ·  {len(todo)} to render, "
-              f"{len(jobs) - len(todo) - busy - len(blocked) - len(errors)} done"
+              f"{len(jobs) - len(todo) - busy - len(blocked) - len(errors) - len(mismatched)} done"
               + (f", {busy} already queued" if busy else "")
               + (f", {len(blocked)} blocked (missing refs)" if blocked else "")
+              + (f", {len(mismatched)} blocked (model mismatch)" if mismatched else "")
               + (f", {len(errors)} can't be planned" if errors else "")
               + f"  ·  {pass_}  ->  {shown_folder}/")
         for key, vals in (("target", sorted({j.target for j in todo})),
@@ -268,6 +288,11 @@ def main() -> int:
                   "those shots with flat grey stand-ins")
         for j in errors:
             print(f"    !! {j.error}")
+        for j in mismatched[:8]:
+            print(f"    ! {j.id}: {j.mismatch_note()}")
+        if mismatched:
+            print("    ! pick a model of the right family, or --allow-model-mismatch to render "
+                  "those shots anyway")
         for j in todo:
             if j.retargeted:
                 print(f"    ~ {j.id}: retargeted {j.built_target} -> {j.target}")
@@ -322,6 +347,19 @@ def main() -> int:
                 print(f"  wrote {out} ({j.id} of {os.path.basename(root)}, {j.target}"
                       + (f", inputs {j.inputs}" if j.inputs else "") + ")")
                 if args.check_nodes:
+                    how = ("by name only: set COMFYUI_PATH to read their headers"
+                           if model_resolve is None else "by name, then by header")
+                    print(f"  model files, checked {how}:")
+                    for c in j.model_checks:
+                        f = c.get("found") or {}
+                        conf = (f"{f.get('base_confidence')} + name" if f.get("base")
+                                else f.get("confidence"))
+                        seen = f" -> {f.get('label') or 'unknown'} ({conf})" if f else ""
+                        print(f"    {'!' if c['block'] else '~' if c['match'] != 'name' else ' '} "
+                              f"{c['param']:<14} {c['file']}: {c['match']}{seen}"
+                              + ("" if c["match"] == "name" else f" — wants {c['label']}"))
+                    if not j.model_checks:
+                        print("    (the target declares no model families)")
                     try:
                         info = comfy.object_info()
                     except Exception as e:

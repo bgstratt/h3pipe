@@ -60,6 +60,14 @@
     "review_nodes": []
   },
 
+  "models": {
+    "_note": "The family each model param must be (targets/modelid.py): names first, then the file's header. FL2VA and Ref2VA share every tensor, so a file named neither is accepted as H3 with a note, and one named Ref2VA is refused.",
+    "model": {"family": "minimax-h3-fl2va", "patterns": ["*h3*fl2v*", "*fl2va*"]},
+    "text_encoder": {"family": "qwen3vl-32b", "patterns": ["*qwen3*vl*32b*"]},
+    "video_vae": {"family": "minimax-h3-video-vae", "patterns": ["*h3*video*vae*"]},
+    "audio_vae": {"family": "minimax-h3-audio-vae", "patterns": ["*h3*audio*vae*"]}
+  },
+
   "presets": {
     "_note": "Turbo LoRA per pass, as H3 Ref2VA: the final uses lightx2v's 8-step FL2V v1.0 with res_multistep (ComfyUI's H3 t2v template, lightning branch); the proxy the 4-step v0.1 with euler (the user's own 4-step H3 workflows). Not the SLA LoRA: it is co-distilled with block-sparse attention and needs that node. The series config's pass blocks override model, LoRA and steps only when this is the series target; otherwise only their size carries over.",
     "final": {
