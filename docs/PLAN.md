@@ -1,11 +1,10 @@
 # h3pipe — plan: a shot/take editor, then model-agnostic targets
 
-Status (2026-09-19): Phases 0, 1, 2, 3, 5, 6 and 7 done and in use; Phase 4 (evaluate) is
-ongoing through use. Phase 8 (LTX-2.5 as the second video target, mixed-target episodes,
-retargeting) is built, green on every golden, and live-checked from the CLI; the
-editor's target picker is merged; the route-level live check passed 2026-09-19 (an LTX one-off of ep38 sh020 through
-`/h3pipe/render`: ok, 65 frames at 448×256, with audio, thumbnail and strip, beside its H3 take). The remaining LTX work
-(ingredients / subject refs, final-quality settings, keyframe generation) is listed under
+Status (2026-09-19): Phases 0–3 and 5–8 done; Phase 4 (evaluate) continues through use. Targets:
+`minimax_h3_ref2va` (default), `ltx2` (LTX-2.5, text/keyframes), `ltx2_ingredients` (LTX-2.3 + IC-LoRA
+reference sheet from the picked refs: character identity on LTX). Keyframe continuity (the previous shot's
+last frame becomes this shot's first) is in the CLI, the routes and the editor. Next candidates: Wan 2.2
+(VACE, with references), H3 FL2VA (uses keyframes), the Phase 9 editor items. The open LTX items are under
 **Phase 8 — as built**.
 This is the working plan for the next round of development. `CLAUDE.md` points here.
 
