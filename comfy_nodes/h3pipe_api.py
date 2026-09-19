@@ -4,7 +4,7 @@ h3pipe_api — the editor's HTTP routes (docs/API.md) as plain functions.
 No aiohttp and no ComfyUI in here, so it runs (and is tested) with any Python:
 every handler takes a Context plus the query dict and/or the JSON body and
 returns (status, json-able value). h3pipe_routes.py is the aiohttp adapter that
-ComfyUI loads. The work itself is the pipeline's (h3edit, h3jobs, h3takes);
+ComfyUI loads. The work itself is the pipeline's (h3edit, h3jobs, h3refs, h3takes);
 this layer checks input, keeps episodes inside the configured roots, turns
 seeds into strings and back, and sends the live-update events.
 
@@ -40,9 +40,10 @@ try:
         sys.path.append(HOME)
     import h3edit as E  # noqa: E402
     import h3jobs as J  # noqa: E402
+    import h3refs as R  # noqa: E402
     import h3takes as T  # noqa: E402
 except Exception as exc:                                  # pragma: no cover
-    E = J = T = None
+    E = J = R = T = None
     IMPORT_ERROR = (f"h3pipe: can't import the pipeline from {HOME} "
                     f"({exc.__class__.__name__}: {exc}); set H3PIPE_HOME to the repo")
 
@@ -341,16 +342,30 @@ def get_file(ctx: Context, query: dict):
     if not rel or not isinstance(rel, str):
         raise ApiError(400, "path is required")
     parts = rel.replace("\\", "/").split("/")
-    if (rel.startswith(("/", "\\")) or re.match(r"^[A-Za-z]:", rel) or ".." in parts
-            or "\x00" in rel):
+    if (rel.startswith(("/", "\\")) or re.match(r"^[A-Za-z]:", rel) or "\x00" in rel
+            or (".." in parts and not _in_series_home(ctx, ep, parts))):
         raise ApiError(400, f"path must be relative to the episode and stay inside it: {rel!r}")
-    full = os.path.join(ep, *[p for p in parts if p not in ("", ".")])
-    if not _inside(_real(full), _real(ep)):
+    full = os.path.normpath(os.path.join(ep, *[p for p in parts if p not in ("", ".")]))
+    if not (_inside(_real(full), _real(ep)) or _in_series_home(ctx, ep, parts)):
         raise ApiError(403, f"{rel} leads outside the episode")
     if not os.path.isfile(full):
         raise ApiError(404, f"no file {rel} in {ep}")
     ext = os.path.splitext(full)[1].lower()
     return 200, {"path": full, "content_type": CONTENT_TYPES.get(ext, "application/octet-stream")}
+
+
+def _in_series_home(ctx: Context, ep: str, parts: list[str]) -> bool:
+    """A path like ../refs/x.png is allowed when the episode's bible lives in its
+    parent folder (a series folder, where series refs live) and the file is
+    inside that folder and inside a configured root."""
+    bible = E.episode_bible(ep)
+    if not bible:
+        return False
+    home = _real(os.path.dirname(os.path.abspath(bible)))
+    if home == _real(ep):
+        return False
+    full = _real(os.path.join(ep, *[p for p in parts if p not in ("", ".")]))
+    return _inside(full, home) and any(_inside(full, _real(r)) for r in load_roots(ctx))
 
 
 # ---------------------------------------------------------------------------
@@ -624,6 +639,222 @@ def post_assemble(ctx: Context, body):
     return 200, E.assemble_episode(ep, pass_, partial)
 
 
+# ---------------------------------------------------------------------------
+# references (Phase 5)
+# ---------------------------------------------------------------------------
+
+def _series(ep: str):
+    try:
+        return R.load_series(ep)
+    except FileNotFoundError as e:
+        raise ApiError(404, str(e))
+    except ValueError as e:
+        raise ApiError(500, f"the bible can't be read: {e}")
+
+
+def _ref(s, ref_id):
+    try:
+        return R.find_ref(s, ref_id)
+    except R.RefError as e:
+        raise ApiError(400, str(e))
+    except R.UnknownRef as e:
+        raise ApiError(404, str(e))
+
+
+def _view(ref, v, required: bool = False):
+    if v is not None and not isinstance(v, str):
+        raise ApiError(400, "view must be a view name or null")
+    try:
+        return R.check_view(ref, v, required=required)
+    except R.RefError as e:
+        raise ApiError(400, str(e))
+
+
+def ref_event(ctx: Context, ep: str, ref_id: str, view, take, status: str) -> None:
+    ctx.emit("h3pipe.ref", {"ep": ep, "ref": ref_id, "view": view, "take": take,
+                            "status": status})
+
+
+def sweep_refs(ctx: Context, s) -> list:
+    """Close queued ref takes whose job is gone (h3refs.sweep). A ComfyUI that
+    doesn't answer means no sweep this time, not an error."""
+    try:
+        changed = R.sweep(s, ctx.comfy)
+    except Exception:
+        return []
+    for t in changed:
+        ref_event(ctx, s.ep, t.ref, t.view, t.take, t.status)
+    return changed
+
+
+@handler
+def get_refs(ctx: Context, query: dict):
+    ep = check_ep(ctx, query.get("ep"))
+    s = _series(ep)
+    sweep_refs(ctx, s)
+    return 200, seeds_out({"refs": R.list_refs(ep)})
+
+
+@handler
+def post_refs_generate(ctx: Context, body):
+    body = body_dict(body)
+    ep = check_ep(ctx, body.get("ep"))
+    s = _series(ep)
+    ref = _ref(s, body.get("ref"))
+    view = _view(ref, body.get("view"))
+    count = body.get("count", 1)
+    if count is None:
+        count = 1
+    if isinstance(count, bool) or not isinstance(count, int) or not 1 <= count <= 16:
+        raise ApiError(400, "count must be a whole number from 1 to 16")
+    seed_mode = body.get("seed_mode") or "auto"
+    if seed_mode not in ("auto", "new", "same"):
+        raise ApiError(400, f"seed_mode must be auto, new or same, not {seed_mode!r}")
+    prompt = body.get("prompt")
+    if prompt is not None and not isinstance(prompt, str):
+        raise ApiError(400, "prompt must be text or null")
+    req = R.GenRequest(ref=ref.id, view=view, count=count, seed_mode=seed_mode,
+                       seed=seed_in(body.get("seed")), prompt=prompt or None,
+                       model=_opt_str(body, "model") or None,
+                       loras=_opt_loras(body.get("loras")),
+                       steps=_opt_steps(body.get("steps")), note=_opt_str(body, "note") or "")
+    why = R.can_generate(s, ref)
+    if why:
+        raise ApiError(400, why)
+    try:
+        base, _ = R.resolve_workflow(ctx.comfy_url)
+    except Exception as e:
+        raise ApiError(500, f"{R.REFS_WORKFLOW} can't be read: {e}")
+    try:
+        result = R.queue_generate(s, req, ctx.comfy, base, save_node=True)
+    except R.RefError as e:
+        raise ApiError(400, str(e))
+    except R.UnknownRef as e:
+        raise ApiError(404, str(e))
+    for q in result["queued"]:
+        # "queued" even if the job has already finished: the saver sends its own event
+        ref_event(ctx, ep, q["ref"], q["view"], q["take"], "queued")
+    for err in result["errors"]:
+        if err.get("take"):
+            ref_event(ctx, ep, err["ref"], err["view"], err["take"], "failed")
+    if result["queued"] or any(e.get("take") for e in result["errors"]):
+        episode_event(ctx, ep)
+    return 200, seeds_out(result)
+
+
+@handler
+def put_refs_pick(ctx: Context, body):
+    body = body_dict(body)
+    ep = check_ep(ctx, body.get("ep"))
+    s = _series(ep)
+    ref = _ref(s, body.get("ref"))
+    view = _view(ref, body.get("view"), required=True)
+    take = check_take(body.get("take"))
+    force = body.get("force", False)
+    if not isinstance(force, bool):
+        raise ApiError(400, "force must be true or false")
+    try:
+        R.pick_take(s, ref, view, take, force=force)
+    except R.NotUsable as e:
+        raise ApiError(409, f"{e}; pick it anyway with \"force\": true")
+    except R.UnknownRef as e:
+        raise ApiError(404, str(e))
+    except R.RefError as e:
+        raise ApiError(400, str(e))
+    except R.StitchError as e:
+        ref_event(ctx, ep, ref.id, view, take, "picked")
+        episode_event(ctx, ep)
+        raise ApiError(500, f"picked, but the sheet could not be stitched: {e}")
+    ref_event(ctx, ep, ref.id, view, take, "picked")
+    episode_event(ctx, ep)
+    return 200, seeds_out(R.ref_json(s, ref, R.used_by(s, [ref])))
+
+
+@handler
+def post_refs_import(ctx: Context, body):
+    body = body_dict(body)
+    ep = check_ep(ctx, body.get("ep"))
+    s = _series(ep)
+    ref = _ref(s, body.get("ref"))
+    view = _view(ref, body.get("view"), required=True)
+    src = body.get("source_path")
+    if not isinstance(src, str) or not src.strip():
+        raise ApiError(400, "source_path is required: the file's absolute path on this machine")
+    try:
+        t = R.import_take(s, ref, view, src.strip(), note=_opt_str(body, "note") or "")
+    except R.RefError as e:
+        raise ApiError(400, str(e))
+    ref_event(ctx, ep, ref.id, view, t.take, t.status)
+    episode_event(ctx, ep)
+    return 200, seeds_out(R.take_json(ep, ref, t))
+
+
+REF_OVERRIDE_FIELDS = ("prompt", "seed", "model", "loras", "steps", "note")
+
+
+def _ref_override_json(s, ref, view) -> dict:
+    o = R.override_view(s, ref, view, R.load_overrides(ref.home))
+    return dict(o["values"], stale=o["stale"])
+
+
+@handler
+def put_refs_override(ctx: Context, body):
+    body = body_dict(body)
+    ep = check_ep(ctx, body.get("ep"))
+    s = _series(ep)
+    ref = _ref(s, body.get("ref"))
+    view = _view(ref, body.get("view"))
+    fields = body.get("fields")
+    if not isinstance(fields, dict):
+        raise ApiError(400, "fields must be an object, e.g. {\"seed\": \"1234\"}")
+    unknown = set(fields) - set(REF_OVERRIDE_FIELDS)
+    if unknown:
+        raise ApiError(400, f"unknown override field(s) {', '.join(sorted(unknown))}: "
+                            f"one of {', '.join(REF_OVERRIDE_FIELDS)}")
+    clean = {}
+    if "seed" in fields:
+        clean["seed"] = seed_in(fields["seed"])
+    if "note" in fields:
+        if fields["note"] is not None and not isinstance(fields["note"], str):
+            raise ApiError(400, "note must be text or null")
+        clean["note"] = fields["note"] or None
+    if "prompt" in fields:
+        if fields["prompt"] is not None and not isinstance(fields["prompt"], str):
+            raise ApiError(400, "prompt must be text or null")
+        clean["prompt"] = fields["prompt"] or None
+    if "model" in fields:
+        m = fields["model"]
+        if m is not None and not isinstance(m, str):
+            raise ApiError(400, "model must be a file name or null")
+        clean["model"] = m or None
+    if "loras" in fields:
+        clean["loras"] = _opt_loras(fields["loras"])
+    if "steps" in fields:
+        clean["steps"] = _opt_steps(fields["steps"])
+    ov = R.load_overrides(ref.home)
+    try:
+        R.set_ref_override(ov, ref, view, clean,
+                           R.prompt_hash(R.built_prompt(s, ref, view)))
+    except R.RefError as e:
+        raise ApiError(400, str(e))
+    R.save_overrides(ref.home, ov)
+    episode_event(ctx, ep)
+    return 200, seeds_out({"override": _ref_override_json(s, ref, view)})
+
+
+@handler
+def delete_refs_override(ctx: Context, query: dict):
+    ep = check_ep(ctx, query.get("ep"))
+    s = _series(ep)
+    ref = _ref(s, query.get("ref"))
+    view = _view(ref, query.get("view") or None)
+    ov = R.load_overrides(ref.home)
+    R.clear_ref_override(ov, ref.id, view)
+    R.save_overrides(ref.home, ov)
+    episode_event(ctx, ep)
+    return 200, seeds_out({"override": _ref_override_json(s, ref, view)})
+
+
 # (method, path, handler, what it takes: "query" or "body")
 ROUTES = [
     ("GET", "/h3pipe/config", get_config, "query"),
@@ -641,4 +872,10 @@ ROUTES = [
     ("PUT", "/h3pipe/override", put_override, "body"),
     ("DELETE", "/h3pipe/override", delete_override, "query"),
     ("POST", "/h3pipe/assemble", post_assemble, "body"),
+    ("GET", "/h3pipe/refs", get_refs, "query"),
+    ("POST", "/h3pipe/refs/generate", post_refs_generate, "body"),
+    ("PUT", "/h3pipe/refs/pick", put_refs_pick, "body"),
+    ("POST", "/h3pipe/refs/import", post_refs_import, "body"),
+    ("PUT", "/h3pipe/refs/override", put_refs_override, "body"),
+    ("DELETE", "/h3pipe/refs/override", delete_refs_override, "query"),
 ]

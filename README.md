@@ -84,7 +84,7 @@ ComfyUI must be running for `refs` and `render`.
 |---|---|---|---|
 | `h3.py` | One command for every step below; passes any extra flags through | an episode folder | — |
 | `h3build.py` | Compiles the bible and script into shots: H3 prompts, frame counts, seeds, reference slots, audio settings. Checks pacing | `series.json`, `epNN.md` | `shotlist/shotlist.json`, `shotlist_proxy.json`, `refs_todo.md/.json` |
-| `kreagen.py` | Generates every missing reference image with krea2 on ComfyUI and saves it where h3build expects it | `refs_todo.json`, `series.json` | `refs/…`, `views/…` |
+| `kreagen.py` | Generates every missing reference image with krea2 on ComfyUI and saves it where h3build expects it | `refs_todo.json`, `series.json` | `refs/…` (takes in `refs/_takes/`) |
 | `mksheet.py` | Joins four character views into one 4096×1024 sheet (kreagen calls it) | 4 images | `refs/<char>/<char>_sheet_4panel.png` |
 | `h3render.py` | Queues each shot on ComfyUI through `H3_Ref2VA_Shotlist_v1.json`, waits, skips finished shots | `shotlist*.json`, the workflow | `renders/` or `renders_proxy/` |
 | `h3align.py` | Times the script against a dialogue recording and writes the `audio:` windows | recording, `epNN.md`, `series.json` | updated script and bible, `align_report.md` |
@@ -176,10 +176,13 @@ python h3.py refs Shows\ep05 --only dean   # one asset first
 python h3.py refs Shows\ep05               # everything missing, most-needed first
 ```
 
-- Skips anything already on disk. `--redo` regenerates; combine it with `--only`.
+- Skips anything already on disk. `--redo` makes a new take (kept in `refs/_takes/`) and
+  leaves the live file alone unless you add `--pick`; combine it with `--only`. `--all`
+  works from the whole bible instead of `refs_todo.json`.
 - `--only` matches part of the file path, so `dean` also matches `dean_grown`.
 - Each character is made as four square views sharing a seed, then joined by mksheet.
-  Per-view files stay in `views/<char>/` so you can redo one angle.
+  Every view is a take in `refs/_takes/subject__<char>/`, so one angle can be redone and
+  re-picked in the editor's Refs tab (h3refs.py).
 - Negative prompts do nothing on krea2 turbo: no negative field, and no guidance branch at
   cfg 1. kreagen leaves a workflow's negative side as saved, so a NAG or negpip setup passes
   through; `--negative-file` only bites above `--cfg 1.0`, on a model that expects guidance.
@@ -336,7 +339,8 @@ the bible). `clone` and `generate` shots don't use it.
   refs/<char>/<char>_sheet_4panel.png   horizontal 4-panel strip
   refs/props/<name>.png                 single clean object image
   refs/_bg/<location>.png               background plate -> <Picture 4>
-  views/<char>/0N_*.png                 kreagen's per-view sources
+  refs/_takes/<ref>/…_tNN.png/.json     every ref candidate (h3refs)
+  refs/_picks.json, _overrides.json     which take is live; ref prompt/seed tweaks
   audio/voices/<char>_sample.wav        clone mode
   audio/<episode>_dialogue.wav          recorded dialogue (h3align)
   renders/<shot_id>/

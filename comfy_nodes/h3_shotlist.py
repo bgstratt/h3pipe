@@ -14,6 +14,8 @@ H3ShotListLoader   reads shotlist.json + the project's reference assets and
 H3ShotInfo         readout of the current shot, for the canvas
 H3SaveShot         writes frames / audio / mp4 under a strict shot naming
                    convention, honouring the shot's audio policy
+H3SaveRefTake      writes one reference-image take (h3refs) and closes its
+                   sidecar
 
 Project layout expected
 -----------------------
@@ -957,15 +959,119 @@ class H3SaveShot:
 
 
 # ---------------------------------------------------------------------------
+# H3SaveRefTake
+# ---------------------------------------------------------------------------
+
+class H3SaveRefTake:
+    """Write one reference-image take and close its sidecar (h3refs.py).
+
+    `sidecar` is the take's `queued` record, as h3refs reserved it (absolute
+    path). The image goes next to it, named by the sidecar's `image` field
+    (else <sidecar stem>.png). The sidecar then gets status, finished, image,
+    width, height and save_notes; every other field is left alone, and it is
+    rewritten atomically, as H3SaveShot does. Then the `h3pipe.ref` event
+    (docs/API.md) goes to open editors. Only the first image of a batch is
+    kept. A failure is reported in the sidecar and the status string, never
+    raised, so a queue of refs keeps going.
+    """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {"images": ("IMAGE",),
+                             "sidecar": ("STRING", {"default": ""})}}
+
+    RETURN_TYPES = ("STRING",)
+    RETURN_NAMES = ("status",)
+    FUNCTION = "save"
+    OUTPUT_NODE = True
+    CATEGORY = "H3/refs"
+
+    def save(self, images, sidecar):
+        path = os.path.abspath((sidecar or "").strip())
+        if not (sidecar or "").strip() or not path.lower().endswith(".json"):
+            status = f"no sidecar given (got {sidecar!r}): nothing saved"
+            return {"ui": {"text": [status]}, "result": (status,)}
+        notes: list[str] = []
+        data = None
+        try:
+            with open(path, encoding="utf-8") as fh:
+                data = json.load(fh)
+            if not isinstance(data, dict):
+                notes.append("sidecar was not a JSON object; rewritten")
+                data = None
+        except FileNotFoundError:
+            notes.append("sidecar was missing; created")
+        except (OSError, ValueError) as exc:
+            notes.append(f"sidecar unreadable ({exc.__class__.__name__}); rewritten")
+        data = data or {}
+        stem = os.path.splitext(os.path.basename(path))[0]
+        name = os.path.basename(data.get("image") or f"{stem}.png")
+        if os.path.splitext(name)[1].lower() != ".png":
+            name = os.path.splitext(name)[0] + ".png"
+        out = os.path.join(os.path.dirname(path), name)
+        n = int(images.shape[0])
+        if n > 1:
+            notes.append(f"{n} images in the batch; kept the first")
+        width = height = None
+        try:
+            img = H3SaveShot._frame(images, 0)
+            width, height = img.size
+            fd, tmp = tempfile.mkstemp(prefix=".tmp_", suffix=".png",
+                                       dir=os.path.dirname(out))
+            try:
+                with os.fdopen(fd, "wb") as fh:
+                    img.save(fh, format="PNG", compress_level=4)
+                os.replace(tmp, out)
+            except BaseException:
+                try:
+                    os.remove(tmp)
+                except OSError:
+                    pass
+                raise
+            status = "ok"
+            notes.insert(0, f"{name} {width}x{height}")
+        except Exception as exc:
+            status = "failed"
+            notes.insert(0, f"image not written: {exc}")
+        data.update(status=status, finished=_now(), image=name if status == "ok" else None,
+                    width=width, height=height, save_notes=f"{stem}: " + "; ".join(notes))
+        try:
+            _write_json_atomic(path, data)
+        except Exception as exc:
+            notes.append(f"sidecar update failed: {exc}")
+        else:
+            self._notify(data, status)
+        text = f"{stem}: {status}; " + "; ".join(notes)
+        return {"ui": {"text": [text]}, "result": (text,)}
+
+    @staticmethod
+    def _notify(data: dict, status: str) -> None:
+        """The `h3pipe.ref` event of docs/API.md. Only inside ComfyUI; never
+        affects saving."""
+        try:
+            from server import PromptServer
+            server = getattr(PromptServer, "instance", None)
+            if server is None:
+                return
+            server.send_sync("h3pipe.ref", {
+                "ep": data.get("ep"), "ref": data.get("ref"), "view": data.get("view"),
+                "take": data.get("take"), "status": status})
+        except Exception:
+            pass
+
+
+# ---------------------------------------------------------------------------
 
 NODE_CLASS_MAPPINGS = {
     "H3ShotListLoader": H3ShotListLoader,
     "H3ShotInfo": H3ShotInfo,
     "H3SaveShot": H3SaveShot,
+    "H3SaveRefTake": H3SaveRefTake,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
     "H3ShotListLoader": "H3 Shot List Loader",
     "H3ShotInfo": "H3 Shot Info",
     "H3SaveShot": "H3 Save Shot",
+    "H3SaveRefTake": "H3 Save Ref Take",
 }

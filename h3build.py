@@ -31,6 +31,8 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from h3core import ir
+# Reference prompt wording has one home, shared with kreagen and the editor.
+from h3refs import object_prompt, plate_prompt, sheet_prompt, voice_prompt
 from h3core.bible import character_ids, load_bible, series_info, subject_ids
 # Model-neutral pieces, re-exported under their old names: h3align and others
 # import them from here.
@@ -462,9 +464,7 @@ def compile_episode(ep: dict, bible: dict, proxy: bool) -> tuple[dict, dict]:
                 f"location '{key}': needs a `plate` path. The background "
                 f"plate is <Picture 4> in every shot there.")
         need(entry["plate"], "background plate",
-             f"A background plate drawn as {bible['style']['look']}. An empty establishing "
-             f"view of {entry['description']}. No characters, no props, no figures in frame — "
-             f"the environment only. Wide framing that shows the layout of the space.",
+             plate_prompt(look=bible['style']['look'], description=entry['description']),
              shot_id)
         return entry
 
@@ -610,18 +610,11 @@ def compile_episode(ep: dict, bible: dict, proxy: bool) -> tuple[dict, dict]:
                 e = book[s]
                 if e.get("kind", "character") == "character":
                     need(e.get("sheet"), "character sheet",
-                         f"A character model sheet on a plain flat background: FOUR panels side "
-                         f"by side in a single horizontal strip, left to right — three-quarter "
-                         f"body, side profile full body, back view full body, and a "
-                         f"head-and-shoulders facial close-up. The SAME character in all four. "
-                         f"{e['design']}. Drawn as {bible['style']['look']}. "
-                         f"Output 4096x1024 or larger.", shot["id"])
+                         sheet_prompt(e['design'], bible['style']['look']), shot["id"])
 
                 else:
                     need(e.get("sheet"), f"{e.get('kind', 'prop')} reference",
-                         f"A single clean three-quarter view of one object on a plain flat "
-                         f"background, no scene around it. {e['design']}. Drawn as "
-                         f"{bible['style']['look']}. Output 1024x1024 or larger.", shot["id"])
+                         object_prompt(e['design'], bible['style']['look']), shot["id"])
 
             if seq["continuous"] and i > 0 and 22 / raw > 0.15:
                 warnings.append(
@@ -647,8 +640,8 @@ def compile_episode(ep: dict, bible: dict, proxy: bool) -> tuple[dict, dict]:
                 for v in voices:
                     e = book[v]
                     need(e.get("voice_sample"), "voice sample",
-                         f"A 5-15 second clean recording of {e['name']} speaking. "
-                         f"Voice: {e.get('voice', 'as written in the bible')}.", shot["id"])
+                         voice_prompt(e['name'], e.get('voice', 'as written in the bible')),
+                         shot["id"])
                     voice_refs.append({"subject": v, "sample": e.get("voice_sample", "")})
 
             entry = {

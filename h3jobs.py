@@ -265,6 +265,20 @@ class Comfy:
         """ComfyUI's history entry for one prompt, or None if it has none (yet)."""
         return self._json(f"/history/{pid}", timeout=10).get(pid)
 
+    def has_node(self, ctype: str) -> bool:
+        """True if the running ComfyUI knows the node class `ctype`."""
+        from urllib.parse import quote
+        return ctype in (self._json(f"/object_info/{quote(ctype, safe='')}", timeout=30) or {})
+
+    def view(self, img: dict) -> bytes:
+        """The bytes of an output image, as /history lists it ({filename,
+        subfolder, type})."""
+        from urllib.parse import urlencode
+        q = urlencode({"filename": img["filename"], "subfolder": img.get("subfolder", ""),
+                       "type": img.get("type", "output")})
+        with urllib.request.urlopen(f"{self.base}/view?{q}", timeout=120) as r:
+            return r.read()
+
     def delete_queued(self, pids) -> None:
         """Drop pending prompts from the queue (a running one is not affected)."""
         self._json("/queue", {"delete": list(pids)}, timeout=10)

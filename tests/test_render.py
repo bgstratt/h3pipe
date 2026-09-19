@@ -248,15 +248,37 @@ class GraphTest(unittest.TestCase):
 # h3render end to end
 # ---------------------------------------------------------------------------
 
+def png_bytes(w: int, h: int, rgb=(128, 128, 128)) -> bytes:
+    """A flat-colour RGB PNG, stdlib only."""
+    import struct
+    import zlib
+
+    def chunk(kind: bytes, data: bytes) -> bytes:
+        return (struct.pack(">I", len(data)) + kind + data
+                + struct.pack(">I", zlib.crc32(kind + data) & 0xFFFFFFFF))
+    row = b"\x00" + bytes(rgb) * w
+    return (b"\x89PNG\r\n\x1a\n"
+            + chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 2, 0, 0, 0))
+            + chunk(b"IDAT", zlib.compress(row * h, 6)) + chunk(b"IEND", b""))
+
+
 class FakeComfy:
     """Just enough of ComfyUI's API. Each /prompt runs 'instantly' and does what
     the save node does, according to `mode`: 'node' (writes mp4 and closes the
     sidecar), 'oldnode' (writes the mp4 only), 'error' (execution error),
     'hold' (accepted, and left pending in the queue) or 'reject' (node_errors).
-    `running`/`pending` are what /queue reports; other POSTs land in `posts`."""
+    `running`/`pending` are what /queue reports; other POSTs land in `posts`.
+
+    A reference-image graph (h3refs) is played too: H3SaveRefTake writes a
+    flat PNG (its colour from the seed) beside the sidecar and closes it; a
+    graph that kept SaveImage gets its PNG in the job's outputs, served by
+    /view. `nodes` is what /object_info knows (drop "H3SaveRefTake" to play a
+    ComfyUI whose node pack predates it)."""
 
     def __init__(self):
         self.mode = "node"
+        self.nodes = {"H3SaveRefTake", "H3SaveShot", "H3ShotListLoader", "SaveImage"}
+        self.files: dict[str, bytes] = {}         # /view filename -> bytes
         self.userdata: dict[str, dict] = {}       # "workflows/x.json" -> saved workflow
         self.graphs: list[dict] = []
         self.history: dict[str, dict] = {}
@@ -290,6 +312,18 @@ class FakeComfy:
                         self.send_response(404)
                         self.send_header("Content-Length", "0")
                         self.end_headers()
+                elif self.path.startswith("/object_info/"):
+                    from urllib.parse import unquote
+                    ct = unquote(self.path[len("/object_info/"):])
+                    self._send({ct: {"input": {}}} if ct in fake.nodes else {})
+                elif self.path.startswith("/view?"):
+                    from urllib.parse import parse_qs, urlparse
+                    name = parse_qs(urlparse(self.path).query)["filename"][0]
+                    body = fake.files.get(name)
+                    self.send_response(200 if body is not None else 404)
+                    self.send_header("Content-Length", str(len(body or b"")))
+                    self.end_headers()
+                    self.wfile.write(body or b"")
                 elif self.path == "/queue":
                     self._send({"queue_running": [[0, p] for p in fake.running],
                                 "queue_pending": [[1, p] for p in fake.pending]})
@@ -322,6 +356,8 @@ class FakeComfy:
                                             "messages": [["execution_error",
                                                           {"exception_message": "boom"}]]}}
             return pid
+        if not any(v["class_type"] == J.SAVER for v in graph.values()):
+            return self.run_image(graph, pid)
         si = next(v["inputs"] for v in graph.values() if v["class_type"] == J.SAVER)
         root = si["project_root"]
         shotlist = next(v["inputs"] for v in graph.values()
@@ -336,6 +372,33 @@ class FakeComfy:
                              thumb=None, strip=None, save_notes="fake")
         self.history[pid] = {"status": {"status_str": "success", "completed": True},
                              "outputs": {}}
+        return pid
+
+    def run_image(self, graph: dict, pid: str) -> str:
+        """A reference-image job: what H3SaveRefTake (or SaveImage) does."""
+        lat = next(v["inputs"] for v in graph.values()
+                   if v["class_type"] in ("EmptyLatentImage", "EmptySD3LatentImage"))
+        seed = next(v["inputs"].get("seed", v["inputs"].get("noise_seed", 0))
+                    for v in graph.values() if v["class_type"].startswith("KSampler"))
+        png = png_bytes(lat["width"], lat["height"],
+                        (seed % 256, (seed >> 8) % 256, (seed >> 16) % 256))
+        outputs = {}
+        for nid, v in graph.items():
+            if v["class_type"] == "H3SaveRefTake":
+                sc = v["inputs"]["sidecar"]
+                data = T.read_json(sc) or {}
+                name = data.get("image") or os.path.basename(sc)[:-5] + ".png"
+                with open(os.path.join(os.path.dirname(sc), name), "wb") as fh:
+                    fh.write(png)
+                T.update_sidecar(sc, status="ok", finished=T.now(), image=name,
+                                 width=lat["width"], height=lat["height"], save_notes="fake")
+            elif v["class_type"] == "SaveImage":
+                name = f"{v['inputs']['filename_prefix'].replace('/', '_')}_{pid[:8]}.png"
+                self.files[name] = png
+                outputs[nid] = {"images": [{"filename": name, "subfolder": "",
+                                            "type": "output"}]}
+        self.history[pid] = {"status": {"status_str": "success", "completed": True},
+                             "outputs": outputs}
         return pid
 
     def close(self):
