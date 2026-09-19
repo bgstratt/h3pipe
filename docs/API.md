@@ -1503,3 +1503,65 @@ plan and apply, and `python h3.py promote`). Each point is **[differs]**, **[add
 - **[added]** `python h3.py promote <ep> [<shot>]` prints the plan (items, `left` with
   reasons, both diffs) and writes nothing; `--all` or `--item ID` (repeatable) promotes and
   rebuilds; `--dry-run` shows the plan even with those.
+
+## Phase 9b: timeline editing (contract written before building, 2026-09-19)
+
+`cut.json` already holds order, trims and locks, `PUT /h3pipe/cut` writes them, and assemble
+and Play all honour them; the editor just never wrote them. 9b adds the editing, the
+waveforms, and play-through polish. Backend and UI build in parallel; the backend writes
+"Phase 9b as built".
+
+### Cut edits (backend)
+- **`PUT /h3pipe/cut`** (as before) also: 400 for a negative or non-integer trim, and for
+  trims that leave less than one frame of a take whose frame count is known; the previous
+  `cut.json` goes to `<ep>/_history/cut.json.<stamp>` (newest 30), as source saves do. Emits
+  `h3pipe.episode`.
+- **`POST /h3pipe/cut/reset`** `{ep, pass, what: "order" | "trims" | "all"}`: script order
+  (picks, locks and notes kept) and/or zero trims. Returns `{"cut"}`.
+- **`POST /h3pipe/cut/copy`** `{ep, from, to, what: "order" | "trims" | "all"}`: copies one
+  pass's order/trims onto the other (trims converted by frame rate when the passes' fps
+  differ; picks never copied). Returns `{"cut"}`.
+- **`GET /h3pipe/episode`**: each shot's `cut` also carries `order` (its index in the pass's
+  cut), `script_index`, and `out_of_order` (true when it's not where script order would put
+  it); top level adds `track`: `{"path", "duration", "rate"}` or null (the series config's
+  recorded dialogue, `audio.track`), and each shot with a dialogue window carries
+  `audio_in` / `audio_out` (seconds on that track) if it doesn't already.
+- **`locked`** entries: `PUT /h3pipe/pick` answers 409 for a locked shot unless `force`;
+  the UI also refuses to move or trim them.
+- **CLI:** `h3.py cut <ep> [--proxy] (--show | --order sh010,sh030,... | --move SH (--before|
+  --after) SH | --trim SH IN OUT | --lock SH | --unlock SH | --reset order|trims|all |
+  --copy-from final|proxy [order|trims|all])`.
+
+### Waveforms (backend)
+- **`GET /h3pipe/peaks?ep=…&path=…&bins=N[&start=S&end=E]`**: `path` is a media file relative
+  to the episode (a take's mp4 or wav, or the `track`). Returns `{"duration", "bins",
+  "peaks": [0..255, ...]}` — max absolute amplitude per bin, mono, over `start..end` seconds
+  (default the whole file); `peaks: []` and `"silent": true` for a file with no audio
+  stream. Computed once per file at 200 bins/second (stdlib `wave` for PCM wav, else
+  `ffmpeg -ac 1 -ar 8000 -f s16le`), cached in `<ep>/_cache/peaks/<sha1 of path+size+
+  mtime>.json`, then resampled to `bins`. 404 for a missing file, 400 for a path outside
+  the episode (and its parent-folder series config's folder).
+- **Takes** in `GET /h3pipe/episode` carry `audio`: the file whose sound the cut plays for
+  that take (the mp4 if it has an audio stream, else its `_h3.wav`, else null) — the same
+  rule as assemble's `--audio auto`.
+
+### Timeline (UI)
+- **Reorder:** drag a clip between clips (drop marker; Esc cancels); Alt+←/→ moves the
+  selected clip. Clips can move across sequences; an out-of-order clip gets a badge. Menu:
+  "Reset order", "Clear trims", "Copy order/trims from the other pass".
+- **Trims:** drag a clip's left/right edge (frame-snapped; tooltip shows frames and seconds;
+  at least one frame stays); I / O set trim-in / trim-out at the playhead while Play all is
+  on that clip; numeric trims in the Inspector's cut section. The thumbnail strip shows the
+  trimmed part dimmed.
+- **Undo/redo** (Ctrl+Z / Ctrl+Shift+Z) of cut edits for the session; each edit is one
+  `PUT /h3pipe/cut`.
+- **Locked** clips show a lock and refuse moves, trims and re-picks (unlock from the menu).
+- **Play-through:** click or drag in the ruler to seek (starts Play all paused there if it
+  isn't open); Space play/pause; J / K / L; the playhead follows. With a `track`, an
+  "Audio: clips | recording" toggle plays the recording under the cut instead (the clip
+  audio muted), as `h3assemble --audio master` does; it warns when trims or reordering
+  make the recording drift.
+- **Waveforms:** a toggleable lane under the clips: each clip's own audio (`take.audio`),
+  or, for a shot with a dialogue window when the audio toggle is on "recording", its slice
+  of the track (`audio_in`..`audio_out`, trims applied). Peaks are fetched per clip at the
+  zoom's resolution and cached.
