@@ -2,6 +2,9 @@ import type { ShotStatus, TakeSummary } from "../types";
 import { missingOf, missingRefsTitle } from "./missingRefs";
 
 export type BadgeKind =
+  | "moved"
+  | "locked"
+  | "trimmed"
   | "stale"
   | "override"
   | "override-stale"
@@ -48,6 +51,12 @@ export function staleTitle(reasons: string[]): string {
 export function shotBadges(s: ShotStatus, rendering: ReadonlySet<number> = new Set()): Badge[] {
   const out: Badge[] = [];
   if (s.orphan) out.push({ kind: "orphan", label: "orphan", title: "In cut.json but no longer in the script; assemble skips it" });
+  // Phase 9b: the cut's own edits
+  if (s.cut?.locked) out.push({ kind: "locked", label: "locked", title: "Locked in the cut: it can't be moved, trimmed or given another take until unlocked" });
+  if (s.cut?.out_of_order && !s.orphan) out.push({ kind: "moved", label: "moved", title: "Out of script order: the cut moved it (the cut menu's Reset order puts it back)" });
+  if ((s.cut?.trim_in ?? 0) > 0 || (s.cut?.trim_out ?? 0) > 0) {
+    out.push({ kind: "trimmed", label: "trimmed", title: `Trimmed in the cut: ${s.cut.trim_in || 0} frames off the head, ${s.cut.trim_out || 0} off the tail` });
+  }
   const missing = missingOf(s);
   if (missing.length) {
     out.push({

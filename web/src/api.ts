@@ -22,8 +22,8 @@
 
 import type {
   AssembleResult, BrowseFiles, BrowseResult, BuildResult, CancelResult, ComfyQueue, Config, CutEntry,
-  CutFile, DiscardResult, EpisodeStatus, EpisodeSummary, EpisodeTargetResult, ModelList, OverrideRequest, OverrideResult, Pass,
-  PickRequest, Ref, RefDefaults, RefDiscardRequest, RefGenerateMissingRequest, RefGenerateMissingResult, RefGenerateRequest,
+  CutFile, CutWhat, DiscardResult, EpisodeStatus, EpisodeSummary, EpisodeTargetResult, ModelList, OverrideRequest, OverrideResult, Pass,
+  PeaksResult, PickRequest, Ref, RefDefaults, RefDiscardRequest, RefGenerateMissingRequest, RefGenerateMissingResult, RefGenerateRequest,
   RefGenerateResult, RefImportRequest, RefKeyframeRequest, RefList, RefOverrideInfo, RefOverrideRequest, RefPickRequest,
   RefTake, RefUploadRequest, RenderRequest, RenderResult, Seed, ShotDetail, TakeRef, TargetKind, TargetList,
   PromoteHashes, PromotePlan, PromoteResult, SourceCheck, SourceDoc, SourceFile, SourceHash, SourceSaveRequest, SourceSaveResult,
@@ -56,6 +56,12 @@ export interface Api {
   discard(take: TakeRef): Promise<DiscardResult>;
   pick(req: PickRequest): Promise<{ cut: CutFile }>;
   putCut(ep: string, pass: Pass, entries: CutEntry[]): Promise<{ cut: CutFile }>;
+  /** Phase 9b: POST /h3pipe/cut/reset: script order and/or zero trims (picks, locks, notes kept). */
+  cutReset(ep: string, pass: Pass, what: CutWhat): Promise<{ cut: CutFile }>;
+  /** Phase 9b: POST /h3pipe/cut/copy: one pass's order and/or trims onto the other (never picks). */
+  cutCopy(ep: string, from: Pass, to: Pass, what: CutWhat): Promise<{ cut: CutFile }>;
+  /** Phase 9b: GET /h3pipe/peaks: `bins` peaks (0..255) of a media file over start..end seconds. */
+  peaks(ep: string, path: string, bins: number, start?: number | null, end?: number | null): Promise<PeaksResult>;
   putOverride(req: OverrideRequest): Promise<OverrideResult>;
   deleteOverride(ep: string, shot: string, pass?: Pass): Promise<OverrideResult>;
   assemble(ep: string, pass: Pass, partial: boolean): Promise<AssembleResult>;
@@ -286,6 +292,18 @@ export function createHttpApi(t: Transport): Api {
     discard: ({ ep, pass, shot, take }) => call("POST", "/h3pipe/discard", { ep, shot, take, pass }),
     pick: (req) => call("PUT", "/h3pipe/pick", req),
     putCut: (ep, pass, entries) => call("PUT", "/h3pipe/cut", { ep, pass, entries }),
+    cutReset: (ep, pass, what) => call("POST", "/h3pipe/cut/reset", { ep, pass, what }),
+    cutCopy: (ep, from, to, what) => call("POST", "/h3pipe/cut/copy", { ep, from, to, what }),
+    peaks: async (ep, path, bins, start, end) => {
+      const n = Math.max(1, Math.round(bins));
+      const r = await get<Partial<PeaksResult>>(`/h3pipe/peaks?${qs({
+        ep, path, bins: String(n),
+        start: start != null && Number.isFinite(start) ? String(round6(start)) : undefined,
+        end: end != null && Number.isFinite(end) ? String(round6(end)) : undefined,
+      })}`);
+      const peaks = Array.isArray(r?.peaks) ? r.peaks.map((x) => (typeof x === "number" && Number.isFinite(x) ? x : 0)) : [];
+      return { duration: typeof r?.duration === "number" ? r.duration : 0, bins: peaks.length, peaks, silent: !!r?.silent };
+    },
     putOverride: (req) => {
       const s = req.fields.seed;
       if (s !== undefined && s !== null && !isSeed(s)) {
@@ -384,6 +402,10 @@ export function createHttpApi(t: Transport): Api {
       return { running: ids(q.queue_running), pending: ids(q.queue_pending) };
     },
   };
+}
+
+function round6(n: number): number {
+  return Math.round(n * 1e6) / 1e6;
 }
 
 export function errText(e: unknown): string {

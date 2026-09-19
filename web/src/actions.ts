@@ -510,6 +510,11 @@ export async function pickTake(shot: string, take: number | null, fromPass: Pass
   const ep = s.ep;
   const pass = s.pass;
   const req = { ep, pass, shot, take, from_pass: fromPass && fromPass !== pass ? fromPass : null };
+  // Phase 9b: a locked clip keeps its take (the server answers 409 too)
+  if (s.status[statusKey(ep, pass)]?.shots.find((x) => x.shot === shot)?.cut?.locked) {
+    host().toast("warn", `${shot} is locked`, `A locked clip keeps its take. Unlock it from its menu to change it.`);
+    return;
+  }
   return withBusy(`pick|${shot}`, async () => {
     try {
       await api().pick(req);

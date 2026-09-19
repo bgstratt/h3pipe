@@ -53,6 +53,9 @@ export interface TakeSummary {
   /** The frame rate the take was rendered at, from its sidecar (a Wan 14B
    * take is 16 fps in a 24 fps episode); null/absent: the episode's. */
   fps?: number | null;
+  /** Phase 9b: the file whose sound the cut plays for this take (the mp4 when
+   * it has an audio stream, else its `_h3.wav`, else null), relative to the episode. */
+  audio?: string | null;
 }
 
 export interface CutInfo {
@@ -73,6 +76,12 @@ export interface CutInfo {
   /** The frame rate of `frames` (and of the build's `length` when there is no
    * take): the cut take's, else the shot's target's. Absent: the episode's. */
   fps?: number | null;
+  /** Phase 9b: the shot's index in the pass's cut (absent from older servers). */
+  order?: number | null;
+  /** Phase 9b: the shot's index in script order (null for an orphan). */
+  script_index?: number | null;
+  /** Phase 9b: not where script order would put it (the timeline badges it). */
+  out_of_order?: boolean;
 }
 
 export interface ShotStatus {
@@ -104,6 +113,10 @@ export interface ShotStatus {
   /** Phase 8.5: the length is an estimate (`dur: model` before a take exists):
    * the model decides it at render time. The UI marks it "≈". */
   length_estimated?: boolean;
+  /** Phase 9b: the shot's dialogue window on the episode's `track`, seconds
+   * (a shot timed against recorded dialogue); absent otherwise. */
+  audio_in?: number | null;
+  audio_out?: number | null;
 }
 
 /** "series" / "default": the shot has no target of its own and follows the episode's
@@ -143,7 +156,33 @@ export interface EpisodeStatus {
   target_source?: EpisodeTargetSource | null;
   /** The series config's `series.target` (null when it names none). */
   series_target?: string | null;
+  /** Phase 9b: the series config's recorded dialogue (`audio.track`), or null. */
+  track?: Track | null;
 }
+
+/** Phase 9b: the episode's recorded dialogue track. */
+export interface Track {
+  /** relative to the episode (`../` for a parent-folder series config) */
+  path: string;
+  /** seconds (null when unknown) */
+  duration?: number | null;
+  /** sample rate (null when unknown) */
+  rate?: number | null;
+}
+
+/** Phase 9b: GET /h3pipe/peaks. */
+export interface PeaksResult {
+  /** seconds of the whole file */
+  duration: number;
+  bins: number;
+  /** max absolute amplitude per bin, 0..255 */
+  peaks: number[];
+  /** the file has no audio stream */
+  silent?: boolean;
+}
+
+/** Phase 9b: what POST /h3pipe/cut/reset and /cut/copy touch. */
+export type CutWhat = "order" | "trims" | "all";
 
 /** PUT /h3pipe/episode-target: the episode's target fields, as GET /h3pipe/episode has them. */
 export interface EpisodeTargetResult {

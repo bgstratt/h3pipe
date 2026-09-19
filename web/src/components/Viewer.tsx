@@ -3,17 +3,20 @@
 //  - cut:   Play all, the cut in order from the takes themselves (CutPlayer);
 //  - image: a ref's candidates (stills), with the same A/B compare.
 
-import { useCallback, useEffect, useRef, useState, type CSSProperties, type PointerEvent as RPointerEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as RPointerEvent, type ReactNode } from "react";
 import {
   closeViewer, currentPlaylist, openInspector, openMenu, openRedo, openSidecar, openViewer, pickRef, pickTake,
   reportCutPos, seekCut, setCutPlaying, updateViewer,
 } from "../actions";
+import { cutKey, isTyping, lockedPickRefusal, setCutAudio } from "../cutActions";
 import { api } from "../host";
+import { anyOutOfOrder } from "../lib/cutEdit";
 import { fmtClock, realStale, tn } from "../lib/format";
 import { frameAt } from "../lib/keyframes";
 import {
-  atOutPoint, clipOffset, cutTime, locate, nextVideo, totalDuration, type PlayItem,
+  atOutPoint, baseIn, clipOffset, cutTime, fileTime, locate, nextVideo, totalDuration, type PlayItem,
 } from "../lib/playlist";
+import { masterSync, needsResync, recordingAt } from "../lib/recording";
 import { takesOf, viewLabel, viewOf } from "../lib/refs";
 import { shotTarget, takeTargetBadge, targetLabel } from "../lib/targets";
 import { store, useApp, type CompareMode, type ViewerState } from "../store";
@@ -111,23 +114,27 @@ function Transport({ a, fps, audio, setAudio, hasB }: {
   );
 }
 
-/** Esc closes, and `onKey` gets keys while focus is inside the window (ComfyUI owns them otherwise). */
+/** Esc closes, and `onKey` gets keys while focus is inside the window (ComfyUI owns them otherwise).
+ * Listened for on the window's own element, so a key it handles (it calls
+ * preventDefault) is stopped there, before ComfyUI's window-level shortcuts see it. */
 function useWindowKeys(winRef: React.RefObject<HTMLDivElement>, onKey: (e: KeyboardEvent) => void) {
   const cb = useRef(onKey);
   cb.current = onKey;
   useEffect(() => {
+    const el = winRef.current;
     const h = (e: KeyboardEvent) => {
-      const tag = (e.target as HTMLElement | null)?.tagName;
-      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+      if (isTyping(e.target)) return;
       if (!winRef.current?.contains(document.activeElement)) return;
       if (e.key === "Escape") {
         closeViewer();
         return;
       }
       cb.current(e);
+      if (e.defaultPrevented) e.stopPropagation();
     };
-    window.addEventListener("keydown", h);
-    return () => window.removeEventListener("keydown", h);
+    const target: HTMLElement | Window = el ?? window;
+    target.addEventListener("keydown", h as EventListener);
+    return () => target.removeEventListener("keydown", h as EventListener);
   }, [winRef]);
 }
 
@@ -244,6 +251,8 @@ function TakesView({ ep, v }: { ep: string; v: ViewerState }) {
     n != null && !!cutSt && cutSt.cut.pass === v.pass && cutSt.cut.take === n;
   const aspect = aspectOf(st);
   const takes = shot?.takes ?? [];
+  // Phase 9b: a locked clip keeps its take
+  const locked = useApp(() => lockedPickRefusal(v.shot));
 
   const pane = (which: "a" | "b", t: TakeSummary | undefined, style?: CSSProperties) => (
     <div className="h3-pane" style={style}>
@@ -354,16 +363,17 @@ function TakesView({ ep, v }: { ep: string; v: ViewerState }) {
         </button>
         <button
           className="h3-btn h3-primary"
-          disabled={!takeA || takeA.status !== "ok" || !takeA.has_video || isCutTake(takeA.take)}
+          disabled={!takeA || takeA.status !== "ok" || !takeA.has_video || isCutTake(takeA.take) || !!locked}
           onClick={() => takeA && void pickTake(v.shot, takeA.take, v.pass)}
-          title={takeA && isCutTake(takeA.take) ? "The cut already uses A" : "Put A in the cut"}
+          title={takeA && isCutTake(takeA.take) ? "The cut already uses A" : locked ?? "Put A in the cut"}
         >
           <i className="pi pi-check" /> {takeA && isCutTake(takeA.take) ? "In the cut" : `Use ${takeA ? tn(takeA.take) : "A"}`}
         </button>
         {takeB && (
           <button
             className="h3-btn"
-            disabled={takeB.status !== "ok" || !takeB.has_video || isCutTake(takeB.take)}
+            disabled={takeB.status !== "ok" || !takeB.has_video || isCutTake(takeB.take) || !!locked}
+            title={locked ?? undefined}
             onClick={() => void pickTake(v.shot, takeB.take, v.pass)}
           >
             Use B ({tn(takeB.take)})
@@ -393,9 +403,9 @@ interface Engine {
   active: 0 | 1;
   /** clip index loaded in each <video> (-1 none) */
   slot: [number, number];
-  /** missing card: when it started (performance.now) and how far it got */
-  cardT0: number;
+  /** missing card (and reverse shuttle): how far into the clip, and the last tick's time (performance.now) */
   cardOffset: number;
+  lastT: number;
   items: PlayItem[];
 }
 
@@ -404,23 +414,38 @@ interface Engine {
  * spare holding the next clip, loaded and parked at its in point, so a cut is a
  * swap rather than a load. Shots without a usable take are a black card that
  * lasts the shot's duration. The clock is the store's `cutPlay` (the timeline's
- * playhead reads it).
+ * playhead reads it). Phase 9b: J / L shuttle (2x, 4x; backwards by stepping
+ * the picture), and the episode's recorded dialogue under the cut instead of
+ * the clips' own sound (one <audio>, kept on the cut's clock).
  */
 function CutPlayer({ ep, v }: { ep: string; v: ViewerState }) {
   const items = useApp((s) => currentPlaylist(s));
   const st = useStatus();
   const cp = useApp((s) => s.cutPlay);
+  const audioMode = useApp((s) => s.cutAudio);
   const fps = st?.fps || 24;
+  const track = st?.track?.path ? st.track : null;
+  const recording = audioMode === "recording" && !!track;
   const winRef = useRef<HTMLDivElement>(null);
   const v0 = useRef<HTMLVideoElement>(null);
   const v1 = useRef<HTMLVideoElement>(null);
-  const eng = useRef<Engine>({ idx: -1, active: 0, slot: [-1, -1], cardT0: 0, cardOffset: 0, items });
+  const au = useRef<HTMLAudioElement>(null);
+  const eng = useRef<Engine>({ idx: -1, active: 0, slot: [-1, -1], cardOffset: 0, lastT: 0, items });
   const playing = useRef(cp.playing);
   playing.current = cp.playing;
+  const rate = useRef(cp.rate ?? 1);
+  rate.current = cp.rate ?? 1;
+  const rec = useRef(recording);
+  rec.current = recording;
   const [shown, setShown] = useState<{ idx: number; active: 0 | 1 }>({ idx: -1, active: 0 });
   const total = totalDuration(items);
+  const sync = useMemo(() => masterSync(items, fps, baseIn(st), anyOutOfOrder(st)), [items, fps, st]);
+  const recStart = useRef(sync.start);
+  recStart.current = sync.start;
 
   const els = (): [HTMLVideoElement | null, HTMLVideoElement | null] => [v0.current, v1.current];
+  /** forwards at 1x, 2x or 4x (the <video> plays); backwards is stepped here */
+  const forward = () => playing.current && rate.current > 0;
 
   /** Load clip `i` into a <video> and park it at `at` seconds into the file. */
   const loadSlot = useCallback((slot: 0 | 1, i: number, at?: number) => {
@@ -452,6 +477,8 @@ function CutPlayer({ ep, v }: { ep: string; v: ViewerState }) {
     const [a, b] = els();
     if (!it) return;
     e.idx = i;
+    e.cardOffset = offset;
+    e.lastT = performance.now();
     if (it.mp4) {
       const slot: 0 | 1 = e.slot[e.active] === i ? e.active : e.slot[1 - e.active] === i ? ((1 - e.active) as 0 | 1) : e.active;
       e.active = slot;
@@ -461,15 +488,14 @@ function CutPlayer({ ep, v }: { ep: string; v: ViewerState }) {
       off?.pause();
       if (off) off.muted = true;
       if (on) {
-        on.muted = false;
-        if (playing.current) void on.play().catch(() => {});
+        on.muted = rec.current;
+        on.playbackRate = forward() ? rate.current : 1;
+        if (forward()) void on.play().catch(() => {});
         else on.pause();
       }
     } else {
       a?.pause();
       b?.pause();
-      e.cardOffset = offset;
-      e.cardT0 = performance.now() - offset * 1000;
     }
     setShown({ idx: i, active: e.active });
     // the spare: the other <video> while a clip plays, either during a card
@@ -486,29 +512,63 @@ function CutPlayer({ ep, v }: { ep: string; v: ViewerState }) {
     const tick = () => {
       const e = eng.current;
       const it = e.items[e.idx];
+      const now = performance.now();
+      const dt = Math.min(0.25, Math.max(0, (now - e.lastT) / 1000));
+      e.lastT = now;
       if (it) {
-        let offset: number;
-        let done = false;
-        if (it.mp4) {
-          const el = els()[e.active];
-          const ft = el ? el.currentTime : it.inT;
-          offset = clipOffset(it, ft);
-          // a clip that can't load (el.error) is passed over rather than stalling the cut
-          done = playing.current && !!el && (atOutPoint(it, ft, fps) || el.ended || !!el.error);
-        } else {
-          offset = playing.current ? (performance.now() - e.cardT0) / 1000 : e.cardOffset;
-          if (playing.current) e.cardOffset = offset;
-          done = playing.current && offset >= it.dur;
-        }
-        if (done) {
-          if (e.idx + 1 < e.items.length) {
-            show(e.idx + 1, 0);
-          } else {
-            els().forEach((x) => x?.pause());
-            reportCutPos(totalDuration(e.items), it.shot, true);
+        if (playing.current && rate.current < 0) {
+          // backwards: step the picture (a <video> can't play in reverse)
+          let t = cutTime(e.items, e.idx, e.cardOffset) + rate.current * dt;
+          if (t <= 0) {
+            t = 0;
+            store.set((s) => ({ cutPlay: { ...s.cutPlay, playing: false, rate: 1 } }));
           }
+          const { index, offset } = locate(e.items, t);
+          if (index !== e.idx) show(index, offset);
+          else {
+            e.cardOffset = offset;
+            const el = els()[e.active];
+            if (it.mp4 && el && !el.seeking) el.currentTime = fileTime(it, offset);
+          }
+          reportCutPos(t, e.items[index]?.shot ?? it.shot);
         } else {
-          reportCutPos(cutTime(e.items, e.idx, offset), it.shot);
+          let offset: number;
+          let done = false;
+          if (it.mp4) {
+            const el = els()[e.active];
+            const ft = el ? el.currentTime : it.inT;
+            offset = clipOffset(it, ft);
+            e.cardOffset = offset;
+            // a clip that can't load (el.error) is passed over rather than stalling the cut
+            done = playing.current && !!el && (atOutPoint(it, ft, fps) || el.ended || !!el.error);
+          } else {
+            if (playing.current) e.cardOffset += dt * rate.current;
+            offset = e.cardOffset;
+            done = playing.current && offset >= it.dur;
+          }
+          if (done) {
+            if (e.idx + 1 < e.items.length) {
+              show(e.idx + 1, 0);
+            } else {
+              els().forEach((x) => x?.pause());
+              reportCutPos(totalDuration(e.items), it.shot, true);
+            }
+          } else {
+            reportCutPos(cutTime(e.items, e.idx, offset), it.shot);
+          }
+        }
+      }
+      // the recording follows the cut's clock (as h3assemble --audio master lays it)
+      const a = au.current;
+      if (a) {
+        const want = recordingAt(recStart.current, store.get().cutPlay.pos);
+        const dur = Number.isFinite(a.duration) ? a.duration : Infinity;
+        if (rec.current && forward() && want < dur) {
+          if (a.playbackRate !== rate.current) a.playbackRate = rate.current;
+          if (needsResync(a.currentTime, want, 0.15 * rate.current)) a.currentTime = want;
+          if (a.paused) void a.play().catch(() => {});
+        } else if (!a.paused) {
+          a.pause();
         }
       }
       raf = requestAnimationFrame(tick);
@@ -517,30 +577,42 @@ function CutPlayer({ ep, v }: { ep: string; v: ViewerState }) {
     return () => cancelAnimationFrame(raf);
   }, [fps, show]);
 
-  // seek requests (Play all, Play from here, a click on the timeline or the slider)
+  // seek requests (Play all, Play from here, a click on the timeline or the ruler, the slider)
   const seekN = cp.seek?.n;
   useEffect(() => {
     if (seekN == null) return;
     const t = store.get().cutPlay.seek?.t ?? 0;
     const { index, offset } = locate(eng.current.items, t);
     if (index >= 0) show(index, offset);
+    const a = au.current;
+    if (a && rec.current) a.currentTime = recordingAt(recStart.current, t);
   }, [seekN, show]);
 
-  // play / pause
+  // play / pause / shuttle speed
+  const cpRate = cp.rate ?? 1;
   useEffect(() => {
     const e = eng.current;
     const it = e.items[e.idx];
+    e.lastT = performance.now();
     if (!it) return;
     if (it.mp4) {
       const el = els()[e.active];
-      if (cp.playing) void el?.play().catch(() => {});
-      else el?.pause();
-    } else if (cp.playing) {
-      e.cardT0 = performance.now() - e.cardOffset * 1000;
+      if (!el) return;
+      el.playbackRate = cp.playing && cpRate > 0 ? cpRate : 1;
+      if (cp.playing && cpRate > 0) void el.play().catch(() => {});
+      else el.pause();
     }
-  }, [cp.playing]);
+  }, [cp.playing, cpRate]);
 
-  // the cut changed under us (a pick, a render finishing): re-place the playhead
+  // clips' sound or the recording
+  useEffect(() => {
+    const e = eng.current;
+    const el = els()[e.active];
+    if (el && e.items[e.idx]?.mp4) el.muted = recording;
+    if (!recording) au.current?.pause();
+  }, [recording]);
+
+  // the cut changed under us (a pick, a trim, a move, a render finishing): re-place the playhead
   useEffect(() => {
     const e = eng.current;
     const prev = e.items;
@@ -565,10 +637,9 @@ function CutPlayer({ ep, v }: { ep: string; v: ViewerState }) {
   }, [items, show, loadSlot]);
 
   useWindowKeys(winRef, useCallback((e: KeyboardEvent) => {
-    if (e.key === " ") {
+    if (cutKey(e)) {
       e.preventDefault();
-      setCutPlaying(!store.get().cutPlay.playing);
-    } else if (e.key === "ArrowRight" || e.key === "ArrowLeft") {
+    } else if ((e.key === "ArrowRight" || e.key === "ArrowLeft") && !e.altKey && !e.ctrlKey && !e.metaKey) {
       e.preventDefault();
       const i = eng.current.idx + (e.key === "ArrowRight" ? 1 : -1);
       const it = eng.current.items[Math.max(0, i)];
@@ -582,6 +653,10 @@ function CutPlayer({ ep, v }: { ep: string; v: ViewerState }) {
     if (items[i]) seekCut(items[i].start);
   };
   const missingCount = items.filter((x) => !x.mp4).length;
+  const speed = cp.playing && cpRate !== 1 ? `${cpRate < 0 ? "◀ " : ""}${Math.abs(cpRate)}×` : "";
+  const driftTitle = sync.warnings.length
+    ? `The recording won't line up everywhere:\n• ${sync.warnings.join("\n• ")}${sync.drifts.length ? `\n\nOff by more than a frame: ${sync.drifts.slice(0, 12).map((d) => `${d.shot} ${d.drift > 0 ? "+" : ""}${d.drift.toFixed(2)} s`).join(", ")}${sync.drifts.length > 12 ? "…" : ""}` : ""}`
+    : "The recording lines up with every clip's dialogue window";
 
   const head = (
     <>
@@ -609,7 +684,11 @@ function CutPlayer({ ep, v }: { ep: string; v: ViewerState }) {
 
   return (
     <FloatingWindow storageKey={RECT_KEY} defaultRect={defaultViewerRect} head={head} winRef={winRef}>
-      <div className="h3-stage h3-single h3-cutstage" onClick={() => setCutPlaying(!cp.playing)} title="Click or space: play / pause · ←/→: previous / next shot">
+      <div
+        className="h3-stage h3-single h3-cutstage"
+        onClick={() => setCutPlaying(!cp.playing)}
+        title="Click or space: play / pause · J / K / L: back / stop / forward (again: faster) · ←/→: previous / next shot · I / O: trim the clip to start / end here · Ctrl+Z: undo a cut edit"
+      >
         {[v0, v1].map((r, i) => (
           <video
             key={i}
@@ -629,10 +708,20 @@ function CutPlayer({ ep, v }: { ep: string; v: ViewerState }) {
         {cur && (
           <span className="h3-pane-label">
             {cur.shot} {cur.take != null && cur.mp4 ? tn(cur.take) : ""}{cur.pass !== v.pass ? ` (${cur.pass})` : ""} · {shown.idx + 1}/{items.length}
+            {speed ? ` · ${speed}` : ""}
+            {recording ? " · recording" : ""}
           </span>
         )}
         {!items.length && <div className="h3-empty-state">The cut is empty.</div>}
       </div>
+      {track && (
+        <audio
+          ref={au}
+          preload="auto"
+          src={api().fileUrl(ep, track.path)}
+          onError={(e) => console.warn("h3pipe play all: recording error", (e.currentTarget as HTMLAudioElement).error)}
+        />
+      )}
       <div className="h3-transport">
         <button className="h3-btn h3-icon" title="Previous shot (←)" onClick={() => jump(-1)}><i className="pi pi-step-backward" /></button>
         <button className="h3-btn h3-icon" title="Play / pause (space)" onClick={() => setCutPlaying(!cp.playing)}>
@@ -641,6 +730,17 @@ function CutPlayer({ ep, v }: { ep: string; v: ViewerState }) {
         <button className="h3-btn h3-icon" title="Next shot (→)" onClick={() => jump(1)}><i className="pi pi-step-forward" /></button>
         <input type="range" min={0} max={total || 1} step={0.01} value={Math.min(cp.pos, total)} onChange={(e) => seekCut(Number(e.target.value))} />
         <span className="h3-mono h3-muted">{fmtClock(cp.pos)} / {fmtClock(total)}</span>
+        {track && (
+          <span className="h3-seg" title={`Audio: each clip's own sound, or the recorded dialogue (${track.path}) under the cut, as h3assemble --audio master lays it`}>
+            <button className={!recording ? "h3-on" : ""} onClick={() => setCutAudio("clips")}>clips</button>
+            <button className={recording ? "h3-on" : ""} onClick={() => setCutAudio("recording")}>recording</button>
+          </span>
+        )}
+        {recording && sync.warnings.length > 0 && (
+          <span className="h3-badge h3-b-drift" title={driftTitle}>
+            <i className="pi pi-exclamation-triangle" /> drifts
+          </span>
+        )}
       </div>
     </FloatingWindow>
   );

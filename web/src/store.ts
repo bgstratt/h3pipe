@@ -88,7 +88,12 @@ export interface CutPlayState {
   pos: number;
   /** a seek request; `n` changes on every request so the same time can be sought twice */
   seek: { t: number; n: number } | null;
+  /** Phase 9b: J / L shuttle speed: 1, 2, 4 forwards, -1, -2, -4 backwards (absent: 1) */
+  rate?: number;
 }
+
+/** Phase 9b: what Play all sounds like: each clip's own audio, or the recorded dialogue. */
+export type CutAudio = "clips" | "recording";
 
 export type BrowsePurpose = "roots" | "import";
 
@@ -248,6 +253,14 @@ export interface AppState {
   sourceN: number;
   /** Phase 9a: the Promote dialog (shot null: the whole episode) */
   promote: { shot: string | null } | null;
+  /** Phase 9b: Play all's sound (the recording needs the episode's `track`) */
+  cutAudio: CutAudio;
+  /** Phase 9b: the waveform lane under the timeline's clips is shown */
+  waves: boolean;
+  /** Phase 9b: what Ctrl+Z / Ctrl+Shift+Z would undo / redo, by statusKey */
+  cutUndo: Record<string, { undo: string | null; redo: string | null }>;
+  /** Phase 9b: the timeline's Cut menu, open at (x, y) */
+  cutMenu: { x: number; y: number } | null;
 }
 
 export const ZOOM_MIN = 8;
@@ -315,6 +328,10 @@ export function initialState(prefs: Prefs = {}): AppState {
     scriptFocus: null,
     sourceN: 0,
     promote: null,
+    cutAudio: "clips",
+    waves: prefs.waves ?? false,
+    cutUndo: {},
+    cutMenu: null,
   };
 }
 
@@ -340,6 +357,8 @@ export interface Prefs {
   ep?: string | null;
   pass?: Pass;
   zoom?: number;
+  /** Phase 9b: the waveform lane */
+  waves?: boolean;
 }
 
 type KV = Pick<Storage, "getItem" | "setItem">;
@@ -361,15 +380,16 @@ export function loadPrefs(storage: KV | null = defaultStorage()): Prefs {
       ep: typeof p.ep === "string" ? p.ep : null,
       pass: p.pass === "final" || p.pass === "proxy" ? p.pass : undefined,
       zoom: typeof p.zoom === "number" ? p.zoom : undefined,
+      waves: typeof p.waves === "boolean" ? p.waves : undefined,
     };
   } catch {
     return {};
   }
 }
 
-export function savePrefs(s: Pick<AppState, "ep" | "pass" | "zoom">, storage: KV | null = defaultStorage()) {
+export function savePrefs(s: Pick<AppState, "ep" | "pass" | "zoom"> & { waves?: boolean }, storage: KV | null = defaultStorage()) {
   try {
-    storage?.setItem(PREFS_KEY, JSON.stringify({ ep: s.ep, pass: s.pass, zoom: s.zoom }));
+    storage?.setItem(PREFS_KEY, JSON.stringify({ ep: s.ep, pass: s.pass, zoom: s.zoom, ...(s.waves != null ? { waves: s.waves } : {}) }));
   } catch {
     /* private window or blocked storage: not remembering is fine */
   }
@@ -377,11 +397,11 @@ export function savePrefs(s: Pick<AppState, "ep" | "pass" | "zoom">, storage: KV
 
 /** Save prefs whenever they change. Returns the unsubscribe. */
 export function persistPrefs(st: Store<AppState>, storage: KV | null = defaultStorage()): () => void {
-  let last = { ep: st.get().ep, pass: st.get().pass, zoom: st.get().zoom };
+  let last = { ep: st.get().ep, pass: st.get().pass, zoom: st.get().zoom, waves: st.get().waves };
   return st.subscribe(() => {
     const s = st.get();
-    if (s.ep !== last.ep || s.pass !== last.pass || s.zoom !== last.zoom) {
-      last = { ep: s.ep, pass: s.pass, zoom: s.zoom };
+    if (s.ep !== last.ep || s.pass !== last.pass || s.zoom !== last.zoom || s.waves !== last.waves) {
+      last = { ep: s.ep, pass: s.pass, zoom: s.zoom, waves: s.waves };
       savePrefs(last, storage);
     }
   });

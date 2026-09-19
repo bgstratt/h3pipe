@@ -25,6 +25,7 @@ import { ResolvedNotes, TargetReadinessNote } from "./Readiness";
 import { PassToggle } from "./ShotsTab";
 import { TargetSelect, useTargetPickers, useTargets } from "./Targets";
 import { Badges } from "./Thumb";
+import { CutSection } from "./CutSection";
 import { DropSlot, UploadButton } from "./Upload";
 
 /** The shot's video target: a picker over the video targets (the default
@@ -509,6 +510,7 @@ export function Inspector() {
               <i className="pi pi-eye" /> View {ct ? tn(ct.take) : ""}
             </button>
           </div>
+          <CutSection shot={shot} />
         </div>
       )}
       {derr && !d && (
