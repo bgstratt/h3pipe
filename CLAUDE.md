@@ -14,6 +14,11 @@ IR + targets). Read it before changing `h3build.py`, `h3render.py`, `kreagen.py`
 - `h3core/` — model-free core: script parser → story IR (`shotlist/shots.json`), bible loading, speech pacing
 - `h3build.py` — script + bible → story IR → H3 compile → `shotlist/*.json`, `refs_todo.*`
 - `h3render.py` — queues shots on ComfyUI via `workflows/H3_Ref2VA_Shotlist_v1.json`
+- `h3takes.py` (take/cut/override files), `h3jobs.py` (plan + queue a take), `h3edit.py`
+  (episode status, pick/override, the `takes`/`pick`/`override` commands),
+  `h3refs.py` (refs as takes, bible-driven) — shared by the CLI and the routes
+- `comfy_nodes/h3pipe_api.py` + `h3pipe_routes.py` — the editor's HTTP API (`docs/API.md`);
+  `web/` — the editor UI (React/Vite), built into `comfy_nodes/web/h3pipe-editor.js`
 - `kreagen.py`, `mksheet.py` — reference images
 - `h3align.py` — times the script against a dialogue recording
 - `h3assemble.py` — review cut (ffmpeg)

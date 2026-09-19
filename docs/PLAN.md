@@ -351,7 +351,16 @@ Use it on a real episode, then decide and write down here:
 - Which override fields actually get used, and which are missing?
 - What should the Refs tab look like, now that the take model has been used?
 
-**Phase 5 — references**
+**Phase 5 — references**: backend merged 2026-09-18 (`h3refs.py`, `H3SaveRefTake`, the
+ref routes, `kreagen` on takes); the Refs tab is in progress.
+- **Known gap:** a bible in the episode's *parent* folder. `h3refs` resolves ref paths
+  against the bible's folder, but `h3build` writes the bible's paths into the shotlist
+  unchanged, and the loader resolves them against the episode. Fix: `h3build` rebases
+  ref paths to be relative to the episode (an intended golden change, needing a
+  parent-bible fixture). Today's episodes each have their own `series.json`, so this
+  only matters for the series-folder layout.
+
+**Phase 5 — references** (the original bullets)
 - Series/episode layout: look up the bible in the parent folder; paths resolve relative
   to the bible.
 - Ref takes, picks, per-view sheet picks, import, `refs/_overrides.json`; the two

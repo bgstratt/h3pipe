@@ -344,3 +344,32 @@ take.
 
 ### `PUT /h3pipe/refs/override` and `DELETE /h3pipe/refs/override`
 Same shape as the shot override routes, keyed by `ref` (and `view`).
+
+### References: as built (Phase 5), where the text above left room
+- **Extra fields on a ref:** `key`, `subject`, `can_generate`, `why_not`, and `effective`
+  (prompt, seed, seed_source, model, loras, steps, width, height). `override.values`.
+  `views: []` for refs that aren't characters. Each view has its own `prompt`,
+  `override` and `effective`.
+- **A character's top-level `prompt`** is the 4-panel sheet text (as in `refs_todo`).
+  What each view actually generates with is in that view's entry.
+- **Extra fields on a ref take:** `view`, `usable`, `audio` (voices: `audio` set,
+  `image: null`), `seed_source`, `prompt`, `model`, `loras`, `steps`, `width`,
+  `height`, `queued`, `finished`, `comfy_prompt_id`, `save_notes`, `overrides`.
+- **Refs live next to the bible.** A bible in the parent folder gives paths like
+  `../refs/…`, and `/h3pipe/file` serves those only inside that bible's folder and a
+  configured root.
+- **Keyframes** are listed once they exist (a live file or a take). Any shot in a build
+  can import or pick one; a shot in no build is 404.
+- **`h3pipe.ref` status values:** `queued`, `ok`, `failed`, `picked` (after a pick).
+- **Ref overrides** have one level: the ref, or a view, not per pass. A character's
+  `prompt` override needs a view. The response is `{"override": {...fields, "stale"}}`.
+  `base_hash` is the sha1 of the built prompt.
+- **Generate:**
+  - `count` 1–16. Only the first candidate follows `seed_mode` or a typed or pinned
+    seed; the rest get new seeds.
+  - `auto` keeps the stable seed until the ref has a usable take.
+  - `prompt` with a character and `view: null` is 400; voice and keyframe generates are
+    400.
+  - Pick accepts `force: true`.
+- **Import:** images png/jpg/jpeg/webp, audio wav/mp3/flac/ogg/m4a. The take keeps its
+  extension, and picking copies the bytes to the bible's path.
