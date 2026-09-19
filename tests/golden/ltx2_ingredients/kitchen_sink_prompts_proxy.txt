@@ -1,0 +1,75 @@
+## sh010
+Reference sheet: Ada, a tall woman in her thirties with a short grey bob, a mustard apron over a striped shirt, and round red glasses, shown full-body in a three-quarter view. The location, a cramped diner kitchen with steel counters, a hanging ticket rail and cold fluorescent light from overhead.
+
+Generated video: Style: a flat vector cartoon with thick even outlines and a limited pastel palette. A wide shot of a cramped diner kitchen with steel counters, a hanging ticket rail and cold fluorescent light from overhead, the camera pushes in on Ada with small amplitude at slow speed. Ada is in frame. Ada slams the walk-in door shut and turns to face the kitchen. Visible on-screen text reads "OPEN 24 HOURS". The sound is the compressor hum of the walk-in, a door latch clanking. A plucky ukulele sting plays underneath.
+
+## sh020
+Reference sheet: Ada, a tall woman in her thirties with a short grey bob, a mustard apron over a striped shirt, and round red glasses, shown full-body in a three-quarter view. Bo, a stocky teenage boy with a shaved head, an oversized green bomber jacket and orange high-tops, shown full-body in a three-quarter view. The diner kettle, a dented chrome kettle with a black bakelite handle and a whistle cap on a chain. The location, a cramped diner kitchen with steel counters, a hanging ticket rail and cold fluorescent light from overhead.
+
+Generated video: Style: a flat vector cartoon with thick even outlines and a limited pastel palette. A medium shot of a cramped diner kitchen with steel counters, a hanging ticket rail and cold fluorescent light from overhead, the camera remains static. Ada, Bo, and the diner kettle are in frame. Also in frame are two customers at the counter seen through the window, backs to camera, unnamed background figures who look nothing like Ada and Bo. Bo sets the kettle down on the burner and flicks the gas on. Ada, in a voice that is dry, quick and precise, says, warmly: "You know that one whistles." Bo, in a voice that is slow and cracking, says: "I know." Bo says, whispering: "That's the point." The ambient sound of the place follows the action. There is no music.
+
+## sh030
+Reference sheet: Ada, a tall woman in her thirties with a short grey bob, a mustard apron over a striped shirt, and round red glasses, shown in a face close-up. The location, a cramped diner kitchen with steel counters, a hanging ticket rail and cold fluorescent light from overhead.
+
+Generated video: Style: a flat vector cartoon with thick even outlines and a limited pastel palette. A close-up of a cramped diner kitchen with steel counters, a hanging ticket rail and cold fluorescent light from overhead, the camera remains static. Ada is in frame. Ada's eyes narrow at the kettle. Ada, in a voice that is dry, quick and precise, says in an off-screen voiceover, her lips staying closed: "Not today." The ambient sound of the place follows the action. There is no music.
+
+## sh040
+Reference sheet: Bo, a stocky teenage boy with a shaved head, an oversized green bomber jacket and orange high-tops, shown full-body in a three-quarter view. The delivery van, a boxy white delivery van with a sky-blue stripe and a cracked left headlight. The diner kettle, a dented chrome kettle with a black bakelite handle and a whistle cap on a chain. The location, a cramped diner kitchen with steel counters, a hanging ticket rail and cold fluorescent light from overhead.
+
+Generated video: Style: a flat vector cartoon with thick even outlines and a limited pastel palette. A close-up of a cramped diner kitchen with steel counters, a hanging ticket rail and cold fluorescent light from overhead, the camera remains static. Bo, the delivery van, and the diner kettle are in frame. Bo leans out of the back door as the van reverses toward it, kettle in hand. Bo, in a voice that is slow and cracking, says from off-screen, outside the frame: "Left! Left!" The narrator, in a voice that is warm, older, unhurried, says in an off-screen voiceover, into phone: "Nobody ever goes left." The ambient sound of the place follows the action. There is no music.
+
+## sh050
+Reference sheet: Cy, a small girl with two puffball pigtails, a purple raincoat and yellow rubber boots, shown full-body in a three-quarter view. Rex, a scruffy brown terrier with one white ear and a red collar, shown full-body in a three-quarter view. The location, a cramped diner kitchen with steel counters, a hanging ticket rail and cold fluorescent light from overhead.
+
+Generated video: Style: a flat vector cartoon with thick even outlines and a limited pastel palette. A medium shot of a cramped diner kitchen with steel counters, a hanging ticket rail and cold fluorescent light from overhead, the camera remains static. Cy and Rex are in frame. Cy bursts in from the back with Rex at her heels. Cy says: "Absolutely everybody in this entire neighbourhood is waiting outside for breakfast!" Rex, in a voice that is a gravelly bark of a voice, says: "Woof." The ambient sound of the place follows the action. There is no music.
+
+## sh060
+Reference sheet: Bo, a stocky teenage boy with a shaved head, an oversized green bomber jacket and orange high-tops, shown full-body in a three-quarter view. The location, a cramped diner kitchen with steel counters, a hanging ticket rail and cold fluorescent light from overhead.
+
+Generated video: Style: a flat vector cartoon with thick even outlines and a limited pastel palette. A medium shot of a cramped diner kitchen with steel counters, a hanging ticket rail and cold fluorescent light from overhead, the camera remains static. Bo is in frame. Bo stares at the ticket rail as it fills with orders. Bo, in a voice that is slow and cracking, says in an off-screen voiceover, their lips staying closed: "Here we go again, then, everybody." Cy says from off-screen, outside the frame: "Bo!" The ambient sound of the place follows the action. There is no music.
+
+## sh110
+Reference sheet: Ada, a tall woman in her thirties with a short grey bob, a mustard apron over a striped shirt, and round red glasses, shown full-body in a three-quarter view. Bo, a stocky teenage boy with a shaved head, an oversized green bomber jacket and orange high-tops, shown full-body in a three-quarter view. Cy, a small girl with two puffball pigtails, a purple raincoat and yellow rubber boots, shown full-body in a three-quarter view. The location, a wet night street outside the diner, neon sign reflected in the puddles, light from the left.
+
+Generated video: Style: a flat vector cartoon with thick even outlines and a limited pastel palette. A wide shot of a wet night street outside the diner, neon sign reflected in the puddles, light from the left, the camera remains static. Ada, Bo, and Cy are in frame. Ada, Bo and Cy spill out of the diner door into the rain. Ada, in a voice that is dry, quick and precise, says: "Van." Bo, in a voice that is slow and cracking, says: "Where?" Cy says: "There!" The sound is traffic hiss on wet asphalt. There is no music.
+
+## sh120
+Reference sheet: Ada, a tall woman in her thirties with a short grey bob, a mustard apron over a striped shirt, and round red glasses, shown full-body in a three-quarter view. The location, a wet night street outside the diner, neon sign reflected in the puddles, light from the left.
+
+Generated video: Style: a flat vector cartoon with thick even outlines and a limited pastel palette. A medium shot of a wet night street outside the diner, neon sign reflected in the puddles, light from the left, the camera remains static. Ada is in frame. Ada sprints along the kerb after the van. Ada, in a voice that is dry, quick and precise, says: "Stop!" The sound is running footsteps splashing through puddles. There is no music.
+
+## sh130
+Reference sheet: Bo, a stocky teenage boy with a shaved head, an oversized green bomber jacket and orange high-tops, shown full-body in a three-quarter view. The location, the diner's pass-through window looking out to the counter, warm tungsten light spilling in from the dining room.
+
+Generated video: Style: a flat vector cartoon with thick even outlines and a limited pastel palette. A medium shot of the diner's pass-through window looking out to the counter, warm tungsten light spilling in from the dining room, the camera remains static. Bo is in frame. Bo ducks back inside and leans through the pass-through window. Bo, in a voice that is slow and cracking, says from off-screen, outside the frame: "She's never catching that." The sound is rain drumming on the awning. There is no music.
+
+## sh140
+Reference sheet: The location, a wet night street outside the diner, neon sign reflected in the puddles, light from the left.
+
+Generated video: Style: a flat vector cartoon with thick even outlines and a limited pastel palette. A medium shot of a wet night street outside the diner, neon sign reflected in the puddles, light from the left, the camera remains static. The street empties; the neon sign flickers once and goes dark. The narrator, in a voice that is warm, older, unhurried, says in an off-screen voiceover: "And that was the last anyone saw of the kettle." The ambient sound of the place follows the action. There is no music.
+
+## sh150
+Reference sheet: Ada, a tall woman in her thirties with a short grey bob, a mustard apron over a striped shirt, and round red glasses, shown full-body in a three-quarter view. The location, a wet night street outside the diner, neon sign reflected in the puddles, light from the left.
+
+Generated video: Style: a flat vector cartoon with thick even outlines and a limited pastel palette. A medium shot of a wet night street outside the diner, neon sign reflected in the puddles, light from the left, the camera remains static. Ada is in frame. Ada stops dead in the middle of the road, soaked, and starts to laugh. The ambient sound of the place follows the action. There is no music.
+
+## sh210
+Reference sheet: Ada, a tall woman in her thirties with a short grey bob, a mustard apron over a striped shirt, and round red glasses, shown full-body in a three-quarter view. Bo, a stocky teenage boy with a shaved head, an oversized green bomber jacket and orange high-tops, shown full-body in a three-quarter view. The location, the diner's pass-through window looking out to the counter, warm tungsten light spilling in from the dining room.
+
+Generated video: Style: a flat vector cartoon with thick even outlines and a limited pastel palette. A medium shot of the diner's pass-through window looking out to the counter, warm tungsten light spilling in from the dining room, the camera remains static. Ada and Bo are in frame. Ada and Bo lean on the counter, dripping, as the kettle finally whistles. Ada, in a voice that is dry, quick and precise, says: "Well." Bo, in a voice that is slow and cracking, says: "Well what?" Ada says: "Put the tea on." The narrator, in a voice that is warm, older, unhurried, says in an off-screen voiceover: "They did." The ambient sound of the place follows the action. There is no music.
+
+## sh310
+Reference sheet: Cy, a small girl with two puffball pigtails, a purple raincoat and yellow rubber boots, shown full-body in a three-quarter view. The location, a cramped diner kitchen with steel counters, a hanging ticket rail and cold fluorescent light from overhead.
+
+Generated video: Style: a flat vector cartoon with thick even outlines and a limited pastel palette. A medium shot of a cramped diner kitchen with steel counters, a hanging ticket rail and cold fluorescent light from overhead, the camera remains static. Cy is in frame. Cy climbs onto a stool and peers into the steaming kettle. The ambient sound of the place follows the action. There is no music.
+
+## sh320
+Reference sheet: Ada, a tall woman in her thirties with a short grey bob, a mustard apron over a striped shirt, and round red glasses, shown in a face close-up. The location, a cramped diner kitchen with steel counters, a hanging ticket rail and cold fluorescent light from overhead.
+
+Generated video: Style: a flat vector cartoon with thick even outlines and a limited pastel palette. A close-up of a cramped diner kitchen with steel counters, a hanging ticket rail and cold fluorescent light from overhead, the camera remains static. Ada is in frame. Ada points a wooden spoon at the kettle. Ada, in a voice that is dry, quick and precise, says: "Don't you dare." The ambient sound of the place follows the action. There is no music.
+
+## sh330
+Reference sheet: Bo, a stocky teenage boy with a shaved head, an oversized green bomber jacket and orange high-tops, shown full-body in a three-quarter view. The location, a cramped diner kitchen with steel counters, a hanging ticket rail and cold fluorescent light from overhead.
+
+Generated video: Style: a flat vector cartoon with thick even outlines and a limited pastel palette. A medium shot of a cramped diner kitchen with steel counters, a hanging ticket rail and cold fluorescent light from overhead, the camera remains static. Bo is in frame. Bo lifts the kettle off the burner with a grin. Bo, in a voice that is slow and cracking, says: "Too late." The ambient sound of the place follows the action. There is no music.
+

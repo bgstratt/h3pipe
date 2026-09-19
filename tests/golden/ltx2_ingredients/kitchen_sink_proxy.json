@@ -1,0 +1,717 @@
+{
+  "doc": {
+    "episode": "ks01",
+    "title": "Kitchen Sink",
+    "target": "ltx2_ingredients",
+    "defaults": {
+      "width": 512,
+      "height": 288,
+      "fps": 24.0,
+      "steps": 8,
+      "model": "ltx-2.3-22b-distilled-fp8.safetensors",
+      "lora": "ltx-2.3-22b-ic-lora-ingredients-0.9.safetensors",
+      "audio_policy": "generate",
+      "master_track": "audio/ks01_mix.wav",
+      "negative": "worst quality, inconsistent motion, blurry, jittery, distorted, flickering, morphing, extra limbs, watermark, subtitles",
+      "text_encoder": "gemma_3_12B_it_fp4_mixed.safetensors"
+    },
+    "subjects": {
+      "ada": {
+        "kind": "character",
+        "sheet": "refs/ada/ada_sheet_4panel.png",
+        "voice_sample": "audio/voices/ada_sample.wav"
+      },
+      "bo": {
+        "kind": "character",
+        "sheet": "refs/bo/bo_sheet_4panel.png",
+        "voice_sample": "audio/voices/bo_sample.wav"
+      },
+      "cy": {
+        "kind": "character",
+        "sheet": "refs/cy/cy_sheet_4panel.png",
+        "voice_sample": "audio/voices/cy_sample.wav"
+      },
+      "rex": {
+        "kind": "character",
+        "sheet": "refs/rex/rex_sheet_4panel.png",
+        "voice_sample": ""
+      },
+      "narrator": {
+        "kind": "character",
+        "sheet": "refs/narrator/narrator_sheet_4panel.png",
+        "voice_sample": "audio/voices/narrator_sample.wav"
+      },
+      "kettle": {
+        "kind": "prop",
+        "sheet": "refs/props/kettle.png",
+        "voice_sample": ""
+      },
+      "van": {
+        "kind": "vehicle",
+        "sheet": "refs/props/van.png",
+        "voice_sample": ""
+      }
+    },
+    "shots": [
+      {
+        "id": "sh010",
+        "sequence": "sq01",
+        "subjects": [
+          "ada"
+        ],
+        "background": "refs/_bg/kitchen.png",
+        "size": "ws",
+        "length": 121,
+        "seed": 8828384270954910346,
+        "steps": 8,
+        "audio_policy": "generate",
+        "prompt": "Reference sheet: Ada, a tall woman in her thirties with a short grey bob, a mustard apron over a striped shirt, and round red glasses, shown full-body in a three-quarter view. The location, a cramped diner kitchen with steel counters, a hanging ticket rail and cold fluorescent light from overhead.\n\nGenerated video: Style: a flat vector cartoon with thick even outlines and a limited pastel palette. A wide shot of a cramped diner kitchen with steel counters, a hanging ticket rail and cold fluorescent light from overhead, the camera pushes in on Ada with small amplitude at slow speed. Ada is in frame. Ada slams the walk-in door shut and turns to face the kitchen. Visible on-screen text reads \"OPEN 24 HOURS\". The sound is the compressor hum of the walk-in, a door latch clanking. A plucky ukulele sting plays underneath.",
+        "negative": "worst quality, inconsistent motion, blurry, jittery, distorted, flickering, morphing, extra limbs, watermark, subtitles",
+        "panels": [
+          {
+            "subject": "ada",
+            "kind": "character",
+            "path": "refs/ada/ada_sheet_4panel.png",
+            "view": "body"
+          },
+          {
+            "location": "kitchen",
+            "kind": "plate",
+            "path": "refs/_bg/kitchen.png"
+          }
+        ],
+        "duration": 2.5
+      },
+      {
+        "id": "sh020",
+        "sequence": "sq01",
+        "subjects": [
+          "ada",
+          "bo",
+          "kettle"
+        ],
+        "background": "refs/_bg/kitchen.png",
+        "size": "ms",
+        "length": 121,
+        "seed": 2769191069994745345,
+        "steps": 8,
+        "audio_policy": "generate",
+        "prompt": "Reference sheet: Ada, a tall woman in her thirties with a short grey bob, a mustard apron over a striped shirt, and round red glasses, shown full-body in a three-quarter view. Bo, a stocky teenage boy with a shaved head, an oversized green bomber jacket and orange high-tops, shown full-body in a three-quarter view. The diner kettle, a dented chrome kettle with a black bakelite handle and a whistle cap on a chain. The location, a cramped diner kitchen with steel counters, a hanging ticket rail and cold fluorescent light from overhead.\n\nGenerated video: Style: a flat vector cartoon with thick even outlines and a limited pastel palette. A medium shot of a cramped diner kitchen with steel counters, a hanging ticket rail and cold fluorescent light from overhead, the camera remains static. Ada, Bo, and the diner kettle are in frame. Also in frame are two customers at the counter seen through the window, backs to camera, unnamed background figures who look nothing like Ada and Bo. Bo sets the kettle down on the burner and flicks the gas on. Ada, in a voice that is dry, quick and precise, says, warmly: \"You know that one whistles.\" Bo, in a voice that is slow and cracking, says: \"I know.\" Bo says, whispering: \"That's the point.\" The ambient sound of the place follows the action. There is no music.",
+        "negative": "worst quality, inconsistent motion, blurry, jittery, distorted, flickering, morphing, extra limbs, watermark, subtitles",
+        "panels": [
+          {
+            "subject": "ada",
+            "kind": "character",
+            "path": "refs/ada/ada_sheet_4panel.png",
+            "view": "body"
+          },
+          {
+            "subject": "bo",
+            "kind": "character",
+            "path": "refs/bo/bo_sheet_4panel.png",
+            "view": "body"
+          },
+          {
+            "subject": "kettle",
+            "kind": "prop",
+            "path": "refs/props/kettle.png"
+          },
+          {
+            "location": "kitchen",
+            "kind": "plate",
+            "path": "refs/_bg/kitchen.png"
+          }
+        ],
+        "duration": 3.6
+      },
+      {
+        "id": "sh030",
+        "sequence": "sq01",
+        "subjects": [
+          "ada"
+        ],
+        "background": "refs/_bg/kitchen.png",
+        "size": "cu",
+        "length": 121,
+        "seed": 9049780455082391214,
+        "steps": 8,
+        "audio_policy": "generate",
+        "prompt": "Reference sheet: Ada, a tall woman in her thirties with a short grey bob, a mustard apron over a striped shirt, and round red glasses, shown in a face close-up. The location, a cramped diner kitchen with steel counters, a hanging ticket rail and cold fluorescent light from overhead.\n\nGenerated video: Style: a flat vector cartoon with thick even outlines and a limited pastel palette. A close-up of a cramped diner kitchen with steel counters, a hanging ticket rail and cold fluorescent light from overhead, the camera remains static. Ada is in frame. Ada's eyes narrow at the kettle. Ada, in a voice that is dry, quick and precise, says in an off-screen voiceover, her lips staying closed: \"Not today.\" The ambient sound of the place follows the action. There is no music.",
+        "negative": "worst quality, inconsistent motion, blurry, jittery, distorted, flickering, morphing, extra limbs, watermark, subtitles",
+        "panels": [
+          {
+            "subject": "ada",
+            "kind": "character",
+            "path": "refs/ada/ada_sheet_4panel.png",
+            "view": "face"
+          },
+          {
+            "location": "kitchen",
+            "kind": "plate",
+            "path": "refs/_bg/kitchen.png"
+          }
+        ],
+        "duration": 1.62
+      },
+      {
+        "id": "sh040",
+        "sequence": "sq01",
+        "subjects": [
+          "bo",
+          "van",
+          "kettle"
+        ],
+        "background": "refs/_bg/kitchen.png",
+        "size": "close",
+        "length": 121,
+        "seed": 2765843861826537092,
+        "steps": 10,
+        "audio_policy": "generate",
+        "prompt": "Reference sheet: Bo, a stocky teenage boy with a shaved head, an oversized green bomber jacket and orange high-tops, shown full-body in a three-quarter view. The delivery van, a boxy white delivery van with a sky-blue stripe and a cracked left headlight. The diner kettle, a dented chrome kettle with a black bakelite handle and a whistle cap on a chain. The location, a cramped diner kitchen with steel counters, a hanging ticket rail and cold fluorescent light from overhead.\n\nGenerated video: Style: a flat vector cartoon with thick even outlines and a limited pastel palette. A close-up of a cramped diner kitchen with steel counters, a hanging ticket rail and cold fluorescent light from overhead, the camera remains static. Bo, the delivery van, and the diner kettle are in frame. Bo leans out of the back door as the van reverses toward it, kettle in hand. Bo, in a voice that is slow and cracking, says from off-screen, outside the frame: \"Left! Left!\" The narrator, in a voice that is warm, older, unhurried, says in an off-screen voiceover, into phone: \"Nobody ever goes left.\" The ambient sound of the place follows the action. There is no music.",
+        "negative": "worst quality, inconsistent motion, blurry, jittery, distorted, flickering, morphing, extra limbs, watermark, subtitles",
+        "panels": [
+          {
+            "subject": "bo",
+            "kind": "character",
+            "path": "refs/bo/bo_sheet_4panel.png",
+            "view": "body"
+          },
+          {
+            "subject": "van",
+            "kind": "vehicle",
+            "path": "refs/props/van.png"
+          },
+          {
+            "subject": "kettle",
+            "kind": "prop",
+            "path": "refs/props/kettle.png"
+          },
+          {
+            "location": "kitchen",
+            "kind": "plate",
+            "path": "refs/_bg/kitchen.png"
+          }
+        ],
+        "model": "shot_model.safetensors",
+        "lora": "none",
+        "duration": 3.04
+      },
+      {
+        "id": "sh050",
+        "sequence": "sq01",
+        "subjects": [
+          "cy",
+          "rex"
+        ],
+        "background": "refs/_bg/kitchen.png",
+        "size": "medium",
+        "length": 121,
+        "seed": 4412217473130868673,
+        "steps": 8,
+        "audio_policy": "generate",
+        "prompt": "Reference sheet: Cy, a small girl with two puffball pigtails, a purple raincoat and yellow rubber boots, shown full-body in a three-quarter view. Rex, a scruffy brown terrier with one white ear and a red collar, shown full-body in a three-quarter view. The location, a cramped diner kitchen with steel counters, a hanging ticket rail and cold fluorescent light from overhead.\n\nGenerated video: Style: a flat vector cartoon with thick even outlines and a limited pastel palette. A medium shot of a cramped diner kitchen with steel counters, a hanging ticket rail and cold fluorescent light from overhead, the camera remains static. Cy and Rex are in frame. Cy bursts in from the back with Rex at her heels. Cy says: \"Absolutely everybody in this entire neighbourhood is waiting outside for breakfast!\" Rex, in a voice that is a gravelly bark of a voice, says: \"Woof.\" The ambient sound of the place follows the action. There is no music.",
+        "negative": "worst quality, inconsistent motion, blurry, jittery, distorted, flickering, morphing, extra limbs, watermark, subtitles",
+        "panels": [
+          {
+            "subject": "cy",
+            "kind": "character",
+            "path": "refs/cy/cy_sheet_4panel.png",
+            "view": "body"
+          },
+          {
+            "subject": "rex",
+            "kind": "character",
+            "path": "refs/rex/rex_sheet_4panel.png",
+            "view": "body"
+          },
+          {
+            "location": "kitchen",
+            "kind": "plate",
+            "path": "refs/_bg/kitchen.png"
+          }
+        ],
+        "duration": 1.62
+      },
+      {
+        "id": "sh060",
+        "sequence": "sq01",
+        "subjects": [
+          "bo"
+        ],
+        "background": "refs/_bg/kitchen.png",
+        "size": "medium",
+        "length": 121,
+        "seed": 7624922143456421625,
+        "steps": 8,
+        "audio_policy": "generate",
+        "prompt": "Reference sheet: Bo, a stocky teenage boy with a shaved head, an oversized green bomber jacket and orange high-tops, shown full-body in a three-quarter view. The location, a cramped diner kitchen with steel counters, a hanging ticket rail and cold fluorescent light from overhead.\n\nGenerated video: Style: a flat vector cartoon with thick even outlines and a limited pastel palette. A medium shot of a cramped diner kitchen with steel counters, a hanging ticket rail and cold fluorescent light from overhead, the camera remains static. Bo is in frame. Bo stares at the ticket rail as it fills with orders. Bo, in a voice that is slow and cracking, says in an off-screen voiceover, their lips staying closed: \"Here we go again, then, everybody.\" Cy says from off-screen, outside the frame: \"Bo!\" The ambient sound of the place follows the action. There is no music.",
+        "negative": "worst quality, inconsistent motion, blurry, jittery, distorted, flickering, morphing, extra limbs, watermark, subtitles",
+        "panels": [
+          {
+            "subject": "bo",
+            "kind": "character",
+            "path": "refs/bo/bo_sheet_4panel.png",
+            "view": "body"
+          },
+          {
+            "location": "kitchen",
+            "kind": "plate",
+            "path": "refs/_bg/kitchen.png"
+          }
+        ],
+        "duration": 3.04
+      },
+      {
+        "id": "sh110",
+        "sequence": "sq02",
+        "subjects": [
+          "ada",
+          "bo",
+          "cy"
+        ],
+        "background": "refs/_bg/street.png",
+        "size": "wide",
+        "length": 121,
+        "seed": 3054841815674432230,
+        "steps": 12,
+        "audio_policy": "generate",
+        "prompt": "Reference sheet: Ada, a tall woman in her thirties with a short grey bob, a mustard apron over a striped shirt, and round red glasses, shown full-body in a three-quarter view. Bo, a stocky teenage boy with a shaved head, an oversized green bomber jacket and orange high-tops, shown full-body in a three-quarter view. Cy, a small girl with two puffball pigtails, a purple raincoat and yellow rubber boots, shown full-body in a three-quarter view. The location, a wet night street outside the diner, neon sign reflected in the puddles, light from the left.\n\nGenerated video: Style: a flat vector cartoon with thick even outlines and a limited pastel palette. A wide shot of a wet night street outside the diner, neon sign reflected in the puddles, light from the left, the camera remains static. Ada, Bo, and Cy are in frame. Ada, Bo and Cy spill out of the diner door into the rain. Ada, in a voice that is dry, quick and precise, says: \"Van.\" Bo, in a voice that is slow and cracking, says: \"Where?\" Cy says: \"There!\" The sound is traffic hiss on wet asphalt. There is no music.",
+        "negative": "worst quality, inconsistent motion, blurry, jittery, distorted, flickering, morphing, extra limbs, watermark, subtitles",
+        "panels": [
+          {
+            "subject": "ada",
+            "kind": "character",
+            "path": "refs/ada/ada_sheet_4panel.png",
+            "view": "body"
+          },
+          {
+            "subject": "bo",
+            "kind": "character",
+            "path": "refs/bo/bo_sheet_4panel.png",
+            "view": "body"
+          },
+          {
+            "subject": "cy",
+            "kind": "character",
+            "path": "refs/cy/cy_sheet_4panel.png",
+            "view": "body"
+          },
+          {
+            "location": "street",
+            "kind": "plate",
+            "path": "refs/_bg/street.png"
+          }
+        ],
+        "audio_intent": "dub",
+        "audio_note": "audio dub renders as generate on LTX+refs: LTX-2 generates sound with the picture and takes no voice sample or recording",
+        "model": "seq_model.safetensors",
+        "audio_in": 1.0,
+        "audio_out": 3.5
+      },
+      {
+        "id": "sh120",
+        "sequence": "sq02",
+        "subjects": [
+          "ada"
+        ],
+        "background": "refs/_bg/street.png",
+        "size": "medium",
+        "length": 121,
+        "seed": 985161046565145751,
+        "steps": 12,
+        "audio_policy": "generate",
+        "prompt": "Reference sheet: Ada, a tall woman in her thirties with a short grey bob, a mustard apron over a striped shirt, and round red glasses, shown full-body in a three-quarter view. The location, a wet night street outside the diner, neon sign reflected in the puddles, light from the left.\n\nGenerated video: Style: a flat vector cartoon with thick even outlines and a limited pastel palette. A medium shot of a wet night street outside the diner, neon sign reflected in the puddles, light from the left, the camera remains static. Ada is in frame. Ada sprints along the kerb after the van. Ada, in a voice that is dry, quick and precise, says: \"Stop!\" The sound is running footsteps splashing through puddles. There is no music.",
+        "negative": "worst quality, inconsistent motion, blurry, jittery, distorted, flickering, morphing, extra limbs, watermark, subtitles",
+        "panels": [
+          {
+            "subject": "ada",
+            "kind": "character",
+            "path": "refs/ada/ada_sheet_4panel.png",
+            "view": "body"
+          },
+          {
+            "location": "street",
+            "kind": "plate",
+            "path": "refs/_bg/street.png"
+          }
+        ],
+        "audio_intent": "dub_keep_foley",
+        "audio_note": "audio dub_keep_foley renders as generate on LTX+refs: LTX-2 generates sound with the picture and takes no voice sample or recording",
+        "model": "seq_model.safetensors",
+        "audio_in": 3.5,
+        "audio_out": 5.0
+      },
+      {
+        "id": "sh130",
+        "sequence": "sq02",
+        "subjects": [
+          "bo"
+        ],
+        "background": "refs/_bg/kitchen_window.png",
+        "size": "medium",
+        "length": 121,
+        "seed": 1964752148325355590,
+        "steps": 12,
+        "audio_policy": "generate",
+        "prompt": "Reference sheet: Bo, a stocky teenage boy with a shaved head, an oversized green bomber jacket and orange high-tops, shown full-body in a three-quarter view. The location, the diner's pass-through window looking out to the counter, warm tungsten light spilling in from the dining room.\n\nGenerated video: Style: a flat vector cartoon with thick even outlines and a limited pastel palette. A medium shot of the diner's pass-through window looking out to the counter, warm tungsten light spilling in from the dining room, the camera remains static. Bo is in frame. Bo ducks back inside and leans through the pass-through window. Bo, in a voice that is slow and cracking, says from off-screen, outside the frame: \"She's never catching that.\" The sound is rain drumming on the awning. There is no music.",
+        "negative": "worst quality, inconsistent motion, blurry, jittery, distorted, flickering, morphing, extra limbs, watermark, subtitles",
+        "panels": [
+          {
+            "subject": "bo",
+            "kind": "character",
+            "path": "refs/bo/bo_sheet_4panel.png",
+            "view": "body"
+          },
+          {
+            "location": "kitchen_window",
+            "kind": "plate",
+            "path": "refs/_bg/kitchen_window.png"
+          }
+        ],
+        "audio_intent": "dub_keep_foley",
+        "audio_note": "audio dub_keep_foley renders as generate on LTX+refs: LTX-2 generates sound with the picture and takes no voice sample or recording",
+        "model": "seq_model.safetensors",
+        "audio_in": 5.0,
+        "audio_out": 7.2
+      },
+      {
+        "id": "sh140",
+        "sequence": "sq02",
+        "subjects": [],
+        "background": "refs/_bg/street.png",
+        "size": "medium",
+        "length": 121,
+        "seed": 5738520875936942780,
+        "steps": 12,
+        "audio_policy": "generate",
+        "prompt": "Reference sheet: The location, a wet night street outside the diner, neon sign reflected in the puddles, light from the left.\n\nGenerated video: Style: a flat vector cartoon with thick even outlines and a limited pastel palette. A medium shot of a wet night street outside the diner, neon sign reflected in the puddles, light from the left, the camera remains static. The street empties; the neon sign flickers once and goes dark. The narrator, in a voice that is warm, older, unhurried, says in an off-screen voiceover: \"And that was the last anyone saw of the kettle.\" The ambient sound of the place follows the action. There is no music.",
+        "negative": "worst quality, inconsistent motion, blurry, jittery, distorted, flickering, morphing, extra limbs, watermark, subtitles",
+        "panels": [
+          {
+            "location": "street",
+            "kind": "plate",
+            "path": "refs/_bg/street.png"
+          }
+        ],
+        "audio_intent": "dub",
+        "audio_note": "audio dub renders as generate on LTX+refs: LTX-2 generates sound with the picture and takes no voice sample or recording",
+        "model": "seq_model.safetensors",
+        "audio_in": 7.2,
+        "audio_out": 9.0
+      },
+      {
+        "id": "sh150",
+        "sequence": "sq02",
+        "subjects": [
+          "ada"
+        ],
+        "background": "refs/_bg/street.png",
+        "size": "medium",
+        "length": 121,
+        "seed": 5193023516762493768,
+        "steps": 12,
+        "audio_policy": "generate",
+        "prompt": "Reference sheet: Ada, a tall woman in her thirties with a short grey bob, a mustard apron over a striped shirt, and round red glasses, shown full-body in a three-quarter view. The location, a wet night street outside the diner, neon sign reflected in the puddles, light from the left.\n\nGenerated video: Style: a flat vector cartoon with thick even outlines and a limited pastel palette. A medium shot of a wet night street outside the diner, neon sign reflected in the puddles, light from the left, the camera remains static. Ada is in frame. Ada stops dead in the middle of the road, soaked, and starts to laugh. The ambient sound of the place follows the action. There is no music.",
+        "negative": "worst quality, inconsistent motion, blurry, jittery, distorted, flickering, morphing, extra limbs, watermark, subtitles",
+        "panels": [
+          {
+            "subject": "ada",
+            "kind": "character",
+            "path": "refs/ada/ada_sheet_4panel.png",
+            "view": "body"
+          },
+          {
+            "location": "street",
+            "kind": "plate",
+            "path": "refs/_bg/street.png"
+          }
+        ],
+        "model": "seq_model.safetensors",
+        "duration": 1.0
+      },
+      {
+        "id": "sh210",
+        "sequence": "sq03",
+        "subjects": [
+          "ada",
+          "bo"
+        ],
+        "background": "refs/_bg/kitchen_window.png",
+        "size": "medium",
+        "length": 121,
+        "seed": 1998322879969458948,
+        "steps": 8,
+        "audio_policy": "generate",
+        "prompt": "Reference sheet: Ada, a tall woman in her thirties with a short grey bob, a mustard apron over a striped shirt, and round red glasses, shown full-body in a three-quarter view. Bo, a stocky teenage boy with a shaved head, an oversized green bomber jacket and orange high-tops, shown full-body in a three-quarter view. The location, the diner's pass-through window looking out to the counter, warm tungsten light spilling in from the dining room.\n\nGenerated video: Style: a flat vector cartoon with thick even outlines and a limited pastel palette. A medium shot of the diner's pass-through window looking out to the counter, warm tungsten light spilling in from the dining room, the camera remains static. Ada and Bo are in frame. Ada and Bo lean on the counter, dripping, as the kettle finally whistles. Ada, in a voice that is dry, quick and precise, says: \"Well.\" Bo, in a voice that is slow and cracking, says: \"Well what?\" Ada says: \"Put the tea on.\" The narrator, in a voice that is warm, older, unhurried, says in an off-screen voiceover: \"They did.\" The ambient sound of the place follows the action. There is no music.",
+        "negative": "worst quality, inconsistent motion, blurry, jittery, distorted, flickering, morphing, extra limbs, watermark, subtitles",
+        "panels": [
+          {
+            "subject": "ada",
+            "kind": "character",
+            "path": "refs/ada/ada_sheet_4panel.png",
+            "view": "body"
+          },
+          {
+            "subject": "bo",
+            "kind": "character",
+            "path": "refs/bo/bo_sheet_4panel.png",
+            "view": "body"
+          },
+          {
+            "location": "kitchen_window",
+            "kind": "plate",
+            "path": "refs/_bg/kitchen_window.png"
+          }
+        ],
+        "lora": "seq_lora.safetensors",
+        "duration": 3.595
+      },
+      {
+        "id": "sh310",
+        "sequence": "sq04",
+        "subjects": [
+          "cy"
+        ],
+        "background": "refs/_bg/kitchen.png",
+        "size": "medium",
+        "length": 121,
+        "seed": 6151578644003521749,
+        "steps": 5,
+        "audio_policy": "generate",
+        "prompt": "Reference sheet: Cy, a small girl with two puffball pigtails, a purple raincoat and yellow rubber boots, shown full-body in a three-quarter view. The location, a cramped diner kitchen with steel counters, a hanging ticket rail and cold fluorescent light from overhead.\n\nGenerated video: Style: a flat vector cartoon with thick even outlines and a limited pastel palette. A medium shot of a cramped diner kitchen with steel counters, a hanging ticket rail and cold fluorescent light from overhead, the camera remains static. Cy is in frame. Cy climbs onto a stool and peers into the steaming kettle. The ambient sound of the place follows the action. There is no music.",
+        "negative": "worst quality, inconsistent motion, blurry, jittery, distorted, flickering, morphing, extra limbs, watermark, subtitles",
+        "panels": [
+          {
+            "subject": "cy",
+            "kind": "character",
+            "path": "refs/cy/cy_sheet_4panel.png",
+            "view": "body"
+          },
+          {
+            "location": "kitchen",
+            "kind": "plate",
+            "path": "refs/_bg/kitchen.png"
+          }
+        ],
+        "profile": "quick",
+        "duration": 2.33
+      },
+      {
+        "id": "sh320",
+        "sequence": "sq04",
+        "subjects": [
+          "ada"
+        ],
+        "background": "refs/_bg/kitchen.png",
+        "size": "close",
+        "length": 121,
+        "seed": 5660381186064488857,
+        "steps": 7,
+        "audio_policy": "generate",
+        "prompt": "Reference sheet: Ada, a tall woman in her thirties with a short grey bob, a mustard apron over a striped shirt, and round red glasses, shown in a face close-up. The location, a cramped diner kitchen with steel counters, a hanging ticket rail and cold fluorescent light from overhead.\n\nGenerated video: Style: a flat vector cartoon with thick even outlines and a limited pastel palette. A close-up of a cramped diner kitchen with steel counters, a hanging ticket rail and cold fluorescent light from overhead, the camera remains static. Ada is in frame. Ada points a wooden spoon at the kettle. Ada, in a voice that is dry, quick and precise, says: \"Don't you dare.\" The ambient sound of the place follows the action. There is no music.",
+        "negative": "worst quality, inconsistent motion, blurry, jittery, distorted, flickering, morphing, extra limbs, watermark, subtitles",
+        "panels": [
+          {
+            "subject": "ada",
+            "kind": "character",
+            "path": "refs/ada/ada_sheet_4panel.png",
+            "view": "face"
+          },
+          {
+            "location": "kitchen",
+            "kind": "plate",
+            "path": "refs/_bg/kitchen.png"
+          }
+        ],
+        "model": "profile_model.safetensors",
+        "loras": [
+          {
+            "name": "profile_turbo_8step.safetensors",
+            "strength": 1.0
+          },
+          {
+            "name": "profile_style.safetensors",
+            "strength": 0.6
+          }
+        ],
+        "profile": "dialogue_close",
+        "duration": 1.332
+      },
+      {
+        "id": "sh330",
+        "sequence": "sq04",
+        "subjects": [
+          "bo"
+        ],
+        "background": "refs/_bg/kitchen.png",
+        "size": "medium",
+        "length": 121,
+        "seed": 5114629555451768005,
+        "steps": 9,
+        "audio_policy": "generate",
+        "prompt": "Reference sheet: Bo, a stocky teenage boy with a shaved head, an oversized green bomber jacket and orange high-tops, shown full-body in a three-quarter view. The location, a cramped diner kitchen with steel counters, a hanging ticket rail and cold fluorescent light from overhead.\n\nGenerated video: Style: a flat vector cartoon with thick even outlines and a limited pastel palette. A medium shot of a cramped diner kitchen with steel counters, a hanging ticket rail and cold fluorescent light from overhead, the camera remains static. Bo is in frame. Bo lifts the kettle off the burner with a grin. Bo, in a voice that is slow and cracking, says: \"Too late.\" The ambient sound of the place follows the action. There is no music.",
+        "negative": "worst quality, inconsistent motion, blurry, jittery, distorted, flickering, morphing, extra limbs, watermark, subtitles",
+        "panels": [
+          {
+            "subject": "bo",
+            "kind": "character",
+            "path": "refs/bo/bo_sheet_4panel.png",
+            "view": "body"
+          },
+          {
+            "location": "kitchen",
+            "kind": "plate",
+            "path": "refs/_bg/kitchen.png"
+          }
+        ],
+        "model": "profile_model.safetensors",
+        "lora": "shot_lora.safetensors",
+        "profile": "dialogue_close",
+        "duration": 1.105
+      }
+    ]
+  },
+  "report": {
+    "episode": "ks01",
+    "title": "Kitchen Sink",
+    "mode": "proxy",
+    "resolution": "512x288",
+    "steps": 8,
+    "model": "ltx-2.3-22b-distilled-fp8.safetensors",
+    "lora": "ltx-2.3-22b-ic-lora-ingredients-0.9.safetensors",
+    "fps": 24.0,
+    "shots": 15,
+    "sequences": 4,
+    "target_s": 32.791666666666664,
+    "delivered_s": 75.625,
+    "pad_frames": 1028,
+    "policies": {
+      "generate": 15
+    },
+    "needed": {
+      "refs/ada/ada_sheet_4panel.png": {
+        "kind": "character sheet",
+        "prompt": "A character model sheet on a plain flat background: FOUR panels side by side in a single horizontal strip, left to right — three-quarter body, side profile full body, back view full body, and a head-and-shoulders facial close-up. The SAME character in all four. a tall woman in her thirties with a short grey bob, a mustard apron over a striped shirt, and round red glasses. Drawn as a flat vector cartoon with thick even outlines and a limited pastel palette. Output 4096x1024 or larger."
+      },
+      "refs/_bg/kitchen.png": {
+        "kind": "background plate",
+        "prompt": "A background plate drawn as a flat vector cartoon with thick even outlines and a limited pastel palette. An empty establishing view of a cramped diner kitchen with steel counters, a hanging ticket rail and cold fluorescent light from overhead. No characters, no props, no figures in frame — the environment only. Wide framing that shows the layout of the space."
+      },
+      "refs/bo/bo_sheet_4panel.png": {
+        "kind": "character sheet",
+        "prompt": "A character model sheet on a plain flat background: FOUR panels side by side in a single horizontal strip, left to right — three-quarter body, side profile full body, back view full body, and a head-and-shoulders facial close-up. The SAME character in all four. a stocky teenage boy with a shaved head, an oversized green bomber jacket and orange high-tops. Drawn as a flat vector cartoon with thick even outlines and a limited pastel palette. Output 4096x1024 or larger."
+      },
+      "refs/props/kettle.png": {
+        "kind": "prop reference",
+        "prompt": "A single clean three-quarter view of one object on a plain flat background, no scene around it. a dented chrome kettle with a black bakelite handle and a whistle cap on a chain. Drawn as a flat vector cartoon with thick even outlines and a limited pastel palette. Output 1024x1024 or larger."
+      },
+      "refs/props/van.png": {
+        "kind": "vehicle reference",
+        "prompt": "A single clean three-quarter view of one object on a plain flat background, no scene around it. a boxy white delivery van with a sky-blue stripe and a cracked left headlight. Drawn as a flat vector cartoon with thick even outlines and a limited pastel palette. Output 1024x1024 or larger."
+      },
+      "refs/cy/cy_sheet_4panel.png": {
+        "kind": "character sheet",
+        "prompt": "A character model sheet on a plain flat background: FOUR panels side by side in a single horizontal strip, left to right — three-quarter body, side profile full body, back view full body, and a head-and-shoulders facial close-up. The SAME character in all four. a small girl with two puffball pigtails, a purple raincoat and yellow rubber boots. Drawn as a flat vector cartoon with thick even outlines and a limited pastel palette. Output 4096x1024 or larger."
+      },
+      "refs/rex/rex_sheet_4panel.png": {
+        "kind": "character sheet",
+        "prompt": "A character model sheet on a plain flat background: FOUR panels side by side in a single horizontal strip, left to right — three-quarter body, side profile full body, back view full body, and a head-and-shoulders facial close-up. The SAME character in all four. a scruffy brown terrier with one white ear and a red collar. Drawn as a flat vector cartoon with thick even outlines and a limited pastel palette. Output 4096x1024 or larger."
+      },
+      "refs/_bg/street.png": {
+        "kind": "background plate",
+        "prompt": "A background plate drawn as a flat vector cartoon with thick even outlines and a limited pastel palette. An empty establishing view of a wet night street outside the diner, neon sign reflected in the puddles, light from the left. No characters, no props, no figures in frame — the environment only. Wide framing that shows the layout of the space."
+      },
+      "refs/_bg/kitchen_window.png": {
+        "kind": "background plate",
+        "prompt": "A background plate drawn as a flat vector cartoon with thick even outlines and a limited pastel palette. An empty establishing view of the diner's pass-through window looking out to the counter, warm tungsten light spilling in from the dining room. No characters, no props, no figures in frame — the environment only. Wide framing that shows the layout of the space."
+      }
+    },
+    "blocked_shots": {
+      "refs/ada/ada_sheet_4panel.png": [
+        "sh010",
+        "sh020",
+        "sh030",
+        "sh110",
+        "sh120",
+        "sh150",
+        "sh210",
+        "sh320"
+      ],
+      "refs/_bg/kitchen.png": [
+        "sh010",
+        "sh020",
+        "sh030",
+        "sh040",
+        "sh050",
+        "sh060",
+        "sh310",
+        "sh320",
+        "sh330"
+      ],
+      "refs/bo/bo_sheet_4panel.png": [
+        "sh020",
+        "sh040",
+        "sh060",
+        "sh110",
+        "sh130",
+        "sh210",
+        "sh330"
+      ],
+      "refs/props/kettle.png": [
+        "sh020",
+        "sh040"
+      ],
+      "refs/props/van.png": [
+        "sh040"
+      ],
+      "refs/cy/cy_sheet_4panel.png": [
+        "sh050",
+        "sh110",
+        "sh310"
+      ],
+      "refs/rex/rex_sheet_4panel.png": [
+        "sh050"
+      ],
+      "refs/_bg/street.png": [
+        "sh110",
+        "sh120",
+        "sh140",
+        "sh150"
+      ],
+      "refs/_bg/kitchen_window.png": [
+        "sh130",
+        "sh210"
+      ]
+    },
+    "warnings": [
+      "sh010: 2.50s renders LTX+refs's whole 121-frame bucket (5.04s); trim it in the cut.",
+      "sh030: 1.62s renders LTX+refs's whole 121-frame bucket (5.04s); trim it in the cut.",
+      "sh040: 3.04s renders LTX+refs's whole 121-frame bucket (5.04s); trim it in the cut.",
+      "sh050: CRAMMED — 26 syllables in 5.04s forces 6.4 syl/s (ceiling 5.8). Split the shot.",
+      "sh050: 1.62s renders LTX+refs's whole 121-frame bucket (5.04s); trim it in the cut.",
+      "sh060: 3.04s renders LTX+refs's whole 121-frame bucket (5.04s); trim it in the cut.",
+      "sh150: 1.00s renders LTX+refs's whole 121-frame bucket (5.04s); trim it in the cut.",
+      "sh310: 2.33s renders LTX+refs's whole 121-frame bucket (5.04s); trim it in the cut.",
+      "2 shot(s) ask for audio dub, which LTX+refs can't render (LTX-2 generates sound with the picture and takes no voice sample or recording): they render with generate: sh110, sh140",
+      "2 shot(s) ask for audio dub_keep_foley, which LTX+refs can't render (LTX-2 generates sound with the picture and takes no voice sample or recording): they render with generate: sh120, sh130",
+      "sh040 overrides model: shot_model.safetensors",
+      "sh040 overrides lora: none",
+      "sh110 overrides model: seq_model.safetensors",
+      "sh120 overrides model: seq_model.safetensors",
+      "sh130 overrides model: seq_model.safetensors",
+      "sh140 overrides model: seq_model.safetensors",
+      "sh150 overrides model: seq_model.safetensors",
+      "sh210 overrides lora: seq_lora.safetensors",
+      "sh320 overrides model: profile_model.safetensors",
+      "sh330 overrides model: profile_model.safetensors",
+      "sh330 overrides lora: shot_lora.safetensors"
+    ],
+    "target": "ltx2_ingredients",
+    "size_hints": {
+      "character sheet": "4096x1024 or larger (horizontal 4-panel strip)",
+      "prop reference": "1024x1024 or larger",
+      "vehicle reference": "1024x1024 or larger",
+      "background plate": "1344x768 (any landscape size: it becomes one panel of the sheet)"
+    }
+  }
+}

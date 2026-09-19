@@ -557,3 +557,39 @@ open, and what was added:
   `shotlist.<target>_proxy.json` beside `shotlist.json` / `shotlist_proxy.json`, each with a
   top-level `"target"`. `shotlist.json` is always the series target's, even when no shot is
   left on it.
+
+## The `ltx2_ingredients` target (as built)
+
+A third video target: LTX-2.3 with the IC-LoRA "ingredients", which keeps characters,
+props and the set looking like their refs. Nothing new in the routes; what the existing
+ones now show:
+
+- **`GET /h3pipe/targets`** lists it: `label` "LTX-2.3 ingredients (character/plate refs)",
+  `short` "LTX+refs". `capabilities` gains `reference_sheet` (true only here), and
+  `subject_refs` is true for it. `template`: `fps: 24`, `frames: {step: 8, base: 121, max:
+  121}` (every shot is 121 frames), `size_multiple: 32`. Presets: final 768×448, proxy
+  512×288, both `ltx-2.3-22b-distilled-fp8.safetensors` + `ltx-2.3-22b-ic-lora-ingredients-0.9`
+  at 1.0, 8 steps, text encoder `gemma_3_12B_it_fp4_mixed`. Its widgets include `steps`
+  (the template's KSampler), and `model` is patched into all three loaders that read the
+  checkpoint.
+- **Shotlist entries** carry `panels`: the reference sheet, in order, each
+  `{"subject", "kind", "path", "view"?: "body" | "face"}` or `{"location", "kind": "plate",
+  "path"}`. `prompt` is `"Reference sheet: …\n\nGenerated video: …"` (a shot with no panels:
+  plain LTX-2 prose).
+- **`missing_refs`** (episode listing, render `skipped`) lists the panels' files that
+  aren't on disk, with slots `"sheet panel N"` and `subject` or `location`. They block the
+  shot like H3's pictures. `allow_missing_refs: true` recompiles the shot without them
+  (`missing_mode: "recompiled"`): they leave the sheet and the `Reference sheet:` half, and
+  a shot left with none renders text-only (the take's `notes` say so).
+- **Queueing** (`POST /h3pipe/render`, `h3render`): before the take is reserved, the sheet
+  is composed from the live ref files at the render size (no text, one panel per element
+  tiling the sheet with thin black lines between them; `comfy_nodes/h3_refsheet.py`, run
+  as a subprocess of the running Python, which needs PIL: ComfyUI's has it) and uploaded
+  as `h3pipe/<sha1>.png`.
+  Composing fails clearly when PIL is missing; the shot is reported in `errors`.
+- **Take files and sidecar:** the sheet is kept as `<shot>_tNN_refsheet.png` beside the
+  mp4. The sidecar's `refs` lists each panel's file with its `sha1` (so re-picking a view
+  makes the take `ref`-stale) and then the sheet itself (`slot: "reference sheet"`,
+  `role: "sheet"`, its path in the take folder and `sha1`); `inputs` is
+  `{"sheet": "h3pipe/<sha1>.png"}`. When a LoRA list from a script line or profile didn't
+  name the IC-LoRA, it is put back first and `notes` says so.

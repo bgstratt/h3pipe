@@ -1,4 +1,4 @@
 exit 1
 
-  error in other_target.md: shot sh010: target 'ltx_2_3' is not a video target (known: ltx2, minimax_h3_ref2va)
+  error in other_target.md: shot sh010: target 'ltx_2_3' is not a video target (known: ltx2, ltx2_ingredients, minimax_h3_ref2va)
 

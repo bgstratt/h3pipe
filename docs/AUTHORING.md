@@ -62,8 +62,9 @@ shot 93. So:
   not. 1344×768 is H3's native canvas.
 - `steps`, `lora` and `model` are optional per pass; see the README's **Steps, model and LoRA**.
 - `series.target` names the video model the episode renders on: `minimax_h3_ref2va`
-  (MiniMax H3, the default: leave it out) or `ltx2` (LTX-2.5 distilled). Single shots or
-  sequences can render on the other one; see **Rendering a shot on LTX-2** below.
+  (MiniMax H3, the default: leave it out), `ltx2` (LTX-2.5 distilled) or `ltx2_ingredients`
+  (LTX-2.3 with your character sheets and plates). Single shots or sequences can render on
+  another one; see **Rendering a shot on LTX-2** below.
 
 ### Render profiles
 
@@ -169,7 +170,7 @@ sound: running footsteps on grass, fabric movement
 | `extras: …` | other people in frame, described; see **Crowds and extras** |
 | `model:`, `lora:`, `steps:` | per-shot render overrides; also valid under a `#` header |
 | `profile: dialogue_close` | a render profile from the series config; also valid under a `#` header |
-| `target: ltx2` | the video model for this shot or sequence (`minimax_h3_ref2va` or `ltx2`); see below |
+| `target: ltx2` | the video model for this shot or sequence (`minimax_h3_ref2va`, `ltx2` or `ltx2_ingredients`); see below |
 | `NAME: line` | dialogue from someone on screen |
 | `NAME (V.O.): line` | voiceover: speaks, is not drawn, costs no reference slot |
 | `NAME (O.S.): line` | off-screen: in the space, outside the frame |
@@ -204,6 +205,36 @@ render command and the review cut treat the episode as one. What changes for an 
 
 To try a shot on LTX without touching the script, retarget it from the editor or with
 `h3.py override <ep> sh040 --target ltx2` (`--target built` undoes it).
+
+### Rendering a shot on LTX-2 with its refs: `target: ltx2_ingredients`
+
+`target: ltx2_ingredients` renders on LTX-2.3 with the "ingredients" IC-LoRA, which keeps a
+recurring character looking like its sheet (and a prop like its picture, the set like its
+plate). Everything above about LTX-2 holds (generated sound, `camera:`, retargeting), except:
+
+- **Your refs are used, and required.** Each shot gets a reference sheet, made when it is
+  queued from the picked refs: one panel per element, tiling the frame, in order: each character in
+  `who:` (one panel of its 4-panel sheet: the face on a one-character `close`/`cu` shot, the
+  three-quarter body otherwise, as on H3), then each prop and vehicle in `with:`, then the
+  location's plate. A shot whose ref is missing is blocked, as on H3. Rendering anyway
+  leaves that element off the sheet (it is still described in words); a shot left with no
+  refs at all renders text-only, without the IC-LoRA. The sheet is kept beside the take
+  (`<shot>_tNN_refsheet.png`), and re-picking a view marks the take stale.
+- **Give important things their own panel.** The model only reproduces what is on the
+  sheet, and bigger panels carry over better: a crowded shot (many `who:`/`with:`) gets
+  small panels. Keep the plate clean.
+- **One length: 121 frames (5.04 s).** The IC-LoRA was trained on 768×448, 121 frames,
+  24 fps, so every shot renders exactly that. A shorter shot is padded up to 5.04 s (a
+  dialogue window is trimmed back in the review cut; trim others in the cut) and a longer
+  one is an error: split it.
+- **Size is the model's**: 768×448 for the final, 512×288 for the proxy, whatever the series
+  config's pass blocks say.
+- **A two-part prompt**, written for you: `Reference sheet:` names each panel in order (the
+  character's `name` and `design` and which view, the prop's, the location's
+  `description`), then `Generated video:` is the LTX-2 paragraph, where someone on the
+  sheet is only named.
+- A `lora:` line or profile written for another model doesn't remove the IC-LoRA: it is
+  put back first in the list, and the take says so.
 
 ## Durations land on a grid
 

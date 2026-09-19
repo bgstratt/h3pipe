@@ -36,6 +36,9 @@ and, for a video target, the code behind it:
     patch_graph(graph, job, inputs)                 (optional) graph surgery the
                                                     binding's data can't express
                                                     (LTX: keyframe conditioning)
+    stage_inputs(job, comfy)                        (optional) inputs the target
+                                                    makes at queue time (the
+                                                    ingredients reference sheet)
 
 or, for an image target:
 
@@ -392,6 +395,14 @@ class Target:
         LoadImage reads (see h3jobs.stage_inputs)."""
         self._need("patch_graph")(self, graph, job, inputs)
 
+    def stage_inputs(self, job, comfy=None) -> dict:
+        """Inputs the target makes itself for one job, before its take is
+        reserved (only targets that have it: supports("stage_inputs")):
+        {role: the name LoadImage reads}. ltx2_ingredients composes the shot's
+        reference sheet and uploads it (`comfy`; None is a dry run). Called by
+        h3jobs.stage_inputs."""
+        return self._need("stage_inputs")(self, job, comfy)
+
     def supports(self, name: str) -> bool:
         return getattr(self.module, name, None) is not None
 
@@ -424,7 +435,8 @@ class Target:
         return {"policies": self.policies,
                 "policy_fallback": (r.get("policy_fallback") or {}).get("to"),
                 "voice_reference": bool(r.get("voice_slots")),
-                "subject_refs": bool(r.get("subject_slots")),
+                "subject_refs": bool(r.get("subject_slots") or r.get("reference_sheet")),
+                "reference_sheet": bool(r.get("reference_sheet")),
                 "keyframes": list(r.get("keyframes") or []),
                 "prompt": r.get("prompt", "sections" if r.get("subject_slots") else "prose"),
                 "negative_prompt": bool(self.binding.specs("negative"))}

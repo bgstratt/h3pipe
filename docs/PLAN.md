@@ -506,7 +506,9 @@ real ComfyUI, a `kreagen` dry run, and workflows still read from ComfyUI's saved
   73 frames (8k+1), 448×256 with AAC audio, thumbnail and strip written; the last frame
   matched the last keyframe. The mixed H3/LTX proxy cut assembled.
 - **Left for full LTX parity:**
-  - **Subject references (IC-LoRA "ingredients").** Design: a third ref shape,
+  - ~~**Subject references (IC-LoRA "ingredients").**~~ **Done** (2026-09-19): the
+    `ltx2_ingredients` target; see **LTX-2.3 ingredients — as built** below. The design
+    that follows is kept as the reasoning. Design: a third ref shape,
     `reference_sheet`, per shot: one composite image on black, one clean panel per element
     (each character's face + body from its picked views, each prop, the plate), made by an
     image-target job (`mksheet` can already stitch; it needs a layout and a black ground).
@@ -531,6 +533,64 @@ real ComfyUI, a `kreagen` dry run, and workflows still read from ComfyUI's saved
   - Per-target pass blocks in the series config (`targets.ltx2.series` / `.proxy`) if one
     series needs different LTX model/steps than the target's presets.
   - `H3SaveShot` still names the generated mix `_h3.wav` for any target.
+
+**LTX-2.3 ingredients — as built** (`targets/video/ltx2_ingredients/`, from the user's
+saved `template_ltx2_3_ic_lora_ingredients.json`; label "LTX-2.3 ingredients
+(character/plate refs)", short `LTX+refs`)
+- **Template:** the IC-LoRA's bucket, checked against the template's notes (the workflow's
+  own defaults are 1280×720 at 25 fps, 5 s × 25 = 125 reference frames, which it crops to
+  121): fps 24; frames `{step 8, base 121, max 121}`, so **every shot is exactly 121 frames**
+  (8k+1). The reference video must be ≥121 frames (model card) and no longer than the
+  output (`LTXVAddGuide` asserts it), so a shorter output isn't possible without leaving
+  the bucket: short shots pad up (a warning; dialogue windows trim back in assemble),
+  longer ones are a build error ("split the shot"). Sizes are multiples of 32 (one
+  stage, no upscaler); another target's series block lends no size.
+- **Presets:** both `ltx-2.3-22b-distilled-fp8.safetensors` (checkpoint, audio VAE and
+  text-encoder projection all read it) + `ltx-2.3-22b-ic-lora-ingredients-0.9.safetensors`
+  at 1.0 (the template's; the card's 1.4 is for dev at 30 steps) as the preset LoRA,
+  `gemma_3_12B_it_fp4_mixed.safetensors`, KSampler 8 steps (patched: `steps` is a real
+  widget here). Final 768×448, proxy 512×288 (the bucket × 2/3, on the 32 grid). A dev
+  final (dev + distilled LoRA 0.75) is left to a profile.
+- **Binding:** widgets as in `ltx2`; `model` goes to the three loaders; width/height to the
+  latent and `ResizeAndPadImage`; length to the latent, the audio latent and
+  `RepeatImageBatch`; `H3SaveShot` replaces `CreateVideo`; prune drops the enhancer
+  (`TextGenerateLTX2Prompt`, its Gemma LoRA, the switch), the size/length maths and the
+  previews. The flattened, patched graph passes `check_graph` against the trimmed
+  `/object_info` fixture (unchanged: it already had every class).
+- **Recipe:** entries carry `panels` (characters in `who:` order, then props/vehicles, then
+  the plate; a character's view is H3's rule: face on a one-character close-up, else the
+  three-quarter body). Every panel's file is a required ref (`needed`/`blocked_shots` in
+  refs_todo, blocked at queue time like H3). Render anyway = `compile_without`: missing
+  elements leave the sheet and the `Reference sheet:` half; none left = text-only (the
+  graph drops the guide, crop and IC-LoRA; the prompt is plain `ltx2` prose; the take's
+  notes say so). A LoRA list from a script line or profile that lacks the IC-LoRA gets it
+  put back first, with a note.
+- **The sheet** is composed at queue time, not by a node (no ComfyUI restart):
+  `h3jobs.stage_inputs` calls the target's new optional `stage_inputs(job, comfy)`, which
+  runs `comfy_nodes/h3_refsheet.py` (PIL) as a subprocess of the running Python (clear
+  error without PIL), uploads the PNG through `POST /upload/image`, and leaves it in
+  `job.staged`; `start_job` moves it into the take as `<shot>_tNN_refsheet.png` and appends
+  it (sha1, `role: "sheet"`) to the sidecar's `refs`, after the panel files' own entries,
+  which are what make a take `ref`-stale. A dry run composes nothing.
+- **Layout:** the panels tile the whole frame in rows or columns (whichever leaves least
+  black and crops least), thin black lines between, **no black border or bands**: the
+  first live render, from a sheet with black bands above and below its row, came back
+  letterboxed exactly where the bands were (the IC-LoRA reads the reference at the output's
+  size and position). The plate is cover-cropped; a figure only at its sides (≥60% kept).
+- **Prompt:** `Reference sheet: <one sentence per panel: name, design, view>\n\nGenerated
+  video: <the ltx2 paragraph>`, where subjects on the sheet are named, not re-described.
+- **Live check (2026-09-19, scratch copy of ep05, proxy, CLI `--target`):** dry run with
+  `--check-nodes` clean against the running ComfyUI (23 nodes). sh020 (Dean, medium, old
+  layout): 36 s, 121 frames 512×288 + AAC, sidecar ok, thumb/strip/refsheet; Dean on
+  model (cap and goggles, blue shirt, suspenders) but the frame letterboxed like the sheet.
+  sh210 (Dean + Whiskers, new layout): 21 s, full frame; Dean very close to his sheet
+  (cap, goggles, suspenders, the red knee patch), Whiskers recognisable (green body, face,
+  antennae, cheek tufts) but its patterned wings came out as a white glow. sh060 (face
+  close-up): 21 s; Dean's face matches the face panel, framed through the sill's window.
+- **Left:** a dev-model final profile and whether the card's LoRA 1.4 / STG help;
+  per-character face + body panels (the card's advice) instead of H3's one-panel rule;
+  shots longer than the bucket (split automatically, or allow up to ~10 s with a warning);
+  the editor showing the take's refsheet.
 
 **Phase 9 — later**
 - Script pane: `epNN.md` in a text editor with live `--check` errors beside the lines;

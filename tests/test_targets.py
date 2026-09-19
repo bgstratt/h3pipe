@@ -42,8 +42,9 @@ def kitchen_sink():
 class LoadingTest(unittest.TestCase):
     def test_list_and_load(self):
         ids = {(t.kind, t.id) for t in TG.list_targets()}
-        self.assertEqual(ids, {("video", H3), ("video", "ltx2"), ("image", "krea2")})
-        self.assertEqual([t.id for t in TG.list_targets("video")], ["ltx2", H3])
+        self.assertEqual(ids, {("video", H3), ("video", "ltx2"), ("video", "ltx2_ingredients"),
+                               ("image", "krea2")})
+        self.assertEqual([t.id for t in TG.list_targets("video")], ["ltx2", "ltx2_ingredients", H3])
         self.assertIs(TG.load_target(H3), TG.load_target(H3))
         with self.assertRaises(TG.TargetError) as cm:
             TG.load_target("ltx_2_3", "video")
@@ -165,7 +166,8 @@ class ProfileTest(unittest.TestCase):
         series_cfg["profiles"]["dialogue_close"]["target"] = "ltx_2_3"
         with self.assertRaises(ValueError) as cm:
             TG.episode_target(story, series_cfg)
-        self.assertIn("not a video target (known: ltx2, minimax_h3_ref2va)", str(cm.exception))
+        self.assertIn("not a video target (known: ltx2, ltx2_ingredients, minimax_h3_ref2va)",
+                      str(cm.exception))
         # sh320 names the series target itself, which beats its profile's; sh330
         # takes the profile's
         self.assertIn("shot sh330:", str(cm.exception))
@@ -387,7 +389,9 @@ class TargetsRouteTest(ApiTest):
     def test_targets(self):
         data = self.ok(A.get_targets(self.ctx, {}))
         by = {t["id"]: t for t in data["targets"]}
-        self.assertEqual(set(by), {H3, "ltx2", "krea2"})
+        self.assertEqual(set(by), {H3, "ltx2", "ltx2_ingredients", "krea2"})
+        self.assertEqual((by["ltx2_ingredients"]["label"], by["ltx2_ingredients"]["short"]),
+                         ("LTX-2.3 ingredients (character/plate refs)", "LTX+refs"))
         self.assertEqual(by[H3]["kind"], "video")
         self.assertIn("loras", by[H3]["widgets"])
         # what a target picker needs
