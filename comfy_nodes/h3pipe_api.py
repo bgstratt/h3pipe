@@ -38,12 +38,21 @@ try:
     if HOME not in sys.path:
         # appended, not prepended: nothing in the repo may shadow ComfyUI's modules
         sys.path.append(HOME)
+    import importlib.util
+    # `targets` is a generic name: make sure it is the repo's package, not
+    # something else on ComfyUI's path (HOME is appended, so it comes last).
+    _spec = importlib.util.find_spec("targets")
+    if _spec is None or not os.path.normcase(os.path.realpath(_spec.origin or "")).startswith(
+            os.path.normcase(os.path.realpath(os.path.join(HOME, "targets")))):
+        raise ImportError(f"another module called 'targets' shadows the pipeline's "
+                          f"({getattr(_spec, 'origin', None)})")
     import h3edit as E  # noqa: E402
     import h3jobs as J  # noqa: E402
     import h3refs as R  # noqa: E402
     import h3takes as T  # noqa: E402
+    import targets as TG  # noqa: E402
 except Exception as exc:                                  # pragma: no cover
-    E = J = R = T = None
+    E = J = R = T = TG = None
     IMPORT_ERROR = (f"h3pipe: can't import the pipeline from {HOME} "
                     f"({exc.__class__.__name__}: {exc}); set H3PIPE_HOME to the repo")
 
@@ -440,12 +449,14 @@ def post_render(ctx: Context, body):
         steps=_opt_steps(body.get("steps")), prompt=_opt_prompt(body.get("prompt")),
         parent_take=check_take(body.get("parent_take"), "parent_take", nullable=True),
         note=_opt_str(body, "note") or "", allow_missing_refs=allow_missing)
-    J.load_shotlist(ep, pass_)                           # 404 before anything else
+    doc = J.load_shotlist(ep, pass_)                     # 404 before anything else
+    target = J.shotlist_target(doc)
+    b = target.binding
     try:
-        base, _ = J.resolve_workflow(None, J.WORKFLOW_NAME, ctx.comfy_url)
-        J.node_of(base, J.LOADER), J.node_of(base, J.SAVER)
+        base, _ = J.target_workflow(target, None, ctx.comfy_url)
+        J.node_of(base, b.loader_class), J.node_of(base, b.saver_class)
     except Exception as e:
-        raise ApiError(500, f"no usable {J.WORKFLOW_NAME}: {e}")
+        raise ApiError(500, f"no usable {b.workflow_name}: {e}")
     result = E.queue_shots(ep, pass_, shots, template, ctx.comfy, base)
     for q in result["queued"]:
         # "queued" even if the job has already finished: the saver sends its own event
@@ -604,12 +615,14 @@ def put_override(ctx: Context, body):
     missing = [ps for ps in passes if ps not in built]
     if pass_fields and missing:
         raise ApiError(409, f"{shot} has no {'/'.join(missing)} build: build the episode first")
+    doc = J.load_shotlist(ep, next(iter(built)))
+    target = J.shotlist_target(doc).id                  # overrides are keyed by target
     ov = T.load_overrides(ep)
-    E.set_shot_override(ov, shot, built, passes, shot_fields, pass_fields)
-    ov.setdefault("episode", J.load_shotlist(ep, next(iter(built))).get("episode", ""))
+    E.set_shot_override(ov, shot, built, passes, shot_fields, pass_fields, target)
+    ov.setdefault("episode", doc.get("episode", ""))
     T.save_overrides(ep, ov)
     episode_event(ctx, ep)
-    return 200, seeds_out({"override": E.override_view(ov, shot, built)})
+    return 200, seeds_out({"override": E.override_view(ov, shot, built, target)})
 
 
 @handler
@@ -618,11 +631,30 @@ def delete_override(ctx: Context, query: dict):
     shot = check_shot(query.get("shot"))
     p = query.get("pass")
     pass_ = check_pass(p) if p else None
+    built = E.pass_builds(ep, shot)
+    target = (J.shotlist_target(J.load_shotlist(ep, next(iter(built)))).id if built
+              else T.DEFAULT_TARGET)
     ov = T.load_overrides(ep)
-    E.clear_shot_override(ov, shot, pass_)
+    E.clear_shot_override(ov, shot, pass_, target)
     T.save_overrides(ep, ov)
     episode_event(ctx, ep)
-    return 200, seeds_out({"override": E.override_view(ov, shot, E.pass_builds(ep, shot))})
+    return 200, seeds_out({"override": E.override_view(ov, shot, built, target)})
+
+
+# ---------------------------------------------------------------------------
+# targets (Phase 7)
+# ---------------------------------------------------------------------------
+
+@handler
+def get_targets(ctx: Context, query: dict):
+    """Every video and image target: id, kind, label, presets, and the widgets
+    its binding exposes (for pickers). `kind` narrows to one kind."""
+    kind = query.get("kind") or None
+    if kind is not None and kind not in TG.KINDS:
+        raise ApiError(400, f"kind must be one of {', '.join(TG.KINDS)}, not {kind!r}")
+    return 200, {"targets": [t.describe() for t in TG.list_targets(kind)],
+                 "default": {"video": TG.DEFAULT_VIDEO_TARGET,
+                             "image": TG.DEFAULT_IMAGE_TARGET}}
 
 
 # ---------------------------------------------------------------------------
@@ -890,6 +922,7 @@ ROUTES = [
     ("PUT", "/h3pipe/override", put_override, "body"),
     ("DELETE", "/h3pipe/override", delete_override, "query"),
     ("POST", "/h3pipe/assemble", post_assemble, "body"),
+    ("GET", "/h3pipe/targets", get_targets, "query"),
     ("GET", "/h3pipe/refs", get_refs, "query"),
     ("POST", "/h3pipe/refs/generate", post_refs_generate, "body"),
     ("PUT", "/h3pipe/refs/pick", put_refs_pick, "body"),

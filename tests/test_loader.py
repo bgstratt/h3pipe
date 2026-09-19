@@ -60,6 +60,19 @@ class LoaderMissingRefsTest(unittest.TestCase):
         self.assertIn("RENDERED WITHOUT", info)
         self.assertIn("Picture 4", info)
 
+    def test_render_anyway_recompiled_loads(self):
+        # with the series config beside the build, H3 recompiles the shot
+        # without its missing refs: no subjects, no plate in the prompt
+        import shutil
+        from test_render import FIXTURE
+        shutil.copy(os.path.join(FIXTURE, "series.json"), self.root)
+        out = self.load(self.frozen("sh020", blank=True))
+        prompt, info = out[1], out[15]
+        self.assertNotIn("<Picture", prompt)
+        self.assertIn("Ada has no reference image", prompt)
+        self.assertIn("subjects: - (plate only)", info)
+        self.assertIn("RENDERED WITHOUT: Picture 4", info)
+
     def test_render_anyway_drops_missing_recording(self):
         # sh110 is a dub shot: its recording is missing too
         out = self.load(self.frozen("sh110", blank=True))

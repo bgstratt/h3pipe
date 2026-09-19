@@ -39,8 +39,9 @@ ComfyUI whose node pack predates that node, SaveImage stays and kreagen fetches
 the image over HTTP. When a LoRA is given, the text encoder reads the LoRA's
 CLIP rather than the raw CLIPLoader output, so strength_clip is not inert;
 --no-lora-clip reproduces the original wiring of the built-in graph. The model
-file names are constants in h3refs.py — point them at whatever image model you
-have, and pass --lora/--unet to override per run.
+file names are the krea2 image target's (targets/image/krea2/target.json, re-exported
+by h3refs) — point them at whatever image model you have, and pass --lora/--unet to
+override per run.
 """
 from __future__ import annotations
 

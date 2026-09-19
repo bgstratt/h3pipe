@@ -123,7 +123,10 @@ Queues takes on ComfyUI's own queue and returns without waiting.
   - `null` means "not set in this request", so the built value and `overrides.json`
     apply.
 - The workflow comes from `h3jobs.resolve_workflow(None, WORKFLOW_NAME, <this
-  server>)`: the copy saved in ComfyUI, else the repo copy.
+  server>)`: the copy saved in ComfyUI, else the repo copy. (Phase 7: the shotlist's
+  target's binding names it, `h3jobs.target_workflow`; for H3 that is still
+  `H3_Ref2VA_Shotlist_v1.json` among ComfyUI's saved workflows, and the repo copy is
+  now `targets/video/minimax_h3_ref2va/workflow.json`.)
 - For each shot the route calls `plan_job`, then `start_job`, `graph_for` and
   queue. It queues by POSTing to this server's own `/prompt` with a `client_id`
   of `h3pipe`, from an executor, and then calls `mark_queued`.
@@ -260,7 +263,8 @@ contents.
     that's close to text-to-video. The take's sidecar lists what was missing in
     `missing_refs` (slots).
   - The prompt still names the missing pictures. Writing a prompt without them is
-    model-specific, so it belongs to the Phase 7 target adapters.
+    model-specific, so it belongs to the Phase 7 target adapters. (Done in Phase 7: see
+    **Render anyway, target-aware** below. Grey stand-ins are now the fallback.)
 - The CLI equivalent is `h3render --allow-missing-refs`. Without it, blocked shots are
   listed and skipped.
 
@@ -325,7 +329,8 @@ Queues one candidate per call. It returns without waiting, like `/render`.
 - A character with `view: null` queues all four views, sharing one seed (as
   `kreagen` does).
 - `count` greater than 1 queues that many candidates, each with a new seed.
-- The workflow is `krea2_refs_t2i.json`, found through `resolve_workflow`.
+- The workflow is `krea2_refs_t2i.json`, found through `resolve_workflow`. (Phase 7: the
+  `krea2` image target's binding; the repo copy is `targets/image/krea2/workflow.json`.)
 - A new save node, `H3SaveRefTake`, takes the place of the workflow's `SaveImage`.
   It writes the take's image and closes its sidecar, as `H3SaveShot` does, and sends
   `h3pipe.ref` `{"ep", "ref", "view", "take", "status"}`.
@@ -386,3 +391,79 @@ Same shape as the shot override routes, keyed by `ref` (and `view`).
   on ref takes and episode takes, `effective` on refs and on each character view, and
   per-view `prompt`/`override`/`effective`. Ref files beside a parent-folder series config
   come through `/h3pipe/file` as `../refs/…` paths.
+
+## Targets (Phase 7)
+
+Everything model-specific lives in a **target**: `targets/video/<id>/` for a shot model,
+`targets/image/<id>/` for a reference-image model (`targets/__init__.py`). Today there is
+one of each: `minimax_h3_ref2va` (MiniMax H3 Ref2VA) and `krea2`. A built shotlist
+belongs to one video target, the series config's `series.target` (default
+`minimax_h3_ref2va`). Episodes that mix targets arrive with Phase 8.
+
+### `GET /h3pipe/targets[?kind=video|image]`
+Every target, for pickers. Nothing here is per-episode.
+```json
+{"targets": [{
+   "id": "minimax_h3_ref2va", "kind": "video", "label": "MiniMax H3 Ref2VA",
+   "default": true,
+   "presets": {"final": {"model": "…", "lora": "…", "steps": 8, "width": 1344, "height": 768},
+               "proxy": {"model": null, "lora": "…", "steps": 4, "width": 480, "height": 272}},
+   "widgets": {"model": {"class_type": "UNETLoader", "field": "unet_name"},
+               "loras": {"class_type": "LoraLoaderModelOnly", "name": "lora_name",
+                         "strength": "strength_model", "input": "model", "chain": true},
+               "steps": {"via": "loader"}, "seed": {"via": "loader"}},
+   "workflow": "H3_Ref2VA_Shotlist_v1.json",
+   "loader": "H3ShotListLoader", "saver": "H3SaveShot",
+   "template": {"fps": 24.0, "frames": {"step": 17, "base": 5, "max": 3592},
+                "size_multiple": 32}},
+  {"id": "krea2", "kind": "image", "…": "…"}],
+ "default": {"video": "minimax_h3_ref2va", "image": "krea2"}}
+```
+- `presets` are the target's own defaults. The series config's `series` / `proxy` blocks
+  and profiles override them per episode; `GET /h3pipe/shot`'s `effective` is what a
+  render of that shot would actually use.
+- `widgets` is the binding: which node class and widget takes each render parameter.
+  `{"via": "loader"}` means the target's loader reads it from the frozen shotlist, so
+  the graph isn't patched for it. A picker for a `{"class_type", "field"}` widget can
+  list ComfyUI's own choices from `/object_info/<class_type>`.
+- `presets.proxy.model: null` means the proxy renders the series model (then the final
+  preset's).
+- An unknown `kind` answers 400.
+
+### `target` and `profile` on shots and takes
+- **`GET /h3pipe/episode`** has a top-level `"target"`. Each shot has `"target"` (the
+  video target it renders on) and `"profile"` (the render profile it was built with, or
+  `null`). Each take has `"target"` from its sidecar (`null` for a take from before
+  sidecars).
+- **`GET /h3pipe/shot`** has `"target"` and `"profile"`. `built` carries `profile`, and a
+  profile's LoRA list as `loras`, when the shot has them.
+- **Take sidecars** record `"target"`: the job's real target id, not a constant. The frozen
+  shotlist beside the take records it too, at the top level.
+- `overrides.json` is keyed by target already (`shots.<shot>.<target>`); the routes read
+  and write the shot's own target's block.
+
+### Render profiles
+A profile is a named `{target?, model?, loras?, steps?}` in the series config's
+`profiles` block, picked with `profile:` on a sequence or a shot (docs/AUTHORING.md).
+Build folds it into the shotlist, so the routes see the result: `model`, `steps`, and
+`loras` (a list) or `lora` on the built shot, plus `profile` naming it. Precedence, weakest
+first: target preset → series config pass block → sequence profile → sequence lines →
+shot profile → shot lines → `overrides.json` → the request.
+
+### Render anyway, target-aware
+`POST /h3pipe/render` with `"allow_missing_refs": true` now asks the shot's target to
+write the shot **without** the missing refs, when it can:
+- **H3 can.** A missing subject picture drops out of the `<Picture N>` slots and the
+  subject is described in words (its series config `design`). A missing plate leaves
+  `<Picture 4>` unmentioned and describes the location in words; the loader still feeds
+  flat grey into that input. A missing voice sample or recording makes the shot
+  `generate` (no audio reference; voices come from each `voice` line). The frozen
+  shotlist carries this recompiled shot.
+- **The recompile needs the build to be current.** It reads `shotlist/shots.json` and the
+  series config, and first checks that they still build the exact shot in the shotlist.
+  If they don't, or the target can't recompile, the render falls back to grey stand-ins
+  with the built prompt (the Phase 5 behaviour).
+- **A prompt override still wins:** the text you wrote is rendered as is.
+- The take's sidecar says what happened: `missing_refs` (the slots, as before),
+  `missing_mode` (`"recompiled"` or `"blank"`), and `missing_note` (why it fell back to
+  `blank`). The last two are only present on a take rendered anyway.

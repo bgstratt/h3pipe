@@ -23,7 +23,8 @@ from .speech import SPEECH_RATE
 
 META_KEYS = {"who", "cast", "with", "props", "size", "audio", "dur", "duration",
              "camera", "sound", "music", "policy", "continuous", "text",
-             "pace", "plate", "retention", "model", "lora", "steps", "extras"}
+             "pace", "plate", "retention", "model", "lora", "steps", "extras",
+             "target", "profile"}
 SIZES = {"close", "cu", "medium", "ms", "wide", "ws"}
 
 # Voice-only delivery markers. A speaker tagged with one of these is NOT added
@@ -301,7 +302,8 @@ def _shot_ir(ep_id: str, seq: dict, sh: dict, span: tuple[int, int]) -> Shot:
         timing=timing, pace=sh.get("pace"), audio=sh.get("policy") or None,
         preserve=preserve, seed_key=f"{ep_id}/{seq['id']}/{sh['id']}",
         overrides=overrides, source={"line": span[0], "end_line": span[1]},
-        unparsed=unparsed)
+        unparsed=unparsed, target=sh.get("target") or None,
+        profile=sh.get("profile") or None)
 
 
 def episode_from_parsed(ep: dict, seq_lines: list[int],
@@ -315,7 +317,8 @@ def episode_from_parsed(ep: dict, seq_lines: list[int],
             id=seq["id"], location=seq["location_key"], continuous=seq["continuous"],
             overrides=overrides, source={"line": line},
             shots=[_shot_ir(ep["id"], seq, sh, spans[sh["id"]]) for sh in seq["shots"]],
-            unparsed=unparsed))
+            unparsed=unparsed, target=seq.get("target") or None,
+            profile=seq.get("profile") or None))
     return Episode(id=ep["id"], title=ep["title"], series=dict(series or {}),
                    sequences=sequences)
 

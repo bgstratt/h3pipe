@@ -94,7 +94,7 @@ class SaveNodeTest(unittest.TestCase):
         self.assertEqual(opt["sidecar"], ("STRING", {"default": ""}))
 
     def test_saved_workflow_still_converts(self):
-        path = os.path.join(REPO, "workflows", "H3_Ref2VA_Shotlist_v1.json")
+        path = os.path.join(REPO, "targets", "video", "minimax_h3_ref2va", "workflow.json")
         with open(path, encoding="utf-8") as fh:
             api = h3render.ui_to_api(json.load(fh))
         savers = [v for v in api.values() if v["class_type"] == "H3SaveShot"]

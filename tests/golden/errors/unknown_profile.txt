@@ -1,0 +1,4 @@
+exit 1
+
+  error in unknown_profile.md: shot sh010: profile 'close_up' is not in series.json's profiles (dialogue_close, quick)
+

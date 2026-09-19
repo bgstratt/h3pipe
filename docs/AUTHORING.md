@@ -61,6 +61,33 @@ shot 93. So:
 - Resolution must be a multiple of 32 on both axes. **1280×720 is illegal**, because 720 is
   not. 1344×768 is H3's native canvas.
 - `steps`, `lora` and `model` are optional per pass; see the README's **Steps, model and LoRA**.
+- `series.target` names the video model the episode renders on. Leave it out: the only one
+  today is `minimax_h3_ref2va` (MiniMax H3), the default.
+
+### Render profiles
+
+A profile is a named render setup for a kind of shot, so you set it once instead of
+repeating `model:` / `lora:` / `steps:` on every shot. Declare profiles in the series config
+and pick one with `profile:` under a `#` sequence header or on a `##` shot:
+
+```json
+"profiles": {
+  "dialogue_close": { "model": "h3_finetune_faces.safetensors",
+                      "loras": ["turbo_8step.safetensors", "soft_light.safetensors:0.6"],
+                      "steps": 8 },
+  "action_wide":    { "steps": 10 }
+}
+```
+
+- Every key is optional: `target`, `model`, `loras` (a list of LoRA names; `name:0.6`
+  sets a strength, `"none"` means no LoRA) and `steps`.
+- A profile applies to both passes, like a shot's own `model:` line.
+- **What wins**, from weakest to strongest: the series config's `series` / `proxy` block →
+  the sequence's profile → the sequence's own `model:` / `lora:` / `steps:` lines → the
+  shot's profile → the shot's own lines. So `profile: dialogue_close` plus `steps: 9` on a
+  shot renders the profile's model and LoRAs at 9 steps. A `lora:` line replaces the
+  profile's whole LoRA list.
+- A profile name that isn't in the series config is an error.
 
 ### Writing the `design` sentence
 
@@ -140,6 +167,8 @@ sound: running footsteps on grass, fabric movement
 | `music: …` | audience-only score; omit for none |
 | `extras: …` | other people in frame, described; see **Crowds and extras** |
 | `model:`, `lora:`, `steps:` | per-shot render overrides; also valid under a `#` header |
+| `profile: dialogue_close` | a render profile from the series config; also valid under a `#` header |
+| `target: minimax_h3_ref2va` | the video model for this shot or sequence; see below |
 | `NAME: line` | dialogue from someone on screen |
 | `NAME (V.O.): line` | voiceover: speaks, is not drawn, costs no reference slot |
 | `NAME (O.S.): line` | off-screen: in the space, outside the frame |
@@ -147,6 +176,10 @@ sound: running footsteps on grass, fabric movement
 | `// text` | comment |
 
 Any other line is action prose.
+
+`target:` exists so a shot can one day render on another model. Today there is one video
+target, so `target:` may only name the series target (or be left out); anything else is an
+error. Episodes that mix targets come later.
 
 ## Durations land on a grid
 

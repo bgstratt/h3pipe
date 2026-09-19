@@ -21,11 +21,24 @@ A redo gets a NEW seed unless asked for the same one. A seed pinned in
 overrides.json, or typed in the request, beats both. The seed actually used is
 recorded in the sidecar with where it came from (`seed_source`).
 
+Which workflow, loader, saver and widgets a job uses is the shot's target's
+`binding` (targets/<kind>/<id>/target.json): a built shotlist belongs to one
+video target (`shotlist_target`, the default one until Phase 8 writes
+per-target shotlists), and the frozen shotlist and the sidecar record it.
+
 LoRAs are a list of {"name", "strength"}. The first goes into the workflow's
-LoraLoaderModelOnly; the rest are chained after it by adding nodes to the API
-graph, so no workflow needs a fixed number of LoRA slots. An empty list keeps
-the loader wired at strength 0, which renders on the base model. The shotlist's
+LoRA loader (the binding's `loras` class, LoraLoaderModelOnly for H3); the rest
+are chained after it by adding nodes to the API graph, so no workflow needs a
+fixed number of LoRA slots. An empty list keeps the loader wired at strength 0,
+which renders on the base model. The shotlist's `loras` (a profile's list) or
 single `lora` (the turbo LoRA; "none" means no LoRA) is the default list.
+
+Rendering anyway (a shot whose reference files are missing, allowed by the
+request): a target that can (`compile_without`, H3 does) recompiles the shot
+from shotlist/shots.json and the series config as if those refs didn't exist,
+so the prompt never names them; the frozen shotlist carries that entry. Any
+other target, or a build that is out of date, falls back to the loader's grey
+stand-ins with the built prompt. The sidecar's `missing_mode` says which.
 
 Stdlib only.
 """
@@ -41,12 +54,16 @@ import urllib.request
 from dataclasses import dataclass, field
 
 import h3takes as T
+import targets as TG
 
-LOADER = "H3ShotListLoader"
-SAVER = "H3SaveShot"
-LORA = "LoraLoaderModelOnly"
-UNET = "UNETLoader"
-WORKFLOW_NAME = "H3_Ref2VA_Shotlist_v1.json"
+# The default video target's binding, under the names h3render and the routes
+# have always imported. Job code reads the job's own target instead.
+_DEFAULT = TG.load_target(TG.DEFAULT_VIDEO_TARGET, "video").binding
+LOADER = _DEFAULT.loader_class
+SAVER = _DEFAULT.saver_class
+LORA = _DEFAULT.param("loras")["class_type"]
+UNET = _DEFAULT.param("model")["class_type"]
+WORKFLOW_NAME = _DEFAULT.workflow_name
 SKIP_UI = {"MarkdownNote", "Note", "H3ShotInfo", "Reroute"}
 PRIMITIVES = {"PrimitiveInt", "PrimitiveFloat", "PrimitiveString",
               "PrimitiveBoolean", "PrimitiveNode", "PrimitiveStringMultiline"}
@@ -67,8 +84,9 @@ def find_workflow(explicit: str | None, name: str = WORKFLOW_NAME) -> str:
     if explicit:
         return explicit
     here = os.path.dirname(os.path.abspath(__file__))
-    # $H3_WORKFLOW wins, then beside this file, then $COMFYUI_PATH's workflows folder
-    cands = [os.environ.get("H3_WORKFLOW", ""),
+    # $H3_WORKFLOW wins, then the target's copy, then beside this file, then
+    # $COMFYUI_PATH's workflows folder
+    cands = [os.environ.get("H3_WORKFLOW", ""), TG.repo_workflow(name) or "",
              os.path.join(here, "workflows", name),
              os.path.join(here, name),
              os.path.join(here, "..", name)]
@@ -169,8 +187,9 @@ def resolve_workflow(explicit: str | None, name: str = WORKFLOW_NAME,
     In order: an explicit path; $`env`; the workflow as saved in the RUNNING
     ComfyUI at `comfy_url` (its user workflows, fetched over the API, so it
     always matches that ComfyUI's node versions; skipped when comfy_url is
-    None); $COMFYUI_PATH's workflows folder; the copy in this repo (workflows/)
-    or beside it. `prefer_repo` puts the repo copy ahead of $COMFYUI_PATH, for
+    None); $COMFYUI_PATH's workflows folder; the copy in this repo (the
+    target's workflow.json whose binding names `name`, else workflows/ or
+    beside it). `prefer_repo` puts the repo copy ahead of $COMFYUI_PATH, for
     callers whose saved canvas holds experiments that must not leak in (a
     style LoRA on the reference-image graph). With `required=False`, finding
     nothing returns (None, "") instead of raising.
@@ -193,6 +212,9 @@ def resolve_workflow(explicit: str | None, name: str = WORKFLOW_NAME,
     saved = [os.path.join(comfy, "user", "default", "workflows", name)] if comfy else []
     repo = [os.path.join(here, "workflows", name), os.path.join(here, name),
             os.path.join(here, "..", name)]
+    mine = TG.repo_workflow(name)
+    if mine:
+        repo.insert(0, mine)
     cands = repo + saved if prefer_repo else saved + repo
     for cand in cands:
         if os.path.isfile(cand):
@@ -202,6 +224,15 @@ def resolve_workflow(explicit: str | None, name: str = WORKFLOW_NAME,
         return None, ""
     raise FileNotFoundError(f"{name} not found in ComfyUI's saved workflows or beside "
                             f"this script — pass --workflow, or set {env}")
+
+
+def target_workflow(target: "TG.Target", explicit: str | None = None,
+                    comfy_url: str | None = None, required: bool = True,
+                    prefer_repo: bool = False) -> tuple[dict | None, str]:
+    """resolve_workflow for a target's binding (its saved name and env var)."""
+    b = target.binding
+    return resolve_workflow(explicit, b.workflow_name, comfy_url, env=b.env or "H3_WORKFLOW",
+                            required=required, prefer_repo=prefer_repo)
 
 
 def node_of(graph: dict, ctype: str) -> str:
@@ -331,6 +362,12 @@ def shotlist_rel(pass_: str) -> str:
                         else "shotlist.json")
 
 
+def shotlist_target(doc: dict) -> "TG.Target":
+    """The video target a built shotlist is for. Today's shotlists carry no
+    `target` (the goldens predate targets), so that means the default one."""
+    return TG.load_target(doc.get("target") or TG.DEFAULT_VIDEO_TARGET, "video")
+
+
 def load_shotlist(root: str, pass_: str) -> dict:
     path = os.path.join(root, shotlist_rel(pass_))
     if not os.path.isfile(path):
@@ -346,16 +383,23 @@ def load_shotlist(root: str, pass_: str) -> dict:
 # override.
 PRESET_KEYS = ("model", "lora", "steps")
 PRESET_DEFAULTS = ("model", "lora", "steps", "width", "height")
+# Render settings a shot entry carries only when a profile set them. They join
+# the preset hash only when present, so the hash of every shot without them is
+# what it always was.
+PRESET_EXTRA = ("loras", "profile")
 
 
 def story_hash(shot: dict) -> str:
-    return T.content_hash({k: v for k, v in shot.items() if k not in PRESET_KEYS})
+    return T.content_hash({k: v for k, v in shot.items()
+                           if k not in PRESET_KEYS and k not in PRESET_EXTRA})
 
 
 def preset_hash(doc: dict, shot: dict) -> str:
     d = doc.get("defaults", {})
+    part = {k: shot.get(k) for k in PRESET_KEYS}
+    part.update({k: shot[k] for k in PRESET_EXTRA if k in shot})
     return T.content_hash({"defaults": {k: d.get(k) for k in PRESET_DEFAULTS},
-                           "shot": {k: shot.get(k) for k in PRESET_KEYS}})
+                           "shot": part})
 
 
 def stale_reasons(root: str, doc: dict, shot: dict, sidecar: dict | None) -> list[str]:
@@ -439,6 +483,10 @@ class Job:
     forced: bool = False               # take number given explicitly
     missing: list[dict] = field(default_factory=list)   # refs not on disk
     allow_missing: bool = False
+    target: str = T.DEFAULT_TARGET                      # the video target's id
+    recompiled: dict | None = None     # render anyway: the shot compiled without them
+    missing_mode: str = ""             # render anyway: "recompiled" | "blank"
+    missing_why: str = ""              # why it fell back to "blank"
 
     @property
     def id(self) -> str:
@@ -462,7 +510,8 @@ def plan_job(root: str, pass_: str, doc: dict, index: int, req: RenderRequest,
     shot = doc["shots"][index]
     sid = shot["id"]
     dflt = doc.get("defaults", {})
-    ov = T.shot_override(overrides or {}, sid, pass_)
+    target = shotlist_target(doc)
+    ov = T.shot_override(overrides or {}, sid, pass_, target.id)
     shot_hash = story_hash(shot)
 
     takes = T.list_takes(root, pass_, sid, folder)
@@ -491,11 +540,25 @@ def plan_job(root: str, pass_: str, doc: dict, index: int, req: RenderRequest,
             return ov[name]
         return built
 
+    # A shot missing a reference fails in the loader. Unless the caller says to
+    # render anyway, don't queue it at all; rendering anyway, let the target
+    # write the shot without those refs when it can.
+    missing = missing_refs(root, doc, shot)
+    recompiled, missing_mode, missing_why = None, "", ""
+    if missing and req.allow_missing_refs and action not in ("skip", "busy"):
+        recompiled, missing_why = recompile_without(root, pass_, doc, shot, missing)
+        missing_mode = "recompiled" if recompiled is not None else "blank"
+    source = recompiled or shot
+
     model = pick("model", shot.get("model") or dflt.get("model", ""), req.model)
-    built_lora = shot.get("lora") or dflt.get("lora", "")
-    loras = pick("loras", parse_lora(built_lora) if built_lora else None, req.loras)
+    if "loras" in shot:                                # a profile's list
+        built_loras = [dict(lo) for lo in shot["loras"]]
+    else:
+        built_lora = shot.get("lora") or dflt.get("lora", "")
+        built_loras = parse_lora(built_lora) if built_lora else None
+    loras = pick("loras", built_loras, req.loras)
     steps = int(pick("steps", int(shot.get("steps", dflt.get("steps", 4))), req.steps))
-    prompt = pick("prompt", shot.get("prompt", ""), req.prompt)
+    prompt = pick("prompt", source.get("prompt", ""), req.prompt)
 
     # seed: typed > pinned in overrides > (same | new | first take: built)
     built_seed = int(shot.get("seed", 0))
@@ -512,9 +575,6 @@ def plan_job(root: str, pass_: str, doc: dict, index: int, req: RenderRequest,
         seed, source = built_seed, "stable"
 
     base_hash = ov.get("base_hash")
-    # A shot missing a reference fails in the loader. Unless the caller says to
-    # render anyway (blank image / no audio reference), don't queue it at all.
-    missing = missing_refs(root, doc, shot)
     if missing and not req.allow_missing_refs and action not in ("skip", "busy"):
         action = "blocked"
     return Job(root=root, pass_=pass_, index=index, shot=shot, doc=doc, folder=folder,
@@ -524,7 +584,37 @@ def plan_job(root: str, pass_: str, doc: dict, index: int, req: RenderRequest,
                overridden=sorted(set(overridden)),
                override_stale=bool(base_hash) and base_hash != shot_hash,
                shot_hash=shot_hash, parent_take=req.parent_take, note=req.note,
-               missing=missing, allow_missing=req.allow_missing_refs)
+               missing=missing, allow_missing=req.allow_missing_refs, target=target.id,
+               recompiled=recompiled, missing_mode=missing_mode, missing_why=missing_why)
+
+
+def episode_story(root: str):
+    """(the story IR from shotlist/shots.json, the series config) of a built
+    episode. The series config is looked up as h3edit does: the episode
+    folder, then its parent."""
+    from h3core import ir
+    from h3core.series_config import load_series_config
+    with open(os.path.join(root, "shotlist", "shots.json"), encoding="utf-8") as fh:
+        story = ir.Episode.loads(fh.read())
+    for d in (root, os.path.dirname(os.path.normpath(root))):
+        p = os.path.join(d, "series.json")
+        if os.path.isfile(p):
+            return story, load_series_config(p)
+    raise FileNotFoundError(f"no series.json in {root} or its parent folder")
+
+
+def recompile_without(root: str, pass_: str, doc: dict, shot: dict,
+                      missing: list[dict]) -> tuple[dict | None, str]:
+    """(the shot recompiled without the `missing` refs, "") when the shot's
+    target can write it that way and the build is current; else (None, why)."""
+    t = shotlist_target(doc)
+    if not t.supports("compile_without"):
+        return None, f"{t.id} can't write a shot without its references"
+    try:
+        story, series_cfg = episode_story(root)
+        return t.compile_without(story, series_cfg, pass_, shot, missing), ""
+    except Exception as e:                                # fall back to grey stand-ins
+        return None, f"{e.__class__.__name__}: {e}"[:400]
 
 
 def plan_episode(root: str, pass_: str, reqs: dict[str, RenderRequest] | None = None,
@@ -549,7 +639,8 @@ def plan_episode(root: str, pass_: str, reqs: dict[str, RenderRequest] | None = 
 
 def frozen_shotlist(job: Job) -> dict:
     """A complete one-shot shotlist: what the loader reads for this take."""
-    shot = copy.deepcopy(job.shot)
+    # rendering anyway, the target's recompile of the shot without the refs
+    shot = copy.deepcopy(job.recompiled or job.shot)
     shot["seed"] = job.seed
     shot["steps"] = job.steps
     shot["prompt"] = copy.deepcopy(job.prompt)
@@ -563,6 +654,7 @@ def frozen_shotlist(job: Job) -> dict:
         # a missing audio reference, instead of failing
         shot["missing_refs"] = "blank"
     doc = {k: copy.deepcopy(v) for k, v in job.doc.items() if k != "shots"}
+    doc["target"] = job.target
     doc["shots"] = [shot]
     return doc
 
@@ -570,22 +662,10 @@ def frozen_shotlist(job: Job) -> dict:
 def ref_slots(doc: dict, shot: dict) -> list[dict]:
     """Every reference the loader will read for `shot`: {slot, kind ("image" |
     "audio"), path, subject?}. Paths as the shotlist writes them (relative to
-    the episode unless absolute); an empty path means the series config names none."""
-    book = doc.get("subjects", {})
-    out = []
-    for i, sid in enumerate((shot.get("subjects") or [])[:3], start=1):
-        out.append({"slot": f"Picture {i}", "kind": "image", "subject": sid,
-                    "path": book.get(sid, {}).get("sheet", "")})
-    out.append({"slot": "Picture 4", "kind": "image", "path": shot.get("background", "")})
-    policy = shot.get("audio_policy", "")
-    if policy == "clone":
-        for i, r in enumerate(shot.get("voice_refs") or [], start=1):
-            out.append({"slot": f"Audio {i}", "kind": "audio",
-                        "subject": r.get("subject", ""), "path": r.get("sample", "")})
-    elif policy in ("dub", "dub_keep_foley"):
-        out.append({"slot": "Audio 1", "kind": "audio", "path": shot.get("audio_file")
-                    or doc.get("defaults", {}).get("master_track", "")})
-    return out
+    the episode unless absolute); an empty path means the series config names none.
+    The slots are the target's recipe (H3: Picture 1-3 subjects, Picture 4 the
+    plate, Audio 1-3)."""
+    return shotlist_target(doc).ref_slots(doc, shot)
 
 
 def _abs(root: str, p: str) -> str:
@@ -610,7 +690,7 @@ def ref_files(job: Job) -> list[dict]:
 def sidecar_for(job: Job) -> dict:
     d = job.doc.get("defaults", {})
     return {
-        "target": T.DEFAULT_TARGET, "status": "queued", "queued": T.now(),
+        "target": job.target, "status": "queued", "queued": T.now(),
         "comfy_prompt_id": None,
         "seed": job.seed, "seed_source": job.seed_source,
         "model": job.model, "loras": job.loras, "steps": job.steps,
@@ -623,6 +703,9 @@ def sidecar_for(job: Job) -> dict:
         "parent_take": job.parent_take, "note": job.note,
         "refs": ref_files(job),
         "missing_refs": [r["slot"] for r in job.missing] if job.allow_missing else [],
+        # only when rendering anyway, so every other sidecar is as it was
+        **({"missing_mode": job.missing_mode} if job.missing_mode else {}),
+        **({"missing_note": job.missing_why} if job.missing_why else {}),
     }
 
 
@@ -670,21 +753,35 @@ def finish_job(take: T.Take) -> str:
 # graph patching
 # ---------------------------------------------------------------------------
 
-def apply_loras(g: dict, loras: list[dict]) -> None:
+DEFAULT_LORA_SPEC = {"class_type": LORA, "name": "lora_name", "strength": "strength_model",
+                     "input": "model", "chain": True}
+
+
+def apply_loras(g: dict, loras: list[dict], spec: dict | None = None) -> None:
     """Put `loras` into the graph: the first in the workflow's LoRA loader, the
-    rest chained after it. No LoRAs: the loader stays wired at strength 0."""
-    ids = [k for k, v in g.items() if v["class_type"] == LORA]
+    rest chained after it. No LoRAs: the loader stays wired at strength 0.
+
+    `spec` is the binding's `loras` param: the loader's class_type, its `name`
+    and `strength` widgets, the `input` it chains through (output 0 of one
+    feeds that input of the next) and whether `chain` is allowed (without it
+    more than one LoRA is an error). Default: the default target's."""
+    spec = dict(DEFAULT_LORA_SPEC, **(spec or {}))
+    ctype, name_w, str_w, link = (spec["class_type"], spec["name"], spec["strength"],
+                                  spec["input"])
+    ids = [k for k, v in g.items() if v["class_type"] == ctype]
     if len(ids) != 1:
         if loras or ids:
-            raise ValueError(f"LoRAs need exactly one {LORA} node in the workflow "
+            raise ValueError(f"LoRAs need exactly one {ctype} node in the workflow "
                              f"(found {len(ids)})")
         return
     first = ids[0]
     if not loras:
-        g[first]["inputs"]["strength_model"] = 0.0
+        g[first]["inputs"][str_w] = 0.0
         return
-    g[first]["inputs"]["lora_name"] = loras[0]["name"]
-    g[first]["inputs"]["strength_model"] = float(loras[0].get("strength", 1.0))
+    if len(loras) > 1 and not spec.get("chain"):
+        raise ValueError(f"this workflow takes one LoRA ({ctype}), not {len(loras)}")
+    g[first]["inputs"][name_w] = loras[0]["name"]
+    g[first]["inputs"][str_w] = float(loras[0].get("strength", 1.0))
     consumers = [(k, name) for k, v in g.items() for name, val in v["inputs"].items()
                  if val == [first, 0]]
     prev = first
@@ -692,39 +789,61 @@ def apply_loras(g: dict, loras: list[dict]) -> None:
     for i, lo in enumerate(loras[1:], start=2):
         nid = str(next_id)
         next_id += 1
-        g[nid] = {"class_type": LORA,
-                  "inputs": {"model": [prev, 0], "lora_name": lo["name"],
-                             "strength_model": float(lo.get("strength", 1.0))},
+        g[nid] = {"class_type": ctype,
+                  "inputs": {link: [prev, 0], name_w: lo["name"],
+                             str_w: float(lo.get("strength", 1.0))},
                   "_meta": {"title": f"LoRA {i} (h3jobs)"}}
         prev = nid
     for k, name in consumers:
         g[k]["inputs"][name] = [prev, 0]
 
 
+def job_target(job: Job) -> "TG.Target":
+    return TG.load_target(job.target, "video")
+
+
+def _set_widget(g: dict, spec: dict | None, value) -> None:
+    """Patch a {"class_type", "field"} param; a {"via": "loader"} one (or none)
+    needs nothing, the frozen shotlist carries it."""
+    if spec and spec.get("class_type") and spec.get("field"):
+        g[node_of(g, spec["class_type"])]["inputs"][spec["field"]] = value
+
+
 def graph_for(base: dict, job: Job, take: T.Take, *, panel_mode: str | None = None,
               save_frames: bool | None = None, review_copy: bool = True,
               strip_meta: bool = False) -> dict:
+    """`base` (the target's workflow as an API graph) patched for one take,
+    following the job's target's binding: the loader reads the take's frozen
+    shotlist, the saver writes into the take, and the model, LoRA, steps and
+    seed widgets the binding names get the job's values."""
+    b = job_target(job).binding
     g = copy.deepcopy(base)
-    loader, saver = node_of(g, LOADER), node_of(g, SAVER)
+    loader, saver = node_of(g, b.loader_class), node_of(g, b.saver_class)
+    lin = dict({"root": "project_root", "shotlist": "shotlist_file", "index": "index"},
+               **(b.loader.get("inputs") or {}))
     li = g[loader]["inputs"]
-    li["project_root"] = job.root
-    li["shotlist_file"] = os.path.relpath(take.paths.shotlist, job.root)
-    li["index"] = 0
+    li[lin["root"]] = job.root
+    li[lin["shotlist"]] = os.path.relpath(take.paths.shotlist, job.root)
+    li[lin["index"]] = 0
     if panel_mode:
         li["panel_mode"] = panel_mode
     if job.model:
-        g[node_of(g, UNET)]["inputs"]["unet_name"] = job.model
+        _set_widget(g, b.param("model"), job.model)
     if job.loras is not None:
-        apply_loras(g, job.loras)
+        apply_loras(g, job.loras, b.param("loras"))
+    _set_widget(g, b.param("steps"), job.steps)
+    _set_widget(g, b.param("seed"), job.seed)
+    sin = dict({"root": "project_root", "subfolder": "subfolder", "take": "take",
+                "sidecar": "sidecar"}, **(b.saver.get("inputs") or {}))
     si = g[saver]["inputs"]
-    si["project_root"] = job.root
-    si["subfolder"] = os.path.relpath(os.path.dirname(take.paths.dir), job.root)
-    si["take"] = take.take
-    si["sidecar"] = os.path.relpath(take.paths.sidecar, job.root)
+    si[sin["root"]] = job.root
+    si[sin["subfolder"]] = os.path.relpath(os.path.dirname(take.paths.dir), job.root)
+    si[sin["take"]] = take.take
+    si[sin["sidecar"]] = os.path.relpath(take.paths.sidecar, job.root)
     if save_frames is not None:
         si["save_frames"] = save_frames
     if not review_copy:
-        for k in [k for k, v in g.items() if v["class_type"] in ("SaveVideo", "CreateVideo")]:
+        for k in [k for k, v in g.items() if v["class_type"] in b.review_nodes]:
             del g[k]
     if strip_meta:
         for v in g.values():

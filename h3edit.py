@@ -193,6 +193,7 @@ def episode_status(root: str, pass_: str, folder: str | None = None) -> dict:
     """Every shot in cut order with its takes, the take the cut uses, and its
     override. Plain data, ready to serve as JSON."""
     doc = J.load_shotlist(root, pass_)
+    target = J.shotlist_target(doc).id
     fps = episode_fps(root)
     shots = {s["id"]: s for s in doc["shots"]}
     ov = T.load_overrides(root)
@@ -213,10 +214,12 @@ def episode_status(root: str, pass_: str, folder: str | None = None) -> dict:
             chosen = T.latest_usable(src)
             chosen_take = chosen.take if chosen else None
             chosen_ok = chosen is not None
-        o = T.shot_override(ov, e.shot, pass_)
+        o = T.shot_override(ov, e.shot, pass_, target)
         out.append({
             "shot": e.shot,
             "orphan": e.orphan,
+            "target": target,
+            "profile": shot.get("profile") if shot else None,
             "sequence": shot.get("sequence") if shot else None,
             "length": shot.get("length") if shot else None,
             "seconds": round(shot["length"] / fps, 3) if shot else None,
@@ -237,6 +240,7 @@ def episode_status(root: str, pass_: str, folder: str | None = None) -> dict:
                 "take": t.take, "status": t.status, "has_video": t.has_video,
                 "seed": (t.sidecar or {}).get("seed"),
                 "seed_source": (t.sidecar or {}).get("seed_source"),
+                "target": (t.sidecar or {}).get("target"),
                 "note": (t.sidecar or {}).get("note", ""),
                 "overrides": (t.sidecar or {}).get("overrides", []),
                 "stale": J.stale_reasons(root, doc, shot, t.sidecar) if shot else [],
@@ -251,7 +255,7 @@ def episode_status(root: str, pass_: str, folder: str | None = None) -> dict:
         })
     d = doc.get("defaults", {})
     return {"episode": doc.get("episode", os.path.basename(root)), "title": doc.get("title", ""),
-            "pass": pass_, "fps": fps, "width": d.get("width"), "height": d.get("height"),
+            "pass": pass_, "target": target, "fps": fps, "width": d.get("width"), "height": d.get("height"),
             "folder": folder or T.pass_subfolder(pass_), "shots": out}
 
 
@@ -266,7 +270,7 @@ def shot_detail(root: str, pass_: str, shot_id: str, folder: str | None = None) 
     shot = doc["shots"][idx]
     ov = T.load_overrides(root)
     job = J.plan_job(root, pass_, doc, idx, J.RenderRequest(shot_id), ov, folder)
-    eff = T.shot_override(ov, shot_id, pass_)
+    eff = T.shot_override(ov, shot_id, pass_, job.target)
     takes = []
     for t in T.list_takes(root, pass_, shot_id, folder):
         takes.append({"take": t.take, "status": t.status, "has_video": t.has_video,
@@ -276,7 +280,8 @@ def shot_detail(root: str, pass_: str, shot_id: str, folder: str | None = None) 
                                 for k in ("mp4", "thumb", "strip", "shotlist", "h3_wav")
                                 if os.path.isfile(getattr(t.paths, k))}})
     return {
-        "shot": shot_id, "pass": pass_, "index": idx, "built": shot,
+        "shot": shot_id, "pass": pass_, "index": idx, "target": job.target,
+        "profile": shot.get("profile"), "built": shot,
         "built_prompt": prompt_text(shot.get("prompt")),
         "override": {k: v for k, v in eff.items() if k != "base_hash"},
         "override_stale": bool(eff.get("base_hash")) and eff["base_hash"] != J.story_hash(shot),
@@ -374,35 +379,38 @@ def pass_builds(root: str, shot_id: str,
 
 def set_shot_override(ov: dict, shot_id: str, built: dict[str, dict], passes,
                       shot_fields: dict | None = None,
-                      pass_fields: dict | None = None) -> None:
+                      pass_fields: dict | None = None,
+                      target: str = T.DEFAULT_TARGET) -> None:
     """Change one shot's override in `ov` (not saved). `shot_fields` (seed,
     note) are shared; `pass_fields` (prompt, model, loras, steps) go to each
     pass in `passes`, stamped with that pass's `base_hash` (the story hash of
     `built[pass]`) whenever a value is set. None clears a field."""
     if shot_fields:
-        T.set_override(ov, shot_id, **shot_fields)
+        T.set_override(ov, shot_id, target=target, **shot_fields)
     if pass_fields:
         stamp = any(v is not None for v in pass_fields.values())
         for ps in passes:
             # written against the shot as this pass builds it now
             extra = {"base_hash": J.story_hash(built[ps])} if stamp else {}
-            T.set_override(ov, shot_id, ps, **extra, **pass_fields)
+            T.set_override(ov, shot_id, ps, target, **extra, **pass_fields)
 
 
-def clear_shot_override(ov: dict, shot_id: str, pass_: str | None = None) -> None:
+def clear_shot_override(ov: dict, shot_id: str, pass_: str | None = None,
+                        target: str = T.DEFAULT_TARGET) -> None:
     """Drop one pass's fields (prompt, model, loras, steps), or with no pass
     the shot's whole override: both passes, seed and note."""
     if pass_ is None:
-        T.set_override(ov, shot_id, **{f: None for f in T.SHOT_FIELDS})
+        T.set_override(ov, shot_id, target=target, **{f: None for f in T.SHOT_FIELDS})
     for ps in (T.PASSES if pass_ is None else [pass_]):
-        T.set_override(ov, shot_id, ps, **{f: None for f in T.PASS_FIELDS})
+        T.set_override(ov, shot_id, ps, target, **{f: None for f in T.PASS_FIELDS})
 
 
-def override_view(ov: dict, shot_id: str, built: dict[str, dict]) -> dict:
+def override_view(ov: dict, shot_id: str, built: dict[str, dict],
+                  target: str = T.DEFAULT_TARGET) -> dict:
     """{pass: effective override without base_hash, plus `stale`}, both passes."""
     out = {}
     for ps in T.PASSES:
-        eff = T.shot_override(ov, shot_id, ps)
+        eff = T.shot_override(ov, shot_id, ps, target)
         view = {k: v for k, v in eff.items() if k != "base_hash"}
         view["stale"] = (bool(eff.get("base_hash")) and ps in built
                          and eff["base_hash"] != J.story_hash(built[ps]))

@@ -577,6 +577,135 @@
           }
         }
       ]
+    },
+    {
+      "id": "sq04",
+      "location": "kitchen",
+      "continuous": false,
+      "overrides": {
+        "model": null,
+        "lora": null,
+        "steps": null
+      },
+      "source": {
+        "line": 139
+      },
+      "profile": "quick",
+      "shots": [
+        {
+          "id": "sh310",
+          "cast": [
+            "cy"
+          ],
+          "props": [],
+          "plate": "kitchen",
+          "size": "medium",
+          "camera": null,
+          "action": "Cy climbs onto a stool and peers into the steaming kettle.",
+          "dialogue": [],
+          "sound": null,
+          "music": null,
+          "extras": null,
+          "text": null,
+          "timing": {
+            "seconds": 2.33
+          },
+          "pace": null,
+          "audio": null,
+          "preserve": null,
+          "seed_key": "ks01/sq04/sh310",
+          "overrides": {
+            "model": null,
+            "lora": null,
+            "steps": null
+          },
+          "source": {
+            "line": 143,
+            "end_line": 146
+          }
+        },
+        {
+          "id": "sh320",
+          "cast": [
+            "ada"
+          ],
+          "props": [],
+          "plate": "kitchen",
+          "size": "close",
+          "camera": null,
+          "action": "Ada points a wooden spoon at the kettle.",
+          "dialogue": [
+            {
+              "speaker": "ada",
+              "mode": "on",
+              "delivery": "",
+              "line": "Don't you dare."
+            }
+          ],
+          "sound": null,
+          "music": null,
+          "extras": null,
+          "text": null,
+          "timing": {
+            "auto": true
+          },
+          "pace": null,
+          "audio": null,
+          "preserve": null,
+          "seed_key": "ks01/sq04/sh320",
+          "overrides": {
+            "model": null,
+            "lora": null,
+            "steps": null
+          },
+          "source": {
+            "line": 150,
+            "end_line": 157
+          },
+          "target": "minimax_h3_ref2va",
+          "profile": "dialogue_close"
+        },
+        {
+          "id": "sh330",
+          "cast": [
+            "bo"
+          ],
+          "props": [],
+          "plate": "kitchen",
+          "size": "medium",
+          "camera": null,
+          "action": "Bo lifts the kettle off the burner with a grin.",
+          "dialogue": [
+            {
+              "speaker": "bo",
+              "mode": "on",
+              "delivery": "",
+              "line": "Too late."
+            }
+          ],
+          "sound": null,
+          "music": null,
+          "extras": null,
+          "text": null,
+          "timing": {
+            "auto": true
+          },
+          "pace": null,
+          "audio": null,
+          "preserve": null,
+          "seed_key": "ks01/sq04/sh330",
+          "overrides": {
+            "model": null,
+            "lora": "shot_lora.safetensors",
+            "steps": 9
+          },
+          "source": {
+            "line": 161,
+            "end_line": 168
+          },
+          "profile": "dialogue_close"
+        }
+      ]
     }
   ]
 }

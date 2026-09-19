@@ -22,7 +22,7 @@ import h3jobs as J  # noqa: E402
 import h3takes as T  # noqa: E402
 
 FIXTURE = os.path.join(HERE, "fixtures", "kitchen_sink")
-WORKFLOW = os.path.join(ROOT, "workflows", "H3_Ref2VA_Shotlist_v1.json")
+WORKFLOW = os.path.join(ROOT, "targets", "video", "minimax_h3_ref2va", "workflow.json")
 ENV = dict(os.environ, PYTHONUTF8="1", PYTHONIOENCODING="utf-8")
 
 
@@ -422,7 +422,7 @@ class WorkflowLookupTest(unittest.TestCase):
             comfy.userdata.clear()
             for url in (comfy.url, "http://127.0.0.1:9", None):
                 g, where = J.resolve_workflow(None, J.WORKFLOW_NAME, url)
-                self.assertTrue(where.endswith(os.path.join("workflows", J.WORKFLOW_NAME)), where)
+                self.assertEqual(os.path.normcase(where), os.path.normcase(WORKFLOW))
             self.assertEqual(J.resolve_workflow(None, "nope.json", None, required=False),
                              (None, ""))
             with self.assertRaises(FileNotFoundError):

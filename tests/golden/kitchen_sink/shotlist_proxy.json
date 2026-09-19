@@ -431,6 +431,110 @@
       ],
       "lora": "seq_lora.safetensors",
       "duration": 3.595
+    },
+    {
+      "id": "sh310",
+      "sequence": "sq04",
+      "subjects": [
+        "cy"
+      ],
+      "background": "refs/_bg/kitchen.png",
+      "size": "medium",
+      "panels": 1,
+      "panel_view": "body",
+      "length": 56,
+      "seed": 6151578644003521749,
+      "steps": 5,
+      "audio_policy": "generate",
+      "audio_retention": "",
+      "voices": [],
+      "voice_subject": "",
+      "voice_refs": [],
+      "prompt": [
+        "subject_definitions:\n<Subject 1> is Cy, defined by <Picture 1> — a single reference image of ONE character, a three-quarter view of the whole body. Exactly one person appears in that image. Exactly one person appears in this shot. Preserve the exact reference styling: a small girl with two puffball pigtails, a purple raincoat and yellow rubber boots.\n<Subject 2> is the location, defined by <Picture 4> — a background plate of a cramped diner kitchen with steel counters, a hanging ticket rail and cold fluorescent light from overhead. It establishes the layout, color palette, lighting direction and depth of the space, not a fixed camera framing.",
+        "summary:\n[reference generation] Cy climbs onto a stool and peers into the steaming kettle.",
+        "retention_analysis:\n<Subject 1> (appears in [Shot 1]): fully_preserved - facial identity, hairstyle, body proportions, wardrobe and colors are retained from <Picture 1> while allowing natural poses and expressions.\n<Subject 2> (appears in [Shot 1]): partially_preserved - the layout, color palette and lighting direction of the location are retained while the camera framing and visible portion of the space differ from the plate.",
+        "detailed_description:\nThe target video is a flat vector cartoon with thick even outlines and a limited pastel palette.\n[Shot 1] The scene takes place in <Subject 2>, a cramped diner kitchen with steel counters, a hanging ticket rail and cold fluorescent light from overhead. Cy climbs onto a stool and peers into the steaming kettle. The camera holds a static shot with fixed composition.",
+        "overall_soundscape: Continuous room tone and environmental ambience with synchronized physical action sounds.",
+        "non_diegetic_music: N/A"
+      ],
+      "profile": "quick",
+      "duration": 2.33
+    },
+    {
+      "id": "sh320",
+      "sequence": "sq04",
+      "subjects": [
+        "ada"
+      ],
+      "background": "refs/_bg/kitchen.png",
+      "size": "close",
+      "panels": 1,
+      "panel_view": "face",
+      "length": 39,
+      "seed": 5660381186064488857,
+      "steps": 7,
+      "audio_policy": "generate",
+      "audio_retention": "",
+      "voices": [
+        "ada"
+      ],
+      "voice_subject": "ada",
+      "voice_refs": [],
+      "prompt": [
+        "subject_definitions:\n<Subject 1> is Ada, defined by <Picture 1> — a single reference image of ONE character, a head-and-shoulders facial close-up. Exactly one person appears in that image. Exactly one person appears in this shot. Preserve the exact reference styling: a tall woman in her thirties with a short grey bob, a mustard apron over a striped shirt, and round red glasses.\n<Subject 2> is the location, defined by <Picture 4> — a background plate of a cramped diner kitchen with steel counters, a hanging ticket rail and cold fluorescent light from overhead. It establishes the layout, color palette, lighting direction and depth of the space, not a fixed camera framing.",
+        "summary:\n[reference generation] Ada points a wooden spoon at the kettle.",
+        "retention_analysis:\n<Subject 1> (appears in [Shot 1]): fully_preserved - facial identity, hairstyle, body proportions, wardrobe and colors are retained from <Picture 1> while allowing natural poses and expressions.\n<Subject 2> (appears in [Shot 1]): weak_reference - only the color palette, lighting direction and material character of the location are retained; the layout of the space is not reproduced and most of it falls outside the frame.",
+        "detailed_description:\nThe target video is a flat vector cartoon with thick even outlines and a limited pastel palette.\n[Shot 1] The scene takes place in <Subject 2>, a cramped diner kitchen with steel counters, a hanging ticket rail and cold fluorescent light from overhead. Ada points a wooden spoon at the kettle. The camera holds a static shot with fixed composition.\n<Subject 1>, with a voice that is dry, quick and precise, (S1) says, <d>[English] Don't you dare.</d>",
+        "overall_soundscape: Continuous room tone and environmental ambience with synchronized physical action sounds.",
+        "non_diegetic_music: N/A"
+      ],
+      "model": "profile_model.safetensors",
+      "loras": [
+        {
+          "name": "profile_turbo_8step.safetensors",
+          "strength": 1.0
+        },
+        {
+          "name": "profile_style.safetensors",
+          "strength": 0.6
+        }
+      ],
+      "profile": "dialogue_close",
+      "duration": 1.332
+    },
+    {
+      "id": "sh330",
+      "sequence": "sq04",
+      "subjects": [
+        "bo"
+      ],
+      "background": "refs/_bg/kitchen.png",
+      "size": "medium",
+      "panels": 1,
+      "panel_view": "body",
+      "length": 39,
+      "seed": 5114629555451768005,
+      "steps": 9,
+      "audio_policy": "generate",
+      "audio_retention": "",
+      "voices": [
+        "bo"
+      ],
+      "voice_subject": "bo",
+      "voice_refs": [],
+      "prompt": [
+        "subject_definitions:\n<Subject 1> is Bo, defined by <Picture 1> — a single reference image of ONE character, a three-quarter view of the whole body. Exactly one person appears in that image. Exactly one person appears in this shot. Preserve the exact reference styling: a stocky teenage boy with a shaved head, an oversized green bomber jacket and orange high-tops.\n<Subject 2> is the location, defined by <Picture 4> — a background plate of a cramped diner kitchen with steel counters, a hanging ticket rail and cold fluorescent light from overhead. It establishes the layout, color palette, lighting direction and depth of the space, not a fixed camera framing.",
+        "summary:\n[reference generation] Bo lifts the kettle off the burner with a grin.",
+        "retention_analysis:\n<Subject 1> (appears in [Shot 1]): fully_preserved - facial identity, hairstyle, body proportions, wardrobe and colors are retained from <Picture 1> while allowing natural poses and expressions.\n<Subject 2> (appears in [Shot 1]): partially_preserved - the layout, color palette and lighting direction of the location are retained while the camera framing and visible portion of the space differ from the plate.",
+        "detailed_description:\nThe target video is a flat vector cartoon with thick even outlines and a limited pastel palette.\n[Shot 1] The scene takes place in <Subject 2>, a cramped diner kitchen with steel counters, a hanging ticket rail and cold fluorescent light from overhead. Bo lifts the kettle off the burner with a grin. The camera holds a static shot with fixed composition.\n<Subject 1>, with a voice that is slow and cracking, (S1) says, <d>[English] Too late.</d>",
+        "overall_soundscape: Continuous room tone and environmental ambience with synchronized physical action sounds.",
+        "non_diegetic_music: N/A"
+      ],
+      "model": "profile_model.safetensors",
+      "lora": "shot_lora.safetensors",
+      "profile": "dialogue_close",
+      "duration": 1.105
     }
   ]
 }

@@ -40,14 +40,15 @@ and picking the view that completes the set stitches the sheet with mksheet
 (run as a subprocess with this Python: mksheet needs PIL, the pipeline is
 stdlib only).
 
-The prompt wording for every ref lives here, and only here: h3build writes the
-refs_todo prompts with it, and kreagen and the editor generate with it.
+The prompt wording for every ref lives in the image target
+(targets/image/krea2/prompt.py), re-exported here: h3build writes the refs_todo
+prompts with it (through the video target's ref requests), and kreagen and the
+editor generate with it. The model stack and graph are that target's too.
 
 Stdlib only.
 """
 from __future__ import annotations
 
-import copy
 import glob
 import hashlib
 import os
@@ -66,93 +67,25 @@ import h3jobs as J  # noqa: E402
 import h3takes as T  # noqa: E402
 
 # ---------------------------------------------------------------------------
-# wording: the one source for every reference prompt
+# wording and the image model: the krea2 image target (targets/image/krea2)
 # ---------------------------------------------------------------------------
+#
+# The wording of every reference prompt lives in targets/image/krea2/prompt.py,
+# the model stack's names in its target.json, and the graph code in its
+# graph.py. They are re-exported here under their old names (kreagen and the
+# tests read them from h3refs).
 
-# A character sheet is generated as four square views and stitched (a 4096x1024
-# canvas is far outside any image model's training distribution). The views,
-# in sheet order, left to right:
-VIEWS = [
-    ("01_threequarter", "a three-quarter view of the full figure from head to feet, "
-                        "turned slightly toward the viewer's left, standing straight "
-                        "with arms relaxed at the sides"),
-    ("02_side",         "a direct side profile of the full figure from head to feet, "
-                        "facing the viewer's right, standing straight with arms "
-                        "relaxed at the sides"),
-    ("03_back",         "the full figure seen from directly behind, head to feet, "
-                        "standing straight with arms relaxed at the sides"),
-    ("04_face",         "a head-and-shoulders close-up, facing the viewer, "
-                        "neutral expression"),
-]
-VIEW_TAGS = [tag for tag, _ in VIEWS]
-VIEW_DESC = dict(VIEWS)
+import targets as TG  # noqa: E402
+from targets import voice_prompt  # noqa: E402,F401
+from targets.image.krea2.graph import (  # noqa: E402,F401
+    CFG, CLIP, CLIPTYPE, LORA, LORA_C, LORA_M, OBJECT_SIZE, PLATE_SIZE, PREFIX,
+    REFS_WORKFLOW, SAMPLER, SAVER, SCHED, STEPS, UNET, VAE, VIEW_SIZE, _one, _splice_lora,
+    build_graph, patch_workflow, take_graph)
+from targets.image.krea2.prompt import (  # noqa: E402,F401
+    VIEW_DESC, VIEW_TAGS, VIEW_TMPL, VIEWS, object_prompt, plate_prompt, sheet_prompt,
+    view_prompt)
 
-VIEW_TMPL = ("A single character reference view on a plain flat neutral background, "
-             "no scene and no props, the whole figure inside the frame with margin "
-             "on every side: {view}. {design}. Drawn as {look}. Output {w}x{h}.")
-
-
-def view_prompt(view: str, design: str, look: str, w: int, h: int) -> str:
-    """The prompt for one view of a character sheet (`view` is a VIEWS tag)."""
-    return VIEW_TMPL.format(view=VIEW_DESC[view], design=design, look=look, w=w, h=h)
-
-
-def sheet_prompt(design: str, look: str) -> str:
-    """The whole 4-panel sheet, described for someone making it by hand
-    (refs_todo). Generating uses view_prompt four times instead."""
-    return (f"A character model sheet on a plain flat background: FOUR panels side "
-            f"by side in a single horizontal strip, left to right — three-quarter "
-            f"body, side profile full body, back view full body, and a "
-            f"head-and-shoulders facial close-up. The SAME character in all four. "
-            f"{design}. Drawn as {look}. "
-            f"Output 4096x1024 or larger.")
-
-
-def object_prompt(design: str, look: str) -> str:
-    """A prop or vehicle reference."""
-    return (f"A single clean three-quarter view of one object on a plain flat "
-            f"background, no scene around it. {design}. Drawn as "
-            f"{look}. Output 1024x1024 or larger.")
-
-
-def plate_prompt(look: str, description: str) -> str:
-    """A location's background plate."""
-    return (f"A background plate drawn as {look}. An empty establishing "
-            f"view of {description}. No characters, no props, no figures in frame — "
-            f"the environment only. Wide framing that shows the layout of the space.")
-
-
-def voice_prompt(name: str, voice: str) -> str:
-    """What a voice sample should be (nothing generates voices yet)."""
-    return (f"A 5-15 second clean recording of {name} speaking. "
-            f"Voice: {voice}.")
-
-
-# ---------------------------------------------------------------------------
-# the image model stack (krea2 turbo by default) and its graph
-# ---------------------------------------------------------------------------
-
-REFS_WORKFLOW = "krea2_refs_t2i.json"
-SAVER = "H3SaveRefTake"
-
-UNET = "krea2_turbo_fp8_scaled.safetensors"
-CLIP = "qwen3vl_4b_fp8_scaled.safetensors"
-CLIPTYPE = "krea2"
-VAE = "wan_2.1_vae.safetensors"
-# No style LoRA by default: references have to match whatever look series.json
-# asks for, and a realism LoRA fights a storybook one (and vice versa).
-LORA = ""
-LORA_M = 1.0
-LORA_C = 1.0
-STEPS = 12
-CFG = 1.0
-SAMPLER = "euler"
-SCHED = "beta"
-PREFIX = "h3refs/tmp"      # SaveImage prefix, when the graph keeps SaveImage
-
-VIEW_SIZE = (1024, 1024)
-PLATE_SIZE = (1344, 768)
-OBJECT_SIZE = (1024, 1024)
+IMAGE_TARGET = TG.load_target(TG.DEFAULT_IMAGE_TARGET, "image")
 NEW_SEED_BITS = 53         # as h3jobs: a browser can hold these as numbers
 
 
@@ -164,129 +97,6 @@ def seed_for(key: str) -> int:
 def parse_size(target: str, default=(1024, 1024)) -> tuple[int, int]:
     m = re.search(r"(\d+)\s*[x×]\s*(\d+)", target or "")
     return (int(m.group(1)), int(m.group(2))) if m else default
-
-
-def _one(g: dict, *ctypes: str) -> str:
-    ids = [k for k, v in g.items() if v["class_type"] in ctypes]
-    if len(ids) != 1:
-        raise ValueError(f"the workflow needs exactly one {' / '.join(ctypes)} node "
-                         f"(found {len(ids)})")
-    return ids[0]
-
-
-def _splice_lora(g: dict, ks: str, pos: str, name: str, sm: float, sc: float,
-                 lid: str) -> None:
-    """Insert a LoraLoader between the sampler's model / the prompt's clip and
-    their sources, rewiring every text encoder that read the same clip."""
-    ki = g[ks]["inputs"]
-    model_src, clip_src = ki["model"], g[pos]["inputs"]["clip"]
-    g[lid] = {"class_type": "LoraLoader",
-              "inputs": {"model": model_src, "clip": clip_src, "lora_name": name,
-                         "strength_model": sm, "strength_clip": sc}}
-    ki["model"] = [lid, 0]
-    for node in g.values():
-        if node["class_type"] == "CLIPTextEncode" and node["inputs"].get("clip") == clip_src:
-            node["inputs"]["clip"] = [lid, 1]
-
-
-def patch_workflow(base: dict, prompt: str, negative: str, w: int, h: int, seed: int,
-                   steps: int, cfg: float, prefix: str,
-                   unet: str = "", lora: str = "", lora_m: float = 1.0,
-                   lora_c: float = 1.0) -> dict:
-    """Set this job's values on a loaded workflow, leaving its wiring alone.
-
-    Positive and negative prompts are found by following the sampler's own
-    links, because the two CLIPTextEncode nodes are otherwise identical.
-    """
-    g = copy.deepcopy(base)
-    ks = _one(g, "KSampler", "KSamplerAdvanced")
-    ki = g[ks]["inputs"]
-    for key, val in (("seed", seed), ("noise_seed", seed), ("steps", steps),
-                     ("cfg", cfg), ("denoise", 1.0)):
-        if key in ki:
-            ki[key] = val
-
-    def text_node(slot: str) -> str | None:
-        link = ki.get(slot)
-        return link[0] if isinstance(link, list) else None
-
-    pos, neg = text_node("positive"), text_node("negative")
-    if pos and g[pos]["class_type"] == "CLIPTextEncode":
-        g[pos]["inputs"]["text"] = prompt
-    else:
-        raise ValueError("the workflow's sampler has no CLIPTextEncode on `positive`")
-    # The negative side is left exactly as the workflow wires it — a krea2 turbo
-    # graph zeroes it, a guided model's graph carries its own text, and a NAG or
-    # negpip setup is untouched. Only an explicit negative overrides that.
-    if neg and negative and cfg > 1.0:
-        g[neg] = {"class_type": "CLIPTextEncode",
-                  "inputs": {"clip": g[pos]["inputs"]["clip"], "text": negative}}
-
-    lat = _one(g, "EmptyLatentImage", "EmptySD3LatentImage")
-    g[lat]["inputs"]["width"], g[lat]["inputs"]["height"] = w, h
-    g[_one(g, "SaveImage")]["inputs"]["filename_prefix"] = prefix
-
-    if unet:
-        g[_one(g, "UNETLoader")]["inputs"]["unet_name"] = unet
-    if lora:
-        ids = [k for k, v in g.items() if v["class_type"] in ("LoraLoader",
-                                                              "LoraLoaderModelOnly")]
-        if len(ids) > 1:
-            raise ValueError(f"--lora needs one LoraLoader in the workflow (found {len(ids)})")
-        if ids:
-            gi = g[ids[0]]["inputs"]
-            gi["lora_name"] = lora
-            if "strength_model" in gi:
-                gi["strength_model"] = lora_m
-            if "strength_clip" in gi:
-                gi["strength_clip"] = lora_c
-        else:
-            # the workflow has no LoRA node: splice one in between the loaders
-            # and everything that reads them, so --lora works on any graph
-            _splice_lora(g, ks, pos, lora, lora_m, lora_c, "kreagen_lora")
-    return g
-
-
-def build_graph(prompt: str, negative: str, w: int, h: int, seed: int,
-                steps: int, cfg: float, prefix: str, lora_clip: bool,
-                unet: str = "", lora: str = "", lora_m: float = LORA_M,
-                lora_c: float = LORA_C) -> dict:
-    """The built-in krea2 turbo graph, for when no workflow file is found."""
-    lora = lora or LORA
-    model_src = ["4", 0] if lora else ["1", 0]
-    clip_src = (["4", 1] if lora_clip else ["2", 0]) if lora else ["2", 0]
-    g = {
-        "1": {"class_type": "UNETLoader",
-              "inputs": {"unet_name": unet or UNET, "weight_dtype": "default"}},
-        "2": {"class_type": "CLIPLoader",
-              "inputs": {"clip_name": CLIP, "type": CLIPTYPE, "device": "default"}},
-        "3": {"class_type": "VAELoader", "inputs": {"vae_name": VAE}},
-
-        "5": {"class_type": "CLIPTextEncode",
-              "inputs": {"clip": clip_src, "text": prompt}},
-        "7": {"class_type": "EmptyLatentImage",
-              "inputs": {"width": w, "height": h, "batch_size": 1}},
-        "8": {"class_type": "KSampler",
-              "inputs": {"model": model_src, "positive": ["5", 0], "negative": ["6", 0],
-                         "latent_image": ["7", 0], "seed": seed, "steps": steps,
-                         "cfg": cfg, "sampler_name": SAMPLER, "scheduler": SCHED,
-                         "denoise": 1.0}},
-        "9": {"class_type": "VAEDecode", "inputs": {"samples": ["8", 0], "vae": ["3", 0]}},
-        "10": {"class_type": "SaveImage",
-               "inputs": {"images": ["9", 0], "filename_prefix": prefix}},
-    }
-    if lora:
-        g["4"] = {"class_type": "LoraLoader",
-                  "inputs": {"model": ["1", 0], "clip": ["2", 0], "lora_name": lora,
-                             "strength_model": lora_m, "strength_clip": lora_c}}
-    # At cfg 1.0 there is no guidance, so a negative prompt is inert and
-    # ConditioningZeroOut is the cheap correct thing. Above 1.0 it bites.
-    if cfg > 1.0 and negative:
-        g["6"] = {"class_type": "CLIPTextEncode",
-                  "inputs": {"clip": clip_src, "text": negative}}
-    else:
-        g["6"] = {"class_type": "ConditioningZeroOut", "inputs": {"conditioning": ["5", 0]}}
-    return g
 
 
 # ---------------------------------------------------------------------------
@@ -1130,43 +940,17 @@ def graph_for(base: dict | None, job: GenJob, take: RefTake, save_node: bool = T
     patched with this job's values, or the built-in graph when `base` is None.
     With `save_node` the SaveImage becomes an H3SaveRefTake writing into the
     take (the sidecar path is absolute); without, SaveImage stays (prefix
-    PREFIX) and the caller fetches the image (kreagen on an older node pack)."""
-    loras = job.loras
-    first = loras[0] if loras else None
-    fname, fstr = (first["name"], float(first.get("strength", 1.0))) if first else ("", 1.0)
-    if base is not None:
-        g = patch_workflow(base, job.prompt, job.negative, job.width, job.height, job.seed,
-                           job.steps, job.cfg, PREFIX, unet=job.model, lora=fname,
-                           lora_m=fstr, lora_c=fstr)
-    else:
-        g = build_graph(job.prompt, job.negative, job.width, job.height, job.seed,
-                        job.steps, job.cfg, PREFIX, lora_clip, unet=job.model, lora=fname,
-                        lora_m=fstr, lora_c=fstr)
-    if loras == []:
-        # no LoRA at all: a workflow's own loader is kept but does nothing
-        for v in g.values():
-            if v["class_type"] in ("LoraLoader", "LoraLoaderModelOnly"):
-                for k in ("strength_model", "strength_clip"):
-                    if k in v["inputs"]:
-                        v["inputs"][k] = 0.0
-    if loras and len(loras) > 1:
-        ks = _one(g, "KSampler", "KSamplerAdvanced")
-        pos = g[ks]["inputs"]["positive"][0]
-        for i, lo in enumerate(loras[1:], start=2):
-            st = float(lo.get("strength", 1.0))
-            _splice_lora(g, ks, pos, lo["name"], st, st, f"h3refs_lora{i}")
-    if save_node:
-        sid = _one(g, "SaveImage")
-        g[sid] = {"class_type": SAVER,
-                  "inputs": {"images": g[sid]["inputs"]["images"],
-                             "sidecar": os.path.abspath(take.paths.sidecar)},
-                  "_meta": {"title": "H3 Save Ref Take"}}
-    return g
+    PREFIX) and the caller fetches the image (kreagen on an older node pack).
+    The graph code is the image target's (targets/image/krea2/graph.py)."""
+    return take_graph(base, job.prompt, job.negative, job.width, job.height, job.seed,
+                      job.steps, job.cfg, job.model, job.loras,
+                      take.paths.sidecar if save_node else None, lora_clip)
 
 
 def resolve_workflow(comfy_url: str | None, explicit: str | None = None):
     """(krea2_refs_t2i graph or None, where) — None means the built-in graph."""
-    return J.resolve_workflow(explicit, REFS_WORKFLOW, comfy_url, env="KREA_WORKFLOW",
+    b = IMAGE_TARGET.binding
+    return J.resolve_workflow(explicit, b.workflow_name, comfy_url, env=b.env,
                               required=False)
 
 

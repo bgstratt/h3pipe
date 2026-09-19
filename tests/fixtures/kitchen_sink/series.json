@@ -1,5 +1,5 @@
 {
-  "_README": "Golden-test fixture. Exercises every branch of h3build that no real episode reaches: per-pass/sequence/shot model, lora and steps; a LoRA whose step count disagrees; clone mode with a track so audio windows work; explicit policies and retentions; continuous sequences; a speaker with no voice sample; a subject with no kind.",
+  "_README": "Golden-test fixture. Exercises every branch of h3build that no real episode reaches: per-pass/sequence/shot model, lora and steps; a LoRA whose step count disagrees; clone mode with a track so audio windows work; explicit policies and retentions; continuous sequences; a speaker with no voice sample; a subject with no kind; render profiles at sequence and shot level.",
   "series": {
     "id": "kitchen_sink",
     "title": "Kitchen Sink",
@@ -94,5 +94,17 @@
   "audio": {
     "mode": "clone",
     "track": "audio/ks01_mix.wav"
+  },
+  "profiles": {
+    "_note": "keys starting with _ are ignored",
+    "dialogue_close": {
+      "target": "minimax_h3_ref2va",
+      "model": "profile_model.safetensors",
+      "loras": ["profile_turbo_8step.safetensors", "profile_style.safetensors:0.6"],
+      "steps": 7
+    },
+    "quick": {
+      "steps": 5
+    }
   }
 }
