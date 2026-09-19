@@ -919,7 +919,8 @@ as built in `docs/API.md`, "Phase 9a"; `h3source.py`, `h3promote.py`, `h3.py pro
   and ref design fields into the series config); the rest stays with a reason. Diff preview
   first. Replaces the old rule that the editor never writes the series config.
 
-**Phase 9b — timeline** (after 9a; decide per item)
+**Phase 9b — timeline** (in progress 2026-09-19; contract in `docs/API.md`, "Phase 9b": reorder,
+trims, undo, locks, ruler seek and J/K/L, a recording-under-the-cut toggle, waveform lane)
 - Drag-reorder and trims in the timeline; play-through of the cut (partly there: play all);
   master dialogue waveform under the timeline (only useful with a recorded track).
 

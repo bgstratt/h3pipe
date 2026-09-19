@@ -61,6 +61,7 @@ import tempfile
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import h3jobs  # noqa: E402
+import h3peaks  # noqa: E402
 import h3takes  # noqa: E402
 
 NOT_RENDERED = "not rendered"
@@ -72,12 +73,6 @@ def run(cmd: list[str], timeout: int = 900) -> subprocess.CompletedProcess:
 
 def have(tool: str) -> bool:
     return shutil.which(tool) is not None
-
-
-def has_audio(path: str) -> bool:
-    r = run(["ffprobe", "-v", "error", "-select_streams", "a",
-             "-show_entries", "stream=index", "-of", "csv=p=0", path], timeout=60)
-    return bool(r.stdout.strip())
 
 
 def frame_count(path: str) -> int:
@@ -560,23 +555,22 @@ def main() -> int:
         with open(listing, "w", encoding="utf-8") as fh:
             for i, p in enumerate(plan):
                 src = p["path"]
-                if args.audio == "none":
-                    wav = None
+                if args.audio in ("none", "master"):
+                    sound = None
                 elif args.audio == "h3":
-                    wav = p["wav"]
-                elif args.audio == "mp4":
-                    wav = None if has_audio(src) else p["wav"]
-                else:                                   # auto
-                    wav = None if has_audio(src) else p["wav"]
+                    sound = p["wav"]
+                else:                                   # auto, mp4
+                    # the mp4's own sound, else its _h3.wav, else silence
+                    # (h3peaks.clip_audio: the editor's take `audio` is the same rule)
+                    sound = h3peaks.clip_audio(src, p["wav"])
                 norm = os.path.join(tmp, f"{i:04d}.mp4")
                 if reencode:
-                    conform(src, norm, None if args.audio in ("none", "master") else
-                            (p["wav"] if args.audio == "h3" or not has_audio(src) else src),
+                    conform(src, norm, sound,
                             fps, p["used"], start=p["trim_in"],
                             size=size if (p["placeholder"] or p in resized) else None,
                             src_fps=p["src_fps"])
-                elif args.audio == "h3" or not has_audio(src) or args.audio in ("none", "master"):
-                    normalise(src, norm, wav, fps, p.get("frames", 0))
+                elif sound != src:
+                    normalise(src, norm, sound, fps, p.get("frames", 0))
                 else:
                     shutil.copy(src, norm)
                 fh.write(f"file '{norm.replace(os.sep, '/')}'\n")
