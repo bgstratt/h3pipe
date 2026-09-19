@@ -47,6 +47,8 @@ PRESERVE = {"fully_copy": "strict", "partially_copy": "loose", "reference": "sty
 class ScriptError(Exception):
     def __init__(self, line_no: int, line: str, msg: str):
         super().__init__(f"line {line_no}: {msg}\n    | {line.strip()}")
+        # the parts, for callers that show the line number beside the text
+        self.line_no, self.line, self.msg = line_no, line, msg
 
 
 def _norm_token(tok: str) -> str:

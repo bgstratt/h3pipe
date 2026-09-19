@@ -30,6 +30,12 @@ your projects, with the pipeline scripts beside it (see the README).
                                                     # (a cut pick of it goes back to latest)
     (see h3edit.py for every takes/pick/override/keyframe/discard flag)
 
+    python h3.py promote  Shows\\ep05 [sh020]        # the plan: which overrides can move into
+                                                    # the script / series config, the diffs
+    python h3.py promote  Shows\\ep05 --all          # move them, drop those overrides, rebuild
+    python h3.py promote  Shows\\ep05 --item shot:sh020:steps [--item ...] [--dry-run]
+                                                    # (see h3promote.py for what maps where)
+
     python h3.py targets  [Shows\\ep05] [--json]     # which targets the running ComfyUI can
                                                     # render, and what to download for the rest
 
@@ -140,6 +146,13 @@ def main() -> int:
         rest = argv[1:]
         ep = os.path.abspath(rest.pop(0)) if rest and not rest[0].startswith("-") else None
         return h3edit.cmd_targets(ep, rest)
+    if argv and argv[0] == "promote":
+        if len(argv) < 2 or argv[1].startswith("-"):
+            sys.exit("  !! usage: python h3.py promote <episode> [<shot>] [--all | --item ID ...] "
+                     "[--dry-run]")
+        sys.path.insert(0, HERE)
+        import h3promote
+        return h3promote.cmd_promote(os.path.abspath(argv[1]), argv[2:])
     if argv and argv[0] in EDIT:
         if len(argv) < 2 or argv[1].startswith("-"):
             sys.exit(f"  !! usage: python h3.py {argv[0]} <episode> ...")

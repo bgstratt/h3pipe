@@ -48,11 +48,12 @@ try:
                           f"({getattr(_spec, 'origin', None)})")
     import h3edit as E  # noqa: E402
     import h3jobs as J  # noqa: E402
+    import h3promote as P  # noqa: E402
     import h3refs as R  # noqa: E402
     import h3takes as T  # noqa: E402
     import targets as TG  # noqa: E402
 except Exception as exc:                                  # pragma: no cover
-    E = J = R = T = TG = None
+    E = J = P = R = T = TG = None
     IMPORT_ERROR = (f"h3pipe: can't import the pipeline from {HOME} "
                     f"({exc.__class__.__name__}: {exc}); set H3PIPE_HOME to the repo")
 
@@ -73,9 +74,12 @@ _UNSET = object()
 
 
 class ApiError(Exception):
-    def __init__(self, status: int, message: str):
+    """An answer other than 200: {"error": message, **data}."""
+
+    def __init__(self, status: int, message: str, **data):
         super().__init__(message)
         self.status = status
+        self.data = data
 
 
 class Context:
@@ -169,10 +173,12 @@ def handler(fn):
         try:
             return fn(*args, **kw)
         except ApiError as e:
-            return e.status, {"error": str(e)}
+            return e.status, dict({"error": str(e)}, **e.data)
         except FileNotFoundError as e:
             return 404, {"error": str(e)}
         except Exception as e:                            # the message is for a person
+            if P is not None and isinstance(e, P.H.SourceError):
+                return e.status, dict({"error": str(e)}, **e.data)
             return 500, {"error": f"{e.__class__.__name__}: {e}"}
     wrapped.__name__ = fn.__name__
     wrapped.__doc__ = fn.__doc__
@@ -1427,6 +1433,86 @@ def delete_refs_override(ctx: Context, query: dict):
     return 200, seeds_out({"override": _ref_override_json(s, ref, view)})
 
 
+# ---------------------------------------------------------------------------
+# the script and the series config (Phase 9a)
+# ---------------------------------------------------------------------------
+
+def _file(v) -> str:
+    if v not in P.H.FILES:
+        raise ApiError(400, f"file must be 'script' or 'series', not {v!r}")
+    return v
+
+
+def _flag(v) -> bool:
+    return v is True or (isinstance(v, str) and v.lower() in ("1", "true", "yes"))
+
+
+@handler
+def get_source(ctx: Context, query: dict):
+    ep = check_ep(ctx, query.get("ep"))
+    src = P.H.read_source(ep, _file(query.get("file")))
+    return 200, P.H.source_json(src, hash_only=_flag(query.get("hash_only")))
+
+
+@handler
+def post_source_check(ctx: Context, body):
+    body = body_dict(body)
+    ep = check_ep(ctx, body.get("ep"))
+    file = _file(body.get("file"))
+    text = body.get("text")
+    if not isinstance(text, str):
+        raise ApiError(400, "text must be the file's text")
+    return 200, P.H.check_text(ep, file, text)
+
+
+@handler
+def put_source(ctx: Context, body):
+    """Save the script or the series config (409 when it changed on disk
+    since `base_hash`), then rebuild unless `rebuild` is false."""
+    body = body_dict(body)
+    ep = check_ep(ctx, body.get("ep"))
+    file = _file(body.get("file"))
+    base_hash = body.get("base_hash")
+    if not isinstance(base_hash, str) or not base_hash:
+        raise ApiError(400, "base_hash is required: the hash the text was read at")
+    rebuild = body.get("rebuild", True)
+    if not isinstance(rebuild, bool):
+        raise ApiError(400, "rebuild must be true or false")
+    saved = P.H.save_source(ep, file, body.get("text"), base_hash)
+    build = E.build_episode(ep) if rebuild else None
+    episode_event(ctx, ep)
+    return 200, {"hash": saved["hash"], "check": saved["check"], "build": build}
+
+
+@handler
+def get_promote(ctx: Context, query: dict):
+    ep = check_ep(ctx, query.get("ep"))
+    return 200, seeds_out(P.plan(ep, query.get("shot") or None))
+
+
+@handler
+def post_promote(ctx: Context, body):
+    body = body_dict(body)
+    ep = check_ep(ctx, body.get("ep"))
+    items = body.get("items")
+    if items != "all" and not (isinstance(items, list)
+                               and all(isinstance(i, str) for i in items)):
+        raise ApiError(400, "items must be a list of item ids from the plan, or \"all\"")
+    hashes = body.get("hashes")
+    if not isinstance(hashes, dict):
+        raise ApiError(400, "hashes is required: {\"script\", \"series\"} from the plan")
+    shot = body.get("shot") or None
+    if shot is not None and not isinstance(shot, str):
+        raise ApiError(400, "shot must be a shot id")
+    result = P.apply(ep, items, hashes, shot)
+    refs = result.pop("refs", [])
+    if result["promoted"]:
+        episode_event(ctx, ep)
+        for ref_id in refs:
+            ref_event(ctx, ep, ref_id, None, None, "promoted")
+    return 200, seeds_out(result)
+
+
 # (method, path, handler, what it takes: "query", "body" (JSON) or "form" (JSON, or
 # multipart/form-data whose file field arrives as an Upload))
 ROUTES = [
@@ -1460,4 +1546,9 @@ ROUTES = [
     ("POST", "/h3pipe/refs/keyframe", post_refs_keyframe, "body"),
     ("PUT", "/h3pipe/refs/override", put_refs_override, "body"),
     ("DELETE", "/h3pipe/refs/override", delete_refs_override, "query"),
+    ("GET", "/h3pipe/source", get_source, "query"),
+    ("POST", "/h3pipe/source/check", post_source_check, "body"),
+    ("PUT", "/h3pipe/source", put_source, "body"),
+    ("GET", "/h3pipe/promote", get_promote, "query"),
+    ("POST", "/h3pipe/promote", post_promote, "body"),
 ]

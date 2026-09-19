@@ -1361,3 +1361,145 @@ What can't be expressed stays in `overrides.json`, with the reason.
   `key:` line (or right after `## shot`). Nothing else in the file changes. Series config
   edits rewrite the JSON with 2-space indent, keeping key order and non-ASCII text; if the
   file wasn't already formatted that way the diff says so.
+
+### Phase 9a as built
+
+Everything above is implemented (`h3source.py`: read, check, save; `h3promote.py`: the
+plan and apply, and `python h3.py promote`). Each point is **[differs]**, **[added]** or
+**[settled]**, as for 8.6. No field the contract named changes shape except where marked
+[differs].
+
+**Reading**
+- **[settled]** `text` always has LF line endings and no BOM; `hash` is the sha1 of the
+  bytes on disk (BOM and CRLF included), so it is what `base_hash` must be. `mtime` is
+  seconds since the epoch (a float, `os.stat`). A file that isn't UTF-8 is a 500 naming
+  the byte.
+- **[settled]** `shots` comes from the parser against the series config on disk; it is
+  `[]` when either doesn't parse. `path` is `../series.json` for a parent-folder series
+  config, as the contract said. An unknown `file` is 400; no script (or no way to tell
+  which `.md` it is) or no series config is 404.
+
+**Checking**
+- **[settled]** `errors` / `warnings` entries are `{"file": "script" | "series", "line":
+  <1-based> | null, "message"}`, plus `"col"` for a JSON syntax error only. A parser error
+  gives its own line, and `message` is its text **without** the `line N:` prefix and the
+  echoed `| line` (the line is in `line`). A build error or warning about a shot
+  (`shot sh020: …`, `sh020: …`, `sh040 overrides steps: 10`) points at the line the
+  message is about when it names one in that shot's block (`target:`, `profile:`, `dur:`,
+  `retention:`, `policy:`, `plate:`, `with:`, `model:`, `lora:`, `steps:`), else at the
+  shot's `##` line; `sequence sq04: …` at the `#` line. A series config message points at
+  the key it names (`profile 'x'`, `refs.x`, `series.x`, `proxy.x`, a missing block's
+  name) and is `line: null` when it names none (e.g. "series.json has no `subjects`
+  block").
+- **[settled]** The check is `h3.py check`'s: parse, pick targets, compile the **final**
+  pass of every target the episode uses (`h3build.compile_groups`, which the build now
+  uses too), in memory. Warnings are the report's `!` lines, each once. The build stops at
+  its first error, so `errors` has at most one entry. `--pace` isn't repeated: its
+  CRAMMED/tight verdicts are already warnings.
+- **[settled]** Checking a series config: JSON, then the loader; if it loads, the script
+  on disk is checked with it, and those messages carry `"file": "script"` and lines into
+  the script on disk. `shots` is `[]` for `file: series`.
+
+**Saving**
+- **[settled] Line endings:** the file keeps the ending most of its lines use (CRLF or LF;
+  a mixed file comes out uniform) and its BOM if it had one. A BOM at the start of the sent
+  text is dropped (the file's own rule decides).
+- **[settled]** Text that would write the same bytes writes nothing (no history copy, the
+  hash unchanged); `check` still comes back, and `build` too when `rebuild` is true.
+- **[settled] History:** `<ep>/_history/<file name>.<YYYYmmdd-HHMMSS>`, with `-2`, `-3`…
+  when a copy that second exists; the newest 30 per file name are kept. A parent-folder
+  series config's copies also go in the **episode's** `_history/` (the episode finder
+  skips `_` folders).
+- **[settled]** The JSON refusal is 400 `{"error", "line", "col"}` and writes nothing. A
+  series config that is JSON but doesn't load is saved, with the check's errors.
+- **[added]** The 409 body also has `"file"` (which file changed). `rebuild` defaults to
+  true; `base_hash` is required (400 without it).
+- **[settled]** The write is a temp file beside the file, then `os.replace` (retried
+  briefly while Windows reports the file busy).
+
+**Promote: the plan**
+- **[settled] Item ids:** `shot:<shot>:<field>` (`target`, `model`, `loras`, `steps`),
+  `episode:<field>` (`target`, `refs_target`, `keyframe_target`) and
+  `ref:<ref id>:prompt`. `value` is the override's value (`loras` is the list); `summary`
+  shows the line or key as it will be written, e.g. ``sh030: `lora: x.safetensors:0.5` (the
+  override of both passes)``. `line` (script items) is the line **in the promoted script**
+  (every item of the plan applied).
+- **[differs] A character's prompt is one item, not one per view:** the design sentence
+  is every view's, so it promotes only when all four views have a prompt override and all
+  four change the design the same way; the item has no `view`. (Props, vehicles and
+  locations have one prompt and one item.)
+- **[added]** `left` entries may carry `"pass"` (a per-pass field left in one pass: a
+  prompt, a negative, `model_low`) and `"ref"` / `"view"` for ref overrides.
+- **[settled]** `diffs.script` / `diffs.series` are `""` when that file doesn't change.
+  When the series config wasn't already in the promote's format (2-space indent, key order
+  and non-ASCII kept; e.g. the fixture's one-line arrays), `diffs.series` starts with one
+  line, `# series.json wasn't formatted with a 2-space indent: promoting rewrites the whole
+  file that way`, before the `---`/`+++` header.
+- **[settled] `&shot=`** narrows the plan to that shot's overrides: no episode or ref items.
+- **[settled]** A script or series config that doesn't parse, load or build is 400 (fix it
+  first): a plan needs both.
+
+**Promote: what maps where (the final rules)**
+- Shot **`target`** (the retarget) → `target: <id>` in the shot's block.
+- Shot **`model` / `loras` / `steps`**, from the override block of the target the shot
+  renders on now → `model:` / `lora:` / `steps:`. A script line sets **both passes** (the
+  compilers layer it above the pass preset for final and proxy alike), so the item needs
+  the same value in both passes: both overridden alike, or one pass overridden and the
+  other already rendering that value. `loras` → `lora: name` (strength 1), `lora:
+  name:0.6`, or `lora: none` for `[]`; a stack of two or more is `left` (a script line
+  holds one LoRA: use a profile's `loras`).
+- **left, always, for shots:** `prompt` (compiled text), `seed` (keep it by picking the
+  take), `note`, `negative` (per target and pass), `model_low` (no script line); and every
+  field of an override block written for a target the shot doesn't render on now (a script
+  line would give it to the other model).
+- Episode **`target`** → the series config's `series.target`, **unless** its `series` /
+  `proxy` blocks set `model`, `lora` or `steps` for the old series target: as the series
+  target, the new one would inherit them (`Target.preset` applies the pass blocks to the
+  series target only), so it is `left`, naming the keys.
+- Episode **`refs_target` / `keyframe_target`** → `refs.target` / `refs.keyframe_target`.
+- A ref's **`prompt`** → the subject's `design` or the location's `description`, when the
+  override is the built prompt with only that sentence replaced (it occurs once in the
+  built prompt, and the override keeps everything around it); a character needs all four
+  views, agreeing (above). The summary lists the shots that show it: their compiled
+  prompts use the same sentence and change too.
+- **left, always, for refs:** `seed`, `model`, `loras`, `steps`, `note`, `target` (the
+  series config has no per-ref settings; `refs.target` is every ref's), a keyframe's
+  prompt (written from its shot) and a voice's.
+- **The check (every plan):** the promoted files are parsed and compiled in memory, and
+  every shot must render with the same target, model, LoRAs and steps in both passes as it
+  does now (h3jobs' precedence: the shot compiled for its effective target, then the
+  override for that target), and each promoted line must parse back as written. Each item
+  is checked alone, then all together; one that fails goes to `left` with what would
+  change (`sh010 would render differently (final: steps 9 → 8)`). A ref item is checked by
+  generating its prompt from the changed series config with no override: it must equal the
+  override's text, in every view. `tests/test_phase9a.py` asserts the end-to-end version
+  through `h3jobs.plan_job` on disk, before and after a promote.
+
+**Promote: apply**
+- **[settled]** `items` must be ids the plan (for the same `shot`, if given) offers; an
+  unknown id is 400 ("ask for the plan again"). The chosen subset is checked again on its
+  own; anything that no longer passes comes back in `left`, unpromoted.
+- **[added]** An optional `shot` in the body narrows the plan as `&shot=` does.
+- **[settled]** 409 is `{"error": "changed on disk", "file", "hash", "text"}` for the first
+  file (script, then series) whose hash isn't the plan's; nothing is written. `hashes` is
+  required (400 without it).
+- **[settled] Order:** the script, then the series config (each only if it changes, each
+  with a `_history/` copy), then `overrides.json` (the promoted fields in both passes of
+  that target's block, the retarget, the episode fields), then `<series
+  home>/refs/_overrides.json` (the promoted prompts and their `base_hash`), then the build.
+  `hashes` in the answer are the files' new hashes; `build` is null when nothing was
+  promoted.
+- **[added]** `h3pipe.ref` for a promoted ref override has `"status": "promoted"`,
+  `view: null`, `take: null`; `h3pipe.episode` follows any promote.
+- **[settled] Known side effects:** a take rendered with a promoted model/LoRA/steps
+  override shows `preset` stale afterwards (a take's `preset_hash` is of the built values,
+  which now include the promoted ones), although a render uses the same values. A promoted
+  design changes the compiled prompts of the shots that show that subject or location
+  (listed in the summary), so their takes go `script` stale. An episode item whose series
+  config is shared by a parent folder says so in its summary: every episode that uses it
+  changes.
+
+**CLI**
+- **[added]** `python h3.py promote <ep> [<shot>]` prints the plan (items, `left` with
+  reasons, both diffs) and writes nothing; `--all` or `--item ID` (repeatable) promotes and
+  rebuilds; `--dry-run` shows the plan even with those.
