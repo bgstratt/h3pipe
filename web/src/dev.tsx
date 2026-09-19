@@ -34,7 +34,8 @@ const devHost: Host = {
 
 const params = new URLSearchParams(location.search);
 setHost(devHost);
-setApi(createMockApi(emit, { firstRun: params.has("firstrun") }));
+const mock = createMockApi(emit, { firstRun: params.has("firstrun") });
+setApi(mock);
 
 for (const s of ["shots", "refs", "timeline"] as Surface[]) {
   mountSurface(s, document.getElementById(s)!);
@@ -45,5 +46,8 @@ void start();
 // Try the What's missing panel's Refresh: `h3mockInstall("ltx-2.3-22b-ic-lora-ingredients-0.9.safetensors")`
 // in the console "downloads" a file; Refresh then shows it installed.
 (window as unknown as { h3mockInstall: typeof installMock }).h3mockInstall = installMock;
+// Phase 9a: an edit "in another editor", e.g. h3mockEdit("script", (t) => t.replace("size: wide", "size: close")):
+// an open Script window reloads it (clean buffer) or offers Reload / Keep mine (unsaved edits).
+(window as unknown as { h3mockEdit: typeof mock.outsideEdit }).h3mockEdit = mock.outsideEdit;
 
 document.getElementById("theme")?.addEventListener("click", () => document.documentElement.classList.toggle("light"));

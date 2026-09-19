@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   cancelTake, clearRef, closeMenu, copyText, discardTake, generateKeyframe, keyframeFromTake, loadRefs, openInspector, openRedo, openSidecar,
-  openViewer, pickTake, playAll, requestRender, showMissingRefs,
+  openViewer, pickTake, playAll, requestRender, showInScript, showMissingRefs,
 } from "../actions";
 import { absPath, tn } from "../lib/format";
 import { cutNeighbour, keyframeNote, keyframeRefId } from "../lib/keyframes";
@@ -141,6 +141,9 @@ export function ContextMenu() {
       )}
       <button onClick={run(() => openInspector(menu.shot, take?.take ?? null))}>
         <i className="pi pi-sliders-h" /> Inspect shot
+      </button>
+      <button disabled={!!shot?.orphan} title={shot?.orphan ? `${menu.shot} is no longer in the script` : `Open the script at ${menu.shot}'s lines`} onClick={run(() => showInScript(menu.shot))}>
+        <i className="pi pi-file-edit" /> Show in script
       </button>
     </>
   );

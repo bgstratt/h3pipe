@@ -449,3 +449,63 @@
 .h3-view-head { display: flex; align-items: center; gap: 2px; }
 .h3-view-head .h3-btn { padding: 0 4px; min-height: 0; font-size: 10px; }
 
+/* Phase 9a: the Script / Series config windows, promote.
+   Syntax colours are a hue mixed with ComfyUI's foreground, so they're pastel on
+   a dark palette and deeper on a light one. */
+.h3-root {
+  --h3-syn-head: color-mix(in srgb, #e5a50a 70%, var(--h3-fg));
+  --h3-syn-seq: color-mix(in srgb, #3d8fe0 72%, var(--h3-fg));
+  --h3-syn-shot: color-mix(in srgb, #1fa5a0 75%, var(--h3-fg));
+  --h3-syn-loc: color-mix(in srgb, #9b6bdf 65%, var(--h3-fg));
+  --h3-syn-key: color-mix(in srgb, #3d8fe0 60%, var(--h3-fg));
+  --h3-syn-name: color-mix(in srgb, #1fa5a0 60%, var(--h3-fg));
+  --h3-syn-num: color-mix(in srgb, #d07a2b 70%, var(--h3-fg));
+  --h3-syn-string: color-mix(in srgb, #3fa55b 55%, var(--h3-fg));
+  --h3-syn-speaker: color-mix(in srgb, #d0508a 70%, var(--h3-fg));
+  --h3-syn-voice: color-mix(in srgb, #9b6bdf 70%, var(--h3-fg));
+  --h3-syn-dialogue: color-mix(in srgb, #e5a50a 35%, var(--h3-fg));
+}
+.h3-source-body { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+.h3-code { flex: 1 1 auto; min-height: 0; overflow: hidden; }
+.h3-code .cm-editor { height: 100%; }
+.h3-banner { margin: 6px 8px 0; flex: 0 0 auto; }
+.h3-pre-wrap { white-space: pre-wrap; word-break: break-word; }
+.h3-dirty { color: var(--h3-queued); font-size: 14px; line-height: 1; }
+.h3-root .h3-chip {
+  font: inherit; font-size: 10px; line-height: 14px; padding: 0 6px; border-radius: 7px; cursor: pointer;
+  border: 1px solid currentColor; background: none; white-space: nowrap;
+}
+.h3-chip-err { color: var(--h3-failed); }
+.h3-chip-warn { color: var(--h3-stale); }
+.h3-chip-ok { color: var(--h3-ok); cursor: default; }
+.h3-source-others {
+  flex: 0 0 auto; max-height: 30%; overflow: auto; border-top: 1px solid var(--h3-border); padding: 4px 8px;
+  display: flex; flex-direction: column; gap: 2px;
+}
+.h3-root .h3-source-msg {
+  display: block; text-align: left; background: none; border: 0; border-left: 3px solid var(--h3-stale); padding: 1px 6px;
+  color: var(--h3-fg); font: inherit; cursor: pointer;
+}
+.h3-root .h3-source-msg.h3-error { border-left-color: var(--h3-failed); }
+.h3-root .h3-source-msg:hover { background: var(--h3-hover); }
+.h3-promote-item { display: flex; align-items: flex-start; gap: 6px; padding: 3px 4px; border-radius: 3px; cursor: pointer; }
+.h3-promote-item:hover { background: var(--h3-hover); }
+.h3-promote-item input { margin-top: 2px; }
+.h3-promote-left { padding: 1px 4px; }
+.h3-promote-diff summary { cursor: pointer; padding: 2px 0; }
+.h3-udiff {
+  font-family: var(--h3-mono); font-size: 11px; background: var(--h3-bg2); border: 1px solid var(--h3-border); border-radius: 4px;
+  max-height: 40vh; overflow: auto; padding: 2px 0;
+}
+.h3-dl { display: grid; grid-template-columns: 3.2em 3.2em 1.2em 1fr; }
+.h3-dl-n { color: var(--h3-muted); text-align: right; padding-right: 4px; user-select: none; opacity: 0.7; }
+.h3-dl-sign { text-align: center; user-select: none; }
+.h3-dl-text { white-space: pre-wrap; word-break: break-word; padding-right: 6px; }
+.h3-dl-add { background: color-mix(in srgb, var(--h3-ok) 18%, transparent); }
+.h3-dl-add .h3-dl-sign, .h3-dl-add-c { color: var(--h3-ok); }
+.h3-dl-del { background: color-mix(in srgb, var(--h3-failed) 18%, transparent); }
+.h3-dl-del .h3-dl-sign, .h3-dl-del-c { color: var(--h3-failed); }
+.h3-dl-hunk { color: var(--h3-accent); background: color-mix(in srgb, var(--h3-accent) 8%, transparent); }
+.h3-dl-file, .h3-dl-note { color: var(--h3-muted); }
+.h3-code-span { background: var(--h3-bg2); border-radius: 3px; padding: 0 3px; font-size: 11px; }
+

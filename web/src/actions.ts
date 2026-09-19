@@ -19,7 +19,7 @@ import {
   type RefTakeRef,
 } from "./store";
 import type {
-  EpisodeStatus, Lora, OverrideFields, Pass, ProgressEvent, PromptEvent, Ref, RefEvent,
+  BuildResult, EpisodeStatus, Lora, SourceFile, OverrideFields, Pass, ProgressEvent, PromptEvent, Ref, RefEvent,
   RefGenerateRequest, RefTake, RenderRequest, RenderResult, RenderSkip, Seed, SeedMode, ShotDetail, TakeEvent, TakeRef,
 } from "./types";
 
@@ -1693,4 +1693,61 @@ export function openImageCompare(ref: string, view: string | null, a: number | n
     viewer: { kind: "image", shot: "", pass: get().pass, a, b, mode: b != null ? "side" : "single", target: b != null ? "b" : "a", ref, view },
     menu: null,
   });
+}
+
+// ---------------------------------------------------------------------------
+// Phase 9a: the Script and Series config windows, promote
+// ---------------------------------------------------------------------------
+
+export function openSource(file: SourceFile) {
+  set((s) => ({ sourceOpen: { ...s.sourceOpen, [file]: true }, menu: null }));
+}
+
+/** Close a window (the window asks about unsaved edits first). */
+export function closeSource(file: SourceFile) {
+  set((s) => ({
+    sourceOpen: { ...s.sourceOpen, [file]: false },
+    sourceDirty: { ...s.sourceDirty, [file]: false },
+    // a request to show a shot is for this opening only
+    scriptFocus: file === "script" ? null : s.scriptFocus,
+  }));
+}
+
+export function setSourceDirty(file: SourceFile, dirty: boolean) {
+  if (get().sourceDirty[file] !== dirty) set((s) => ({ sourceDirty: { ...s.sourceDirty, [file]: dirty } }));
+}
+
+/** Open the Script window scrolled to a shot's lines, and select the shot. */
+export function showInScript(shot: string) {
+  if (get().shot !== shot) select(shot, null);
+  set((x) => ({
+    sourceOpen: { ...x.sourceOpen, script: true },
+    scriptFocus: { shot, n: (x.scriptFocus?.n ?? 0) + 1 },
+    menu: null,
+  }));
+}
+
+export function openPromote(shot: string | null = null) {
+  set({ promote: { shot }, menu: null });
+}
+
+export function closePromote() {
+  set({ promote: null });
+}
+
+/**
+ * After the editor wrote an authored file (a save, a promote): show the build,
+ * refresh the episode (and its refs), and have the open windows look at the
+ * disk again.
+ */
+export function afterAuthoredWrite(buildResult: BuildResult | null) {
+  if (buildResult) {
+    set({ build: { busy: false, result: buildResult, error: null } });
+    if (!buildResult.ok) host().toast("error", "The build failed", firstError(buildResult));
+  }
+  set((s) => ({ sourceN: s.sourceN + 1 }));
+  void loadEpisodes();
+  scheduleRefresh(0);
+  const ep = get().ep;
+  if (ep && get().refs[ep]) scheduleRefsRefresh(0);
 }

@@ -9,10 +9,12 @@ import { ContextMenu } from "./components/ContextMenu";
 import { RedoDialog, SidecarDialog } from "./components/Dialogs";
 import { BrowseDialog } from "./components/Browse";
 import { InspectorWindow } from "./components/Inspector";
+import { PromoteDialog } from "./components/Promote";
 import { MissingWindow } from "./components/Readiness";
 import { RefsTab } from "./components/RefsTab";
 import { RenderDialog } from "./components/RenderDialog";
 import { ShotsTab } from "./components/ShotsTab";
+import { SourceWindows } from "./components/SourceWindow";
 import { Timeline } from "./components/Timeline";
 import { Viewer } from "./components/Viewer";
 import type { Surface } from "./host";
@@ -127,11 +129,13 @@ function Overlay() {
       <InspectorWindow />
       <Viewer />
       <MissingWindow />
+      <SourceWindows />
       <ContextMenu />
       <RedoDialog />
       <RenderDialog />
       <BrowseDialog />
       <SidecarDialog />
+      <PromoteDialog />
       <Toasts />
     </>
   );
