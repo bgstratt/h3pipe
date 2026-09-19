@@ -1,13 +1,12 @@
 # h3pipe — plan: a shot/take editor, then model-agnostic targets
 
-Status (2026-09-19): Phases 0–3 and 5–8 done; Phase 4 (evaluate) continues through use. Targets:
-`minimax_h3_ref2va` (default), `ltx2` (LTX-2.5, text/keyframes), `ltx2_ingredients` (LTX-2.3 + IC-LoRA
-reference sheet from the picked refs: character identity on LTX), `minimax_h3_fl2va` (H3 from first/last
-keyframes, or text; dub anchors the recording), and three silent Wan 2.2 targets: `wan22_i2v`
-(14B from a first frame), `wan22_ti2v` (5B text/first frame) and `wan22_vace` (14B with a
-reference image of the picked refs); see **Wan 2.2 — as built**. Keyframe continuity (the previous shot's
-last frame becomes this shot's first) is in the CLI, the routes and the editor. Next candidates:
-the Phase 9 editor items. The open LTX items are under **Phase 8 — as built**.
+Status (2026-09-19): Phases 0–3 and 5–8 done; Phase 4 (evaluate) continues through use. Video targets:
+`minimax_h3_ref2va` (default), `minimax_h3_fl2va` (H3 from first/last keyframes; dub anchors the recording),
+`ltx2` (LTX-2.5; `dur: model` predicts length once the duration head is installed), `ltx2_ingredients`
+(LTX-2.3 + IC-LoRA reference sheet: identity), `wan22_i2v` / `wan22_ti2v` / `wan22_vace` (Wan 2.2, silent,
+16/24 fps; assemble converts fps). Model files are checked against each target's family (name patterns +
+safetensors header). Keyframe continuity is in the CLI, the routes and the editor. Open items: the per-target
+lists under Phase 8 / Wan / shot lengths, and the Phase 9 editor items.
 This is the working plan for the next round of development. `CLAUDE.md` points here.
 
 ## Goals
