@@ -48,12 +48,13 @@ try:
                           f"({getattr(_spec, 'origin', None)})")
     import h3edit as E  # noqa: E402
     import h3jobs as J  # noqa: E402
+    import h3peaks as PK  # noqa: E402
     import h3promote as P  # noqa: E402
     import h3refs as R  # noqa: E402
     import h3takes as T  # noqa: E402
     import targets as TG  # noqa: E402
 except Exception as exc:                                  # pragma: no cover
-    E = J = P = R = T = TG = None
+    E = J = P = PK = R = T = TG = None
     IMPORT_ERROR = (f"h3pipe: can't import the pipeline from {HOME} "
                     f"({exc.__class__.__name__}: {exc}); set H3PIPE_HOME to the repo")
 
@@ -410,7 +411,16 @@ def post_build(ctx: Context, body):
 def get_file(ctx: Context, query: dict):
     """(200, {"path", "content_type"}) for the adapter to stream."""
     ep = check_ep(ctx, query.get("ep"))
-    rel = query.get("path")
+    full, rel = ep_file(ctx, ep, query.get("path"))
+    ext = os.path.splitext(full)[1].lower()
+    return 200, {"path": full, "content_type": CONTENT_TYPES.get(ext, "application/octet-stream")}
+
+
+def ep_file(ctx: Context, ep: str, rel, escape_status: int = 403) -> tuple[str, str]:
+    """(full path, the relative path with forward slashes) of an existing file
+    inside the episode (or its parent-folder series config's folder). 400 for
+    a path that isn't relative or climbs out, `escape_status` for one that
+    leads outside through a link, 404 for no such file."""
     if not rel or not isinstance(rel, str):
         raise ApiError(400, "path is required")
     parts = rel.replace("\\", "/").split("/")
@@ -419,11 +429,10 @@ def get_file(ctx: Context, query: dict):
         raise ApiError(400, f"path must be relative to the episode and stay inside it: {rel!r}")
     full = os.path.normpath(os.path.join(ep, *[p for p in parts if p not in ("", ".")]))
     if not (_inside(_real(full), _real(ep)) or _in_series_home(ctx, ep, parts)):
-        raise ApiError(403, f"{rel} leads outside the episode")
+        raise ApiError(escape_status, f"{rel} leads outside the episode")
     if not os.path.isfile(full):
         raise ApiError(404, f"no file {rel} in {ep}")
-    ext = os.path.splitext(full)[1].lower()
-    return 200, {"path": full, "content_type": CONTENT_TYPES.get(ext, "application/octet-stream")}
+    return full, "/".join(p for p in parts if p not in ("", "."))
 
 
 def _in_series_home(ctx: Context, ep: str, parts: list[str]) -> bool:
@@ -636,6 +645,9 @@ def put_pick(ctx: Context, body):
         cut = E.pick_take(ep, pass_, shot, take, from_pass=src, force=force)
     except E.NotUsable as e:
         raise ApiError(409, f"{e}; pick it anyway with \"force\": true")
+    except E.Locked as e:
+        raise ApiError(409, f"{e}: unlock it first, or pick anyway with \"force\": true",
+                       locked=True)
     except KeyError as e:
         raise ApiError(404, e.args[0])
     except LookupError as e:
@@ -690,9 +702,89 @@ def put_cut(ctx: Context, body):
         if e["shot"] in seen:
             raise ApiError(400, f"{e['shot']} is in the cut twice")
         seen.add(e["shot"])
-    cut = E.replace_cut(ep, pass_, clean)
+    try:
+        cut = E.replace_cut(ep, pass_, clean)
+    except E.CutError as e:
+        raise ApiError(400, str(e))
     episode_event(ctx, ep)
     return 200, {"cut": cut}
+
+
+def _cut_what(v) -> str:
+    if v not in E.CUT_WHAT:
+        raise ApiError(400, f"what must be one of {', '.join(E.CUT_WHAT)}, not {v!r}")
+    return v
+
+
+@handler
+def post_cut_reset(ctx: Context, body):
+    """Script order (picks, locks, notes kept) and/or no trims (h3edit.reset_cut)."""
+    body = body_dict(body)
+    ep = check_ep(ctx, body.get("ep"))
+    pass_ = check_pass(body.get("pass"))
+    what = _cut_what(body.get("what"))
+    J.load_shotlist(ep, pass_)                           # 404: not built
+    try:
+        cut = E.reset_cut(ep, pass_, what)
+    except E.CutError as e:
+        raise ApiError(400, str(e))
+    episode_event(ctx, ep)
+    return 200, {"cut": cut}
+
+
+@handler
+def post_cut_copy(ctx: Context, body):
+    """One pass's order and/or trims onto the other (h3edit.copy_cut)."""
+    body = body_dict(body)
+    ep = check_ep(ctx, body.get("ep"))
+    for k in ("from", "to"):
+        if body.get(k) not in PASSES:
+            raise ApiError(400, f"{k} must be 'final' or 'proxy', not {body.get(k)!r}")
+    src, dst = body["from"], body["to"]
+    what = _cut_what(body.get("what"))
+    if src == dst:
+        raise ApiError(400, "from and to must be different passes")
+    J.load_shotlist(ep, src)                             # 404: not built
+    J.load_shotlist(ep, dst)
+    try:
+        cut = E.copy_cut(ep, src, dst, what)
+    except E.CutError as e:
+        raise ApiError(400, str(e))
+    episode_event(ctx, ep)
+    return 200, {"cut": cut}
+
+
+def _num(query: dict, key: str, cast, lo=None):
+    v = query.get(key)
+    if v is None or v == "":
+        return None
+    try:
+        n = cast(v)
+    except (TypeError, ValueError):
+        raise ApiError(400, f"{key} must be a number, not {v!r}")
+    if cast is float and n != n:                          # NaN
+        raise ApiError(400, f"{key} must be a number")
+    if lo is not None and n < lo:
+        raise ApiError(400, f"{key} must be {lo} or more")
+    return n
+
+
+@handler
+def get_peaks(ctx: Context, query: dict):
+    """A media file's waveform (h3peaks.peaks): max |amplitude| per bin, 0..255."""
+    ep = check_ep(ctx, query.get("ep"))
+    full, rel = ep_file(ctx, ep, query.get("path"), escape_status=400)
+    bins = _num(query, "bins", int, 1)
+    if bins is not None and bins > PK.MAX_BINS:
+        raise ApiError(400, f"bins must be {PK.MAX_BINS} or fewer")
+    start = _num(query, "start", float, 0)
+    end = _num(query, "end", float, 0)
+    try:
+        return 200, PK.peaks(ep, full, rel, bins, start, end)
+    except ValueError as e:
+        raise ApiError(400, str(e))
+    except PK.PeaksError as e:
+        raise ApiError(500, str(e))
 
 
 OVERRIDE_FIELDS = ("prompt", "seed", "model", "loras", "steps", "note", "target", "negative",
@@ -1529,6 +1621,9 @@ ROUTES = [
     ("POST", "/h3pipe/discard", post_discard, "body"),
     ("PUT", "/h3pipe/pick", put_pick, "body"),
     ("PUT", "/h3pipe/cut", put_cut, "body"),
+    ("POST", "/h3pipe/cut/reset", post_cut_reset, "body"),
+    ("POST", "/h3pipe/cut/copy", post_cut_copy, "body"),
+    ("GET", "/h3pipe/peaks", get_peaks, "query"),
     ("PUT", "/h3pipe/override", put_override, "body"),
     ("DELETE", "/h3pipe/override", delete_override, "query"),
     ("PUT", "/h3pipe/episode-target", put_episode_target, "body"),

@@ -24,6 +24,8 @@ IR + targets). Read it before changing `h3build.py`, `h3render.py`, `kreagen.py`
 - `kreagen.py`, `mksheet.py` — reference images
 - `h3align.py` — times the script against a dialogue recording
 - `h3assemble.py` — review cut (ffmpeg)
+- `h3peaks.py` — a media file's sound: has it any, duration, waveform peaks (the editor's
+  `/h3pipe/peaks`); its `clip_audio` is assemble's `--audio auto` rule
 - `comfy_nodes/` — the ComfyUI custom node pack (loader, info, save)
 - `docs/AUTHORING.md` — the script/series config format (source of truth; `prompts/` is
   generated from it by `python tools/make_prompts.py`)

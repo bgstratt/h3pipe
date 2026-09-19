@@ -377,16 +377,21 @@ def save_history(ep: str, src: Source, keep: int = HISTORY_KEEP) -> str:
     """Copy the file as it is now to <ep>/_history/<name>.<YYYYmmdd-HHMMSS>
     (-2, -3... when a copy that second exists), then keep the newest `keep`
     copies of that name. Returns the copy's path."""
+    return save_history_bytes(ep, os.path.basename(src.path), src.data, keep)
+
+
+def save_history_bytes(ep: str, name: str, data: bytes, keep: int = HISTORY_KEEP) -> str:
+    """save_history for bytes already read: a copy named after `name` (also
+    cut.json's, before a cut edit)."""
     d = history_dir(ep)
     os.makedirs(d, exist_ok=True)
-    name = os.path.basename(src.path)
     stamp = _dt.datetime.now().strftime("%Y%m%d-%H%M%S")
     dst, k = os.path.join(d, f"{name}.{stamp}"), 1
     while os.path.exists(dst):
         k += 1
         dst = os.path.join(d, f"{name}.{stamp}-{k}")
     with open(dst, "xb") as fh:
-        fh.write(src.data)
+        fh.write(data)
     prune_history(ep, name, keep)
     return dst
 

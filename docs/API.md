@@ -1565,3 +1565,103 @@ waveforms, and play-through polish. Backend and UI build in parallel; the backen
   or, for a shot with a dialogue window when the audio toggle is on "recording", its slice
   of the track (`audio_in`..`audio_out`, trims applied). Peaks are fetched per clip at the
   zoom's resolution and cached.
+
+### Phase 9b as built
+
+The backend parts above are implemented (`h3edit`: the cut edits, the status fields and
+`h3.py cut`; `h3peaks.py`: sound detection, durations and peaks; the routes stay thin).
+Each point is **[differs]**, **[added]** or **[settled]**, as for 9a. No field the contract
+named changes shape.
+
+**`PUT /h3pipe/cut`**
+- **[settled] The one-frame check** is against the take the entry would use (its `take` from
+  its `pass`, else the latest usable one), counting its `frames` (the sidecar's) in the
+  pass's cut frames; a take at another rate (Wan 14B's 16 fps) counts by duration,
+  `round(frames × cut fps / take fps)`. A take whose length isn't known (nothing rendered, a
+  picked take that isn't usable, a sidecar without `frames`) isn't checked. The dialogue-window
+  trim assemble applies first is not counted: trims are against the take as `cut.frames` shows
+  it. The 400 names the shot. A float, a string or a boolean trim is 400 too.
+- **[settled] History:** `<ep>/_history/cut.json.<YYYYmmdd-HHMMSS>` (`-2`, `-3`… within a
+  second), the newest 30, through the same helper as source saves. A write that would change
+  nothing writes nothing and makes no copy; there is no copy when there was no `cut.json`.
+  PUT, reset, copy and `h3.py cut` make copies; **picks and discards don't** (they would push
+  the edits out of the 30).
+- **[settled]** The server doesn't refuse moving or trimming a locked entry in a PUT (the UI
+  does; `h3.py cut` refuses without `--force`).
+
+**`POST /h3pipe/cut/reset` and `/cut/copy`**
+- **[settled]** Both write the pass's full list (every shot named, as a pick does), answer
+  `{"cut"}` and send `h3pipe.episode`. 400 for a bad `what` or pass, or `from` = `to`; 404
+  when a pass they touch isn't built.
+- **[settled] Reset order** is the script order of the pass's build (every target's
+  shotlists); orphans go after the script's shots, in their current order.
+- **[differs] A locked entry keeps its trims** on "trims" / "all" resets and on a copy of
+  trims: the lock protects them as it protects the pick. Its place in the order still
+  changes.
+- **[settled] Copy order:** the target pass's entries sorted by their place in the source
+  pass's cut; a shot only the target has stays right after the entry it follows now. Picks,
+  placeholder passes, locks and notes stay the target's own.
+- **[settled] Copy trims:** each pass counts in assemble's cut rate (the series config's
+  `series.fps`, else that pass's shotlist's `defaults.fps`, else 24), so they differ only
+  when the series config sets no `fps`; trims are then `round(trim × to fps / from fps)`.
+  Trims that would leave less than one frame of the target's take (when its length is known)
+  are cut down, `trim_out` first, rather than refused.
+
+**`GET /h3pipe/episode`**
+- **[settled]** `cut.order` is the 0-based index in the pass's resolved cut (orphans
+  included); `cut.script_index` the index in the pass's script order (every target's shots),
+  null for an orphan. `cut.out_of_order` is true for the entries outside the longest run
+  that is in script order: moving one shot flags just that shot; swapping two neighbours
+  flags one of them. Orphans are never flagged.
+- **[added] `track.exists`.** `track` is `{"path", "duration", "rate", "exists"}` from the
+  series config's `audio.track` (relative to the episode, as `h3align` writes it). `path` is
+  relative to the episode with forward slashes (`../audio/x.wav` above it; absolute on another
+  drive, which `/h3pipe/peaks` can't serve). `duration` (seconds) and `rate` (Hz) are null
+  when the file is missing or unreadable (an empty placeholder). `track` is null when the
+  series config names no track.
+- **[settled]** `audio_in` / `audio_out` are the build's window (the shotlist entry's), in
+  seconds on the track; a shot with no window has neither key.
+- **[settled] `take.audio`** is a path relative to the episode, or null. Whether an mp4 has
+  sound is read from its boxes (`moov/trak/mdia/hdlr` of type `soun`), not ffprobe, and cached
+  per (path, size, mtime) for the process; an empty or unreadable mp4 counts as silent.
+  **h3assemble now uses the same functions** (`h3peaks.clip_audio` for `--audio auto` and
+  `mp4`, `h3peaks.has_audio`), so its check moved from ffprobe to that box read too
+  (ffprobe remains the fallback for files that aren't mp4/mov/m4a or wav).
+
+**`PUT /h3pipe/pick`**
+- **[added]** The locked 409's body also has `"locked": true`; its message says to unlock
+  or force. The lock is per pass (a final lock doesn't stop a proxy pick). `force: true`
+  passes both the not-usable and the locked 409s. A discard still clears a locked entry's
+  pick of the take it discards (the take is gone).
+
+**`GET /h3pipe/peaks`**
+- **[added] `start` / `end`** in the answer: the range actually used (clamped to the file).
+  A silent file answers `{"duration", "bins": 0, "peaks": [], "silent": true, "start",
+  "end"}`; `duration` is the container's (null if nothing can tell).
+- **[settled] `bins`** is optional: the default is the cached resolution over the range (200
+  a second). 1 to 100000, else 400. `start` / `end` are optional, ≥ 0, clamped to the file;
+  `end` ≤ `start` is 400. Each output bin is the max of the cached bins it overlaps; with
+  more bins than the range has, a bin repeats the nearest one.
+- **[settled] Scale:** `round(|sample| / 32767 × 255)`. The stdlib path (PCM wav, 8/16/24/
+  32-bit integer) takes the max over the channels; ffmpeg's path is the `-ac 1` mix. A float
+  wav, or any wav `wave` can't open, goes through ffmpeg.
+- **[settled] No audio stream** is judged from the mp4 boxes or the wav header, else ffprobe;
+  with no ffprobe, a file that is neither counts as silent. A file with sound and no ffmpeg on
+  PATH is 500 naming ffmpeg; an ffmpeg failure is 500 with its message.
+- **[settled] Cache:** `<ep>/_cache/peaks/<sha1 of "path|size|mtime_ns">.json`, where `path`
+  is the requested path with forward slashes and no empty or `.` parts. It holds `{"version":
+  1, "path", "duration", "rate": 200, "silent", "peaks": <hex, one byte a bin>}`. Old
+  entries aren't pruned. An episode folder that can't be written still gets its answer.
+- **[settled] Paths:** 400 for a path that is absolute or climbs out, and also for one that
+  leads out through a link (`/h3pipe/file` answers 403 there; the contract said 400 here).
+  `../` is allowed into a parent-folder series config's folder, as for `/h3pipe/file`. 404
+  for a missing file.
+
+**`h3.py cut`**
+- **[settled]** With no action it shows the cut (`--show`): order, take, trims, frames and
+  flags (`locked`, `picked`, `placeholder(pass)`, `OUT OF ORDER`, `orphan`). After each edit it
+  shows the cut again.
+- **[settled]** `--order SH,SH,…` puts those shots first, in that order; the rest follow in
+  their current order. `--copy-from PASS [WHAT]` (default `all`) copies onto the pass
+  `--proxy` picks (final without it). `--move` and `--trim` refuse a locked shot without
+  `--force`. A refusal exits 1, a usage error 2.
