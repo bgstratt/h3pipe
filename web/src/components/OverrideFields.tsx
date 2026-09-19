@@ -1,6 +1,7 @@
 // The override form's fields (prompt with a diff against the built text, seed,
 // model, LoRAs, steps, note). Shared by the shot inspector and the Refs tab.
 
+import type { ReactNode } from "react";
 import type { OverrideForm } from "../lib/overrideForm";
 import { shortName } from "../lib/format";
 import type { Lora } from "../types";
@@ -24,25 +25,46 @@ export interface OverrideFieldsProps {
   lorasOverridden: boolean;
   seedTitle?: string;
   rows?: number;
+  /** Phase 8: the model picker's list under the shot's target. undefined =
+   * ComfyUI's generic list; null = the target has no model widget. */
+  modelChoices?: string[] | null;
+  /** the same for LoRAs; null hides the LoRA rows */
+  loraChoices?: string[] | null;
+  /** Phase 8: the prompt can't be overridden (a retargeted shot): show this
+   * note and the effective prompt read-only instead of the editor. */
+  promptLocked?: { note: ReactNode; text: string } | null;
 }
 
 export function OverrideFields(p: OverrideFieldsProps) {
   const { form, set } = p;
   const built = p.builtLabel ?? "built";
   const promptChanged = form.prompt !== p.builtPrompt;
+  const locked = p.promptLocked;
   return (
     <>
-      <div className="h3-row">
-        <span className="h3-h h3-grow">Prompt {p.promptOverridden ? <span className="h3-badge h3-b-override">override</span> : <span className="h3-muted">({built})</span>}</span>
-        <label className="h3-check h3-small"><input type="checkbox" checked={p.showDiff} onChange={(e) => p.setShowDiff(e.target.checked)} /> diff</label>
-        <button className="h3-btn" disabled={!promptChanged} title={`Put the ${built} prompt back in the box`} onClick={() => set({ prompt: p.builtPrompt })}>
-          {built === "built" ? "Built" : "Series config"}
-        </button>
-      </div>
-      {p.showDiff ? (
-        <DiffView oldText={p.builtPrompt} newText={form.prompt} />
+      {locked ? (
+        <>
+          <div className="h3-row">
+            <span className="h3-h h3-grow">Prompt <span className="h3-muted">(written by the target, read-only)</span></span>
+          </div>
+          <div className="h3-note h3-note-info h3-small">{locked.note}</div>
+          <pre className="h3-pre" style={{ maxHeight: 260 }}>{locked.text}</pre>
+        </>
       ) : (
-        <textarea className="h3-in" rows={p.rows ?? 12} value={form.prompt} onChange={(e) => set({ prompt: e.target.value })} spellCheck={false} />
+        <>
+          <div className="h3-row">
+            <span className="h3-h h3-grow">Prompt {p.promptOverridden ? <span className="h3-badge h3-b-override">override</span> : <span className="h3-muted">({built})</span>}</span>
+            <label className="h3-check h3-small"><input type="checkbox" checked={p.showDiff} onChange={(e) => p.setShowDiff(e.target.checked)} /> diff</label>
+            <button className="h3-btn" disabled={!promptChanged} title={`Put the ${built} prompt back in the box`} onClick={() => set({ prompt: p.builtPrompt })}>
+              {built === "built" ? "Built" : "Series config"}
+            </button>
+          </div>
+          {p.showDiff ? (
+            <DiffView oldText={p.builtPrompt} newText={form.prompt} />
+          ) : (
+            <textarea className="h3-in" rows={p.rows ?? 12} value={form.prompt} onChange={(e) => set({ prompt: e.target.value })} spellCheck={false} />
+          )}
+        </>
       )}
       <div className="h3-field">
         <label>Seed</label>
@@ -58,29 +80,37 @@ export function OverrideFields(p: OverrideFieldsProps) {
           {form.seed && <button className="h3-btn h3-icon" title="Clear" onClick={() => set({ seed: "" })}>✕</button>}
         </div>
         <label>Model</label>
-        <ModelSelect value={form.model} onChange={(model) => set({ model })} placeholder={p.modelPlaceholder} />
-        <label>LoRAs</label>
-        <div className="h3-col" style={{ gap: 3 }}>
-          <span className="h3-seg">
-            <button className={form.lorasMode === "built" ? "h3-on" : ""} onClick={() => set({ lorasMode: "built" })}>{built}</button>
-            <button
-              className={form.lorasMode === "custom" ? "h3-on" : ""}
-              onClick={() => set({
-                lorasMode: "custom",
-                loras: form.loras.length ? form.loras : (p.effLoras ?? []).map((l) => ({ name: l.name, strength: String(l.strength) })),
-              })}
-            >
-              custom
-            </button>
-          </span>
-          {form.lorasMode === "custom" ? (
-            <LoraEditor rows={form.loras} onChange={(loras) => set({ loras })} />
-          ) : (
-            <span className="h3-muted h3-small">
-              {p.effLoras?.length && !p.lorasOverridden ? p.effLoras.map((l) => `${shortName(l.name, 32)} @${l.strength}`).join(", ") : !p.lorasOverridden ? "the workflow's LoRA" : ""}
-            </span>
-          )}
-        </div>
+        {p.modelChoices === null ? (
+          <span className="h3-muted h3-small">set by the target (it has no model widget)</span>
+        ) : (
+          <ModelSelect value={form.model} onChange={(model) => set({ model })} placeholder={p.modelPlaceholder} choices={p.modelChoices} />
+        )}
+        {p.loraChoices !== null && (
+          <>
+            <label>LoRAs</label>
+            <div className="h3-col" style={{ gap: 3 }}>
+              <span className="h3-seg">
+                <button className={form.lorasMode === "built" ? "h3-on" : ""} onClick={() => set({ lorasMode: "built" })}>{built}</button>
+                <button
+                  className={form.lorasMode === "custom" ? "h3-on" : ""}
+                  onClick={() => set({
+                    lorasMode: "custom",
+                    loras: form.loras.length ? form.loras : (p.effLoras ?? []).map((l) => ({ name: l.name, strength: String(l.strength) })),
+                  })}
+                >
+                  custom
+                </button>
+              </span>
+              {form.lorasMode === "custom" ? (
+                <LoraEditor rows={form.loras} onChange={(loras) => set({ loras })} choices={p.loraChoices} />
+              ) : (
+                <span className="h3-muted h3-small">
+                  {p.effLoras?.length && !p.lorasOverridden ? p.effLoras.map((l) => `${shortName(l.name, 32)} @${l.strength}`).join(", ") : !p.lorasOverridden ? "the workflow's LoRA" : ""}
+                </span>
+              )}
+            </div>
+          </>
+        )}
         <label>Steps</label>
         <input className="h3-in" inputMode="numeric" placeholder={p.stepsPlaceholder} value={form.steps} onChange={(e) => set({ steps: e.target.value.replace(/[^\d]/g, "") })} />
         <label>Note</label>

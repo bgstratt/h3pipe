@@ -6,36 +6,37 @@ import { shortName } from "../lib/format";
 import { useApp } from "../store";
 
 /** Model picker from ComfyUI's diffusion_models (or unet) list. `""` = the placeholder. */
-export function ModelSelect({ value, onChange, placeholder }: { value: string; onChange: (v: string) => void; placeholder?: string }) {
+/** `choices` (a target's own list) replaces ComfyUI's generic one. */
+export function ModelSelect({ value, onChange, placeholder, choices }: { value: string; onChange: (v: string) => void; placeholder?: string; choices?: string[] }) {
   const models = useApp((s) => s.models);
   const err = useApp((s) => s.modelsError);
   useEffect(() => {
     void loadModels();
   }, []);
-  const list = models ?? [];
+  const list = choices ?? models ?? [];
   const missing = value && !list.includes(value);
   return (
     <select className="h3-in" value={value} onChange={(e) => onChange(e.target.value)} title={value || placeholder || ""}>
       {placeholder != null && <option value="">{placeholder}</option>}
-      {missing && <option value={value}>{shortName(value, 48)} (not installed)</option>}
+      {missing && <option value={value}>{shortName(value, 48)} ({choices ? "not offered by this target" : "not installed"})</option>}
       {list.map((m) => (
         <option key={m} value={m} title={m}>
           {shortName(m, 48)}
         </option>
       ))}
-      {!models && !err && <option disabled>Loading models…</option>}
-      {err && <option disabled>Couldn't list models: {err}</option>}
+      {!choices && !models && !err && <option disabled>Loading models…</option>}
+      {!choices && err && <option disabled>Couldn't list models: {err}</option>}
     </select>
   );
 }
 
 /** A stack of LoRA rows with strength. */
-export function LoraEditor({ rows, onChange }: { rows: LoraRow[]; onChange: (rows: LoraRow[]) => void }) {
+export function LoraEditor({ rows, onChange, choices }: { rows: LoraRow[]; onChange: (rows: LoraRow[]) => void; choices?: string[] }) {
   const loras = useApp((s) => s.loras);
   useEffect(() => {
     void loadModels();
   }, []);
-  const list = loras ?? [];
+  const list = choices ?? loras ?? [];
   const set = (i: number, patch: Partial<LoraRow>) => onChange(rows.map((r, j) => (j === i ? { ...r, ...patch } : r)));
   return (
     <div className="h3-col" style={{ gap: 3 }}>
@@ -43,7 +44,7 @@ export function LoraEditor({ rows, onChange }: { rows: LoraRow[]; onChange: (row
         <div key={i} className="h3-lora">
           <select className="h3-in" value={r.name} onChange={(e) => set(i, { name: e.target.value })} title={r.name}>
             <option value="">(choose a LoRA)</option>
-            {r.name && !list.includes(r.name) && <option value={r.name}>{shortName(r.name, 44)} (not installed)</option>}
+            {r.name && !list.includes(r.name) && <option value={r.name}>{shortName(r.name, 44)} ({choices ? "not offered by this target" : "not installed"})</option>}
             {list.map((l) => (
               <option key={l} value={l} title={l}>{shortName(l, 44)}</option>
             ))}

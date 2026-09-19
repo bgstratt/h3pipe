@@ -19,6 +19,7 @@
   --h3-failed: #e04848;
   --h3-stale: #e07b2b;
   --h3-override: #9b6bdf;
+  --h3-target: #1fa5a0;
   --h3-mono: ui-monospace, "Cascadia Mono", Consolas, "SF Mono", Menlo, monospace;
 
   color: var(--h3-fg);
@@ -117,6 +118,10 @@
 .h3-b-failed, .h3-b-unusable { color: var(--h3-failed); }
 .h3-b-cut { color: var(--h3-accent); }
 .h3-b-ok { color: var(--h3-ok); }
+.h3-b-target { color: var(--h3-target); font-weight: 600; letter-spacing: 0.02em; }
+.h3-pane-label .h3-b-target { color: #6fe0da; }
+.h3-target-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.h3-target-row select { flex: 1 1 160px; min-width: 0; }
 .h3-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; flex: 0 0 auto; background: var(--h3-muted); }
 .h3-dot.h3-s-ok { background: var(--h3-ok); }
 .h3-dot.h3-s-queued { background: var(--h3-queued); }

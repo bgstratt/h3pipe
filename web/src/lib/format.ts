@@ -12,7 +12,8 @@ export type BadgeKind =
   | "orphan"
   | "failed"
   | "unusable"
-  | "missing-refs";
+  | "missing-refs"
+  | "target";
 
 export interface Badge {
   kind: BadgeKind;

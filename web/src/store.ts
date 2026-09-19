@@ -4,7 +4,7 @@
 import { useSyncExternalStore } from "react";
 import type { RefFilter } from "./lib/refs";
 import type {
-  BuildResult, Config, EpisodeStatus, EpisodeSummary, Pass, Ref, ShotDetail, TakeRef,
+  BuildResult, Config, EpisodeStatus, EpisodeSummary, Pass, Ref, ShotDetail, TakeRef, TargetList,
 } from "./types";
 
 // ---------------------------------------------------------------------------
@@ -183,6 +183,11 @@ export interface AppState {
   models: string[] | null;
   loras: string[] | null;
   modelsError: string | null;
+  /** Phase 7: GET /h3pipe/targets (null until loaded, or on a server without it) */
+  targets: TargetList | null;
+  targetsError: string | null;
+  /** ComfyUI choices of the combo widgets targets bind, by "class_type|field" */
+  widgetChoices: Record<string, string[]>;
   zoom: number;
   build: { busy: boolean; result: BuildResult | null; error: string | null };
   assemble: { busy: boolean; output: string | null; report: string | null; error: string | null };
@@ -234,6 +239,9 @@ export function initialState(prefs: Prefs = {}): AppState {
     models: null,
     loras: null,
     modelsError: null,
+    targets: null,
+    targetsError: null,
+    widgetChoices: {},
     zoom: clampZoom(prefs.zoom ?? ZOOM_DEFAULT),
     build: { busy: false, result: null, error: null },
     assemble: { busy: false, output: null, report: null, error: null },

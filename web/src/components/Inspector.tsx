@@ -4,12 +4,14 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   baseRender, closeInspector, loadDetail, openRedo, openViewer, queueRender, renderShots, revertOverride, saveOverride,
+  setShotTarget,
 } from "../actions";
 import { errText } from "../api";
 import { host } from "../host";
 import { cutTake, fmtSeconds, shortName, shotBadges, tn } from "../lib/format";
 import { missingOf } from "../lib/missingRefs";
 import { formFromDetail, isDirty, overrideFields, type OverrideForm } from "../lib/overrideForm";
+import { isRetargeted, retargetNote, shotTarget, targetBadges, targetLabel } from "../lib/targets";
 import { useApp } from "../store";
 import type { ShotDetail } from "../types";
 import { FloatingWindow, defaultInspectorRect } from "./FloatingWindow";
@@ -17,12 +19,52 @@ import { useDetail, useDetailError, useShotStatus } from "./hooks";
 import { MissingRefsNote } from "./MissingRefs";
 import { OverrideFields } from "./OverrideFields";
 import { PassToggle } from "./ShotsTab";
+import { TargetSelect, useTargetPickers, useTargets } from "./Targets";
 import { Badges } from "./Thumb";
+
+/** The shot's video target: a picker over the video targets (the default
+ * marked). A change saves the override's `target` for both passes. */
+function TargetPicker({ d, shot }: { d: ShotDetail | undefined; shot: string }) {
+  const s = useShotStatus(shot);
+  const { list, video, seriesDefault, error } = useTargets();
+  const busy = useApp((st) => !!st.busy[`override|${shot}`]);
+  const src = d ?? s;
+  const current = shotTarget(src, seriesDefault);
+  const built = src?.built_target ?? null;
+  const note = retargetNote(list, src);
+  if (!list) {
+    // a server without /h3pipe/targets: say what the shot renders on, if it says
+    return src?.target ? <div className="h3-small h3-muted" title={error ?? ""}>target: {src.target}</div> : null;
+  }
+  return (
+    <div className="h3-col" style={{ gap: 2 }}>
+      <div className="h3-target-row">
+        <span className="h3-h">Target</span>
+        <TargetSelect
+          value={current}
+          list={list}
+          video={video}
+          disabled={busy || !src}
+          title="The video model this shot renders on (both passes). Its prompt, model, LoRA and steps defaults come with it."
+          onChange={(id) => id && id !== current && void setShotTarget(shot, id, built)}
+        />
+        {isRetargeted(src) && (
+          <button className="h3-btn" disabled={busy} title={`Back to ${targetLabel(list, built)}, the target the build compiled this shot for`} onClick={() => void setShotTarget(shot, null, built)}>
+            Revert target
+          </button>
+        )}
+      </div>
+      {note && <span className="h3-small h3-muted">{note}</span>}
+    </div>
+  );
+}
 
 const RECT_KEY = "h3pipe.inspector.rect";
 
 function Built({ d }: { d: ShotDetail }) {
+  const { list } = useTargets();
   const b = d.built as Record<string, unknown>;
+  const e = d.effective;
   const rows: [string, unknown][] = [
     ["seed", b.seed],
     ["steps", b.steps],
@@ -47,6 +89,11 @@ function Built({ d }: { d: ShotDetail }) {
         </div>
         <div className="h3-h">Effective now</div>
         <div className="h3-kv">
+          {(e.target || d.target) && [
+            <span key="tk">target</span>,
+            <span key="tv" title={e.target || d.target || ""}>{targetLabel(list, e.target || d.target)}{d.built_target && (e.target || d.target) !== d.built_target ? ` (built for ${targetLabel(list, d.built_target)})` : ""}</span>,
+          ]}
+          {e.width && e.height ? [<span key="sk">size</span>, <span key="sv">{e.width}×{e.height}{e.length ? ` · ${e.length} frames` : ""}</span>] : null}
           <span>seed</span><span className="h3-mono">{d.effective.seed} <span className="h3-muted">({d.effective.seed_source})</span></span>
           <span>model</span><span title={d.effective.model}>{shortName(d.effective.model, 60) || "(workflow's)"}</span>
           <span>LoRAs</span><span>{d.effective.loras == null ? "(workflow's)" : d.effective.loras.length ? d.effective.loras.map((l) => `${shortName(l.name, 40)} @${l.strength}`).join(", ") : "none"}</span>
@@ -111,10 +158,28 @@ function OverrideEditor({ d, shot }: { d: ShotDetail; shot: string }) {
   const ov = d.override;
   const hasOverride = Object.keys(ov).length > 0;
   const eff = d.effective;
+  const { list, seriesDefault } = useTargets();
+  const target = shotTarget(d, seriesDefault);
+  const pickers = useTargetPickers(target);
+  const retargeted = isRetargeted(d);
+  const promptLocked = retargeted
+    ? {
+        note: (
+          <>
+            This shot is retargeted from {targetLabel(list, d.built_target)} to <b>{targetLabel(list, target)}</b>. Per-pass prompt
+            overrides are ignored for a retargeted shot (a prompt written for one model isn't valid for another), so
+            this is the prompt {targetLabel(list, target)} writes for it, read-only.
+            {ov.prompt != null && <> The saved {pass} prompt override is kept, unused, for when the shot goes back.</>}
+          </>
+        ),
+        text: eff.prompt,
+      }
+    : null;
+  const whose = retargeted ? "target's" : "built";
 
   return (
     <div className="h3-col">
-      {d.override_stale && (
+      {d.override_stale && !retargeted && (
         <div className="h3-note">
           <b>Override stale.</b> It was written against an older build of this shot; the build now
           produces different text. It still applies. Check the diff, then keep it (Save re-bases it),
@@ -135,12 +200,15 @@ function OverrideEditor({ d, shot }: { d: ShotDetail; shot: string }) {
         setShowDiff={setShowDiff}
         seedPlaceholder={`${String(d.built.seed ?? eff.seed)} (built)`}
         seedTitle="Pinned seed for this shot (both passes). Empty = the built seed; a redo still picks a new one unless you choose same/typed."
-        modelPlaceholder={`(built) ${ov.model == null ? shortName(eff.model, 40) : ""}`}
-        stepsPlaceholder={`${ov.steps == null ? eff.steps : ""} (built)`}
+        modelPlaceholder={`(${whose}) ${ov.model == null ? shortName(eff.model, 40) : ""}`}
+        stepsPlaceholder={`${ov.steps == null ? eff.steps : ""} (${whose})`}
         effLoras={eff.loras}
         lorasOverridden={ov.loras != null}
+        modelChoices={pickers.models}
+        loraChoices={pickers.loras}
+        promptLocked={promptLocked}
       />
-      <label className="h3-check" title="Prompt, model, LoRAs and steps are per pass; this writes them to final and proxy. Seed and note are always shared.">
+      <label className="h3-check" title="Prompt, model, LoRAs and steps are per pass; this writes them to final and proxy. Seed, note and target are always shared.">
         <input type="checkbox" checked={both} onChange={(e) => setBoth(e.target.checked)} /> Apply to both passes
       </label>
       {err && <div className="h3-note h3-note-err">{err}</div>}
@@ -153,7 +221,7 @@ function OverrideEditor({ d, shot }: { d: ShotDetail; shot: string }) {
         <button
           className="h3-btn h3-danger"
           disabled={!hasOverride || busy}
-          title={`Remove this shot's ${pass} override (prompt, model, LoRAs, steps). Seed and note stay.`}
+          title={`Remove this shot's ${pass} override (prompt, model, LoRAs, steps). Seed, note and target stay.`}
           onClick={() => confirm(`Remove ${shot}'s ${pass} override?`) && void revertOverride(shot, pass)}
         >
           Revert {pass}
@@ -161,8 +229,8 @@ function OverrideEditor({ d, shot }: { d: ShotDetail; shot: string }) {
         <button
           className="h3-btn h3-danger"
           disabled={!hasOverride || busy}
-          title="Remove every override of this shot, both passes, seed and note included"
-          onClick={() => confirm(`Remove all of ${shot}'s overrides (both passes, seed and note)?`) && void revertOverride(shot, null)}
+          title="Remove every override of this shot, both passes, seed, note and target included"
+          onClick={() => confirm(`Remove all of ${shot}'s overrides (both passes, seed, note and target)?`) && void revertOverride(shot, null)}
         >
           Revert all
         </button>
@@ -189,7 +257,11 @@ export function Inspector() {
   // "render anyway" is a per-shot decision
   useEffect(() => setAllowMissing(false), [shot]);
 
-  const badges = useMemo(() => (s ? shotBadges(s) : []), [s]);
+  const { list: targets, seriesDefault } = useTargets();
+  const badges = useMemo(() => {
+    if (!s) return [];
+    return [...targetBadges(s, targets, seriesDefault, cutTake(s)), ...shotBadges(s)];
+  }, [s, targets, seriesDefault]);
 
   if (!ep) return <div className="h3-empty-state">Pick an episode in the h3 Shots tab.</div>;
   if (!shot) return <div className="h3-empty-state">Select a shot in the Shots tab or the timeline.</div>;
@@ -203,6 +275,7 @@ export function Inspector() {
         <div className="h3-col" style={{ gap: 4 }}>
           {s.subjects.length > 0 && <div className="h3-small h3-muted">subjects: {s.subjects.join(", ")}</div>}
           <Badges badges={badges} />
+          <TargetPicker d={d} shot={shot} />
           <MissingRefsNote blocked={missing.length ? [{ shot, refs: missing }] : []} allow={allowMissing} setAllow={setAllowMissing} />
           <div className="h3-row h3-wrap">
             <button

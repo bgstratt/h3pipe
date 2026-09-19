@@ -17,6 +17,7 @@ import type {
 import fixturesRaw from "./fixtures.json?raw";
 import { FsError, browse as fsBrowse, fsExists } from "./mockFs";
 import { RefError, createMockRefs } from "./mockRefs";
+import { H3, LTX, MOCK_TARGETS, MOCK_WIDGET_CHOICES, ltxPrompt, preset, targetLength } from "./mockTargets";
 
 interface Fixtures {
   ep: string;
@@ -141,13 +142,26 @@ export function createMockApi(emit: Emit, opts: MockOptions = {}): Api {
     const ov = d.override;
     const b = d.built as { seed?: string; model?: string; steps?: number };
     const base = fx.detail[pass]?.[shot]?.effective;
+    const target = ov.target ?? H3;
+    const frames = Number((d.built as { length?: number }).length ?? 0);
+    const seed = ov.seed ?? (b.seed as string) ?? "0";
+    const seed_source = ov.seed != null ? "override" : "stable";
+    if (target !== H3) {
+      // retargeted: the target's own prompt and defaults; the prompt override is ignored
+      const p = preset(target, pass);
+      return {
+        prompt: ltxPrompt(d.built_prompt), seed, seed_source,
+        model: ov.model ?? p?.model ?? "", loras: ov.loras !== undefined ? ov.loras : null, steps: ov.steps ?? p?.steps ?? 8,
+        target, width: p?.width ?? null, height: p?.height ?? null, length: targetLength(target, frames),
+      };
+    }
     return {
       prompt: ov.prompt != null ? promptText(ov.prompt) : d.built_prompt,
-      seed: ov.seed ?? (b.seed as string) ?? "0",
-      seed_source: ov.seed != null ? "override" : "stable",
+      seed, seed_source,
       model: ov.model ?? base?.model ?? "",
       loras: ov.loras !== undefined ? ov.loras : base?.loras ?? null,
       steps: ov.steps ?? b.steps ?? 4,
+      target, width: st(pass).width, height: st(pass).height, length: frames || null,
     };
   }
 
@@ -158,8 +172,27 @@ export function createMockApi(emit: Emit, opts: MockOptions = {}): Api {
       if (!s || !d) continue;
       s.override = { fields: Object.keys(d.override).sort(), stale: d.override_stale && !!d.override.prompt };
       d.effective = effectiveOf(pass, shot);
+      // Phase 8: the target the next render uses, and the one the build compiled for
+      d.target = s.target = d.override.target ?? H3;
+      d.built_target = s.built_target = H3;
+      s.profile = d.profile = null;
+      for (const t of s.takes) {
+        if (t.target === undefined) t.target = d.takes.find((x) => x.take === t.take)?.sidecar?.target as string | undefined ?? null;
+      }
     }
   }
+
+  // Fixtures for Phase 8: sh030 is retargeted to LTX-2 (its H3 takes now render
+  // on another target than the shot), and sh020's t02 was a one-off LTX-2 run,
+  // so its takes mix targets.
+  for (const pass of ["final", "proxy"] as Pass[]) {
+    const d = detail[pass]?.sh030;
+    if (d) d.override.target = LTX;
+    const t2 = detail[pass]?.sh020?.takes.find((t) => t.take === 2);
+    if (t2?.sidecar) t2.sidecar.target = LTX;
+    if (status[pass]) status[pass]!.target = H3;
+  }
+  for (const id of shotIds) syncOverrideSummary(id);
 
   function randomSeed(): string {
     // new seeds stay below 2^53 (PLAN.md)
@@ -286,7 +319,20 @@ export function createMockApi(emit: Emit, opts: MockOptions = {}): Api {
           if (s.takes.some((t) => t.status === "ok" && t.has_video)) { out.skipped.push({ shot, reason: "has a usable take (pass redo: true)" }); continue; }
         }
         const take = (s.takes[s.takes.length - 1]?.take ?? 0) + 1;
-        const eff = effectiveOf(req.pass, shot);
+        const cur = effectiveOf(req.pass, shot);
+        // Phase 8: a one-off target beats the override; another target brings its
+        // own prompt and defaults, and a prompt written for H3 doesn't apply
+        const target = req.target || cur.target || H3;
+        const p = preset(target, req.pass);
+        const eff = target === cur.target ? cur : {
+          ...cur, target, prompt: target === H3 ? d.built_prompt : ltxPrompt(d.built_prompt),
+          model: p?.model ?? cur.model, loras: null, steps: p?.steps ?? cur.steps,
+        };
+        const prompt = target === H3 ? req.prompt ?? eff.prompt : eff.prompt;
+        const built = d.built as { audio_policy?: string; voice_refs?: unknown[] };
+        if (target !== H3 && (built.audio_policy === "clone" || built.voice_refs?.length)) {
+          (out.warnings ??= []).push({ shot, warning: `audio downgraded to generate: ${target} takes no voice reference (voices come from each voice line)` });
+        }
         let seed: string;
         let src: string;
         if (req.seed != null) { seed = req.seed; src = "typed"; }
@@ -299,14 +345,14 @@ export function createMockApi(emit: Emit, opts: MockOptions = {}): Api {
         const overrides = Object.keys(d.override).filter((k) => k !== "note" && (req as unknown as Record<string, unknown>)[k] == null);
         const sum: TakeSummary = {
           take, status: "queued", has_video: false, seed, seed_source: src, note: req.note ?? "",
-          overrides, stale: [], thumb: null, strip: null, mp4: null, queued: now, finished: null, save_notes: "",
+          overrides, stale: [], thumb: null, strip: null, mp4: null, queued: now, finished: null, save_notes: "", target,
         };
         s.takes.push(sum);
         const loras: Lora[] | null = req.loras ?? eff.loras;
         const td: TakeDetail = {
           take, status: "queued", has_video: false, stale: [],
           sidecar: {
-            target: "minimax_h3_ref2va", status: "queued", queued: now, comfy_prompt_id: pid, seed, seed_source: src,
+            target, status: "queued", queued: now, comfy_prompt_id: pid, seed, seed_source: src,
             model: req.model ?? eff.model, loras, steps: req.steps ?? eff.steps, overrides,
             parent_take: req.parent_take, note: req.note ?? "", shot, take, pass: req.pass,
             ...(missing.length ? { missing_refs: missing.map((m) => m.slot) } : {}),
@@ -316,9 +362,9 @@ export function createMockApi(emit: Emit, opts: MockOptions = {}): Api {
         d.takes.push(td);
         // the frozen shotlist, so "redo from this take" can read its prompt
         const stem = `${st(req.pass).folder}/${shot}/${shot}_t${String(take).padStart(2, "0")}`;
-        fx.shotlist[`${stem}.shotlist.json`] = { shots: [{ prompt: req.prompt ?? eff.prompt }] };
+        fx.shotlist[`${stem}.shotlist.json`] = { shots: [{ prompt }] };
         td.files.shotlist = `${stem}.shotlist.json`;
-        out.queued.push({ shot, take, prompt_id: pid, seed, seed_source: src });
+        out.queued.push({ shot, take, prompt_id: pid, seed, seed_source: src, target });
         emit("h3pipe.take", { ep: EP, pass: req.pass, shot, take, status: "queued", thumb: null });
         simulate(req.pass, shot, take, pid);
       }
@@ -374,7 +420,7 @@ export function createMockApi(emit: Emit, opts: MockOptions = {}): Api {
         if (!d) continue;
         const ov: Override = d.override;
         for (const [k, v] of Object.entries(req.fields) as [keyof Override, unknown][]) {
-          const shared = k === "seed" || k === "note";
+          const shared = k === "seed" || k === "note" || k === "target";
           if (!shared && !passes.includes(pass)) continue;
           if (v === null) delete ov[k];
           else (ov as Record<string, unknown>)[k] = v;
@@ -397,7 +443,7 @@ export function createMockApi(emit: Emit, opts: MockOptions = {}): Api {
         const d = detail[p]?.[shot];
         if (!d) continue;
         if (!pass) d.override = {};
-        else if (p === pass) d.override = Object.fromEntries(Object.entries(d.override).filter(([k]) => k === "seed" || k === "note"));
+        else if (p === pass) d.override = Object.fromEntries(Object.entries(d.override).filter(([k]) => k === "seed" || k === "note" || k === "target"));
         d.override_stale = false;
       }
       syncOverrideSummary(shot);
@@ -462,6 +508,15 @@ export function createMockApi(emit: Emit, opts: MockOptions = {}): Api {
         "storybook_style_v2.safetensors",
         "film_grain_subtle.safetensors",
       ];
+    },
+    async targets(kind) {
+      await wait();
+      const all = clone(MOCK_TARGETS);
+      return kind ? { ...all, targets: all.targets.filter((t) => t.kind === kind) } : all;
+    },
+    async widgetChoices(classType, field) {
+      await wait();
+      return MOCK_WIDGET_CHOICES[`${classType}|${field}`] ?? null;
     },
     async comfyQueue() {
       await wait();
