@@ -26,7 +26,8 @@ export default defineConfig(({ command, mode }) => {
     plugins: [react()],
     define: extension ? { "process.env.NODE_ENV": JSON.stringify("production") } : {},
     // the mock reads the kitchen_sink series config from tests/fixtures (outside web/)
-    server: { open: "/dev.html", fs: { allow: [resolve(HERE, "..")] } },
+    // No `open`: npm run dev must never pop a browser window (open http://localhost:<port>/dev.html yourself).
+    server: { fs: { allow: [resolve(HERE, "..")] } },
     build: extension
       ? {
           outDir: resolve(HERE, "../comfy_nodes/web"),
