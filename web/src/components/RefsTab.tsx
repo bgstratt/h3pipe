@@ -4,21 +4,31 @@
 
 import { memo, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import {
-  copyText, generateMissing, generateRef, keyframeFromTake, loadRefs, openBrowse, openImageCompare, pickRef, revertRefOverride,
-  saveRefOverride, selectRefTake, setRefsFilter, toggleRefOpen,
+  clearRef, copyText, generateMissing, generateRef, keyframeFromTake, loadRefs, openBrowse, openImageCompare, pickRef, refGenerateTarget,
+  revertRefOverride, saveRefOverride, selectRefTake, setRefTargetChoice, setRefsFilter, toggleRefOpen,
 } from "../actions";
-import { cutNeighbour, keyframeSource, type KeyframeEnd } from "../lib/keyframes";
+import {
+  cutNeighbour, isKeyframeRef, keyframeBlocks, keyframeGroups, keyframeOf, keyframePlan, keyframeSource, methodLabel, methodTitle,
+  needLabel,
+} from "../lib/keyframes";
 import { errText } from "../api";
 import { api } from "../host";
 import { shortName, tn } from "../lib/format";
+import {
+  editRefsFor, editRefsText, imageModeText, imageTargets, isEditTarget, refDefaults, refTargetOf, refsSnippet,
+  type RefTargetKind, type ResolvedRefDefaults,
+} from "../lib/imageTargets";
 import { formFromDetail, isDirty, overrideFields, type OverrideForm, type OverrideSource } from "../lib/overrideForm";
+import { pickWarning, readinessBadge, targetOptionText } from "../lib/readiness";
 import {
   VIEWS, blockedShots, canGenerate, groupRefs, hasViews, missingPlan, isAudioRef, pickedTake, refCounts, takesOf, unpickedViews, usedBy,
   viewLabel, viewOf, type RefFilter,
 } from "../lib/refs";
+import { findTarget, targetLabel, targetShort } from "../lib/targets";
 import { store, useApp } from "../store";
 import type { Ref, RefTake, SeedMode } from "../types";
 import { useStatus } from "./hooks";
+import { useTargets } from "./Targets";
 import { OverrideFields } from "./OverrideFields";
 import { PassToggle } from "./ShotsTab";
 import { Progress, statusClass } from "./Thumb";
@@ -29,8 +39,148 @@ const FILTERS: { id: RefFilter; label: string; title: string }[] = [
   { id: "missing", label: "missing", title: "Refs whose file isn't on disk" },
 ];
 
-export const KEYFRAMES_EMPTY = "Use a previous shot's frame (right-click a shot) or import one";
+export const KEYFRAMES_EMPTY = "No shot's target reads keyframes. Use a previous shot's frame (right-click a shot) or import one";
 const NO_FILE = "series.json names no file for this (e.g. a voice-only character has no sheet)";
+
+/** The series defaults for image models (the server's, else the fallback rule). */
+function useRefDefaults(): ResolvedRefDefaults {
+  const list = useApp((s) => s.targets);
+  const served = useApp((s) => (s.ep ? s.refDefaults[s.ep] : null));
+  return useMemo(() => refDefaults(list, served), [list, served]);
+}
+
+/**
+ * "Refs render with: Krea 2 ✓ · Keyframes with: Flux 2 Klein edit ✓". Each is
+ * a picker over the image targets, the series default marked; a choice other
+ * than the default is this session's (sent as each generate's `target`, never
+ * for a ref with its own override) and offers the series.json snippet.
+ */
+function ImageModelBar() {
+  const { list } = useTargets();
+  const defaults = useRefDefaults();
+  const choice = useApp((s) => s.refTargetChoice);
+  const images = imageTargets(list);
+  if (!list || !images.length) return null;
+  const row = (kind: RefTargetKind, label: string) => {
+    const def = kind === "keyframes" ? defaults.keyframes : defaults.refs;
+    const value = choice[kind] || def;
+    const t = findTarget(list, value);
+    const warn = pickWarning(targetLabel(list, value), t?.readiness);
+    const badge = readinessBadge(t?.readiness);
+    return (
+      <span className="h3-row" style={{ gap: 4 }}>
+        <span className="h3-muted h3-small">{label}</span>
+        <select
+          className="h3-in"
+          value={value}
+          title={`${imageModeText(t) || "image model"}${badge ? ` · ${badge.title}` : ""}\nThe series default is ${targetLabel(list, def)}${defaults.source === "series" ? " (series.json refs block)" : ""}.`}
+          onChange={(e) => setRefTargetChoice(kind, e.target.value === def ? null : e.target.value)}
+        >
+          {images.map((x) => (
+            <option key={x.id} value={x.id} title={imageModeText(x)}>
+              {targetOptionText(x, x.id === def).replace(" (default)", " (series default)")}{isEditTarget(x) ? " · edit" : ""}
+            </option>
+          ))}
+        </select>
+        {warn && <span className={warn.severity === "err" ? "h3-err h3-small" : "h3-warn h3-small"} title={warn.text}>{warn.severity === "err" ? "not ready" : "degraded"}</span>}
+      </span>
+    );
+  };
+  const custom = (["refs", "keyframes"] as RefTargetKind[]).filter((k) => choice[k]);
+  return (
+    <div className="h3-col" style={{ gap: 3 }}>
+      <div className="h3-row h3-wrap" style={{ gap: 8 }}>
+        {row("refs", "Refs render with:")}
+        {row("keyframes", "Keyframes with:")}
+      </div>
+      {custom.map((k) => (
+        <div key={k} className="h3-note h3-note-info h3-small">
+          This session sends {targetLabel(list, choice[k])} for {k === "keyframes" ? "keyframe" : "ref"} generates (a ref with its own model keeps it).
+          To make it the series default, add to series.json:{" "}
+          <code className="h3-mono">{refsSnippet(k, choice[k]!)}</code>{" "}
+          <button className="h3-link" onClick={() => void copyText(refsSnippet(k, choice[k]!), "Snippet")}>copy</button>{" "}
+          <button className="h3-link" onClick={() => setRefTargetChoice(k, null)}>back to the default</button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** A keyframe's actions: continuity, a generated still, import, clear. */
+function KeyframeActions({ r }: { r: Ref }) {
+  const k = keyframeOf(r);
+  const pass = useApp((s) => s.pass);
+  const st = useStatus();
+  const refs = useApp((s) => (s.ep ? s.refs[s.ep] : undefined));
+  const choice = useApp((s) => s.refTargetChoice);
+  const defaults = useRefDefaults();
+  const { list } = useTargets();
+  const busyFrame = useApp((s) => !!k && !!s.busy[`keyframe|${k.shot}|${k.which}`]);
+  const busyGen = useApp((s) => !!s.busy[`refgen|${r.id}`] || !!s.busy[`refimport|${r.id}`]);
+  const busyClear = useApp((s) => !!s.busy[`refclear|${r.id}`]);
+  if (!k) return null;
+  const src = cutNeighbour(st, k.shot, k.which === "first" ? -1 : 1);
+  const srcSt = src ? st?.shots.find((x) => x.shot === src) : undefined;
+  const srcOk = !!srcSt && srcSt.cut.take != null && srcSt.cut.usable;
+  const tg = refTargetOf(r, defaults, choice);
+  const target = findTarget(list, tg.target);
+  const size = st?.shots.find((x) => x.shot === k.shot)?.size;
+  const plan = editRefsFor(r, target, refs ?? [], pass, size);
+  const gen = canGenerate(r);
+  const cont = k.which === "first" ? "From previous shot" : "From next shot";
+  return (
+    <div className="h3-col" style={{ gap: 2 }} onClick={(e) => e.stopPropagation()}>
+      <div className="h3-row h3-wrap" style={{ gap: 4 }}>
+        <button
+          className="h3-btn"
+          disabled={busyFrame || !src}
+          title={src
+            ? `A new candidate: ${src}'s ${k.which === "first" ? "last" : "first"} frame, from the take the ${pass} cut uses${srcOk ? "" : ` (${src} has no usable take yet)`}. It goes live if ${k.shot} has no ${k.which} keyframe yet.`
+            : `${k.shot} has no ${k.which === "first" ? "previous" : "next"} shot in the ${pass} cut`}
+          onClick={() => void keyframeFromTake({ shot: k.shot, which: k.which })}
+        >
+          <i className={busyFrame ? "pi pi-spin pi-spinner" : "pi pi-link"} /> {cont}{src ? ` (${src})` : ""}
+        </button>
+        <button
+          className="h3-btn"
+          disabled={busyGen || !gen}
+          title={gen
+            ? `A still of ${k.shot}'s ${k.which === "first" ? "opening" : "closing"} moment, made with ${editRefsText(list, tg.target, plan)}`
+            : r.why_not || "This server doesn't generate keyframes"}
+          onClick={() => {
+            const target = refGenerateTarget(r);
+            void generateRef({ ref: r.id, view: null, count: 1, seed_mode: "auto", seed: null, prompt: null, model: null, loras: null, steps: null, note: "", ...(target ? { target } : {}) });
+          }}
+        >
+          <i className={busyGen ? "pi pi-spin pi-spinner" : "pi pi-sparkles"} /> Generate
+        </button>
+        <button
+          className="h3-btn"
+          disabled={busyGen}
+          title="Import an image from the ComfyUI machine as a new candidate"
+          onClick={() => openBrowse({ purpose: "import", ref: r.id, view: null, files: "image" })}
+        >
+          <i className="pi pi-download" /> Import…
+        </button>
+        <button
+          className="h3-btn h3-danger"
+          disabled={busyClear || !r.exists}
+          title={r.exists
+            ? `Remove the live ${k.which} keyframe (the candidates stay). ${r.need === "required" ? `${k.shot} can't render without one.` : `${k.shot} then renders without it.`}`
+            : "No live keyframe to clear"}
+          onClick={() => void clearRef(r.id)}
+        >
+          <i className="pi pi-times" /> Clear
+        </button>
+      </div>
+      {gen && isEditTarget(target) && (
+        <span className="h3-small h3-muted" title="An edit model keeps the characters' look: it gets their picked views and the plate as reference images">
+          Generate uses {editRefsText(list, tg.target, plan)}
+        </span>
+      )}
+    </div>
+  );
+}
 
 /** A ref's live file (the one renders read), or a "missing" placeholder. */
 function LiveThumb({ ep, r, size }: { ep: string; r: Ref; size: number }) {
@@ -194,6 +344,17 @@ function Selection({ r }: { r: Ref }) {
             <i className="pi pi-clone" /> {picked != null && !live ? "Compare with live" : "View"}
           </button>
         )}
+        {live && (
+          <button
+            className="h3-btn h3-danger"
+            title={isKeyframeRef(r)
+              ? "Clear: remove the live keyframe (the candidates stay); the shot renders without one"
+              : "Remove the live file (the candidates stay). The shots that use it are blocked until you pick one again."}
+            onClick={() => void clearRef(r.id, sel.view)}
+          >
+            <i className="pi pi-times" /> {isKeyframeRef(r) ? "Clear" : "Unpick"}
+          </button>
+        )}
       </div>
       {(t.prompt || t.model || t.note || keyframeSource(t) || (t.status === "failed" && t.save_notes)) && (
         <div className="h3-kv">
@@ -240,10 +401,13 @@ function GenerateBar({ r }: { r: Ref }) {
             className="h3-btn h3-primary"
             disabled={busy}
             title={isChar && !view ? "Queue all four views, sharing one seed per candidate" : "Queue new candidates"}
-            onClick={() => void generateRef({
-              ref: r.id, view: isChar ? view || null : null, count, seed_mode: seedMode, seed: null,
-              prompt: null, model: null, loras: null, steps: null, note: "",
-            })}
+            onClick={() => {
+              const target = refGenerateTarget(r);
+              void generateRef({
+                ref: r.id, view: isChar ? view || null : null, count, seed_mode: seedMode, seed: null,
+                prompt: null, model: null, loras: null, steps: null, note: "", ...(target ? { target } : {}),
+              });
+            }}
           >
             <i className={busy ? "pi pi-spin pi-spinner" : "pi pi-sparkles"} /> Generate {count > 1 ? `${count} more` : "1 more"}
           </button>
@@ -261,30 +425,35 @@ function GenerateBar({ r }: { r: Ref }) {
   );
 }
 
-/** A keyframe's continuity action: the previous shot's last frame (first), or the
- * next shot's first frame (last), from the take the cut uses. */
-function KeyframeBar({ r }: { r: Ref }) {
-  const m = /^shot:(.+):(first|last)$/.exec(r.id);
-  const shot = m?.[1] ?? "";
-  const which = (m?.[2] ?? "first") as KeyframeEnd;
-  const pass = useApp((s) => s.pass);
-  const st = useStatus();
-  const busy = useApp((s) => !!s.busy[`keyframe|${shot}|${which}`]);
-  if (!m) return null;
-  const src = cutNeighbour(st, shot, which === "first" ? -1 : 1);
-  const label = which === "first" ? "From the previous shot's last frame" : "From the next shot's first frame";
+/** The ref's own image model (`target` in refs/_overrides.json), saved at once. */
+function RefTargetOverride({ r }: { r: Ref }) {
+  const { list } = useTargets();
+  const defaults = useRefDefaults();
+  const choice = useApp((s) => s.refTargetChoice);
+  const busy = useApp((s) => !!s.busy[`refoverride|${r.id}`]);
+  const images = imageTargets(list);
+  if (!images.length) return null;
+  const own = r.override_values?.target ?? "";
+  const kind: RefTargetKind = isKeyframeRef(r) ? "keyframes" : "refs";
+  const fallback = choice[kind] || (kind === "keyframes" ? defaults.keyframes : defaults.refs);
+  const cur = refTargetOf(r, defaults, choice);
+  const t = findTarget(list, cur.target);
   return (
-    <div className="h3-row h3-wrap">
-      <button
-        className="h3-btn"
-        disabled={busy || !src}
-        title={src
-          ? `A new candidate: ${src}'s ${which === "first" ? "last" : "first"} frame, from the take the ${pass} cut uses. It goes live if ${shot} has no ${which} keyframe yet.`
-          : `${shot} has no ${which === "first" ? "previous" : "next"} shot in the ${pass} cut`}
-        onClick={() => void keyframeFromTake({ shot, which })}
-      >
-        <i className={busy ? "pi pi-spin pi-spinner" : "pi pi-link"} /> {label}{src ? ` (${src})` : ""}
-      </button>
+    <div className="h3-col" style={{ gap: 2 }}>
+      <div className="h3-row">
+        <span className="h3-h">Image model</span>
+        <select
+          className="h3-in h3-grow"
+          value={own}
+          disabled={busy}
+          title="This ref's own image model (kept in refs/_overrides.json). Empty: the Refs tab's choice, else the series default."
+          onChange={(e) => void saveRefOverride(r.id, { target: e.target.value || null })}
+        >
+          <option value="">{`(${choice[kind] ? "this session's" : "series default"}: ${targetLabel(list, fallback)})`}</option>
+          {images.map((x) => <option key={x.id} value={x.id}>{targetOptionText(x)}{isEditTarget(x) ? " · edit" : ""}</option>)}
+        </select>
+      </div>
+      {t && <span className="h3-small h3-muted">{targetLabel(list, cur.target)}{imageModeText(t) ? `: ${imageModeText(t)}` : ""}{cur.source === "override" ? " (this ref's own)" : ""}</span>}
     </div>
   );
 }
@@ -328,6 +497,7 @@ function RefOverrideEditor({ r }: { r: Ref }) {
   const has = r.override.fields.length > 0;
   return (
     <div className="h3-col">
+      <RefTargetOverride r={r} />
       {r.override.stale && <div className="h3-note"><b>Override stale.</b> The series config's text for this ref changed since the override was written.</div>}
       {!r.override_values && has && (
         <div className="h3-note h3-note-info h3-small">This server doesn't send the override's values (only that {r.override.fields.join(", ")} are set); the form shows what a generate uses now.</div>
@@ -400,11 +570,11 @@ function RefDetail({ ep, r }: { ep: string; r: Ref }) {
         <CandidateGrid ep={ep} r={r} view={null} />
       )}
       <Selection r={r} />
-      {r.kind === "keyframe" && <KeyframeBar r={r} />}
-      {r.can_generate === false && r.why_not && r.kind !== "keyframe" && (
-        <div className="h3-small h3-muted">Can't generate: {r.why_not}. Import a file instead.</div>
+      {/* a keyframe's continuity / generate / import / clear sit on its row (KeyframeActions) */}
+      {r.can_generate === false && r.why_not && (
+        <div className="h3-small h3-muted">Can't generate: {r.why_not}. {isKeyframeRef(r) ? "Use a neighbouring shot's frame or import one." : "Import a file instead."}</div>
       )}
-      <GenerateBar r={r} />
+      {!isKeyframeRef(r) && <GenerateBar r={r} />}
       {canGenerate(r) && (
         <details className="h3-ref-settings">
           <summary>Prompt and settings{r.override.fields.length ? ` (override: ${r.override.fields.join(", ")})` : ""}</summary>
@@ -425,29 +595,56 @@ function RefRow({ ep, r }: { ep: string; r: Ref }) {
   const queued = all.filter((t) => t.status === "queued").length;
   const live = hasViews(r) ? null : r.picked;
   const picks = hasViews(r) ? r.views!.filter((v) => v.picked != null).length : null;
+  const kf = isKeyframeRef(r) ? keyframeOf(r) : null;
+  const { list } = useTargets();
+  const need = needLabel(r.need);
+  const method = kf ? methodLabel(r.method, kf.which) : "";
+  // an optional keyframe with no file isn't "missing": the shot renders without it
+  const showMissing = !r.exists && (!kf || r.need !== "optional" || !!r.requested) && r.method !== "none";
   return (
-    <div className={`h3-ref${open ? " h3-open" : ""}`}>
+    <div className={`h3-ref${open ? " h3-open" : ""}`} data-ref={r.id}>
       <div className="h3-ref-row" onClick={() => toggleRefOpen(r.id)}>
         <span className="h3-chev">{open ? "▼" : "▶"}</span>
         <LiveThumb ep={ep} r={r} size={40} />
         <div className="h3-col h3-grow" style={{ gap: 1 }}>
           <div className="h3-row">
-            <b className="h3-ell">{r.name}</b>
+            <b className="h3-ell">{kf ? `${kf.which} frame` : r.name}</b>
             <span className="h3-muted h3-small h3-ell">{r.id}</span>
           </div>
-          <div className="h3-row h3-small h3-muted">
-            <span title={used.join(", ")}>used by {used.length} shot{used.length === 1 ? "" : "s"}</span>
-            <span>· {all.length} cand.</span>
-            {picks != null && <span>· {picks}/4 views</span>}
-            {live != null && <span>· live {tn(live)}</span>}
-          </div>
+          {kf ? (
+            <div className="h3-row h3-small h3-muted h3-wrap">
+              {method && <span title={methodTitle(r.method, kf.which)}>{method}</span>}
+              {r.target && <span title={`${targetLabel(list, r.target)} reads this keyframe`}>· read by {targetShort(list, r.target)}</span>}
+              <span>· {all.length} cand.</span>
+              {live != null && <span>· live {tn(live)}</span>}
+            </div>
+          ) : (
+            <div className="h3-row h3-small h3-muted">
+              <span title={used.join(", ")}>used by {used.length} shot{used.length === 1 ? "" : "s"}</span>
+              <span>· {all.length} cand.</span>
+              {picks != null && <span>· {picks}/4 views</span>}
+              {live != null && <span>· live {tn(live)}</span>}
+            </div>
+          )}
           <span className="h3-badges">
-            {!r.exists && <span className="h3-badge h3-b-failed" title={`${r.path} isn't on disk`}>missing</span>}
+            {need && (
+              <span
+                className={`h3-badge ${need === "required" ? "h3-b-kf-required" : "h3-b-kf-optional"}`}
+                title={need === "required" ? `${targetLabel(list, r.target)} can't render ${kf?.shot ?? "the shot"} without it` : "The target can use it; the shot renders without one"}
+              >
+                {need}
+              </span>
+            )}
+            {showMissing && <span className="h3-badge h3-b-failed" title={`${r.path} isn't on disk`}>missing</span>}
             {blocked.length > 0 && <span className="h3-badge h3-b-missing-refs" title={`Renders of these shots are skipped until this ref exists:\n${blocked.join(", ")}`}>blocks {blocked.length}</span>}
             {queued > 0 && <span className="h3-badge h3-b-queued">queued ×{queued}</span>}
             {r.override.fields.length > 0 && <span className="h3-badge h3-b-override" title={`Override: ${r.override.fields.join(", ")}`}>override</span>}
             {r.override.stale && <span className="h3-badge h3-b-override-stale">override stale</span>}
           </span>
+          {kf && <KeyframeActions r={r} />}
+          {kf && keyframeBlocks(r) && (
+            <div className="h3-small h3-err">Missing: {targetLabel(list, r.target)} can't render {kf.shot} without a {kf.which} frame (not even with Render anyway).</div>
+          )}
         </div>
       </div>
       {open && <RefDetail ep={ep} r={r} />}
@@ -464,6 +661,7 @@ export function RefsTab() {
   const filter = useApp((s) => s.refsFilter);
   const st = useStatus();
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+  const { list: targetsList } = useTargets();
 
   useEffect(() => {
     if (ep) void loadRefs(ep);
@@ -472,7 +670,33 @@ export function RefsTab() {
   const groups = useMemo(() => groupRefs(refs ?? [], filter, pass), [refs, filter, pass]);
   const counts = useMemo(() => refCounts(refs ?? [], st, pass), [refs, st, pass]);
   const plan = useMemo(() => missingPlan(refs ?? [], pass), [refs, pass]);
+  const kplan = useMemo(() => keyframePlan(refs ?? [], st), [refs, st]);
+  const planLabels = [...plan.map((p) => p.label), ...kplan.map((k) => k.label)];
   const genBusy = useApp((s) => !!s.busy["refgen|missing"]);
+  const focus = useApp((s) => s.refFocus);
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  // the inspector's "Refs this shot uses": scroll to the ref (its group opened)
+  useEffect(() => {
+    if (!focus || !refs) return;
+    const r = refs.find((x) => x.id === focus.id);
+    if (r) {
+      const gid = isKeyframeRef(r) ? "keyframes" : groupRefs([r], "all", pass).find((g) => g.refs.length)?.id;
+      if (gid) setCollapsed((c) => (c[gid] ? { ...c, [gid]: false } : c));
+    }
+    const t = setTimeout(() => {
+      const box = scrollRef.current;
+      const el = box?.querySelector<HTMLElement>(`[data-ref="${CSS.escape(focus.id)}"]`);
+      if (box && el) {
+        // below the sticky group header
+        const head = el.closest(".h3-seq")?.querySelector<HTMLElement>(".h3-seq-head")?.offsetHeight ?? 0;
+        box.scrollTop += el.getBoundingClientRect().top - box.getBoundingClientRect().top - head - 4;
+      }
+      el?.classList.add("h3-flash");
+      setTimeout(() => el?.classList.remove("h3-flash"), 1200);
+    }, 50);
+    return () => clearTimeout(t);
+  }, [focus, refs, pass]);
 
   return (
     <div className="h3-surface">
@@ -488,6 +712,7 @@ export function RefsTab() {
       {ep && (
         <>
           <div className="h3-pad h3-col" style={{ gap: 4 }}>
+            <ImageModelBar />
             <div className="h3-row h3-wrap">
               <span className="h3-seg" title="Which refs to list">
                 {FILTERS.map((f) => (
@@ -495,15 +720,16 @@ export function RefsTab() {
                 ))}
               </span>
               <span className="h3-grow" />
-              {plan.length > 0 && (
+              {planLabels.length > 0 && (
                 <button
                   className="h3-btn h3-primary"
                   disabled={genBusy}
-                  title={`Queue one candidate for each ref this episode is missing (${pass}); each goes live when it finishes:
-${plan.map((p) => p.label).join(", ")}`}
+                  title={`Queue one candidate for each ref this episode is missing (${pass}); each goes live when it finishes.
+Keyframes: required ones, and optional ones the script asks for (continuity from the neighbouring take when it has one, else a still):
+${planLabels.join(", ")}`}
                   onClick={() => void generateMissing()}
                 >
-                  <i className={genBusy ? "pi pi-spin pi-spinner" : "pi pi-sparkles"} /> Generate missing ({plan.length})
+                  <i className={genBusy ? "pi pi-spin pi-spinner" : "pi pi-sparkles"} /> Generate missing ({planLabels.length})
                 </button>
               )}
             </div>
@@ -515,18 +741,27 @@ ${plan.map((p) => p.label).join(", ")}`}
             )}
             {err && <div className="h3-note h3-note-err">{err} <button className="h3-link" onClick={() => void loadRefs()}>Retry</button></div>}
           </div>
-          <div className="h3-scroll h3-sep">
+          <div className="h3-scroll h3-sep" ref={scrollRef}>
             {!refs && !err && <div className="h3-empty-state">{loading ? "Loading…" : ""}</div>}
             {refs && groups.map((g) => {
               const isCollapsed = !!collapsed[g.id];
               return (
                 <div key={g.id} className="h3-seq">
-                  <div className="h3-seq-head" onClick={() => setCollapsed({ ...collapsed, [g.id]: !isCollapsed })}>
+                  <div className="h3-seq-head" onClick={() => setCollapsed((c) => ({ ...c, [g.id]: !c[g.id] }))}>
                     <span className="h3-chev">{isCollapsed ? "▶" : "▼"}</span>
                     <b>{g.label}</b>
                     <span className="h3-muted h3-small">{g.refs.length}{g.refs.length !== g.total ? ` of ${g.total}` : ""}</span>
                   </div>
-                  {!isCollapsed && g.refs.map((r) => <RefRow key={r.id} ep={ep} r={r} />)}
+                  {!isCollapsed && g.id !== "keyframes" && g.refs.map((r) => <RefRow key={r.id} ep={ep} r={r} />)}
+                  {!isCollapsed && g.id === "keyframes" && keyframeGroups(g.refs, st).map((kg) => (
+                    <div key={kg.shot} className="h3-kf-shot">
+                      <div className="h3-kf-shot-head h3-row h3-small">
+                        <b>{kg.shot}</b>
+                        {kg.target && <span className="h3-muted">on {targetLabel(targetsList, kg.target)}</span>}
+                      </div>
+                      {kg.refs.map((r) => <RefRow key={r.id} ep={ep} r={r} />)}
+                    </div>
+                  ))}
                   {!isCollapsed && !g.refs.length && (
                     <div className="h3-muted h3-small h3-pad">
                       {g.id === "keyframes" && !g.total ? KEYFRAMES_EMPTY : g.total ? `None match “${FILTERS.find((f) => f.id === filter)?.label}”.` : "None in the series config."}

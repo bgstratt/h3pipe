@@ -5,7 +5,7 @@ import {
 } from "../actions";
 import { host } from "../host";
 import {
-  cutTake, fmtSeconds, fmtWhen, groupBySequence, realStale, shotBadges, staleTitle, tn,
+  ESTIMATE_TITLE, cutTake, fmtSeconds, fmtWhen, groupBySequence, lengthEstimated, realStale, shotBadges, staleTitle, tn,
 } from "../lib/format";
 import { shotTarget, takeTargetBadge, targetBadges } from "../lib/targets";
 import { renderingTakes, statusKey, store, useApp } from "../store";
@@ -250,7 +250,9 @@ function ShotRow({ ep, pass, s, aspect, targets, seriesDefault }: {
         <div className="h3-col h3-grow" style={{ gap: 1 }}>
           <div className="h3-row">
             <b>{s.shot}</b>
-            <span className="h3-muted h3-small">{fmtSeconds(s.seconds)}{s.size ? ` · ${s.size}` : ""}</span>
+            <span className="h3-muted h3-small" title={lengthEstimated(s) ? ESTIMATE_TITLE : undefined}>
+              {lengthEstimated(s) ? <span className="h3-est">≈</span> : null}{fmtSeconds(s.seconds)}{s.size ? ` · ${s.size}` : ""}
+            </span>
             <span className="h3-grow" />
             <span className="h3-muted h3-small" title={`${n} take(s)${ct ? `; the cut uses ${tn(ct.take)}` : ""}`}>
               {n ? `${n} take${n > 1 ? "s" : ""}` : ""}{ct ? ` · ${tn(ct.take)}` : ""}

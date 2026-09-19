@@ -49,6 +49,10 @@ export interface TargetPickers {
   /** GET /h3pipe/models for the model param: the files grouped by the target's
    * family (undefined: not loaded, or a server without the route) */
   modelFiles: ModelList | undefined;
+  /** the target has a low-noise model (`models.model_low`: Wan 2.2 14B) */
+  twoStage: boolean;
+  /** GET /h3pipe/models for `model_low` */
+  modelLowFiles: ModelList | undefined;
 }
 
 /** What the model and LoRA pickers may offer under `targetId`. */
@@ -63,7 +67,13 @@ export function useTargetPickers(targetId: string | null | undefined): TargetPic
   useEffect(() => {
     if (hasFamily && target) void loadModelFiles(target.id, "model");
   }, [hasFamily, target]);
-  return { models, loras, target, modelFiles };
+  // Phase 8.5: a two-stage target's low-noise model (GET /h3pipe/models?param=model_low)
+  const twoStage = !!target?.models?.model_low;
+  const modelLowFiles = useApp((s) => (twoStage && target ? s.modelFiles[`${target.id}|model_low`] : undefined));
+  useEffect(() => {
+    if (twoStage && target) void loadModelFiles(target.id, "model_low");
+  }, [twoStage, target]);
+  return { models, loras, target, modelFiles, twoStage, modelLowFiles };
 }
 
 /** A select of the video targets, the default marked. */

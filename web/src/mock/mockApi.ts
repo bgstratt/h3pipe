@@ -11,20 +11,34 @@ import type { HostEvent } from "../host";
 import { reachable } from "../lib/browse";
 import { promptText } from "../lib/format";
 import type {
-  CutEntry, EpisodeStatus, EpisodeSummary, Lora, Override, Pass, RenderResult, ShotDetail,
+  CutEntry, EpisodeStatus, EpisodeSummary, Lora, MissingRef, Override, Pass, RefUsed, RenderResult, ShotDetail,
   ShotStatus, ShotTargetSource, TakeDetail, TakeSummary,
 } from "../types";
 import fixturesRaw from "./fixtures.json?raw";
 import { FsError, browse as fsBrowse, fsExists } from "./mockFs";
 import { RefError, createMockRefs } from "./mockRefs";
+import { MOCK_REF_DEFAULTS, svgImage, type KeyframeNeedSpec } from "./mockRefs";
 import {
-  H3, LTX, MOCK_TARGETS, MOCK_WIDGET_CHOICES, ltxPrompt, mockModelFiles, mockReadiness, mockTakeResolved, preset, targetLength,
+  H3, H3_FL2V, LTX, LTX_REFS, MOCK_TARGETS, MOCK_WIDGET_CHOICES, WAN_I2V, ltxPrompt, mockModelFiles, mockReadiness, mockTakeResolved,
+  preset, targetLength,
 } from "./mockTargets";
 
 /** series.json's `series.target` in the mock */
 const SERIES_TARGET = H3;
-/** shots whose script names a target (`target:` on the shot line) */
-const SCRIPT_TARGETS: Record<string, string> = { sh040: H3 };
+/** shots whose script names a target (`target:` on the shot line). Phase 8.5:
+ * two Wan 2.2 I2V shots (a required first frame: sh060's missing, sh070's a
+ * generated still) and two H3 FL2V shots. */
+const SCRIPT_TARGETS: Record<string, string> = { sh040: H3, sh060: WAN_I2V, sh070: WAN_I2V, sh080: H3_FL2V, sh090: H3_FL2V };
+/** the script's `first:` / `last:` lines (Phase 8.5) */
+const SCRIPT_KEYFRAMES: Record<string, Partial<Record<"first" | "last", string>>> = {
+  sh030: { first: "continuity" },
+  sh080: { first: "generate" },
+  sh090: { first: "none", last: "import" },
+};
+/** shots built with `dur: model` (their length is an estimate until a take exists) */
+const DUR_MODEL = new Set(["sh030", "sh080"]);
+/** the episode's negative.txt */
+const NEGATIVE_TXT = "blurry, extra fingers, text, watermark, photorealistic";
 
 interface Fixtures {
   ep: string;
@@ -80,7 +94,85 @@ export function createMockApi(emit: Emit, opts: MockOptions = {}): Api {
     },
     nextPrompt: () => `mock-${nextPrompt++}-ref`,
     onLiveChange: (ref) => markRefStale(ref),
+    needs: () => keyframeNeeds(),
   });
+
+  /**
+   * The build's keyframe needs (Phase 8.5): every shot whose target reads
+   * keyframes, or whose script asks for one. Wan I2V's first frame is required.
+   * The method: the script's, else continuity with a previous shot, else generate.
+   */
+  function keyframeNeeds(): KeyframeNeedSpec[] {
+    const s = status.proxy ?? status.final;
+    if (!s) return [];
+    const shots = s.shots.filter((x) => !x.orphan);
+    const out: KeyframeNeedSpec[] = [];
+    shots.forEach((sh, i) => {
+      const d = detail.proxy?.[sh.shot] ?? detail.final?.[sh.shot];
+      const target = shotTargetOf(sh.shot, d?.override ?? {}).target;
+      const caps = MOCK_TARGETS.targets.find((t) => t.id === target)?.capabilities;
+      const reads = (caps?.keyframes ?? []) as string[];
+      const script = SCRIPT_KEYFRAMES[sh.shot] ?? {};
+      for (const which of ["first", "last"] as const) {
+        const asked = script[which];
+        if (!reads.includes(which) && !asked) continue;
+        const neighbour = which === "first" ? i > 0 : i < shots.length - 1;
+        out.push({
+          shot: sh.shot, which, target,
+          need: which === "first" && caps?.requires_first ? "required" : "optional",
+          method: asked ?? (neighbour ? "continuity" : "generate"),
+          requested: !!asked && asked !== "none",
+        });
+      }
+    });
+    return out;
+  }
+
+  /** The refs a shot's current target reads (GET /h3pipe/shot `refs_used`). */
+  function refsUsedOf(shot: string, target: string): RefUsed[] {
+    const caps = MOCK_TARGETS.targets.find((t) => t.id === target)?.capabilities;
+    const out: RefUsed[] = [];
+    if (caps?.subject_refs !== false) {
+      for (const id of refs.usedByShot(shotIds.indexOf(shot))) {
+        const r = refs.info(id);
+        if (!r || r.kind === "voice") continue;
+        out.push({ id, kind: r.kind, role: r.kind === "location" ? "plate" : "subject", path: r.path, exists: r.exists, need: null, thumb: r.path });
+      }
+    }
+    for (const n of refs.keyframeNeeds(shot)) {
+      if (n.method === "none") continue;
+      const id = `shot:${shot}:${n.which}`;
+      const r = refs.info(id);
+      out.push({ id, kind: "keyframe", role: n.which, path: r?.path ?? `refs/shots/${shot}/${n.which}.png`, exists: !!r?.exists, need: n.need });
+    }
+    if (target === LTX_REFS) {
+      out.push({ id: `sheet:${shot}`, kind: "reference_sheet", role: "reference_sheet", path: `refs/_sheets/${shot}_refsheet.png`, exists: true, need: null });
+    }
+    return out;
+  }
+
+  /** The series refs a shot is missing, when its target reads subject pictures (not Wan I2V, LTX-2 or FL2V). */
+  function seriesMissing(shot: string): MissingRef[] {
+    const d = detail.proxy?.[shot] ?? detail.final?.[shot];
+    const target = shotTargetOf(shot, d?.override ?? {}).target;
+    const caps = MOCK_TARGETS.targets.find((t) => t.id === target)?.capabilities;
+    return caps?.subject_refs === false ? [] : refs.missingFor(shot, shotIds.indexOf(shot));
+  }
+
+  /** Missing refs a render can't do without (Wan I2V's first frame): anyway false. */
+  function keyframeMissing(shot: string): MissingRef[] {
+    return refs.keyframeNeeds(shot)
+      .filter((n) => n.need === "required" && !refs.info(`shot:${shot}:${n.which}`)?.exists)
+      .map((n) => ({
+        slot: n.which === "first" ? "First frame" : "Last frame", kind: "image" as const, path: `refs/shots/${shot}/${n.which}.png`,
+        anyway: false,
+        why: `${MOCK_TARGETS.targets.find((t) => t.id === n.target)?.label ?? n.target} needs a ${n.which} frame: use the previous shot's frame, generate a still or import one (Refs tab)`,
+      }));
+  }
+
+  // a reference sheet the ingredients target kept (reference_image on a take)
+  refs.addImage("refs/_sheets/sh010_refsheet.png", svgImage("sh010 reference sheet", "Ada · Narrator · kitchen", "sheet", "location", 768, 448));
+  for (const shot of shotIds) refs.addImage(`refs/_sheets/${shot}_refsheet.png`, svgImage(`${shot} reference sheet`, "subjects + plate", shot, "location", 768, 448));
 
   /** A re-picked ref makes the finished takes of the shots using it ref-stale. */
   function markRefStale(ref: string) {
@@ -98,7 +190,11 @@ export function createMockApi(emit: Emit, opts: MockOptions = {}): Api {
   }
 
   function withMissing(e: EpisodeStatus): EpisodeStatus {
-    for (const s of e.shots) s.missing_refs = s.orphan ? [] : refs.missingFor(s.shot, shotIds.indexOf(s.shot));
+    for (const s of e.shots) {
+      s.missing_refs = s.orphan ? [] : [...seriesMissing(s.shot), ...keyframeMissing(s.shot)];
+      // Phase 8.5: `dur: model` before a take exists: the length is an estimate
+      if (DUR_MODEL.has(s.shot)) s.length_estimated = !s.takes.some((t) => t.status === "ok" && t.has_video);
+    }
     return e;
   }
 
@@ -156,10 +252,21 @@ export function createMockApi(emit: Emit, opts: MockOptions = {}): Api {
     if (target !== H3) {
       // retargeted: the target's own prompt and defaults; the prompt override is ignored
       const p = preset(target, pass);
+      const caps = MOCK_TARGETS.targets.find((t) => t.id === target)?.capabilities;
+      // Phase 8.5: request → shot override → negative.txt (Wan) → series.json → preset
+      const neg = caps?.negative_prompt
+        ? ov.negative != null
+          ? { negative: ov.negative, negative_source: "override" }
+          : target === WAN_I2V || target === "wan22_vace"
+            ? { negative: NEGATIVE_TXT, negative_source: "negative.txt" }
+            : { negative: "worst quality, inconsistent motion, blurry, jittery, distorted", negative_source: "preset" }
+        : {};
+      const low = typeof p?.model_low === "string" ? { model_low: ov.model_low ?? p.model_low } : {};
       return {
         prompt: ltxPrompt(d.built_prompt), seed, seed_source,
         model: ov.model ?? p?.model ?? "", loras: ov.loras !== undefined ? ov.loras : null, steps: ov.steps ?? p?.steps ?? 8,
         target, width: p?.width ?? null, height: p?.height ?? null, length: targetLength(target, frames),
+        ...neg, ...low,
       };
     }
     return {
@@ -223,6 +330,12 @@ export function createMockApi(emit: Emit, opts: MockOptions = {}): Api {
     if (t2?.sidecar) {
       t2.sidecar.target = LTX;
       t2.sidecar.resolved = { duration_head: { want: "ltx-2.5-duration-head-bf16.safetensors", using: null, how: "off" } };
+    }
+    // Phase 8.5: sh010's t01 was a one-off run on the ingredients target, which kept its reference sheet
+    const s1 = detail[pass]?.sh010?.takes.find((t) => t.take === 1);
+    if (s1) {
+      if (s1.sidecar) s1.sidecar.target = LTX_REFS;
+      s1.reference_image = "refs/_sheets/sh010_refsheet.png";
     }
     const t1 = detail[pass]?.sh020?.takes.find((t) => t.take === 1);
     if (t1?.sidecar) {
@@ -306,7 +419,10 @@ export function createMockApi(emit: Emit, opts: MockOptions = {}): Api {
     async shot(ep, pass, shot) {
       await wait();
       need(ep);
-      return clone(det(pass, shot));
+      const d = clone(det(pass, shot));
+      refs.list(); // the keyframe needs follow the shot's target
+      d.refs_used = refsUsedOf(shot, shotTargetOf(shot, d.override).target);
+      return d;
     },
     async build(ep) {
       await wait(900);
@@ -322,6 +438,8 @@ export function createMockApi(emit: Emit, opts: MockOptions = {}): Api {
       };
     },
     fileUrl(_ep, path) {
+      const pic = refs.image(path); // a reference sheet a take kept
+      if (pic) return pic;
       const real = alias.get(path) ?? path;
       return media + real.split("/").pop();
     },
@@ -357,8 +475,10 @@ export function createMockApi(emit: Emit, opts: MockOptions = {}): Api {
           });
           continue;
         }
-        const missing = refs.missingFor(shot, shotIds.indexOf(shot));
-        if (missing.length && !req.allow_missing_refs) {
+        refs.list();
+        const missing = [...seriesMissing(shot), ...keyframeMissing(shot)];
+        // a required keyframe can't be rendered anyway (Wan I2V has nothing to start from)
+        if (missing.length && (!req.allow_missing_refs || missing.some((m) => m.anyway === false))) {
           out.skipped.push({
             shot,
             reason: `missing refs: ${missing.map((m) => `${m.slot} (${m.path})`).join(", ")}; pass allow_missing_refs to render anyway`,
@@ -527,7 +647,14 @@ export function createMockApi(emit: Emit, opts: MockOptions = {}): Api {
     async refs(ep) {
       await wait();
       need(ep);
-      return { refs: refs.list() };
+      return { refs: refs.list(), defaults: { ...MOCK_REF_DEFAULTS } };
+    },
+    async refsUnpick(ep, ref, view) {
+      await wait();
+      need(ep);
+      const r = refs.unpick(ref, view ?? null);
+      emit("h3pipe.episode", { ep: EP });
+      return r;
     },
     refFileUrl(_ep, path) {
       return refs.image(path) ?? media + path.split("/").pop();
@@ -616,7 +743,7 @@ export function createMockApi(emit: Emit, opts: MockOptions = {}): Api {
       const { kind, ready } = targetsQuery(o);
       await wait(ready ? 300 : undefined);
       const all = clone(MOCK_TARGETS);
-      if (ready) for (const t of all.targets) if (t.kind === "video") t.readiness = mockReadiness(t.id);
+      if (ready) for (const t of all.targets) t.readiness = mockReadiness(t.id);
       return kind ? { ...all, targets: all.targets.filter((t) => t.kind === kind) } : all;
     },
     async putEpisodeTarget(ep, target) {

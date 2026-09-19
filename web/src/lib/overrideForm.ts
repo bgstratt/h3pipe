@@ -30,6 +30,10 @@ export interface OverrideForm {
   /** "" = the built steps */
   steps: string;
   note: string;
+  /** Phase 8.5: "" = no negative override (negative.txt, series config or preset) */
+  negative: string;
+  /** Phase 8.5: "" = the target's low-noise model (two-stage targets) */
+  modelLow: string;
 }
 
 export function formFromDetail(d: Pick<OverrideSource, "override" | "effective">): OverrideForm {
@@ -42,6 +46,8 @@ export function formFromDetail(d: Pick<OverrideSource, "override" | "effective">
     loras: (o.loras ?? []).map(loraRow),
     steps: o.steps != null ? String(o.steps) : "",
     note: o.note ?? "",
+    negative: o.negative ?? "",
+    modelLow: o.model_low ?? "",
   };
 }
 
@@ -90,5 +96,7 @@ export function overrideFields(form: OverrideForm, initial: OverrideForm, d: Pic
   }
   if (form.steps !== initial.steps) f.steps = form.steps.trim() === "" ? null : parseSteps(form.steps);
   if (form.note !== initial.note) f.note = form.note.trim() === "" ? null : form.note;
+  if (form.negative !== initial.negative) f.negative = form.negative.trim() === "" ? null : form.negative;
+  if (form.modelLow !== initial.modelLow) f.model_low = form.modelLow === "" ? null : form.modelLow;
   return f;
 }

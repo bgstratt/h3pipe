@@ -249,7 +249,7 @@ describe("mock readiness and the episode target", () => {
     const t = await api.targets({ ready: true });
     const status = Object.fromEntries(t.targets.filter((x) => x.kind === "video").map((x) => [x.id, x.readiness?.status]));
     expect(status).toEqual({
-      minimax_h3_ref2va: "ready", ltx2: "degraded", ltx2_ingredients: "not_ready", wan22_i2v: "ready", wan22_vace: "degraded",
+      minimax_h3_ref2va: "ready", ltx2: "degraded", ltx2_ingredients: "not_ready", wan22_i2v: "ready", wan22_vace: "degraded", minimax_h3_fl2va: "ready",
     });
     const refs = readinessOf(t, LTX_REFS)!;
     expect(refs.missing[0]).toMatchObject({ tier: "required", folder: "loras" });

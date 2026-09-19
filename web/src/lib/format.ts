@@ -158,6 +158,26 @@ export function fmtSeconds(s: number | null | undefined): string {
   return `${s.toFixed(s < 10 ? 1 : 0)}s`;
 }
 
+/** The "≈" mark's tooltip (Phase 8.5). */
+export const ESTIMATE_TITLE = "length decided by the model at render time (dur: model); showing the estimate";
+
+/**
+ * The ≈ rule: the shot's length is the build's estimate (`length_estimated`,
+ * `dur: model` before a take exists) and the length shown isn't a real take's
+ * (the cut take's frame count wins once there is one).
+ */
+export function lengthEstimated(s: Pick<ShotStatus, "length_estimated"> & { cut?: { frames?: number | null } | null }): boolean {
+  if (s.length_estimated !== true) return false;
+  const f = s.cut?.frames;
+  return !(f != null && f > 0);
+}
+
+/** "≈3.0s" for an estimate, else "3.0s" (fmtSeconds). */
+export function fmtShotSeconds(s: Pick<ShotStatus, "length_estimated"> & { cut?: { frames?: number | null } | null }, secs: number | null | undefined): string {
+  const t = fmtSeconds(secs);
+  return t && lengthEstimated(s) ? `≈${t}` : t;
+}
+
 export function fmtClock(t: number): string {
   if (!Number.isFinite(t) || t < 0) t = 0;
   const m = Math.floor(t / 60);

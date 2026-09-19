@@ -70,9 +70,43 @@
 //    `/object_info/<class_type>` for a `{class_type, field}` widget (as API.md
 //    suggests); a LoRA widget names its file field `name`, not `field`.
 //
-// Continuity keyframes:
-//  - TODO(contract): there is no route to unpick or delete a ref take, so the
-//    inspector's Keyframes section has no "Clear".
+// Continuity keyframes: (the missing "Clear" is DELETE /h3pipe/refs/pick in Phase 8.5)
+//
+// Phase 8.5 (image targets, keyframes as needed refs, negatives), built against
+// the contract before the backend:
+//  - TODO(contract): the series config's `refs` block (`target`,
+//    `keyframe_target`) has no route. The client reads an optional top-level
+//    `defaults: {target, keyframe_target}` on `GET /h3pipe/refs`; without it the
+//    Refs tab uses the list's `default.image` and the contract's keyframe rule
+//    (flux2_klein_edit when ready, else the refs target).
+//  - TODO(contract): there is no episode-level image-target override (the
+//    video side has `PUT /h3pipe/episode-target`). The Refs tab's model picker
+//    is a session choice sent as each generate's `target` (never for a ref
+//    with its own `target` override), and offers the series.json snippet.
+//  - TODO(contract): a ref's effective image target isn't listed. Read as
+//    optional `effective.target`; else the ref override's `target`, else the
+//    defaults above.
+//  - TODO(contract): "missing includes only required ones plus any whose
+//    script asks": nothing says which optional keyframes the script asks for.
+//    Read as an optional `requested: true` on the keyframe ref.
+//  - TODO(contract): which references an edit target gets with a keyframe
+//    generate isn't listed. Read as an optional `edit_refs: [{id, view, path}]`;
+//    else the UI guesses from the refs the shot uses (subjects, then the plate),
+//    up to `max_refs`, and says it's a guess.
+//  - TODO(contract): `DELETE /h3pipe/refs/pick`'s response isn't given. Read as
+//    the ref (as `/refs` lists it) when it looks like one; the UI refetches
+//    `/refs` and the episode either way.
+//  - TODO(contract): `negative_source` is said to be recorded on the take only,
+//    with no value strings. The inspector reads `effective.negative` /
+//    `effective.negative_source` on `GET /h3pipe/shot` and the sidecar's, and
+//    accepts request | override | negative.txt (or episode / file) | series
+//    (or series.json) | preset (or target / default).
+//  - TODO(contract): `refs_used[].thumb` isn't described (a path like `path`?
+//    a URL?). Read as a ref-relative path, served like `path`.
+//  - TODO(contract): `reference_image` is read as a path relative to the
+//    episode (served through `/h3pipe/file`).
+//  - TODO(contract): `model_low` with `GET /h3pipe/models?param=model_low`
+//    needs the target (`target=`) as for `model`; the client sends it.
 //
 // Readiness and the episode target (API.md, 2026-09-19), built against the
 // contract before the backend:
@@ -137,6 +171,9 @@ export interface Api {
   /** A shot's first / last keyframe from a frame of a video take (continuity);
    * returns the keyframe ref as `refs` lists it. */
   refsKeyframe(req: RefKeyframeRequest): Promise<Ref>;
+  /** DELETE /h3pipe/refs/pick: unpick a ref (its live file is removed; its takes
+   * stay). For a keyframe this is Clear: the shot renders without one. */
+  refsUnpick(ep: string, ref: string, view?: string | null): Promise<Ref | null>;
   putRefOverride(req: RefOverrideRequest): Promise<unknown>;
   deleteRefOverride(ep: string, ref: string, view?: string | null): Promise<unknown>;
   /** ComfyUI's own lists (not h3pipe routes). */
@@ -295,11 +332,17 @@ export function createHttpApi(t: Transport): Api {
       if (req.seed !== null && !isSeed(req.seed)) {
         return Promise.reject(new Error(`Seed must be a string of digits, got ${String(req.seed)}`));
       }
-      return call("POST", "/h3pipe/refs/generate", req);
+      // `target` only when set (an older server may reject an unknown field's null)
+      const { target, ...rest } = req;
+      return call("POST", "/h3pipe/refs/generate", target ? { ...rest, target } : rest);
     },
     refsPick: (req) => call("PUT", "/h3pipe/refs/pick", req),
     refsImport: (req) => call("POST", "/h3pipe/refs/import", req),
     refsKeyframe: (req) => call("POST", "/h3pipe/refs/keyframe", req),
+    refsUnpick: async (ep, ref, view) => {
+      const r = await call<unknown>("DELETE", `/h3pipe/refs/pick?${qs({ ep, ref, view: view || undefined })}`);
+      return r && typeof r === "object" && "id" in r ? (r as Ref) : null;
+    },
     putRefOverride: (req) => {
       const s = req.fields.seed;
       if (s !== undefined && s !== null && !isSeed(s)) {
