@@ -227,7 +227,7 @@ def compile_entry(ctx: Ctx, sq: ir.Sequence, shot: ir.Shot, ep_id: str) -> dict:
         "prompt": build_prompt(shot, sq, series_cfg),
         "negative": ctx.preset.extra.get("negative", ""),
         "keyframes": {end: keyframe_path(ctx.recipe, shot.id, end)
-                      for end in ctx.recipe.get("keyframes") or ()},
+                      for end in TG.keyframe_ends(ctx.recipe, shot, sq)},
     }
     if ctx.recipe.get("reference_image"):
         entry["panels"] = panels(ctx, shot, loc_key)

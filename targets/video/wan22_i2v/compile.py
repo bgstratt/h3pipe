@@ -12,8 +12,8 @@ this file). No loader node: every render value is a widget.
 The first keyframe is what Wan animates, so it is required and has no
 render-anyway: its ref slot says `anyway: false` and why, so h3jobs blocks the
 shot (even with allow_missing_refs) and the CLI, routes and editor say
-"Wan 14B I2V needs a first frame: use continuity or import one, or retarget
-to wan22_ti2v". With a last keyframe too, WanFirstLastFrameToVideo takes the
+"Wan 14B I2V needs a first frame: generate one or use continuity (or import
+one), or retarget to wan22_ti2v". With a last keyframe too, WanFirstLastFrameToVideo takes the
 place of WanImageToVideo (the same inputs, plus end_image).
 
 The compile is targets/video/wan/common.py (shared with wan22_ti2v and

@@ -24,7 +24,7 @@ from .speech import SPEECH_RATE
 META_KEYS = {"who", "cast", "with", "props", "size", "audio", "dur", "duration",
              "camera", "sound", "music", "policy", "continuous", "text",
              "pace", "plate", "retention", "model", "lora", "steps", "extras",
-             "target", "profile"}
+             "target", "profile", "first", "last"}
 SIZES = {"close", "cu", "medium", "ms", "wide", "ws"}
 
 # Voice-only delivery markers. A speaker tagged with one of these is NOT added
@@ -33,6 +33,12 @@ SIZES = {"close", "cu", "medium", "ms", "wide", "ws"}
 # frame as a full character.
 VO_TOKENS = {"vo", "voiceover", "voover"}
 OS_TOKENS = {"os", "offscreen"}
+
+# `first:` / `last:` (a shot's keyframes, or a sequence's default): how each is
+# filled, or a path to an image to use. `none`: no keyframe, even when the
+# shot's video target could read one.
+KEYFRAME_METHODS = ("continuity", "generate", "import", "none")
+KEYFRAME_EXTS = (".png", ".jpg", ".jpeg", ".webp")
 
 # The script's `retention:` words -> the IR's neutral `preserve`.
 PRESERVE = {"fully_copy": "strict", "partially_copy": "loose", "reference": "style"}
@@ -232,6 +238,8 @@ def _parse(text: str, subject_ids: set[str],
                         raise ScriptError(
                             n, line,
                             f"duration '{val}' is not a number, `auto` or `model`")
+            elif key in ("first", "last"):
+                target[key] = _keyframe_method(key, val, n, line)
             elif key == "pace":
                 if val.strip().lower() not in SPEECH_RATE:
                     raise ScriptError(n, line,
@@ -255,6 +263,18 @@ def _parse(text: str, subject_ids: set[str],
     if not ep["sequences"]:
         raise ScriptError(1, "", "script has no sequences")
     return ep, seq_lines, spans
+
+
+def _keyframe_method(key: str, val: str, n: int, line: str) -> str:
+    """`first:` / `last:`: one of KEYFRAME_METHODS (lower-cased), or a path to
+    an image (kept as written)."""
+    v = val.strip()
+    if v.lower() in KEYFRAME_METHODS:
+        return v.lower()
+    if v and v.lower().endswith(KEYFRAME_EXTS):
+        return v
+    raise ScriptError(n, line, f"`{key}: {v}` must be continuity, generate, import, none "
+                               f"or a path to an image ({', '.join(KEYFRAME_EXTS)})")
 
 
 def _model_clamp(spec: str, n: int, line: str) -> dict:
@@ -322,7 +342,8 @@ def _shot_ir(ep_id: str, seq: dict, sh: dict, span: tuple[int, int]) -> Shot:
         preserve=preserve, seed_key=f"{ep_id}/{seq['id']}/{sh['id']}",
         overrides=overrides, source={"line": span[0], "end_line": span[1]},
         unparsed=unparsed, target=sh.get("target") or None,
-        profile=sh.get("profile") or None)
+        profile=sh.get("profile") or None, first=sh.get("first") or None,
+        last=sh.get("last") or None)
 
 
 def episode_from_parsed(ep: dict, seq_lines: list[int],
@@ -337,7 +358,8 @@ def episode_from_parsed(ep: dict, seq_lines: list[int],
             overrides=overrides, source={"line": line},
             shots=[_shot_ir(ep["id"], seq, sh, spans[sh["id"]]) for sh in seq["shots"]],
             unparsed=unparsed, target=seq.get("target") or None,
-            profile=seq.get("profile") or None))
+            profile=seq.get("profile") or None, first=seq.get("first") or None,
+            last=seq.get("last") or None))
     return Episode(id=ep["id"], title=ep["title"], series=dict(series or {}),
                    sequences=sequences)
 

@@ -362,7 +362,7 @@ def sweep_queued(takes: list[Take], alive: set[str], as_of: str | None = None,
 # shot_target / set_shot_target.
 
 OVERRIDES_FILE = "overrides.json"
-PASS_FIELDS = ("prompt", "model", "loras", "steps", "base_hash")
+PASS_FIELDS = ("prompt", "model", "loras", "steps", "base_hash", "negative", "model_low")
 SHOT_FIELDS = ("seed", "note")
 
 
@@ -421,11 +421,39 @@ def episode_target(data: dict) -> str | None:
 def set_episode_target(data: dict, target: str | None, name: str = "") -> dict:
     """Set (or with None clear) the episode target. The "episode" key held
     the episode's name before; it is kept as "id" beside the target, and the
-    plain name comes back when the target is cleared."""
+    plain name comes back when the target is cleared (and nothing else is
+    set there)."""
+    return set_episode_field(data, "target", target, name)
+
+
+EPISODE_FIELDS = ("target", "refs_target", "keyframe_target")
+
+
+def episode_field(data: dict, key: str) -> str | None:
+    """One of the editor's episode-level choices in overrides.json's
+    "episode" object: `target` (the video target), `refs_target` /
+    `keyframe_target` (the image targets of series refs and of keyframes).
+    None when unset (or "episode" is only the episode's name)."""
+    ep = data.get("episode")
+    v = ep.get(key) if isinstance(ep, dict) else None
+    return v if isinstance(v, str) and v else None
+
+
+def set_episode_field(data: dict, key: str, value: str | None, name: str = "") -> dict:
+    """Set (or with None clear) one episode-level choice (EPISODE_FIELDS),
+    keeping the episode's name as "id"; with nothing left set, "episode" is
+    the plain name again."""
     ep = data.get("episode")
     ident = (ep.get("id") if isinstance(ep, dict) else ep) or name or ""
-    if target:
-        data["episode"] = {"id": ident, "target": target} if ident else {"target": target}
+    fields = {k: ep[k] for k in EPISODE_FIELDS
+              if isinstance(ep, dict) and isinstance(ep.get(k), str) and ep[k]}
+    if value:
+        fields[key] = value
+    else:
+        fields.pop(key, None)
+    if fields:
+        data["episode"] = dict({"id": ident} if ident else {},
+                               **{k: fields[k] for k in EPISODE_FIELDS if k in fields})
     elif ident:
         data["episode"] = ident
     else:

@@ -318,6 +318,8 @@ def episode_status(root: str, pass_: str, folder: str | None = None) -> dict:
             "profile": shot.get("profile") if shot else None,
             "sequence": shot.get("sequence") if shot else None,
             "length": shot.get("length") if shot else None,
+            # `dur: model`: the length is the build's estimate (the UI marks it ≈)
+            **({"length_estimated": True} if shot and shot.get("length_estimated") else {}),
             # at the shot's own frame rate (its target's; the episode's for
             # every target that renders at it)
             "seconds": round(shot["length"] / sfps, 3) if shot else None,
@@ -421,6 +423,87 @@ def keeps_shot_target(ov: dict, want: str | None, built_target: str) -> str | No
     return want
 
 
+def _ep_path(root: str, p: str) -> tuple[str, str]:
+    """(a ref path as the episode serves it: relative, forward slashes, maybe
+    ../ beside a parent-folder series config; the file on disk)."""
+    full = p if os.path.isabs(p) else os.path.join(root, p)
+    try:
+        r = os.path.relpath(full, root).replace(os.sep, "/")
+    except ValueError:                                  # another drive
+        r = full.replace(os.sep, "/")
+    return r, full
+
+
+def refs_used(root: str, job: J.Job) -> list[dict]:
+    """The refs a shot's next render reads (its current target's ref slots),
+    for the inspector: [{"id", "kind", "role", "path", "exists", "need",
+    "thumb"}]. `role` is "subject", "plate", "first", "last", "voice",
+    "recording" (a dub's dialogue track) or "reference_sheet" (the sheet or
+    VACE reference a target composes at queue time: `path` is the latest
+    take's kept copy, or null); `need` "required" or "optional"; `thumb` the
+    file to show, relative to the episode (null when it isn't on disk)."""
+    try:
+        slots = J.ref_slots(job.doc, job.shot)
+    except Exception:
+        return []
+    cfg = J.series_config(root) or {}
+    plates = {}
+    home = next((d for d in (root, os.path.dirname(os.path.normpath(root)))
+                 if os.path.isfile(os.path.join(d, "series.json"))), root)
+    for lid, loc in (cfg.get("locations") or {}).items():
+        if isinstance(loc, dict) and loc.get("plate"):
+            plates[os.path.normcase(os.path.normpath(os.path.join(home, loc["plate"])))] = lid
+    out = []
+    for r in slots:
+        p = r.get("path") or ""
+        rel_, full = _ep_path(root, p) if p else (None, "")
+        exists = bool(p) and os.path.isfile(full)
+        role, rid = None, None
+        if r.get("role") in ("first", "last"):
+            role, rid = r["role"], f"shot:{job.id}:{r['role']}"
+        elif r.get("kind") == "audio":
+            role = "voice" if r.get("subject") else "recording"
+            rid = f"voice:{r['subject']}" if r.get("subject") else None
+        elif r.get("subject"):
+            role, rid = "subject", f"subject:{r['subject']}"
+        elif r.get("location"):
+            role, rid = "plate", f"location:{r['location']}"
+        else:
+            lid = plates.get(os.path.normcase(os.path.normpath(full))) if p else None
+            role, rid = "plate", (f"location:{lid}" if lid else None)
+        need = "optional" if r.get("optional") else "required"
+        out.append({"id": rid, "kind": r.get("kind", "image"), "role": role, "path": rel_,
+                    "exists": exists, "need": need, "thumb": rel_ if exists else None,
+                    "slot": r.get("slot")})
+    t = J.job_target(job)
+    rec = t.recipe
+    if rec.get("reference_sheet") or rec.get("reference_image"):
+        suffix = ((rec.get("reference_sheet") or {}).get("take_suffix")
+                  or (rec.get("reference_image") or {}).get("take_suffix") or "")
+        latest = None
+        for tk in reversed(T.list_takes(root, job.pass_, job.id, job.folder)):
+            f = os.path.join(tk.paths.dir, tk.paths.stem + suffix) if suffix else ""
+            if f and os.path.isfile(f):
+                latest = f
+                break
+        rel_ = _ep_path(root, latest)[0] if latest else None
+        out.append({"id": None, "kind": "image", "role": "reference_sheet", "path": rel_,
+                    "exists": bool(latest), "need": "required", "thumb": rel_,
+                    "slot": "reference sheet" if rec.get("reference_sheet") else "reference image"})
+    return out
+
+
+def reference_image(root: str, sidecar: dict | None) -> str | None:
+    """The reference sheet (ltx2_ingredients) or reference image (wan22_vace)
+    a take rendered with, kept beside it: its path relative to the episode,
+    or None."""
+    for r in (sidecar or {}).get("refs") or []:
+        if r.get("role") in ("sheet", "reference") and r.get("path"):
+            rel_, full = _ep_path(root, r["path"])
+            return rel_ if os.path.isfile(full) else None
+    return None
+
+
 def shot_detail(root: str, pass_: str, shot_id: str, folder: str | None = None) -> dict:
     """Everything the inspector shows for one shot in one pass: the built entry,
     the prompt it builds to, the override and the prompt a render would use now,
@@ -441,6 +524,8 @@ def shot_detail(root: str, pass_: str, shot_id: str, folder: str | None = None) 
         takes.append({"take": t.take, "status": t.status, "has_video": t.has_video,
                       "stale": take_stale(root, pass_, doc, shot, t.sidecar, job.target, cache),
                       "sidecar": t.sidecar,
+                      # the reference sheet / VACE reference it rendered with, if kept
+                      "reference_image": reference_image(root, t.sidecar),
                       "files": {k: rel(root, getattr(t.paths, k))
                                 for k in ("mp4", "thumb", "strip", "shotlist", "h3_wav")
                                 if os.path.isfile(getattr(t.paths, k))}})
@@ -459,8 +544,15 @@ def shot_detail(root: str, pass_: str, shot_id: str, folder: str | None = None) 
                       "seed_source": job.seed_source, "model": job.model,
                       "loras": job.loras, "steps": job.steps, "target": job.target,
                       "width": job.width, "height": job.height, "length": job.frames,
+                      # request | override | negative.txt | series | preset | none
+                      "negative": (None if job.negative_source == "none"
+                                   else J.job_values(job).get("negative") or ""),
+                      "negative_source": job.negative_source,
+                      **({"model_low": J.job_values(job).get("model_low")}
+                         if J.job_target(job).binding.specs("model_low") else {}),
                       **({"error": job.error} if job.error else {}),
                       **({"notes": list(job.notes)} if job.notes else {})},
+        "refs_used": refs_used(root, job),
         "takes": takes,
     }
 
@@ -1287,7 +1379,26 @@ def cmd_keyframe(root: str, argv: list[str]) -> int:
         description="Make a shot's first (or last) keyframe from a frame of another "
                     "shot's take: by default the previous shot's last frame, from the "
                     "take the cut uses.")
-    ap.add_argument("shot")
+    ap.add_argument("shot", nargs="?", help="the shot (not needed with --missing)")
+    act = ap.add_mutually_exclusive_group()
+    act.add_argument("--clear", action="store_true",
+                     help="unpick the keyframe: its file goes (the takes stay), the shot "
+                          "renders without one, and nothing re-picks it until you pick")
+    act.add_argument("--generate", action="store_true",
+                     help="make a still from the shot's description with the keyframe image "
+                          "target (an edit target also gets the picked character views and "
+                          "the plate)")
+    act.add_argument("--missing", action="store_true",
+                     help="fill every keyframe the episode needs (required ones, and optional "
+                          "ones the script asks for) by its method: continuity, else generate")
+    ap.add_argument("--target", metavar="IMAGE_TARGET",
+                    help="with --generate/--missing: the image target (default: the ref's "
+                         "override, the episode's, the series config's refs block, else "
+                         "flux2_klein_edit when installed)")
+    ap.add_argument("--dry-run", action="store_true",
+                    help="with --generate/--missing: say what would be done, and the prompt")
+    ap.add_argument("--comfy", default="http://127.0.0.1:8188")
+    ap.add_argument("--timeout", type=int, default=900, help="seconds to wait per image")
     src = ap.add_mutually_exclusive_group()
     src.add_argument("--from-prev", action="store_true",
                      help="the neighbouring shot in cut order (the default): the previous "
@@ -1310,6 +1421,10 @@ def cmd_keyframe(root: str, argv: list[str]) -> int:
     import h3refs as R                                   # h3refs imports this module
     pass_ = _pass(args)
     which = "last" if args.last else "first"
+    if not args.shot and not args.missing:
+        ap.error("give a shot (or --missing)")
+    if args.clear or args.generate or args.missing:
+        return _keyframe_action(R, root, args, pass_, which)
     source_shot = source_take = None
     if args.src:
         source_shot, _, tk = args.src.partition(":")
@@ -1339,6 +1454,84 @@ def cmd_keyframe(root: str, argv: list[str]) -> int:
         print(f"      not picked ({R.ep_rel(root, res.ref.file)} already exists; "
               f"--pick to replace it)")
     return 0
+
+
+def _keyframe_action(R, root: str, args, pass_: str, which: str) -> int:
+    """h3.py keyframe --clear / --generate / --missing."""
+    try:
+        s = R.load_series(root)
+    except (FileNotFoundError, ValueError) as e:
+        print(f"  !! {e}")
+        return 1
+    if args.clear:
+        try:
+            res = R.clear_pick(s, R.find_ref(s, f"shot:{args.shot}:{which}"))
+        except (R.RefError, R.UnknownRef) as e:
+            print(f"  !! {e}")
+            return 1
+        print(f"  {res.ref.id}: cleared"
+              + (f" (was t{res.was:02d})" if res.was else "")
+              + (f"; removed {R.ep_rel(root, res.removed[0])}" if res.removed else
+                 "; there was no live file")
+              + ". The takes stay; nothing re-picks it until you pick one.")
+        need = R.keyframe_needs(root).get((args.shot, which))
+        if need and need["need"] == "required":
+            print(f"      {need['target']} needs it: {args.shot} is blocked until a "
+                  f"{which} keyframe is picked")
+        return 0
+    comfy = J.Comfy(args.comfy, client_id="h3keyframe")
+    listing = J.model_lister(comfy)                    # read-only: /object_info
+    base = None
+    if not args.dry_run:
+        try:
+            comfy.ping()
+        except Exception as e:
+            print(f"  !! can't reach ComfyUI at {args.comfy}: {e}")
+            return 1
+        try:
+            base, _ = R.resolve_workflow(args.comfy)
+        except Exception:
+            base = None
+    common = dict(comfy=comfy, pass_=pass_, base=base, listing=listing,
+                  resolve=J.model_resolver(), cache=J.TG.modelid.temp_cache(),
+                  dry_run=args.dry_run, target=args.target, timeout=args.timeout)
+    if args.generate:
+        todo = [(args.shot, which)]
+    else:
+        todo = [(sh, w) for sh, w, _n in R.missing_keyframes(s)]
+        if args.shot:
+            todo = [t for t in todo if t[0] == args.shot]
+        if not todo:
+            print("  no keyframe is missing (required, or asked for by the script)")
+            return 0
+    failed = 0
+    for sh, w in todo:
+        try:
+            if args.generate:
+                req = R.GenRequest(f"shot:{sh}:{w}", target=args.target, pass_=pass_)
+                if args.dry_run:
+                    (job,) = R.plan_generate(s, req, ready=R.target_ready(listing))
+                    refs = ", ".join(f"{r.get('subject') or r.get('location')}"
+                                     f"{' ' + r['view'] if r.get('view') else ''}"
+                                     for r in job.references)
+                    print(f"  shot:{sh}:{w}: {job.target.id} at {job.width}x{job.height}"
+                          f" (renders {job.render_size[0]}x{job.render_size[1]} on "
+                          f"{job.video_target}), seed {job.seed}"
+                          + (f"\n      references: {refs}" if refs else "")
+                          + f"\n      negative ({job.negative_source}): {job.negative!r}"
+                          + f"\n{job.prompt}\n")
+                    continue
+                R.generate_and_wait(s, req, comfy, base, args.timeout, listing,
+                                    common["resolve"], common["cache"],
+                                    pick=True if args.pick else (False if args.no_pick else None))
+                continue
+            res = R.fill_keyframe(s, sh, w, **common)
+            print(f"  shot:{sh}:{w}: {res.method}: {res.detail}")
+        except (R.RefError, R.UnknownRef, R.NotUsable, R.FfmpegMissing, RuntimeError,
+                ValueError) as e:
+            print(f"  !! shot:{sh}:{w}: {e}")
+            failed += 1
+    return 1 if failed else 0
 
 
 COMMANDS = {"takes": cmd_takes, "pick": cmd_pick, "override": cmd_override,

@@ -48,6 +48,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -101,11 +102,15 @@ def collect(s: R.Series, todo: list | None, only: set[str] | None) -> list[dict]
     return out
 
 
-def request(j: dict, args, negative: str) -> R.GenRequest:
+def request(j: dict, args, negative: str | None) -> R.GenRequest:
+    """One ref's generate request. `negative` is --negative-file's text (it
+    beats negative.txt, the series config and the preset for this run), or
+    None."""
     loras = ([{"name": args.lora, "strength": args.lora_strength}] if args.lora else None)
     return R.GenRequest(ref=j["ref"].id, model=args.unet or None, loras=loras,
                         steps=args.steps, cfg=args.cfg, negative=negative,
-                        view_size=parse_size(args.view_size, R.VIEW_SIZE))
+                        view_size=parse_size(args.view_size, R.VIEW_SIZE),
+                        target=args.target or None)
 
 
 def job_name(j: dict, job: R.GenJob) -> str:
@@ -140,8 +145,17 @@ def main() -> int:
     ap.add_argument("--steps", type=int, default=None,
                     help=f"sampler steps (default: the ref's override, else {STEPS}; "
                          f"match a step-distilled LoRA)")
-    ap.add_argument("--cfg", type=float, default=CFG,
-                    help="1.0 = turbo, no guidance (negative prompt inert). >1 enables it.")
+    ap.add_argument("--cfg", type=float, default=None,
+                    help="1.0 = turbo, no guidance (negative prompt inert). >1 enables it. "
+                         "Default: the image target's preset (krea2: 1.0)")
+    ap.add_argument("--target", default="",
+                    help="the image target (z_image_turbo, flux2_klein, flux_kontext, ...; "
+                         "default: each ref's override, the episode's choice, the series "
+                         "config's refs.target, else krea2)")
+    ap.add_argument("--clear", metavar="REF[:VIEW]", action="append",
+                    help="unpick a ref (e.g. location:kitchen, subject:ada:02_side): its file "
+                         "goes, the takes stay, and nothing re-picks it until you pick; "
+                         "repeatable")
     ap.add_argument("--negative-file",
                     help="text file with a negative prompt; only bites at --cfg > 1, so "
                          "it is for non-distilled models, not krea2 turbo")
@@ -182,11 +196,28 @@ def main() -> int:
         with open(todo_p, encoding="utf-8") as fh:
             todo = json.load(fh)
 
-    negative = ""
+    if args.clear:
+        failed = 0
+        for spec in args.clear:
+            rid, view = spec, None
+            m = re.fullmatch(r"(subject:[^:]+):(\d\d_[a-z]+)", spec)
+            if m:
+                rid, view = m.group(1), m.group(2)
+            try:
+                res = R.clear_pick(s, R.find_ref(s, rid), view)
+            except (R.RefError, R.UnknownRef) as e:
+                print(f"  !! {spec}: {e}")
+                failed += 1
+                continue
+            print(f"  {spec}: cleared" + (f"; removed {os.path.relpath(res.removed[0], ep)}"
+                                          if res.removed else "; there was no live file"))
+        return 1 if failed else 0
+
+    negative = None
     if args.negative_file:
         with open(args.negative_file, encoding="utf-8") as fh:
             negative = fh.read().strip()
-        if args.cfg <= 1.0:
+        if args.cfg is not None and args.cfg <= 1.0:
             print("  ! --negative-file given but cfg is 1.0, where there is no guidance\n"
                   "    branch to apply it to, so it does nothing. Turbo checkpoints want\n"
                   "    cfg 1; for real suppression there use a NAG or negpip node in your\n"
@@ -210,7 +241,9 @@ def main() -> int:
             base, wf = None, ""
 
     print(f"\n  {len(jobs)} asset(s) · comfy {args.comfy} · "
-          f"{args.steps or STEPS} steps · cfg {args.cfg}\n"
+          f"{args.steps or 'preset'} steps · cfg "
+          f"{args.cfg if args.cfg is not None else 'preset'}"
+          f"{' · ' + args.target if args.target else ''}\n"
           f"  graph {wf if wf else 'built-in (' + UNET + ')'}\n"
           f"  {'-' * 62}")
     todo_now = []
@@ -251,16 +284,32 @@ def main() -> int:
               f"    restart ComfyUI). Saving through SaveImage and fetching each image\n"
               f"    over HTTP instead.\n")
 
+    listing = J.model_lister(comfy)
+    cache = R.TG.modelid.temp_cache()
+    graphs: dict = {}
     failed = []
     for j in todo_now:
         r = j["ref"]
         try:
             made = []
-            for job in R.plan_generate(s, request(j, args, negative)):
-                print(f"  .. {job_name(j, job)}")
+            for job in R.plan_generate(s, request(j, args, negative),
+                                       ready=R.target_ready(listing)):
+                print(f"  .. {job_name(j, job)}"
+                      + ("" if job.is_krea2 else f"  ({job.target.id})"))
+                blocked = R.resolve_job_models(job, listing, J.model_resolver(), cache)
+                if blocked:
+                    raise RuntimeError("model files not installed: " + "; ".join(
+                        R.TG.missing_message(m) for m in blocked))
+                g0 = base
+                if not job.is_krea2:
+                    if job.target.id not in graphs:
+                        graphs[job.target.id], _ = R.resolve_workflow(args.comfy, None,
+                                                                      job.target)
+                    g0 = graphs[job.target.id]
+                    R.stage_references(s, job, comfy)
                 take = R.start_gen(s, job)
                 try:
-                    pid = comfy.queue(R.graph_for(base, job, take, save_node=use_node,
+                    pid = comfy.queue(R.graph_for(g0, job, take, save_node=use_node,
                                                   lora_clip=not args.no_lora_clip))
                 except Exception as e:
                     R.mark_failed(take, str(e)[:800])

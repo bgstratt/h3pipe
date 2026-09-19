@@ -175,6 +175,37 @@ A shot whose target is not the one it was built for is compiled for its new targ
 it is queued, so you don't need to rebuild. To make an episode target permanent, put
 `"target": "<id>"` in `series.json`'s `series` block and rebuild.
 
+### Reference images: the `refs` block
+
+Reference images (character views, props, plates) and shot keyframes are made by an
+**image model**. The series config can say which:
+
+```json
+"refs": {"target": "krea2", "keyframe_target": "flux2_klein_edit"}
+```
+
+| image target | what it is |
+|---|---|
+| `krea2` | Krea 2 turbo, text to image (the default for refs) |
+| `z_image_turbo` | Z-Image Turbo, fast text to image |
+| `flux2_klein` | FLUX.2 Klein 9B, text to image |
+| `flux2_klein_edit` | FLUX.2 Klein 9B with up to 4 reference images (the default for keyframes when it is installed; otherwise keyframes use the refs model) |
+| `flux_kontext` | FLUX.1 Kontext dev, with one reference image |
+
+The editor can choose per episode (kept in `overrides.json`, not here) and per ref, and a
+generate request can name one; most specific wins. `python h3.py targets --kind image` says
+which are installed and what to download for the rest. A ref is worded the same whichever
+model draws it.
+
+### Negative prompts
+
+Targets that take a negative prompt (LTX-2, Wan 2.2 and the image models; not H3) use, most
+specific first: the render request's, the shot's override (the editor, per pass), the
+episode's **`negative.txt`** (a text file beside the script), the series config's
+`"negative": "..."`, then the model's own. The take records which one it used. Turbo and
+distilled models sample without guidance (cfg 1): there a negative does nothing, and the
+take says so.
+
 ### Writing the `design` sentence
 
 This is the highest-leverage sentence in the pipeline. It is injected verbatim into every
@@ -256,6 +287,7 @@ sound: running footsteps on grass, fabric movement
 | `model:`, `lora:`, `steps:` | per-shot render overrides; also valid under a `#` header |
 | `profile: dialogue_close` | a render profile from the series config; also valid under a `#` header |
 | `target: ltx2` | the video model for this shot or sequence (`minimax_h3_ref2va`, `ltx2`, `ltx2_ingredients`, `minimax_h3_fl2va`, `wan22_i2v`, `wan22_ti2v` or `wan22_vace`); see below |
+| `first: continuity` / `last: generate` | how this shot's first / last keyframe is made: `continuity`, `generate`, `import`, `none`, or a path to an image; also valid under a `#` header (the default of its shots); see **Keyframes** |
 | `NAME: line` | dialogue from someone on screen |
 | `NAME (V.O.): line` | voiceover: speaks, is not drawn, costs no reference slot |
 | `NAME (O.S.): line` | off-screen: in the space, outside the frame |
@@ -362,10 +394,11 @@ Three Wan 2.2 targets, for pictures without sound:
 
 - **`wan22_i2v`** (label "Wan 2.2 14B I2V"): the 14B image-to-video pair (a high noise model,
   then a low noise one, each with its 4-step turbo LoRA). It animates a picture you give
-  it: **a first frame is required** (`refs/shots/<shot>/first.png`, from continuity with
-  `h3.py keyframe` or an import in the Refs tab). A shot without one is blocked, and
-  rendering anyway can't help: "Wan 14B I2V needs a first frame: use continuity or import
-  one, or retarget to wan22_ti2v". A `last.png` too makes it a first/last-frame shot.
+  it: **a first frame is required** (`refs/shots/<shot>/first.png`: generated from the
+  shot's description, cut from the previous shot by continuity, or imported; see
+  **Keyframes**). A shot without one is blocked, and rendering anyway can't help: "Wan 14B
+  I2V needs a first frame: generate one or use continuity (or import one), or retarget to
+  wan22_ti2v". A `last.png` too makes it a first/last-frame shot.
 - **`wan22_ti2v`** ("Wan 2.2 5B TI2V"): the small 5B model, text-to-video, or from a first
   frame when there is one. Nothing blocks it: the fast, cheap choice for proxies, and
   where an I2V shot without a first frame can go.
@@ -406,6 +439,52 @@ What every Wan shot has in common:
 
 To try a shot on Wan without touching the script, retarget it from the editor or with
 `h3.py override <ep> sh040 --target wan22_ti2v`.
+
+### Keyframes: `first:` and `last:`
+
+Some video targets start (or end) a shot on a picture you give them: its **keyframes**,
+`refs/shots/<shot>/first.png` and `last.png`. Which shots need one follows from the target
+each shot renders on:
+
+- `wan22_i2v` **requires** a first frame (it animates it);
+- `ltx2`, `minimax_h3_fl2va`, `wan22_ti2v` (first only) and `wan22_vace` use them when they
+  exist (**optional**);
+- `minimax_h3_ref2va` and `ltx2_ingredients` don't read keyframes.
+
+The Refs tab lists every keyframe a shot needs, before anything exists, with how it will be
+made. You choose that with a line on the shot, or under a `#` header for all its shots:
+
+```
+# sq02  workshop
+first: continuity
+
+## sh030
+last: generate
+first: refs/stills/sh030_open.png
+```
+
+| value | meaning |
+|---|---|
+| `continuity` | the previous shot's last frame (the default for a shot with a previous shot in its sequence) |
+| `generate` | a still made from the shot's own description (the default otherwise) |
+| `import` | you'll import one (the Refs tab) |
+| a path | this image is imported as the keyframe (relative to the episode) |
+| `none` | no keyframe, even where the target could use one (a required one stays required) |
+
+**Generating a keyframe** writes a still from the shot: the look, the framing and the
+location, who is in frame (their `design`), and the action at that moment: for `first` how
+the shot opens (the action's first sentence, about to happen); for `last` how it ends (its
+last sentence, finished). Write the action as a short sequence of sentences and both ends
+come out right. Dialogue isn't drawn. The keyframe model (the series config's
+`refs.keyframe_target`, else FLUX.2 Klein edit when it is installed) also gets **the picked
+character views** (the face on a one-character close-up, else the three-quarter body), the
+props and **the plate** as reference images, so the characters look like their sheets; the
+prompt names each one ("image 1 is Ada: draw this character exactly as in image 1").
+
+`python h3.py keyframe Shows\ep05 --missing` fills every required keyframe and every one the
+script asks for (continuity when the previous shot has a usable take, else a still);
+`h3.py keyframe Shows\ep05 sh030 --generate` makes one still; `--clear` takes a keyframe away
+(the shot renders without one, and nothing puts it back until you pick one).
 
 ### Letting the model time a shot: `dur: model`
 

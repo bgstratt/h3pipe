@@ -480,6 +480,16 @@ def _opt_loras(v) -> list[dict] | None:
     return out
 
 
+def _opt_negative(v) -> str | None:
+    """A negative prompt from a request: text ("" is an explicit empty one),
+    or null for not set."""
+    if v is None:
+        return None
+    if not isinstance(v, str):
+        raise ApiError(400, "negative must be text or null")
+    return v
+
+
 def _opt_target(v) -> str | None:
     """A video target id from a request (null: not set), 400 if unknown."""
     if v is None or v == "":
@@ -519,7 +529,8 @@ def post_render(ctx: Context, body):
         steps=_opt_steps(body.get("steps")), prompt=_opt_prompt(body.get("prompt")),
         parent_take=check_take(body.get("parent_take"), "parent_take", nullable=True),
         note=_opt_str(body, "note") or "", allow_missing_refs=allow_missing,
-        target=_opt_target(body.get("target")), allow_model_mismatch=allow_mismatch)
+        target=_opt_target(body.get("target")), allow_model_mismatch=allow_mismatch,
+        negative=_opt_negative(body.get("negative")))
     J.load_shotlist(ep, pass_)                           # 404 before anything else
     workflows: dict = {}
 
@@ -659,7 +670,8 @@ def put_cut(ctx: Context, body):
     return 200, {"cut": cut}
 
 
-OVERRIDE_FIELDS = ("prompt", "seed", "model", "loras", "steps", "note", "target")
+OVERRIDE_FIELDS = ("prompt", "seed", "model", "loras", "steps", "note", "target", "negative",
+                   "model_low")
 
 
 @handler
@@ -696,6 +708,17 @@ def put_override(ctx: Context, body):
         pass_fields["loras"] = _opt_loras(fields["loras"])
     if "steps" in fields:
         pass_fields["steps"] = _opt_steps(fields["steps"])
+    if "negative" in fields:
+        # "" is an explicit empty negative; null clears the override
+        n = fields["negative"]
+        if n is not None and not isinstance(n, str):
+            raise ApiError(400, "negative must be text or null")
+        pass_fields["negative"] = n
+    if "model_low" in fields:
+        m = fields["model_low"]
+        if m is not None and not isinstance(m, str):
+            raise ApiError(400, "model_low must be a file name or null")
+        pass_fields["model_low"] = m or None
 
     built_target = E.shot_built_target(ep, shot)
     if built_target is None:
@@ -957,12 +980,66 @@ def auto_pick_refs(ctx: Context, s) -> None:
         episode_event(ctx, s.ep)
 
 
+def image_ready(ctx: Context):
+    """ready(target) for the image-target defaults: its required files are
+    among what ComfyUI offers (h3refs.target_ready)."""
+    return R.target_ready(J.model_lister(ctx.comfy, ctx.model_choices))
+
+
 @handler
 def get_refs(ctx: Context, query: dict):
     ep = check_ep(ctx, query.get("ep"))
     s = _series(ep)
     sweep_refs(ctx, s)
-    return 200, seeds_out({"refs": R.list_refs(ep)})
+    return 200, seeds_out(R.refs_listing(ep, ready=image_ready(ctx)))
+
+
+@handler
+def put_refs_defaults(ctx: Context, body):
+    """The episode's image-target choices (overrides.json's
+    episode.refs_target / episode.keyframe_target): `target` for series refs,
+    `keyframe_target` for shot keyframes; null clears one, a key left out is
+    kept. Never writes series.json. Returns the defaults as GET
+    /h3pipe/refs gives them."""
+    body = body_dict(body)
+    ep = check_ep(ctx, body.get("ep"))
+    s = _series(ep)
+    fields = {}
+    for k in ("target", "keyframe_target"):
+        if k in body:
+            v = body[k]
+            if v is not None and (not isinstance(v, str)):
+                raise ApiError(400, f"{k} must be an image target id or null")
+            fields[k] = v or None
+    if not fields:
+        raise ApiError(400, "give target and/or keyframe_target (an image target id, or null "
+                            "to clear it)")
+    try:
+        R.set_image_defaults(ep, fields)
+        d = R.image_defaults(s, image_ready(ctx))
+    except R.RefError as e:
+        raise ApiError(400, str(e))
+    episode_event(ctx, ep)
+    return 200, {"defaults": d}
+
+
+@handler
+def delete_refs_pick(ctx: Context, query: dict):
+    """Unpick a ref (h3refs.clear_pick): its live file goes, every take stays,
+    and auto-pick leaves it alone until something is picked. For a shot
+    keyframe this is Clear: the shot no longer uses one. Returns the ref as
+    GET /h3pipe/refs lists it."""
+    ep = check_ep(ctx, query.get("ep"))
+    s = _series(ep)
+    ref = _ref(s, query.get("ref"))
+    view = _view(ref, query.get("view") or None)
+    try:
+        res = R.clear_pick(s, ref, view)
+    except R.RefError as e:
+        raise ApiError(400, str(e))
+    ref_event(ctx, ep, ref.id, view, res.was, "cleared")
+    episode_event(ctx, ep)
+    return 200, seeds_out(R.ref_json(s, ref, R.used_by(s, [ref]), ready=image_ready(ctx)))
 
 
 @handler
@@ -983,11 +1060,24 @@ def post_refs_generate(ctx: Context, body):
     prompt = body.get("prompt")
     if prompt is not None and not isinstance(prompt, str):
         raise ApiError(400, "prompt must be text or null")
+    target = body.get("target")
+    if target is not None and (not isinstance(target, str) or not target):
+        raise ApiError(400, "target must be an image target id or null")
+    if target:
+        try:
+            TG.load_target(target, "image")
+        except TG.TargetError as e:
+            raise ApiError(400, str(e))
+    negative = body.get("negative")
+    if negative is not None and not isinstance(negative, str):
+        raise ApiError(400, "negative must be text or null")
+    pass_ = check_pass(body.get("pass"), "final")
     req = R.GenRequest(ref=ref.id, view=view, count=count, seed_mode=seed_mode,
                        seed=seed_in(body.get("seed")), prompt=prompt or None,
                        model=_opt_str(body, "model") or None,
                        loras=_opt_loras(body.get("loras")),
-                       steps=_opt_steps(body.get("steps")), note=_opt_str(body, "note") or "")
+                       steps=_opt_steps(body.get("steps")), note=_opt_str(body, "note") or "",
+                       target=target or None, negative=negative, pass_=pass_)
     why = R.can_generate(s, ref)
     if why:
         raise ApiError(400, why)
@@ -996,7 +1086,9 @@ def post_refs_generate(ctx: Context, body):
     except Exception as e:
         raise ApiError(500, f"{R.REFS_WORKFLOW} can't be read: {e}")
     try:
-        result = R.queue_generate(s, req, ctx.comfy, base, save_node=True)
+        result = R.queue_generate(s, req, ctx.comfy, base, save_node=True,
+                                  listing=J.model_lister(ctx.comfy, ctx.model_choices),
+                                  resolve=ctx.model_resolve, cache=ctx.model_cache)
     except R.RefError as e:
         raise ApiError(400, str(e))
     except R.UnknownRef as e:
@@ -1104,7 +1196,7 @@ def post_refs_keyframe(ctx: Context, body):
     return 200, seeds_out(R.ref_json(s, res.ref, R.used_by(s, [res.ref])))
 
 
-REF_OVERRIDE_FIELDS = ("prompt", "seed", "model", "loras", "steps", "note")
+REF_OVERRIDE_FIELDS = ("prompt", "seed", "model", "loras", "steps", "note", "target")
 
 
 def _ref_override_json(s, ref, view) -> dict:
@@ -1146,6 +1238,11 @@ def put_refs_override(ctx: Context, body):
         clean["loras"] = _opt_loras(fields["loras"])
     if "steps" in fields:
         clean["steps"] = _opt_steps(fields["steps"])
+    if "target" in fields:
+        t = fields["target"]
+        if t is not None and not isinstance(t, str):
+            raise ApiError(400, "target must be an image target id or null")
+        clean["target"] = t or None
     ov = R.load_overrides(ref.home)
     try:
         R.set_ref_override(ov, ref, view, clean,
@@ -1193,6 +1290,8 @@ ROUTES = [
     ("GET", "/h3pipe/refs", get_refs, "query"),
     ("POST", "/h3pipe/refs/generate", post_refs_generate, "body"),
     ("PUT", "/h3pipe/refs/pick", put_refs_pick, "body"),
+    ("DELETE", "/h3pipe/refs/pick", delete_refs_pick, "query"),
+    ("PUT", "/h3pipe/refs/defaults", put_refs_defaults, "body"),
     ("POST", "/h3pipe/refs/import", post_refs_import, "body"),
     ("POST", "/h3pipe/refs/keyframe", post_refs_keyframe, "body"),
     ("PUT", "/h3pipe/refs/override", put_refs_override, "body"),

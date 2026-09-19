@@ -1,0 +1,90 @@
+{
+  "id": "flux_kontext",
+  "kind": "image",
+  "label": "FLUX.1 Kontext dev (edit, one reference)",
+  "short": "Kontext",
+  "code": "target.py",
+
+  "capabilities": {
+    "_note": "Image edit with one reference image (ReferenceLatent on the prompt); with none it is text to image. A keyframe gets its first character's picked view (else the plate).",
+    "mode": "edit",
+    "max_refs": 1
+  },
+
+  "template": {
+    "_note": "Sizes a series ref is generated at (as krea2's). A keyframe is generated at its shot's render size, scaled up (same aspect, multiples of size_multiple) to at least min_pixels: the video targets scale a keyframe to the frame anyway, and Kontext draws poorly far below its 1 MP training size. The reference is scaled by FluxKontextImageScale, as the template does.",
+    "view_size": [1024, 1024],
+    "plate_size": [1344, 768],
+    "object_size": [1024, 1024],
+    "size_multiple": 16,
+    "min_pixels": 786432
+  },
+
+  "recipe": {
+    "_note": "One reference, named 'the image' in the prompt (targets/image/common.py reference_intro).",
+    "ref_word": "image"
+  },
+
+  "binding": {
+    "_note": "An API graph built from the user's saved flux_kontext_image_base.json, trimmed to the branch its SaveImage reads (the canvas holds six more samplers and image stitches): UNETLoader + DualCLIPLoader (clip_l, t5xxl, flux) + the ae VAE; the reference: LoadImage -> FluxKontextImageScale -> VAEEncode -> ReferenceLatent on the prompt, titled 'Reference 1 ...' (cut out with no reference); FluxGuidance; KSampler 20 steps, cfg 1, euler / simple on an EmptySD3LatentImage at the job's size. Guidance 2.5 is ComfyUI's Kontext template's (flux_kontext_dev_basic.json) and the canvas' other branches'; the saved branch had 1.5 for a style transfer. H3SaveRefTake takes the place of SaveImage.",
+    "workflow": "workflow.json",
+    "workflow_name": "h3pipe_flux_kontext.json",
+    "env": "H3_FLUX_KONTEXT_WORKFLOW",
+    "saver": {"class_type": "H3SaveRefTake",
+              "replace": {"class_type": "SaveImage", "inputs": {"images": "images"}}},
+    "prune": true,
+    "references": {"links": {"positive": "conditioning"}},
+    "params": {
+      "model": {"class_type": "UNETLoader", "field": "unet_name"},
+      "text_encoder": {"class_type": "DualCLIPLoader", "field": "clip_name1"},
+      "text_encoder_2": {"class_type": "DualCLIPLoader", "field": "clip_name2"},
+      "vae": {"class_type": "VAELoader", "field": "vae_name"},
+      "loras": {"class_type": "LoraLoaderModelOnly", "name": "lora_name", "strength": "strength_model",
+                "input": "model", "chain": true,
+                "insert_after": {"class_type": "UNETLoader", "output": 0}},
+      "prompt": {"class_type": "CLIPTextEncode", "field": "text", "title": "Positive prompt"},
+      "negative": {"class_type": "CLIPTextEncode", "field": "text", "title": "Negative prompt"},
+      "width": {"class_type": "EmptySD3LatentImage", "field": "width"},
+      "height": {"class_type": "EmptySD3LatentImage", "field": "height"},
+      "steps": {"class_type": "KSampler", "field": "steps"},
+      "seed": {"class_type": "KSampler", "field": "seed"},
+      "cfg": {"class_type": "KSampler", "field": "cfg"},
+      "sampler": {"class_type": "KSampler", "field": "sampler_name"},
+      "guidance": {"class_type": "FluxGuidance", "field": "guidance"}
+    }
+  },
+
+  "models": {
+    "_note": "Families from the installed files' headers (targets/modelid.py): Kontext dev has FLUX.1 dev's tensors (the header says FLUX.1 dev; the name says Kontext). All required.",
+    "model": {"family": "flux1-kontext-dev", "patterns": ["*kontext*"],
+              "tier": "required", "exclude": ["*lora*"]},
+    "text_encoder": {"family": "clip-l", "patterns": ["clip_l*", "*clip_l.*"],
+                     "tier": "required"},
+    "text_encoder_2": {"family": "t5-xxl", "patterns": ["t5xxl*", "*t5*xxl*"],
+                       "tier": "required", "exclude": ["*umt5*"]},
+    "vae": {"family": "flux1-vae", "patterns": ["ae.safetensors", "*flux1*ae.*", "*flux1*vae*"],
+            "tier": "required"}
+  },
+
+  "presets": {
+    "_note": "ComfyUI's Kontext dev template (flux_kontext_dev_basic.json): its fp8 model, 20 steps, cfg 1, euler / simple, guidance 2.5; the text encoders are the user's saved workflow's (t5xxl_fp16; the template's t5xxl_fp8_e4m3fn_scaled isn't installed). The saved workflow's flux1-kontext-dev.safetensors (full precision, installed) stands in by family. At cfg 1 the negative prompt has no effect.",
+    "final": {
+      "model": "flux1-dev-kontext_fp8_scaled.safetensors",
+      "text_encoder": "clip_l.safetensors",
+      "text_encoder_2": "t5xxl_fp16.safetensors",
+      "vae": "ae.safetensors",
+      "lora": "",
+      "steps": 20, "cfg": 1.0, "sampler": "euler", "guidance": 2.5,
+      "negative": ""
+    }
+  },
+
+  "downloads": {
+    "_note": "URLs from ComfyUI's Kontext template (properties.models) and ComfyUI-Manager's model list.",
+    "flux1-dev-kontext_fp8_scaled.safetensors": {"folder": "diffusion_models", "url": "https://huggingface.co/Comfy-Org/flux1-kontext-dev_ComfyUI/resolve/main/split_files/diffusion_models/flux1-dev-kontext_fp8_scaled.safetensors", "source": "ComfyUI template flux_kontext_dev_basic.json (properties.models)"},
+    "flux1-kontext-dev.safetensors": {"folder": "diffusion_models", "url": null, "source": "no URL: no ComfyUI template, saved workflow or ComfyUI-Manager model list on this machine records this file (the fp8 file above stands in for it by family). Search Hugging Face for its exact name (black-forest-labs FLUX.1 Kontext dev, gated)."},
+    "clip_l.safetensors": {"folder": "text_encoders", "url": "https://huggingface.co/comfyanonymous/flux_text_encoders/resolve/main/clip_l.safetensors", "source": "ComfyUI template flux_kontext_dev_basic.json (properties.models)"},
+    "t5xxl_fp16.safetensors": {"folder": "text_encoders", "url": "https://huggingface.co/comfyanonymous/flux_text_encoders/resolve/main/t5xxl_fp16.safetensors", "source": "ComfyUI-Manager model list (custom_nodes/ComfyUI-Manager/model-list.json: t5xxl_fp16)"},
+    "ae.safetensors": {"folder": "vae", "url": "https://huggingface.co/Comfy-Org/Lumina_Image_2.0_Repackaged/resolve/main/split_files/vae/ae.safetensors", "source": "ComfyUI template flux_kontext_dev_basic.json (properties.models)"}
+  }
+}

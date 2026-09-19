@@ -1,0 +1,86 @@
+{
+  "id": "flux2_klein_edit",
+  "kind": "image",
+  "label": "FLUX.2 Klein 9B edit (reference images)",
+  "short": "Klein edit",
+  "code": "target.py",
+
+  "capabilities": {
+    "_note": "Image edit with up to 4 reference images (each one a ReferenceLatent on both conditionings); with none it is text to image. The default keyframe target when it is ready: a keyframe gets the picked character views and the plate, so identity carries into it.",
+    "mode": "edit",
+    "max_refs": 4
+  },
+
+  "template": {
+    "_note": "Sizes a series ref is generated at (as krea2's). A keyframe is generated at its shot's render size, scaled up (same aspect, multiples of size_multiple) to at least min_pixels: the video targets scale a keyframe to the frame anyway, and FLUX.2 draws poorly far below its 1 MP training size. Each reference image is scaled to 1 MP first (ImageScaleToTotalPixels, as the template does).",
+    "view_size": [1024, 1024],
+    "plate_size": [1344, 768],
+    "object_size": [1024, 1024],
+    "size_multiple": 16,
+    "min_pixels": 786432
+  },
+
+  "recipe": {
+    "_note": "The prompt names each reference by its number ('image 1', 'image 2', ...; `ref_word`) and says what to take from it (targets/image/common.py reference_intro): characters first (the picked view: the face on a single-character close-up, else the three-quarter body), then props, then the plate, up to max_refs.",
+    "ref_word": "image"
+  },
+
+  "binding": {
+    "_note": "An API graph built from the user's saved image_flux2_klein_9b_kv_image_edit.json (ComfyUI's FLUX.2 Klein 9B KV image-edit template), chosen over image_flux2_klein_image_edit_9b_base.json because its models are installed (flux-2-klein-9b-kv, qwen_3_8b_fp8mixed, flux2-vae; the base edit needs flux-2-klein-base-9b-fp8). Its two 'Reference Conditioning' subgraphs are flattened into one chain titled 'Reference 1 ...' (LoadImage -> ImageScaleToTotalPixels 1 MP -> VAEEncode -> a ReferenceLatent on the positive and one on the zeroed negative), which graph code repeats per reference image and cuts out with none. The output size is the job's (EmptyFlux2LatentImage and Flux2Scheduler), not the first reference's (the template's GetImageSize). The saved canvas' LoRA loader is left out. FluxKVCache on the model, CFGGuider cfg 1, 4 steps, euler: the template's. H3SaveRefTake takes the place of SaveImage.",
+    "workflow": "workflow.json",
+    "workflow_name": "h3pipe_flux2_klein_edit.json",
+    "env": "H3_FLUX2_KLEIN_EDIT_WORKFLOW",
+    "saver": {"class_type": "H3SaveRefTake",
+              "replace": {"class_type": "SaveImage", "inputs": {"images": "images"}}},
+    "prune": true,
+    "references": {"links": {"positive": "conditioning", "negative": "conditioning"}},
+    "params": {
+      "model": {"class_type": "UNETLoader", "field": "unet_name"},
+      "text_encoder": {"class_type": "CLIPLoader", "field": "clip_name"},
+      "vae": {"class_type": "VAELoader", "field": "vae_name"},
+      "loras": {"class_type": "LoraLoaderModelOnly", "name": "lora_name", "strength": "strength_model",
+                "input": "model", "chain": true,
+                "insert_after": {"class_type": "UNETLoader", "output": 0}},
+      "prompt": {"class_type": "CLIPTextEncode", "field": "text", "title": "Positive prompt"},
+      "width": [{"class_type": "EmptyFlux2LatentImage", "field": "width"},
+                {"class_type": "Flux2Scheduler", "field": "width"}],
+      "height": [{"class_type": "EmptyFlux2LatentImage", "field": "height"},
+                 {"class_type": "Flux2Scheduler", "field": "height"}],
+      "steps": {"class_type": "Flux2Scheduler", "field": "steps"},
+      "seed": {"class_type": "RandomNoise", "field": "noise_seed"},
+      "cfg": {"class_type": "CFGGuider", "field": "cfg"},
+      "sampler": {"class_type": "KSamplerSelect", "field": "sampler_name"}
+    }
+  },
+
+  "models": {
+    "_note": "As flux2_klein: the distilled Klein 9B is an accelerator (without one the pass renders `base`: the base 9B, 20 steps, cfg 5, as ComfyUI's Klein 9B base edit template does); the text encoder and VAE are required.",
+    "model": {"family": "flux2-klein-9b", "patterns": ["flux-2-klein-9b*", "*flux*2*klein*9b*"],
+              "tier": "accelerator", "exclude": ["*base*", "*lora*"]},
+    "text_encoder": {"family": "qwen3-8b", "patterns": ["qwen_3_8b*", "*qwen*3*8b*"],
+                     "tier": "required", "exclude": ["*vl*"]},
+    "vae": {"family": "flux2-vae", "patterns": ["flux2-vae*", "full_encoder_small_decoder*", "*flux*2*vae*"],
+            "tier": "required"}
+  },
+
+  "presets": {
+    "_note": "The KV edit template's settings: 4 steps, cfg 1, euler. No negative prompt: the template zeroes the negative conditioning (it has no effect at cfg 1).",
+    "final": {
+      "model": "flux-2-klein-9b-kv.safetensors",
+      "text_encoder": "qwen_3_8b_fp8mixed.safetensors",
+      "vae": "flux2-vae.safetensors",
+      "lora": "",
+      "steps": 4, "cfg": 1.0, "sampler": "euler",
+      "base": {"model": "flux-2-klein-base-9b-fp8.safetensors", "steps": 20, "cfg": 5.0}
+    }
+  },
+
+  "downloads": {
+    "_note": "The installed flux-2-klein-9b-kv.safetensors has no record under that name (the template names BFL's fp8 file, listed here too: it is the same model, and resolves by family).",
+    "flux-2-klein-9b-kv.safetensors": {"folder": "diffusion_models", "url": null, "source": "no URL: no ComfyUI template, saved workflow or ComfyUI-Manager model list on this machine records this file (the templates name BFL's fp8 file, below, which stands in for it by family). Search Hugging Face for its exact name (black-forest-labs FLUX.2 Klein 9B KV)."},
+    "flux-2-klein-9b-kv-fp8.safetensors": {"folder": "diffusion_models", "url": "https://huggingface.co/black-forest-labs/FLUX.2-klein-9b-kv-fp8/resolve/main/flux-2-klein-9b-kv-fp8.safetensors", "source": "ComfyUI template image_flux2_klein_9b_kv_image_edit.json (properties.models)"},
+    "flux-2-klein-base-9b-fp8.safetensors": {"folder": "diffusion_models", "url": "https://huggingface.co/black-forest-labs/FLUX.2-klein-base-9b-fp8/resolve/main/flux-2-klein-base-9b-fp8.safetensors", "source": "saved workflow image_flux2_klein_image_edit_9b_base.json (properties.models)"},
+    "qwen_3_8b_fp8mixed.safetensors": {"folder": "text_encoders", "url": "https://huggingface.co/Comfy-Org/flux2-klein-9B/resolve/main/split_files/text_encoders/qwen_3_8b_fp8mixed.safetensors", "source": "ComfyUI template image_flux2_klein_9b_kv_image_edit.json (properties.models)"},
+    "flux2-vae.safetensors": {"folder": "vae", "url": "https://huggingface.co/Comfy-Org/flux2-dev/resolve/main/split_files/vae/flux2-vae.safetensors", "source": "ComfyUI template image_flux2_klein_9b_kv_image_edit.json (properties.models)"}
+  }
+}

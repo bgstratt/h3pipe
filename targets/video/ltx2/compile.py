@@ -181,7 +181,8 @@ def _compile(ctx: Ctx, sq: ir.Sequence, shot: ir.Shot, ep_id: str) -> dict:
         "audio_policy": policy,
         "prompt": build_prompt(shot, sq, series_cfg),
         "negative": ctx.preset.extra.get("negative", ""),
-        "keyframes": {end: keyframe_path(shot.id, end) for end in KEYFRAMES},
+        "keyframes": {end: keyframe_path(shot.id, end)
+                      for end in TG.keyframe_ends(RECIPE, shot, sq)},
     }
     if note:
         entry["audio_intent"] = intent
