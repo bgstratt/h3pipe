@@ -390,6 +390,44 @@ class PickTest(RefsTest):
         self.assertTrue(r["exists"])
 
 
+class AutoPickTest(RefsTest):
+    """A ref with no live file takes its first finished candidate; one with a
+    live file is never replaced by new candidates."""
+
+    def test_missing_plate_takes_its_first_candidate(self):
+        self.gen("location:kitchen")
+        self.gen("location:kitchen")
+        kitchen = self.ref("location:kitchen")
+        live = os.path.join(self.ep, "refs", "_bg", "kitchen.png")
+        self.assertFalse(os.path.isfile(live))
+        res = R.auto_pick(self.s, kitchen)
+        self.assertEqual([r.take.take for r in res], [1])
+        self.assertEqual(T.file_sha1(live), T.file_sha1(R.list_takes(kitchen)[0].paths.image))
+        # the file exists now: later candidates wait for an explicit pick
+        self.gen("location:kitchen")
+        self.assertEqual(R.auto_pick(self.s, kitchen), [])
+        self.assertEqual(R.load_picks(self.ep)["refs"]["location:kitchen"]["take"], 1)
+
+    def test_queued_candidates_are_not_picked(self):
+        self.fake().mode = "hold"
+        self.gen("location:kitchen")
+        self.assertEqual(R.auto_pick(self.s, self.ref("location:kitchen")), [])
+
+    @unittest.skipUnless(HAVE_PIL, "stitching needs PIL")
+    def test_character_views_fill_in_and_stitch(self):
+        self.gen("subject:bo")                     # all four views
+        bo = self.ref("subject:bo")
+        R.pick_take(self.s, bo, "02_side", 1)      # one picked by hand already
+        res = R.auto_pick(self.s, bo)
+        self.assertEqual(sorted(r.take.view for r in res),
+                         ["01_threequarter", "03_back", "04_face"])
+        self.assertTrue(res[-1].stitched)
+        self.assertTrue(os.path.isfile(os.path.join(self.ep, "refs", "bo", "bo_sheet_4panel.png")))
+
+    def test_voice_and_nameless_refs_are_left_alone(self):
+        self.assertEqual(R.auto_pick(self.s, self.ref("voice:ada")), [])
+
+
 class ImportAndOverrideTest(RefsTest):
     def test_import(self):
         kettle = self.ref("subject:kettle")

@@ -913,6 +913,26 @@ def pick_take(s: Series, ref: Ref, view: str | None, take: int,
     return res
 
 
+def auto_pick(s: Series, ref: Ref, mksheet: str | None = None) -> list[PickResult]:
+    """Put a ref that has NO live file yet on its first usable candidate: per
+    view for a character, whose sheet is stitched once all four views have a
+    pick. A ref whose live file exists is never touched (new candidates wait
+    for an explicit pick), and nor is a view already picked. Voices aren't
+    auto-picked (audio is only ever imported). This is what kreagen has always
+    done for a missing file, so the editor and the CLI end up the same."""
+    if ref.is_audio or not ref.path or os.path.isfile(ref.file):
+        return []
+    out = []
+    for v in (VIEW_TAGS if ref.has_views else [None]):
+        if picked_take(load_picks(ref.home), ref.id, v) is not None:
+            continue
+        ok = [t for t in list_takes(ref, v)
+              if t.status == "ok" and os.path.isfile(t.paths.image)]
+        if ok:
+            out.append(pick_take(s, ref, v, ok[0].take, mksheet=mksheet))
+    return out
+
+
 def mksheet_path() -> str:
     return os.path.join(os.path.dirname(os.path.abspath(__file__)), "mksheet.py")
 

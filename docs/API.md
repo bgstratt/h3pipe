@@ -360,7 +360,8 @@ Same shape as the shot override routes, keyed by `ref` (and `view`).
   configured root.
 - **Keyframes** are listed once they exist (a live file or a take). Any shot in a build
   can import or pick one; a shot in no build is 404.
-- **`h3pipe.ref` status values:** `queued`, `ok`, `failed`, `picked` (after a pick).
+- **`h3pipe.ref` status values:** `queued`, `ok`, `failed`, `picked` (after a pick or an auto-pick).
+- **Auto-pick:** `GET /h3pipe/refs` gives a ref with NO live file its first finished candidate (`h3refs.auto_pick`), per view for a character, stitching the sheet once all four views have one. A ref whose file exists is never replaced without an explicit pick. This is `kreagen`'s rule for a missing file.
 - **Ref overrides** have one level: the ref, or a view, not per pass. A character's
   `prompt` override needs a view. The response is `{"override": {...fields, "stale"}}`.
   `base_hash` is the sha1 of the built prompt.

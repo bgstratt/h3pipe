@@ -686,7 +686,23 @@ def sweep_refs(ctx: Context, s) -> list:
         return []
     for t in changed:
         ref_event(ctx, s.ep, t.ref, t.view, t.take, t.status)
+    auto_pick_refs(ctx, s)
     return changed
+
+
+def auto_pick_refs(ctx: Context, s) -> None:
+    """Refs with no live file yet take their first finished candidate
+    (h3refs.auto_pick); a stitch failure is left for an explicit pick to report."""
+    picked = False
+    for ref in R.series_refs(s) + R.keyframe_refs(s.ep):
+        try:
+            for res in R.auto_pick(s, ref):
+                ref_event(ctx, s.ep, ref.id, res.take.view, res.take.take, "picked")
+                picked = True
+        except Exception:
+            continue
+    if picked:
+        episode_event(ctx, s.ep)
 
 
 @handler
