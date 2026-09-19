@@ -17,7 +17,8 @@ IR + targets). Read it before changing `h3build.py`, `h3render.py`, `kreagen.py`
   binding, prompt writer, workflow; H3 is `minimax_h3_ref2va`). Ref images: `targets/image/krea2/`
 - `h3takes.py` (take/cut/override files), `h3jobs.py` (plan + queue a take), `h3edit.py`
   (episode status, pick/override, the `takes`/`pick`/`override` commands),
-  `h3refs.py` (refs as takes, driven by the series config) — shared by the CLI and the routes
+  `h3refs.py` (refs as takes, driven by the series config), `h3source.py` (read/check/save the script and
+  series config), `h3promote.py` (overrides → script/series config) — shared by the CLI and the routes
 - `comfy_nodes/h3pipe_api.py` + `h3pipe_routes.py` — the editor's HTTP API (`docs/API.md`);
   `web/` — the editor UI (React/Vite), built into `comfy_nodes/web/h3pipe-editor.js`
 - `kreagen.py`, `mksheet.py` — reference images

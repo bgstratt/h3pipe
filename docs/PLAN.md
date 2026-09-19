@@ -1221,7 +1221,7 @@ episode target** is the contract; its "as built" notes list where the build diff
 
 | File | Owner | Rule |
 |---|---|---|
-| `series.json`, `epNN.md` | you | authored. The editor writes here only via "promote to script" (Phase 9). |
+| `series.json`, `epNN.md` | you | authored. The editor writes here only on an explicit save (Script / Series config windows) or promote (Phase 9a), keeping the previous version in `_history/`. |
 | `overrides.json`, `refs/_overrides.json`, `cut.json` | you / the editor | editor-owned, hand-editable, never touched by build |
 | `shots.json`, `shotlist*.json`, `refs_todo.*` | build | generated; overwritten every build; never hand-edit |
 | take files (frozen shotlist, sidecar, mp4, thumbs) | queue / render | write-once, except the sidecar's status/`finished`/`note` |
