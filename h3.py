@@ -28,7 +28,12 @@ your projects, with the pipeline scripts beside it (see the README).
     python h3.py discard  Shows\\ep05 sh020 3 [--proxy]
                                                     # move sh020 take 3 to renders/_trash/sh020/
                                                     # (a cut pick of it goes back to latest)
-    (see h3edit.py for every takes/pick/override/keyframe/discard flag)
+    python h3.py cut      Shows\\ep05 [--proxy] --move sh050 --before sh020
+                                                    # edit the cut: --show, --order, --move,
+                                                    # --trim SH IN OUT, --lock/--unlock SH,
+                                                    # --reset order|trims|all,
+                                                    # --copy-from final|proxy [order|trims|all]
+    (see h3edit.py for every takes/pick/override/keyframe/discard/cut flag)
 
     python h3.py promote  Shows\\ep05 [sh020]        # the plan: which overrides can move into
                                                     # the script / series config, the diffs
@@ -57,7 +62,7 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 STAGES = ("align", "build", "check", "refs", "render", "assemble", "all")
-EDIT = ("takes", "pick", "override", "keyframe", "discard")          # in-process, see h3edit.py
+EDIT = ("takes", "pick", "override", "keyframe", "discard", "cut")   # in-process, see h3edit.py
 # `targets` (readiness) runs in-process too, with the episode optional
 
 

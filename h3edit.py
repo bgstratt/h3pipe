@@ -19,6 +19,13 @@ cut, set per-shot overrides. The command-line face of what the editor does;
     python h3.py keyframe Shows\\ep05 sh020 [--from-prev | --from sh010[:3]] [--first | --last]
                                           [--frame N] [--proxy] [--pick | --no-pick]
     python h3.py discard  Shows\\ep05 sh020 3 [--proxy]          # move a take to the trash
+    python h3.py cut      Shows\\ep05 [--proxy] [--show]         # the cut: order, trims, locks
+    python h3.py cut      Shows\\ep05 --move sh050 --before sh020
+    python h3.py cut      Shows\\ep05 --order sh010,sh030,sh020  # these first, the rest after
+    python h3.py cut      Shows\\ep05 --trim sh020 4 2           # frames off the head / tail
+    python h3.py cut      Shows\\ep05 --lock sh020 | --unlock sh020
+    python h3.py cut      Shows\\ep05 --reset order|trims|all
+    python h3.py cut      Shows\\ep05 --proxy --copy-from final [order|trims|all]
     python h3.py targets  [Shows\\ep05] [--json]               # readiness of every target
 
 `takes` shows every take with its status, why it is stale (script / ref /
@@ -39,6 +46,11 @@ what to download for the others.
 `discard` moves a take's files to renders[_proxy]/_trash/<shot>/ (nothing is
 deleted, and nothing lists the trash); a cut entry that picked it goes back
 to the latest usable take. A queued take must be cancelled first.
+`cut` edits a pass's cut.json (the old one goes to _history/): reorder, trims
+(in the cut's frames; at least one frame of the take stays), locks (a locked
+shot refuses picks, moves and trims without --force), reset to script order
+or no trims, and copying the other pass's order/trims (converted when the
+passes' frame rates differ).
 `keyframe` cuts a frame out of another shot's take and adds it as the shot's
 first (or last) keyframe: by default the previous shot's last frame, from the
 take that shot's cut entry uses (continuity). It is picked when the shot has no
@@ -55,6 +67,7 @@ import subprocess
 import sys
 
 import h3jobs as J
+import h3peaks
 import h3takes as T
 
 
@@ -301,7 +314,10 @@ def episode_status(root: str, pass_: str, folder: str | None = None) -> dict:
     cut = T.load_cut(root)
     cache: dict = {}
     out = []
-    for e in T.resolve_cut(cut, pass_, list(shots)):
+    script_idx = {sid: i for i, sid in enumerate(shots)}
+    resolved = T.resolve_cut(cut, pass_, list(shots))
+    moved = out_of_order([script_idx.get(e.shot) for e in resolved])
+    for order, e in enumerate(resolved):
         doc, shot = shots.get(e.shot, (doc0, None))
         built_target = J.shotlist_target(doc).id
         target, target_source = J.target_choice(ov, e.shot, built_target, root=root)
@@ -346,7 +362,15 @@ def episode_status(root: str, pass_: str, folder: str | None = None) -> dict:
                     "frames": take_frames(chosen) if chosen_ok else None,
                     # the frame rate of those frames (the take's, else the
                     # shot's build): Wan 14B takes are 16 fps in a 24 fps cut
-                    "fps": (take_fps(chosen) if chosen_ok else None) or sfps},
+                    "fps": (take_fps(chosen) if chosen_ok else None) or sfps,
+                    # its place in this pass's cut, and in the script (None:
+                    # an orphan); out of order when a move took it off the
+                    # script's order
+                    "order": order, "script_index": script_idx.get(e.shot),
+                    "out_of_order": moved[order]},
+            # the shot's dialogue window on the recording (`track`), seconds
+            **({"audio_in": shot["audio_in"], "audio_out": shot["audio_out"]}
+               if shot and "audio_in" in shot and "audio_out" in shot else {}),
             "override": {"fields": sorted([k for k in o if k != "base_hash"]
                                           + (["target"] if T.shot_target(ov, e.shot) else [])),
                          "stale": bool(o.get("base_hash"))
@@ -365,6 +389,8 @@ def episode_status(root: str, pass_: str, folder: str | None = None) -> dict:
                 "thumb": rel(root, t.paths.thumb),
                 "strip": rel(root, t.paths.strip),
                 "mp4": rel(root, t.paths.mp4),
+                # whose sound the cut plays for it (assemble's --audio auto)
+                "audio": take_audio(root, t),
                 "queued": (t.sidecar or {}).get("queued"),
                 "comfy_prompt_id": (t.sidecar or {}).get("comfy_prompt_id"),
                 "finished": (t.sidecar or {}).get("finished"),
@@ -377,7 +403,43 @@ def episode_status(root: str, pass_: str, folder: str | None = None) -> dict:
             **episode_target_info(root, ov, J.shotlist_target(doc0).id),
             "fps": fps, "width": d.get("width"),
             "height": d.get("height"), "folder": folder or T.pass_subfolder(pass_),
+            "track": episode_track(root),
             "shots": out}
+
+
+def take_audio(root: str, t: T.Take) -> str | None:
+    """The file whose sound the cut plays for a take, relative to the
+    episode: its mp4 if that has an audio stream, else its _h3.wav, else None
+    (h3peaks.clip_audio, the rule of h3assemble's --audio auto)."""
+    p = h3peaks.clip_audio(t.paths.mp4, t.paths.h3_wav)
+    return rel(root, p) if p else None
+
+
+def episode_track(root: str) -> dict | None:
+    """The series config's recorded dialogue (`audio.track`, relative to the
+    episode) as {"path" (relative to the episode, forward slashes; absolute
+    when it is on another drive), "duration" (seconds), "rate" (Hz), "exists"},
+    or None when the series config names none."""
+    cfg = episode_series_config(root)
+    try:
+        b = (T.read_json(cfg) or {}) if cfg else {}
+    except ValueError:
+        return None
+    audio = b.get("audio") if isinstance(b, dict) else None
+    track = audio.get("track") if isinstance(audio, dict) else None
+    if not isinstance(track, str) or not track.strip():
+        return None
+    full = os.path.normpath(track if os.path.isabs(track) else os.path.join(root, track))
+    try:
+        path = os.path.relpath(full, root).replace(os.sep, "/")
+    except ValueError:                                    # another drive
+        path = full
+    if not os.path.isfile(full):
+        return {"path": path, "duration": None, "rate": None, "exists": False}
+    info = h3peaks.media_info(full)
+    dur = info["duration"]
+    return {"path": path, "duration": round(dur, 6) if dur is not None else None,
+            "rate": info["rate"], "exists": True}
 
 
 def episode_target_info(root: str, ov: dict | None = None, built: str | None = None) -> dict:
@@ -591,16 +653,30 @@ class NotQueued(Exception):
     """Cancel of a take that isn't queued any more."""
 
 
+class Locked(Exception):
+    """A pick (or a CLI move or trim) of a shot whose cut entry is locked."""
+
+
+class CutError(ValueError):
+    """A cut edit that can't be made: a bad trim, an unknown shot (400)."""
+
+
 def pick_take(root: str, pass_: str, shot_id: str, take: int | None,
               from_pass: str | None = None, force: bool = False) -> dict:
     """Point `pass_`'s cut at take `take` of `shot_id` (None: latest usable),
     from `from_pass` (default the same pass; the other one makes a placeholder).
     Writes cut.json and returns it. Raises KeyError for a shot in neither the
     script nor the cut, LookupError for a take that doesn't exist, NotUsable
-    for a take that can't be cut in (unless `force`)."""
+    for a take that can't be cut in and Locked for a shot whose cut entry is
+    locked (unless `force`, for either)."""
     src = from_pass or pass_
     doc = J.load_shotlist(root, pass_)
     order = [d["shots"][i]["id"] for d, i in J.episode_shots(root, pass_)]
+    if not force:
+        e = next((e for e in T.resolve_cut(T.load_cut(root), pass_, order)
+                  if e.shot == shot_id), None)
+        if e is not None and e.locked:
+            raise Locked(f"{shot_id} is locked in the {pass_} cut")
     if take is not None:
         t = T.get_take(root, src, shot_id, take)
         if t is None:
@@ -615,17 +691,255 @@ def pick_take(root: str, pass_: str, shot_id: str, take: int | None,
 
 def replace_cut(root: str, pass_: str, entries: list[dict]) -> dict:
     """Replace one pass's list in cut.json (reorder, trims, locks). Entries are
-    cut.json entries; shots not in the script are allowed (they become orphans)."""
+    cut.json entries; shots not in the script are allowed (they become orphans).
+    CutError for trims that aren't whole frames >= 0, or that leave less than
+    one frame of the take the entry uses (when its frame count is known). The
+    old cut.json goes to _history/ (write_cut)."""
     T.pass_subfolder(pass_)                               # validates the pass
+    entries = [dict(e) for e in entries]
+    check_trims(root, pass_, entries)
+    return write_cut(root, pass_, entries)
+
+
+# ---------------------------------------------------------------------------
+# cut edits (Phase 9b): the timeline's reorder, trims, locks, reset and copy
+# ---------------------------------------------------------------------------
+
+def write_cut(root: str, pass_: str, entries: list[dict]) -> dict:
+    """Write `entries` as pass `pass_`'s list in cut.json and return the cut.
+    The file as it was goes to <ep>/_history/cut.json.<stamp> first (the
+    newest h3source.HISTORY_KEEP are kept); an edit that changes nothing
+    writes nothing."""
+    import h3source                        # it imports this module: not at the top
     cut = T.load_cut(root)
-    cut[pass_] = [dict(e) for e in entries]
-    if "episode" not in cut:
+    new = copy.deepcopy(cut)
+    new[pass_] = [dict(e) for e in entries]
+    if "episode" not in new:
         try:
-            cut["episode"] = J.load_shotlist(root, pass_).get("episode", "")
+            new["episode"] = J.load_shotlist(root, pass_).get("episode", "")
         except FileNotFoundError:
-            cut["episode"] = os.path.basename(os.path.normpath(root))
-    T.save_cut(root, cut)
-    return cut
+            new["episode"] = os.path.basename(os.path.normpath(root))
+    if new == cut:
+        return cut
+    path = os.path.join(root, T.CUT_FILE)
+    if os.path.isfile(path):
+        with open(path, "rb") as fh:
+            h3source.save_history_bytes(root, T.CUT_FILE, fh.read())
+    T.save_cut(root, new)
+    return new
+
+
+def pass_fps(root: str, pass_: str) -> float:
+    """The frame rate a pass's cut (and its trims) counts in: assemble's (the
+    series config's `series.fps`, else that pass's shotlist's, else 24)."""
+    import h3assemble
+    try:
+        doc = J.load_shotlist(root, pass_)
+    except FileNotFoundError:
+        doc = {}
+    return h3assemble.episode_fps(root, doc)
+
+
+def script_order(root: str, pass_: str) -> list[str]:
+    """Every shot of the pass's build in script order (every target's)."""
+    return [d["shots"][i]["id"] for d, i in J.episode_shots(root, pass_)]
+
+
+def take_span(root: str, e: T.CutEntry, fps: float) -> int | None:
+    """How many of the cut's frames (at `fps`) the take a cut entry uses has,
+    when its frame count is known (its sidecar's `frames`), else None. A take
+    at another rate (Wan 14B's 16 fps) is counted by its duration."""
+    try:
+        chosen, _, ok = cut_take(root, e)
+    except ValueError:                                    # an unknown pass
+        return None
+    n = take_frames(chosen) if ok else None
+    if n is None:
+        return None
+    tf = take_fps(chosen) or fps
+    return n if abs(tf - fps) < 1e-3 else max(1, round(n * fps / tf))
+
+
+def _trim(v, what: str) -> int:
+    if v is None:
+        return 0
+    if isinstance(v, bool) or not isinstance(v, int) or v < 0:
+        raise CutError(f"{what} must be a whole number of frames >= 0, not {v!r}")
+    return v
+
+
+def check_trims(root: str, pass_: str, entries: list[dict]) -> None:
+    """CutError for a trim that isn't a whole number >= 0, or trims that
+    leave less than one frame of the take an entry uses (when its frame count
+    is known; a take not rendered yet can be trimmed ahead)."""
+    fps = None
+    for raw in entries:
+        sid = raw.get("shot")
+        ti = _trim(raw.get("trim_in"), f"{sid}: trim_in")
+        to = _trim(raw.get("trim_out"), f"{sid}: trim_out")
+        if not (ti or to):
+            continue
+        fps = fps or pass_fps(root, pass_)
+        src = raw.get("pass") or pass_
+        e = T.CutEntry(shot=sid, pass_=src, take=raw.get("take"), placeholder=src != pass_)
+        span = take_span(root, e, fps)
+        if span is not None and span - ti - to < 1:
+            which = f"t{e.take:02d}" if isinstance(e.take, int) else "its take"
+            raise CutError(f"{sid}: trim_in {ti} + trim_out {to} leave nothing of "
+                           f"{which} ({span} frames): at least one frame must stay")
+
+
+def out_of_order(script_index: list[int | None]) -> list[bool]:
+    """Which cut entries aren't where script order would put them: those
+    outside the longest run that is in script order (so moving one shot flags
+    that shot). None (an orphan) is never flagged."""
+    import bisect
+    items = [(i, v) for i, v in enumerate(script_index) if v is not None]
+    tails_v: list[int] = []
+    tails_k: list[int] = []
+    prev: dict[int, int | None] = {}
+    for k, (_, v) in enumerate(items):
+        j = bisect.bisect_left(tails_v, v)
+        prev[k] = tails_k[j - 1] if j > 0 else None
+        if j == len(tails_v):
+            tails_v.append(v)
+            tails_k.append(k)
+        else:
+            tails_v[j], tails_k[j] = v, k
+    keep = set()
+    k = tails_k[-1] if tails_k else None
+    while k is not None:
+        keep.add(items[k][0])
+        k = prev[k]
+    return [v is not None and i not in keep for i, v in enumerate(script_index)]
+
+
+def _entries_json(entries: list[T.CutEntry], pass_: str) -> list[dict]:
+    return [T.cut_entry_to_json(e, pass_) for e in entries]
+
+
+CUT_WHAT = ("order", "trims", "all")
+
+
+def _what(what) -> tuple[bool, bool]:
+    if what not in CUT_WHAT:
+        raise CutError(f"what must be one of {', '.join(CUT_WHAT)}, not {what!r}")
+    return what in ("order", "all"), what in ("trims", "all")
+
+
+def reset_cut(root: str, pass_: str, what: str) -> dict:
+    """Put a pass's cut back in script order (`order`; picks, locks and notes
+    kept, orphans after the script's shots) and/or clear its trims (`trims`;
+    a locked entry keeps its trims), or both (`all`). Returns the cut."""
+    T.pass_subfolder(pass_)
+    order, trims = _what(what)
+    idx = {sid: i for i, sid in enumerate(script_order(root, pass_))}
+    entries = T.resolve_cut(T.load_cut(root), pass_, list(idx))
+    if order:
+        entries = (sorted((e for e in entries if not e.orphan), key=lambda e: idx[e.shot])
+                   + [e for e in entries if e.orphan])
+    if trims:
+        for e in entries:
+            if not e.locked:
+                e.trim_in = e.trim_out = 0
+    return write_cut(root, pass_, _entries_json(entries, pass_))
+
+
+def copy_cut(root: str, src: str, dst: str, what: str) -> dict:
+    """Copy pass `src`'s order and/or trims onto pass `dst`'s cut. Picks, locks
+    and notes stay `dst`'s own. A shot only `dst` has stays after the shot it
+    follows now. Trims are converted when the passes' frame rates differ
+    (rounded to whole frames), and cut down (trim_out first) so that at least
+    one frame of the take stays; a locked entry keeps its trims. Returns the
+    cut."""
+    T.pass_subfolder(src)
+    T.pass_subfolder(dst)
+    if src == dst:
+        raise CutError("copy from the other pass: from and to are the same")
+    order, trims = _what(what)
+    a = cut_entries(root, src)
+    b = cut_entries(root, dst)
+    if order:
+        pos = {e.shot: i for i, e in enumerate(a)}
+        out = sorted((e for e in b if e.shot in pos), key=lambda e: pos[e.shot])
+        for i, e in enumerate(b):
+            if e.shot in pos:
+                continue
+            at = 0
+            if i > 0:
+                at = next(j for j, x in enumerate(out) if x.shot == b[i - 1].shot) + 1
+            out.insert(at, e)
+        b = out
+    if trims:
+        fa, fb = pass_fps(root, src), pass_fps(root, dst)
+        by = {e.shot: e for e in a}
+        for e in b:
+            s = by.get(e.shot)
+            if s is None or e.locked:
+                continue
+            if abs(fa - fb) < 1e-3:
+                ti, to = s.trim_in, s.trim_out
+            else:
+                ti, to = round(s.trim_in * fb / fa), round(s.trim_out * fb / fa)
+            span = take_span(root, e, fb)
+            if span is not None:
+                over = ti + to - (span - 1)
+                if over > 0:
+                    less = min(to, over)
+                    to, over = to - less, over - less
+                    ti = max(0, ti - over)
+            e.trim_in, e.trim_out = ti, to
+    return write_cut(root, dst, _entries_json(b, dst))
+
+
+def _find(entries: list[T.CutEntry], shot_id: str, pass_: str) -> int:
+    i = next((i for i, e in enumerate(entries) if e.shot == shot_id), None)
+    if i is None:
+        raise KeyError(f"{shot_id} is not in the {pass_} cut")
+    return i
+
+
+def move_shot(root: str, pass_: str, shot_id: str, anchor: str, after: bool,
+              force: bool = False) -> dict:
+    """Move `shot_id` just before (after) `anchor` in the pass's cut. Locked
+    when the moved shot is locked (unless `force`); KeyError for a shot not
+    in the cut."""
+    if anchor == shot_id:
+        raise CutError("move a shot before or after another shot, not itself")
+    entries = cut_entries(root, pass_)
+    e = entries.pop(_find(entries, shot_id, pass_))
+    if e.locked and not force:
+        raise Locked(f"{shot_id} is locked in the {pass_} cut: unlock it first")
+    j = _find(entries, anchor, pass_)
+    entries.insert(j + 1 if after else j, e)
+    return write_cut(root, pass_, _entries_json(entries, pass_))
+
+
+def reorder_cut(root: str, pass_: str, shots: list[str]) -> dict:
+    """The listed shots first, in that order; every other entry after them in
+    its current order."""
+    entries = cut_entries(root, pass_)
+    if len(set(shots)) != len(shots):
+        raise CutError("a shot is listed twice")
+    head = [entries[_find(entries, s, pass_)] for s in shots]
+    rest = [e for e in entries if e.shot not in set(shots)]
+    return write_cut(root, pass_, _entries_json(head + rest, pass_))
+
+
+def set_cut_entry(root: str, pass_: str, shot_id: str, force: bool = False,
+                  **fields) -> dict:
+    """Change one entry's trim_in / trim_out / locked / note. Trims on a
+    locked entry are Locked unless `force`; they are checked as PUT
+    /h3pipe/cut checks them."""
+    entries = cut_entries(root, pass_)
+    e = entries[_find(entries, shot_id, pass_)]
+    if ({"trim_in", "trim_out"} & set(fields)) and e.locked and not force:
+        raise Locked(f"{shot_id} is locked in the {pass_} cut: unlock it first")
+    for k, v in fields.items():
+        setattr(e, k, v)
+    out = _entries_json(entries, pass_)
+    check_trims(root, pass_, [x for x in out if x["shot"] == shot_id])
+    return write_cut(root, pass_, out)
 
 
 def pass_builds(root: str, shot_id: str,
@@ -1252,7 +1566,7 @@ def cmd_pick(root: str, argv: list[str]) -> int:
             return 2
     try:
         pick_take(root, pass_, args.shot, take, from_pass=src, force=args.force)
-    except NotUsable as e:
+    except (NotUsable, Locked) as e:
         print(f"  !! {e}; --force to pick it anyway")
         return 1
     except KeyError as e:
@@ -1263,6 +1577,91 @@ def cmd_pick(root: str, argv: list[str]) -> int:
         return 1
     print(f"  {pass_} cut: {args.shot} -> "
           + (f"{src} t{take:02d}" if take is not None else "latest usable take"))
+    return 0
+
+
+def print_cut(root: str, pass_: str) -> None:
+    st = episode_status(root, pass_)
+    fps = pass_fps(root, pass_)
+    print(f"\n  {st['episode']}  ·  {pass_} cut  ·  {len(st['shots'])} shots  ·  {fps:g} fps")
+    for s in st["shots"]:
+        c = s["cut"]
+        take = f"{'t%02d' % c['take'] if c['take'] else '--':4}"
+        trim = f"{c['trim_in']}/{c['trim_out']}" if c["trim_in"] or c["trim_out"] else "-"
+        flags = [f for f, on in (("locked", c["locked"]), ("picked", c["picked"]),
+                                 (f"placeholder({c['pass']})", c["placeholder"]),
+                                 ("OUT OF ORDER", c["out_of_order"]),
+                                 ("orphan", s["orphan"])) if on]
+        print(f"  {c['order']:3}  {s['shot']:10} {take}  trim {trim:9}"
+              + (f"  frames {c['frames']:<4}" if c["frames"] else "  frames --  ")
+              + (f"  [{', '.join(flags)}]" if flags else "")
+              + (f"  {c['note']}" if c["note"] else ""))
+    print()
+
+
+def cmd_cut(root: str, argv: list[str]) -> int:
+    ap = argparse.ArgumentParser(
+        prog="h3.py cut",
+        description="Show or edit a pass's cut (cut.json): order, trims, locks. Each edit "
+                    "keeps a copy of the old cut.json in _history/.")
+    ap.add_argument("--proxy", action="store_true", help="the proxy cut")
+    g = ap.add_mutually_exclusive_group()
+    g.add_argument("--show", action="store_true", help="list the cut (the default)")
+    g.add_argument("--order", metavar="SH,SH,...",
+                   help="these shots first, in this order; the rest follow in their "
+                        "current order")
+    g.add_argument("--move", metavar="SH", help="move a shot (with --before or --after)")
+    g.add_argument("--trim", nargs=3, metavar=("SH", "IN", "OUT"),
+                   help="trim frames from the head and tail of a shot's take")
+    g.add_argument("--lock", metavar="SH", help="lock a shot (picks, moves and trims refuse)")
+    g.add_argument("--unlock", metavar="SH")
+    g.add_argument("--reset", choices=CUT_WHAT,
+                   help="script order (picks, locks, notes kept) and/or no trims")
+    g.add_argument("--copy-from", nargs="+", metavar=("PASS", "WHAT"),
+                   help="copy the other pass's order and/or trims (default all); "
+                        "picks stay this pass's own")
+    where = ap.add_mutually_exclusive_group()
+    where.add_argument("--before", metavar="SH")
+    where.add_argument("--after", metavar="SH")
+    ap.add_argument("--force", action="store_true", help="move or trim a locked shot")
+    args = ap.parse_args(argv)
+    pass_ = _pass(args)
+    J.load_shotlist(root, pass_)                     # no build: say so
+    if (args.before or args.after) and not args.move:
+        ap.error("--before / --after go with --move")
+    try:
+        if args.order:
+            reorder_cut(root, pass_, [s.strip() for s in args.order.split(",") if s.strip()])
+        elif args.move:
+            if not (args.before or args.after):
+                ap.error("--move needs --before SH or --after SH")
+            move_shot(root, pass_, args.move, args.after or args.before, bool(args.after),
+                      force=args.force)
+        elif args.trim:
+            sh, a, b = args.trim
+            try:
+                ti, to = int(a), int(b)
+            except ValueError:
+                raise CutError(f"trims are whole numbers of frames, not {a!r} {b!r}")
+            set_cut_entry(root, pass_, sh, force=args.force, trim_in=ti, trim_out=to)
+        elif args.lock or args.unlock:
+            set_cut_entry(root, pass_, args.lock or args.unlock, locked=bool(args.lock))
+        elif args.reset:
+            reset_cut(root, pass_, args.reset)
+        elif args.copy_from:
+            if len(args.copy_from) > 2:
+                ap.error("--copy-from takes a pass and, optionally, order|trims|all")
+            src = args.copy_from[0]
+            if src not in T.PASSES:
+                ap.error(f"--copy-from: the pass is final or proxy, not {src!r}")
+            copy_cut(root, src, pass_, args.copy_from[1] if len(args.copy_from) > 1 else "all")
+    except (CutError, Locked) as e:
+        print(f"  !! {e}")
+        return 1
+    except KeyError as e:
+        print(f"  !! {e.args[0]}")
+        return 1
+    print_cut(root, pass_)
     return 0
 
 
@@ -1619,4 +2018,4 @@ def _keyframe_action(R, root: str, args, pass_: str, which: str) -> int:
 
 
 COMMANDS = {"takes": cmd_takes, "pick": cmd_pick, "override": cmd_override,
-            "keyframe": cmd_keyframe, "discard": cmd_discard}
+            "keyframe": cmd_keyframe, "discard": cmd_discard, "cut": cmd_cut}

@@ -219,6 +219,38 @@ class RoutesTest(unittest.TestCase):
         self.run_client(fn)
         self.assertIn(("h3pipe.episode", {"ep": self.ep}), self.sent)
 
+    def test_cut_edits_and_peaks(self):
+        """Phase 9b through aiohttp: GET /h3pipe/peaks (a stdlib wav, the cache,
+        a path that climbs out) and the cut routes' JSON and statuses
+        (test_phase9b has the rest)."""
+        from test_phase9b import steps_wav
+        steps_wav(os.path.join(self.ep, "audio", "mix.wav"), [1000, 32767])
+
+        async def fn(c):
+            r = await c.put("/h3pipe/config", json={"roots": [self.shows]})
+            self.assertEqual(r.status, 200)
+            q = {"ep": self.ep, "path": "audio/mix.wav", "bins": "2"}
+            for _ in range(2):                             # computed, then cached
+                r = await c.get("/h3pipe/peaks", params=q)
+                self.assertEqual(r.status, 200, await r.text())
+                self.assertEqual(await r.json(), {"duration": 1.0, "bins": 2, "start": 0.0,
+                                                  "end": 1.0, "peaks": [8, 255]})
+            self.assertEqual(len(os.listdir(os.path.join(self.ep, "_cache", "peaks"))), 1)
+            r = await c.get("/h3pipe/peaks", params=dict(q, path="../x.wav"))
+            self.assertEqual(r.status, 400)
+            r = await c.get("/h3pipe/peaks", params=dict(q, bins="many"))
+            self.assertEqual(r.status, 400)
+            r = await c.get("/h3pipe/peaks", params=dict(q, path="nope.wav"))
+            self.assertEqual(r.status, 404)
+            r = await c.post("/h3pipe/cut/reset", json={"ep": self.ep, "pass": "proxy",
+                                                        "what": "order"})
+            self.assertEqual(r.status, 404)                # not built
+            r = await c.post("/h3pipe/cut/copy", json={"ep": self.ep, "from": "final",
+                                                       "to": "final", "what": "all"})
+            self.assertEqual(r.status, 400)
+            self.assertIn("error", await r.json())
+        self.run_client(fn)
+
     def test_models_through_folder_paths(self):
         """GET /h3pipe/models inside ComfyUI: the list and the paths come from
         folder_paths, the fingerprints are cached in the user folder."""
