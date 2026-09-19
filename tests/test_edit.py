@@ -19,7 +19,7 @@ sys.path.insert(0, HERE)
 import h3edit as E  # noqa: E402
 import h3jobs as J  # noqa: E402
 import h3takes as T  # noqa: E402
-from test_render import ENV, FIXTURE, WORKFLOW, FakeComfy  # noqa: E402
+from test_render import ENV, FIXTURE, WORKFLOW, FakeComfy, stub_refs  # noqa: E402
 
 
 class EditFlowTest(unittest.TestCase):
@@ -41,6 +41,8 @@ class EditFlowTest(unittest.TestCase):
         out = r.stdout.decode("utf-8") + r.stderr.decode("utf-8")
         if ok:
             self.assertEqual(r.returncode, 0, out)
+        if args[:1] == ("build",):
+            stub_refs(self.ep)
         return out
 
     def render(self, *args) -> str:

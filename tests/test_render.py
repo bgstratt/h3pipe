@@ -26,12 +26,38 @@ WORKFLOW = os.path.join(ROOT, "workflows", "H3_Ref2VA_Shotlist_v1.json")
 ENV = dict(os.environ, PYTHONUTF8="1", PYTHONIOENCODING="utf-8")
 
 
-def build_episode(root: str) -> None:
+def build_episode(root: str, refs: bool = True) -> None:
     for flags in ([], ["--proxy"]):
         subprocess.run([sys.executable, os.path.join(ROOT, "h3build.py"),
                         os.path.join(FIXTURE, "series.json"),
                         os.path.join(FIXTURE, "script.md"), "-o", root, *flags],
                        check=True, capture_output=True, env=ENV)
+    if refs:
+        stub_refs(root)
+
+
+def stub_refs(root: str) -> None:
+    """An empty file at every reference path the build asked for, so shots
+    aren't blocked for missing refs (these tests are about takes)."""
+    for name in ("refs_todo.json", "refs_todo_proxy.json"):
+        p = os.path.join(root, name)
+        if not os.path.isfile(p):
+            continue
+        for item in json.load(open(p, encoding="utf-8")):
+            f = os.path.join(root, item["path"])
+            os.makedirs(os.path.dirname(f), exist_ok=True)
+            if not os.path.isfile(f):
+                open(f, "wb").close()
+    # the dialogue recording dub shots read isn't in refs_todo
+    for name in ("shotlist.json", "shotlist_proxy.json"):
+        p = os.path.join(root, "shotlist", name)
+        track = (json.load(open(p, encoding="utf-8")).get("defaults", {}).get("master_track")
+                 if os.path.isfile(p) else None)
+        if track:
+            f = os.path.join(root, track)
+            os.makedirs(os.path.dirname(f), exist_ok=True)
+            if not os.path.isfile(f):
+                open(f, "wb").close()
 
 
 def shot_ids(root: str, pass_: str = "final") -> list[str]:
@@ -152,7 +178,8 @@ class PlanTest(unittest.TestCase):
                          ("queued", 42, "typed", "hello"))
         self.assertEqual(sc["shot_hash"], J.story_hash(self.doc["shots"][0]))
         self.assertEqual([r["slot"] for r in sc["refs"]][-2:], ["Picture 1", "Picture 4"])
-        self.assertIsNone(sc["refs"][0]["sha1"])           # refs not on disk in the test
+        self.assertEqual(sc["refs"][0]["sha1"], T.file_sha1(os.path.join(self.root, sc["refs"][0]["path"])))
+        self.assertEqual(sc["missing_refs"], [])
 
 
 # ---------------------------------------------------------------------------

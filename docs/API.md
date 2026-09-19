@@ -229,3 +229,118 @@ No h3pipe route is needed.
 - **Not handled yet:** ComfyUI multi-user mode (config always lives in `default/`),
   and a TLS-fronted ComfyUI (self-queueing uses `http://`).
 - **Aliases:** every route also answers under `/api/h3pipe/...`.
+
+## Round 2 additions
+
+### `GET /h3pipe/browse?path=…`
+A folder picker for choosing roots and episodes. It isn't limited to the roots,
+because this is how roots are chosen. It lists folder names only, never file
+contents.
+```json
+{"path": "C:\Users\bgstr\ComfyProjects\DeanStories", "parent": "C:\Users\bgstr\ComfyProjects",
+ "episode": false, "truncated": false,
+ "dirs": [{"name": "ep05", "path": "C:\…\ep05", "episode": true, "bible": true}]}
+```
+- No `path` gives the starting points: the home folder and the drives on Windows.
+  `parent` is then `null`; at a drive root it is `""`.
+- `episode` means the folder has a `series.json` and a script; `bible` means it has
+  a `series.json`.
+- Status is 404 if the folder doesn't exist, 403 if it can't be read.
+
+### Missing references
+- **`GET /h3pipe/episode`:** every shot carries `"missing_refs": [{"slot": "Picture 4",
+  "kind": "image" | "audio", "path": "refs/_bg/x.png", "subject"?: "dean"}]`. These are
+  the references its render needs that aren't on disk (`h3jobs.missing_refs`); empty
+  means ready.
+- **`POST /h3pipe/render`** takes `"allow_missing_refs": false` by default.
+  - **When false**, a shot with missing refs isn't queued. It appears in `skipped`
+    with a `reason` naming the missing refs, plus the same `missing_refs` list.
+  - **When true, it renders anyway.** The loader replaces a missing picture with flat
+    mid-grey, and a missing voice sample or recording with no audio reference. For H3
+    that's close to text-to-video. The take's sidecar lists what was missing in
+    `missing_refs` (slots).
+  - The prompt still names the missing pictures. Writing a prompt without them is
+    model-specific, so it belongs to the Phase 7 target adapters.
+- The CLI equivalent is `h3render --allow-missing-refs`. Without it, blocked shots are
+  listed and skipped.
+
+## References (Phase 5)
+
+A **ref** is any conditioning input a render reads that the pipeline generates or
+you supply. Refs are the same thing whatever model consumes them. Each has a `scope`:
+
+| scope | kinds | named in | id |
+|---|---|---|---|
+| `series` | `character`, `prop`, `vehicle` (bible subjects), `location` (bible locations), `voice` (a subject's `voice_sample`) | the bible | `subject:<id>`, `location:<id>`, `voice:<id>` |
+| `shot` | `keyframe`: `first` / `last` frame of one shot, for FL2V and I2V models | the script (a later field) or the editor | `shot:<shot>:first`, `shot:<shot>:last` |
+
+- **Series refs are listed from the bible**, not from `refs_todo`. A character nobody
+  uses yet can still be generated. `refs_todo` becomes a filter: "used by this
+  episode", and which shots it blocks.
+- **Shot keyframes:** Phase 5 builds their storage, takes and pick. Generating them
+  (a still from the shot's prompt, or the previous shot's last frame) and feeding
+  them to an FL2V target come with that target. Their home is
+  `refs/shots/<shot>/<first|last>.png`.
+- A **ref take** is one generated or imported candidate. It lives in
+  `refs/_takes/<ref key>/<ref key>[_<view>]_tNN.png`, with a sidecar `…_tNN.json` in
+  the video takes' format (status, seed, prompt, model, LoRAs, steps, queued,
+  finished, and `source`: `generated` or `imported`). The ref key is the id with `:`
+  replaced by `__`.
+- A **character** has views (`01_threequarter`, `02_side`, `03_back`, `04_face`, as
+  in `kreagen.VIEWS`). Each view has its own takes and pick. Picking a view that
+  completes the set stitches the sheet with `mksheet` into the bible's `sheet` path.
+- **Picking** a take copies it to the path the bible names, which is the file renders
+  read. The pick is recorded in `refs/_picks.json`, so the UI knows which take is
+  live. Re-picking changes the file's sha1, so video takes that used the old file
+  show `ref`-stale.
+- **Ref overrides** (prompt, seed, model, LoRAs, steps) live in
+  `refs/_overrides.json`, keyed by ref id (and view), in the same shape as shot
+  overrides.
+
+### `GET /h3pipe/refs?ep=…`
+```json
+{"refs": [{
+   "id": "subject:dean", "scope": "series", "kind": "character", "name": "Dean",
+   "path": "refs/dean/dean_sheet_4panel.png", "exists": true, "sha1": "…",
+   "used_by": {"final": ["sh010", "sh020"], "proxy": ["sh010", "sh020"]},
+   "prompt": "…the prompt a generate would use now…",
+   "override": {"fields": [], "stale": false},
+   "views": [{"view": "01_threequarter", "picked": 2,
+              "takes": [{"take": 1, "status": "ok", "seed": "…", "image": "refs/_takes/…_t01.png",
+                         "source": "generated", "note": ""}]}],
+   "takes": [], "picked": null
+ }]}
+```
+- Characters have `views`; every other ref has `takes` and `picked` at top level.
+- `exists` means the file renders read is on disk.
+- A `voice` ref lists `takes` for imported audio only; nothing generates voices yet.
+
+### `POST /h3pipe/refs/generate`
+Queues one candidate per call. It returns without waiting, like `/render`.
+```json
+{"ep": "…", "ref": "subject:dean", "view": "02_side" | null, "count": 1,
+ "seed_mode": "auto" | "new" | "same", "seed": null, "prompt": null, "model": null,
+ "loras": null, "steps": null, "note": ""}
+```
+- A character with `view: null` queues all four views, sharing one seed (as
+  `kreagen` does).
+- `count` greater than 1 queues that many candidates, each with a new seed.
+- The workflow is `krea2_refs_t2i.json`, found through `resolve_workflow`.
+- A new save node, `H3SaveRefTake`, takes the place of the workflow's `SaveImage`.
+  It writes the take's image and closes its sidecar, as `H3SaveShot` does, and sends
+  `h3pipe.ref` `{"ep", "ref", "view", "take", "status"}`.
+- Returns `{"queued": [{"ref", "view", "take", "prompt_id", "seed"}], "errors": [...]}`.
+
+### `PUT /h3pipe/refs/pick`
+Body `{"ep", "ref", "view"?, "take"}`. Copies the take into place, stitching the
+sheet when all four views are picked. Returns the ref as `/refs` lists it. 409 if the
+take isn't usable.
+
+### `POST /h3pipe/refs/import`
+Adds an image (or, for `voice`, an audio file) as a new take with `source:
+"imported"`. Body `{"ep", "ref", "view"?, "source_path"}`: a file on the ComfyUI
+machine. A multipart upload (`file`) comes later, with drag and drop. Returns the new
+take.
+
+### `PUT /h3pipe/refs/override` and `DELETE /h3pipe/refs/override`
+Same shape as the shot override routes, keyed by `ref` (and `view`).

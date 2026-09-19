@@ -309,6 +309,18 @@ def get_shot(ctx: Context, query: dict):
 
 
 @handler
+def get_browse(ctx: Context, query: dict):
+    """Folder picker. Not limited to the roots: it is how roots are chosen.
+    Lists folder names only, never file contents."""
+    try:
+        return 200, E.browse(query.get("path") or None)
+    except FileNotFoundError as e:
+        raise ApiError(404, str(e))
+    except PermissionError as e:
+        raise ApiError(403, str(e))
+
+
+@handler
 def post_build(ctx: Context, body):
     body = body_dict(body)
     ep = check_ep(ctx, body.get("ep"))
@@ -402,12 +414,15 @@ def post_render(ctx: Context, body):
     redo = body.get("redo", False)
     if not isinstance(redo, bool):
         raise ApiError(400, "redo must be true or false")
+    allow_missing = body.get("allow_missing_refs", False)
+    if not isinstance(allow_missing, bool):
+        raise ApiError(400, "allow_missing_refs must be true or false")
     template = J.RenderRequest(
         shot_id="", redo=redo, seed=seed_in(body.get("seed")), seed_mode=seed_mode,
         model=_opt_str(body, "model") or None, loras=_opt_loras(body.get("loras")),
         steps=_opt_steps(body.get("steps")), prompt=_opt_prompt(body.get("prompt")),
         parent_take=check_take(body.get("parent_take"), "parent_take", nullable=True),
-        note=_opt_str(body, "note") or "")
+        note=_opt_str(body, "note") or "", allow_missing_refs=allow_missing)
     J.load_shotlist(ep, pass_)                           # 404 before anything else
     try:
         base, _ = J.resolve_workflow(None, J.WORKFLOW_NAME, ctx.comfy_url)
@@ -614,6 +629,7 @@ ROUTES = [
     ("GET", "/h3pipe/config", get_config, "query"),
     ("PUT", "/h3pipe/config", put_config, "body"),
     ("GET", "/h3pipe/episodes", get_episodes, "query"),
+    ("GET", "/h3pipe/browse", get_browse, "query"),
     ("GET", "/h3pipe/episode", get_episode, "query"),
     ("GET", "/h3pipe/shot", get_shot, "query"),
     ("POST", "/h3pipe/build", post_build, "body"),

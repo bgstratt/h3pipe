@@ -22,7 +22,7 @@ import h3pipe_api as A  # noqa: E402
 import h3edit as E  # noqa: E402
 import h3jobs as J  # noqa: E402
 import h3takes as T  # noqa: E402
-from test_render import ENV, FIXTURE, FakeComfy  # noqa: E402
+from test_render import stub_refs, ENV, FIXTURE, FakeComfy  # noqa: E402
 
 HAVE_FF = bool(shutil.which("ffmpeg") and shutil.which("ffprobe"))
 _BUILT = None                                            # one build, copied per test
@@ -39,6 +39,7 @@ def built_episode() -> str:
         shutil.copy(os.path.join(FIXTURE, "script.md"), os.path.join(ep, "ks01.md"))
         r = E.build_episode(ep)
         assert r["ok"], r
+        stub_refs(ep)
         _BUILT = ep
     return _BUILT
 
@@ -564,3 +565,39 @@ class SeedTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MissingRefsAndBrowseTest(ApiTest):
+    def remove_plate(self, rel):
+        os.remove(os.path.join(self.ep, rel))
+
+    def test_missing_ref_blocks_unless_render_anyway(self):
+        _, shots = self.status()
+        self.assertEqual(shots["sh010"]["missing_refs"], [])
+        plate = next(r for r in J.ref_slots(J.load_shotlist(self.ep, "proxy"),
+                                            J.load_shotlist(self.ep, "proxy")["shots"][0])
+                     if r["slot"] == "Picture 4")["path"]
+        self.remove_plate(plate)
+        _, shots = self.status()
+        self.assertEqual([m["slot"] for m in shots["sh010"]["missing_refs"]], ["Picture 4"])
+        res = self.render("sh010")
+        self.assertEqual(res["queued"], [])
+        self.assertIn("missing refs", res["skipped"][0]["reason"])
+        self.assertEqual(self.comfy.graphs, [])
+        res = self.render("sh010", allow_missing_refs=True)
+        self.assertEqual(len(res["queued"]), 1)
+        t = T.get_take(self.ep, "proxy", "sh010", res["queued"][0]["take"])
+        self.assertEqual(T.read_json(t.paths.shotlist)["shots"][0]["missing_refs"], "blank")
+        self.assertEqual(t.sidecar["missing_refs"], ["Picture 4"])
+        self.err(A.post_render(self.ctx, {"ep": self.ep, "allow_missing_refs": "yes"}), 400)
+
+    def test_browse(self):
+        top = self.ok(A.get_browse(self.ctx, {}))
+        self.assertIsNone(top["parent"])
+        self.assertTrue(top["dirs"])
+        res = self.ok(A.get_browse(self.ctx, {"path": self.shows}))
+        (d,) = res["dirs"]
+        self.assertEqual((d["name"], d["episode"], d["bible"]), ("ks01", True, True))
+        self.assertEqual(os.path.normcase(res["parent"]), os.path.normcase(self.tmp))
+        self.assertTrue(self.ok(A.get_browse(self.ctx, {"path": self.ep}))["episode"])
+        self.err(A.get_browse(self.ctx, {"path": os.path.join(self.tmp, "nope")}), 404)

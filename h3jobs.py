@@ -398,6 +398,7 @@ class RenderRequest:
     prompt: str | list | None = None
     parent_take: int | None = None
     note: str = ""
+    allow_missing_refs: bool = False   # render anyway: blank images / no audio ref
 
 
 @dataclass
@@ -422,6 +423,8 @@ class Job:
     parent_take: int | None = None
     note: str = ""
     forced: bool = False               # take number given explicitly
+    missing: list[dict] = field(default_factory=list)   # refs not on disk
+    allow_missing: bool = False
 
     @property
     def id(self) -> str:
@@ -433,7 +436,10 @@ class Job:
 
     @property
     def runs(self) -> bool:
-        return self.action not in ("skip", "busy")
+        return self.action not in ("skip", "busy", "blocked")
+
+    def missing_note(self) -> str:
+        return ", ".join(f"{r['slot']} {r['path'] or '(none named)'}" for r in self.missing)
 
 
 def plan_job(root: str, pass_: str, doc: dict, index: int, req: RenderRequest,
@@ -492,13 +498,19 @@ def plan_job(root: str, pass_: str, doc: dict, index: int, req: RenderRequest,
         seed, source = built_seed, "stable"
 
     base_hash = ov.get("base_hash")
+    # A shot missing a reference fails in the loader. Unless the caller says to
+    # render anyway (blank image / no audio reference), don't queue it at all.
+    missing = missing_refs(root, doc, shot)
+    if missing and not req.allow_missing_refs and action not in ("skip", "busy"):
+        action = "blocked"
     return Job(root=root, pass_=pass_, index=index, shot=shot, doc=doc, folder=folder,
                action=action, take=take, seed=seed, seed_source=source, model=model,
                loras=None if loras is None else [dict(l) for l in loras],
                steps=steps, prompt=prompt, forced=bool(req.take),
                overridden=sorted(set(overridden)),
                override_stale=bool(base_hash) and base_hash != shot_hash,
-               shot_hash=shot_hash, parent_take=req.parent_take, note=req.note)
+               shot_hash=shot_hash, parent_take=req.parent_take, note=req.note,
+               missing=missing, allow_missing=req.allow_missing_refs)
 
 
 def plan_episode(root: str, pass_: str, reqs: dict[str, RenderRequest] | None = None,
@@ -532,30 +544,52 @@ def frozen_shotlist(job: Job) -> dict:
     if job.loras is not None:
         shot["loras"] = copy.deepcopy(job.loras)
         shot.pop("lora", None)
+    if job.missing and job.allow_missing:
+        # the loader substitutes a blank image for a missing picture and drops
+        # a missing audio reference, instead of failing
+        shot["missing_refs"] = "blank"
     doc = {k: copy.deepcopy(v) for k, v in job.doc.items() if k != "shots"}
     doc["shots"] = [shot]
     return doc
 
 
-def ref_files(job: Job) -> list[dict]:
-    """Every reference file the loader will read, with its sha1."""
-    shot, book = job.shot, job.doc.get("subjects", {})
+def ref_slots(doc: dict, shot: dict) -> list[dict]:
+    """Every reference the loader will read for `shot`: {slot, kind ("image" |
+    "audio"), path, subject?}. Paths as the shotlist writes them (relative to
+    the episode unless absolute); an empty path means the bible names none."""
+    book = doc.get("subjects", {})
     out = []
     for i, sid in enumerate((shot.get("subjects") or [])[:3], start=1):
-        out.append({"slot": f"Picture {i}", "subject": sid,
+        out.append({"slot": f"Picture {i}", "kind": "image", "subject": sid,
                     "path": book.get(sid, {}).get("sheet", "")})
-    out.append({"slot": "Picture 4", "path": shot.get("background", "")})
+    out.append({"slot": "Picture 4", "kind": "image", "path": shot.get("background", "")})
     policy = shot.get("audio_policy", "")
     if policy == "clone":
         for i, r in enumerate(shot.get("voice_refs") or [], start=1):
-            out.append({"slot": f"Audio {i}", "subject": r.get("subject", ""),
-                        "path": r.get("sample", "")})
+            out.append({"slot": f"Audio {i}", "kind": "audio",
+                        "subject": r.get("subject", ""), "path": r.get("sample", "")})
     elif policy in ("dub", "dub_keep_foley"):
-        out.append({"slot": "Audio 1", "path": shot.get("audio_file")
-                    or job.doc.get("defaults", {}).get("master_track", "")})
+        out.append({"slot": "Audio 1", "kind": "audio", "path": shot.get("audio_file")
+                    or doc.get("defaults", {}).get("master_track", "")})
+    return out
+
+
+def _abs(root: str, p: str) -> str:
+    return p if os.path.isabs(p) else os.path.join(root, p)
+
+
+def missing_refs(root: str, doc: dict, shot: dict) -> list[dict]:
+    """The references `shot` needs that aren't on disk (see ref_slots)."""
+    return [r for r in ref_slots(doc, shot)
+            if not r["path"] or not os.path.isfile(_abs(root, r["path"]))]
+
+
+def ref_files(job: Job) -> list[dict]:
+    """Every reference file the loader will read, with its sha1."""
+    out = ref_slots(job.doc, job.shot)
     for r in out:
         p = r["path"]
-        r["sha1"] = T.file_sha1(p if os.path.isabs(p) else os.path.join(job.root, p)) if p else None
+        r["sha1"] = T.file_sha1(_abs(job.root, p)) if p else None
     return out
 
 
@@ -574,6 +608,7 @@ def sidecar_for(job: Job) -> dict:
         "overrides": job.overridden, "override_stale": job.override_stale,
         "parent_take": job.parent_take, "note": job.note,
         "refs": ref_files(job),
+        "missing_refs": [r["slot"] for r in job.missing] if job.allow_missing else [],
     }
 
 

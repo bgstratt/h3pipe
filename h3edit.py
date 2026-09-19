@@ -92,6 +92,56 @@ def find_episodes(roots: list[str], depth: int = 2) -> list[dict]:
     return out
 
 
+BROWSE_LIMIT = 1000
+
+
+def browse(path: str | None) -> dict:
+    """Folders for a folder picker: the subfolders of `path`, each flagged when
+    it is an episode (a bible and a script) or holds a bible. No `path`: the
+    starting points (drives on Windows, and the home folder)."""
+    if not path:
+        places = []
+        if os.name == "nt":
+            import string
+            places += [f"{d}:\\" for d in string.ascii_uppercase if os.path.isdir(f"{d}:\\")]
+        else:
+            places.append("/")
+        home = os.path.expanduser("~")
+        return {"path": "", "parent": None,
+                "dirs": [{"name": p, "path": p, "episode": False, "bible": False}
+                         for p in [home] + places]}
+    path = os.path.abspath(path)
+    if not os.path.isdir(path):
+        raise FileNotFoundError(f"{path} is not a folder")
+    dirs = []
+    try:
+        names = sorted(os.listdir(path), key=str.lower)
+    except PermissionError as e:
+        raise PermissionError(f"can't read {path}: {e}") from None
+    for n in names:
+        if n.startswith((".", "$")) or n in ("System Volume Information", "__pycache__",
+                                              "node_modules"):
+            continue
+        p = os.path.join(path, n)
+        if not os.path.isdir(p):
+            continue
+        bible = os.path.isfile(os.path.join(p, "series.json"))
+        episode = False
+        if bible:
+            try:
+                episode = episode_script(p) is not None
+            except OSError:
+                pass
+        dirs.append({"name": n, "path": p, "episode": episode, "bible": bible})
+        if len(dirs) >= BROWSE_LIMIT:
+            break
+    parent = os.path.dirname(path)
+    return {"path": path, "parent": parent if parent != path else "",
+            "episode": os.path.isfile(os.path.join(path, "series.json"))
+            and episode_script(path) is not None,
+            "dirs": dirs, "truncated": len(dirs) >= BROWSE_LIMIT}
+
+
 def episode_summary(root: str, script: str | None = None) -> dict:
     title = series = ""
     bible = episode_bible(root)
@@ -163,6 +213,9 @@ def episode_status(root: str, pass_: str, folder: str | None = None) -> dict:
             "size": shot.get("size") if shot else None,
             "subjects": shot.get("subjects", []) if shot else [],
             "audio_policy": shot.get("audio_policy") if shot else None,
+            "missing_refs": [{k: r.get(k) for k in ("slot", "kind", "path", "subject")
+                              if r.get(k) is not None}
+                             for r in J.missing_refs(root, doc, shot)] if shot else [],
             "cut": {"take": chosen_take, "picked": e.take is not None, "pass": e.pass_,
                     "placeholder": e.placeholder, "usable": chosen_ok,
                     "trim_in": e.trim_in, "trim_out": e.trim_out, "locked": e.locked,
@@ -437,6 +490,11 @@ def queue_shots(root: str, pass_: str, shot_ids: list[str] | None,
         if job.action == "skip":
             out["skipped"].append({"shot": sid, "take": job.take,
                                    "reason": "has a usable take (pass redo: true)"})
+            continue
+        if job.action == "blocked":
+            out["skipped"].append({"shot": sid, "reason": "missing refs: " + job.missing_note()
+                                   + " (pass allow_missing_refs: true to render anyway)",
+                                   "missing_refs": job.missing})
             continue
         try:
             take = J.start_job(job)

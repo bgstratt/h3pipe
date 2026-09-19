@@ -83,6 +83,13 @@ def _blank(h: int = 64, w: int = 64) -> torch.Tensor:
     return torch.zeros((1, h, w, 3), dtype=torch.float32)
 
 
+def _neutral(h: int, w: int) -> torch.Tensor:
+    """Flat mid-grey: the stand-in for a missing reference picture when the
+    shot is rendered anyway (`missing_refs: blank`). It carries no layout,
+    colour or identity, so the prompt does the work -- close to text-to-video."""
+    return torch.full((1, h, w, 3), 0.5, dtype=torch.float32)
+
+
 # ---------------------------------------------------------------------------
 # Image / audio IO
 #
@@ -393,14 +400,24 @@ class H3ShotListLoader:
         size = (shot.get("size") or "medium").lower()
         panels_total = int(defaults.get("sheet_panels", 4))
 
+        # `missing_refs: blank` (set by h3jobs when a render is asked for anyway)
+        # turns a missing picture into flat grey and a missing audio reference
+        # into none, instead of failing the shot.
+        render_anyway = shot.get("missing_refs") == "blank"
+        blanked: list[str] = []
+
         # Background first: it is also what fills any unused subject socket.
         bg_path = self._resolve(root, shot.get("background", ""))
         if not bg_path or not os.path.isfile(bg_path):
-            raise FileNotFoundError(
-                f"shot {shot.get('id')}: background plate not found at "
-                f"{bg_path or '<unset>'}. Every shot needs one -- it is <Picture 4>."
-            )
-        ref_bg = load_image(bg_path)
+            if not render_anyway:
+                raise FileNotFoundError(
+                    f"shot {shot.get('id')}: background plate not found at "
+                    f"{bg_path or '<unset>'}. Every shot needs one -- it is <Picture 4>."
+                )
+            ref_bg = _neutral(height, width)
+            blanked.append("Picture 4")
+        else:
+            ref_bg = load_image(bg_path)
 
         # Characters get the panel-crop cost lever; props are single images.
         n_chars = sum(1 for s in subject_ids
@@ -428,10 +445,15 @@ class H3ShotListLoader:
             kind = entry.get("kind", "character")
             path = self._resolve(root, entry.get("sheet", ""))
             if not path or not os.path.isfile(path):
-                raise FileNotFoundError(
-                    f"shot {shot.get('id')}: reference for '{sid}' not found at "
-                    f"{path or '<unset>'}"
-                )
+                if not render_anyway:
+                    raise FileNotFoundError(
+                        f"shot {shot.get('id')}: reference for '{sid}' not found at "
+                        f"{path or '<unset>'}"
+                    )
+                refs.append(_neutral(1024, 1024))
+                blanked.append(f"Picture {len(refs)}")
+                ref_notes.append(f"{sid} ({kind}) MISSING -> flat grey")
+                continue
             img = load_image(path)
             if kind == "character":
                 img = crop_panels(img, panels_total, keep)
@@ -455,7 +477,8 @@ class H3ShotListLoader:
         n_sub = len(refs)
         while len(refs) < 3:
             refs.append(ref_bg)
-        ref_notes.append(f"background {os.path.basename(bg_path)} -> <Picture 4>"
+        ref_notes.append(f"background {os.path.basename(bg_path or '') or '(none)'}"
+                         f"{' MISSING -> flat grey' if 'Picture 4' in blanked else ''} -> <Picture 4>"
                          + (f" (also fills slots {n_sub + 1}-3)" if n_sub < 3 else ""))
 
         # ---- audio -------------------------------------------------------
@@ -491,6 +514,10 @@ class H3ShotListLoader:
             names = []
             for i, r in enumerate(vrefs[:3]):
                 p = self._resolve(root, r.get("sample", ""))
+                if (not p or not os.path.isfile(p)) and render_anyway:
+                    blanked.append(f"Audio {i + 1}")
+                    names.append(f"<Audio {i + 1}>={r.get('subject')} MISSING (none)")
+                    continue
                 if not p or not os.path.isfile(p):
                     raise FileNotFoundError(
                         f"shot {shot.get('id')}: voice sample for '{r.get('subject')}' "
@@ -505,12 +532,17 @@ class H3ShotListLoader:
             # every voice in the shot.
             src = shot.get("audio_file") or defaults.get("master_track", "")
             src = self._resolve(root, src)
-            if not src or not os.path.isfile(src):
+            if (not src or not os.path.isfile(src)) and render_anyway:
+                blanked.append("Audio 1")
+                src = ""
+            elif not src or not os.path.isfile(src):
                 raise FileNotFoundError(
                     f"shot {shot.get('id')}: audio_policy '{policy}' needs the recorded "
                     f"mix; looked for {src or '<unset>'}"
                 )
-            if "audio_in" in shot and not shot.get("audio_file"):
+            if not src:
+                audio_note = f"{policy} <- recording MISSING (no audio reference)"
+            elif "audio_in" in shot and not shot.get("audio_file"):
                 audio_refs[0] = load_audio(src, float(shot["audio_in"]),
                                            float(shot["audio_out"]))
                 audio_note = (f"{policy} <- {os.path.basename(src)} "
@@ -546,6 +578,7 @@ class H3ShotListLoader:
             f"subjects: {', '.join(subject_ids) if subject_ids else '- (plate only)'}   size: {size}",
             f"voices: {', '.join(shot.get('voices', [])) or '-'}",
             f"audio: {audio_note}",
+            *([f"RENDERED WITHOUT: {', '.join(blanked)} (missing refs)"] if blanked else []),
             "refs:",
             *[f"  {n}" for n in ref_notes],
             f"seed: {seed}",

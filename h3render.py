@@ -134,6 +134,10 @@ def main() -> int:
     ap.add_argument("--model", help="H3 unet file name; overrides the shotlist")
     ap.add_argument("--steps", type=int, help="sampler steps; overrides the shotlist")
     ap.add_argument("--note", default="", help="free text stored in each take's sidecar")
+    ap.add_argument("--allow-missing-refs", action="store_true",
+                    help="render shots even when references are missing: a missing picture "
+                         "becomes flat grey, a missing voice/recording no audio reference "
+                         "(without it such shots are skipped)")
     ap.add_argument("--panel-mode", choices=["auto", "full", "pair", "face", "body"])
     fr = ap.add_mutually_exclusive_group()
     fr.add_argument("--save-frames", dest="save_frames", action="store_true", default=None,
@@ -166,7 +170,8 @@ def main() -> int:
     template = RenderRequest(
         shot_id="", take=args.take, redo=args.redo, seed=args.seed,
         seed_mode="new" if args.new_seed else "same" if args.same_seed else "auto",
-        model=args.model or None, loras=loras, steps=args.steps, note=args.note)
+        model=args.model or None, loras=loras, steps=args.steps, note=args.note,
+        allow_missing_refs=args.allow_missing_refs)
     only = {s.strip() for s in args.only.split(",")} if args.only else None
 
     base, wf = resolve_workflow(args.workflow, WORKFLOW_NAME, args.comfy)
@@ -187,11 +192,13 @@ def main() -> int:
             continue
         todo = [j for j in jobs if j.runs]
         busy = sum(1 for j in jobs if j.action == "busy")
+        blocked = [j for j in jobs if j.action == "blocked"]
         plans.append((root, jobs))
         total_frames += sum(j.frames for j in todo)
         print(f"\n  {os.path.basename(root)}  ·  {len(todo)} to render, "
               f"{len(jobs) - len(todo) - busy} done"
               + (f", {busy} already queued" if busy else "")
+              + (f", {len(blocked)} blocked (missing refs)" if blocked else "")
               + f"  ·  {pass_}  ->  {shown_folder}/")
         for key, vals in (("model", sorted({j.model for j in todo if j.model})),
                           ("lora", sorted({lora_label(j.loras) for j in todo}))):
@@ -200,7 +207,14 @@ def main() -> int:
             if len(vals) > 1:
                 print(f"    ! {len(vals)} different {key}s here — ComfyUI reloads on "
                       f"every change, so expect a pause at those shots")
+        for j in blocked[:8]:
+            print(f"    ! {j.id}: missing {j.missing_note()}")
+        if blocked:
+            print("    ! make the refs (h3.py refs), or --allow-missing-refs to render "
+                  "those shots with flat grey stand-ins")
         for j in todo:
+            if j.missing:
+                print(f"    ~ {j.id}: rendering WITHOUT {', '.join(r['slot'] for r in j.missing)}")
             if j.override_stale:
                 print(f"    ! {j.id}: overrides.json was written against an older build of "
                       f"this shot ({', '.join(j.overridden)} still applied)")
