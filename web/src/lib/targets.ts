@@ -4,7 +4,7 @@
 // warnings a render response may carry. Pure functions; the components call them.
 
 import type {
-  EpisodeStatus, RenderResult, ShotDetail, ShotStatus, Target, TargetList, TargetWidget, TakeSummary,
+  EpisodeStatus, ModelFile, ModelList, RenderResult, ShotDetail, ShotStatus, Target, TargetList, TargetWidget, TakeSummary,
 } from "../types";
 import { tn, type Badge } from "./format";
 
@@ -137,6 +137,49 @@ export function pickerChoices(
   if (spec.kind === "none") return null;
   if (spec.kind === "node") return widgetChoices?.[widgetKey(spec)];
   return undefined;
+}
+
+// ---------------------------------------------------------------------------
+// model families (GET /h3pipe/models)
+// ---------------------------------------------------------------------------
+
+/** The render dialog's checkbox that sends allow_model_mismatch. */
+export const MODEL_MISMATCH_LABEL = "Render anyway (model mismatch)";
+
+export interface ModelGroups {
+  /** named like the target's family, or its header says so */
+  matching: ModelFile[];
+  /** "Other files (unverified)": unknown, unreadable, or another family */
+  other: ModelFile[];
+}
+
+/** The model picker's two groups, in the server's order; null without a list. */
+export function modelGroups(list: ModelList | null | undefined): ModelGroups | null {
+  if (!list) return null;
+  return {
+    matching: list.files.filter((f) => f.match === "name" || f.match === "fingerprint"),
+    other: list.files.filter((f) => f.match !== "name" && f.match !== "fingerprint"),
+  };
+}
+
+/** The file `value` names in the list, when it is one of the "other" files. */
+export function otherModel(list: ModelList | null | undefined, value: string | null | undefined): ModelFile | null {
+  if (!list || !value) return null;
+  const f = list.files.find((x) => x.name === value);
+  return f && f.match === "other" ? f : null;
+}
+
+/** True when the server would skip a render with this model (another family). */
+export function isModelMismatch(list: ModelList | null | undefined, value: string | null | undefined): boolean {
+  return !!otherModel(list, value)?.mismatch;
+}
+
+/** The warning under the model picker for an "other" file, or null. */
+export function modelWarning(list: ModelList | null | undefined, value: string | null | undefined): string | null {
+  const f = otherModel(list, value);
+  if (!f || !list) return null;
+  if (f.mismatch) return `${f.detail || `${f.name} is ${f.label || "another model family"}, not ${list.label}`}. A render skips the shot unless you tick “${MODEL_MISMATCH_LABEL}”.`;
+  return `Unverified: ${f.detail || `${f.name} isn't named like ${list.label}`}.`;
 }
 
 /**

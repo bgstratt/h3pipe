@@ -81,6 +81,12 @@
     "review_nodes": []
   },
 
+  "models": {
+    "_note": "The family each model param must be (targets/modelid.py): names first, then the file's header. `model` is a full LTX 2.3 checkpoint (transformer, VAEs and text projection; model_version 2.3.x): the IC-LoRA is 2.3's. The text encoder is plain Gemma 3 12B.",
+    "model": {"family": "ltx2.3", "patterns": ["ltx-2.3*", "*ltx*2.3*", "*ltx*2_3*"]},
+    "text_encoder": {"family": "gemma3-12b", "patterns": ["*gemma*3*12b*"]}
+  },
+
   "presets": {
     "_note": "LTX-2.3 22B distilled (fp8) with the ingredients IC-LoRA at the template's 1.0, one stage of 8 steps (KSampler euler_ancestral / linear_quadratic, cfg 1), as the template runs it. The final is the trained bucket, 768x448; the proxy is the bucket scaled by 2/3 and snapped to the grid, 512x288. The model card's settings for the dev model (LoRA 1.4, 30 steps, guidance 4) are not the distilled template's; a dev final (dev checkpoint + the distilled LoRA at 0.75 + ingredients) is a profile away. Sizes come from here, not from another target's series config block: the IC-LoRA only knows its bucket. The negative prompt is the model card's suggestion plus the artefacts a review cut can't use.",
     "final": {

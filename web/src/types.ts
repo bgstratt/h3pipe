@@ -220,6 +220,8 @@ export interface RenderRequest {
   /** Phase 8: the video target for this run only, beating the override. Only
    * sent when set. */
   target?: string | null;
+  /** Queue shots whose model file is another family than the target needs. Only sent when set. */
+  allow_model_mismatch?: boolean;
 }
 
 export interface RenderSkip {
@@ -227,6 +229,8 @@ export interface RenderSkip {
   reason: string;
   take?: number;
   missing_refs?: MissingRef[];
+  /** the model checks that stopped the shot (h3jobs.check_models) */
+  model_mismatch?: { param: string; file: string; family: string; label: string; message: string }[];
   warnings?: RenderWarningRaw[];
 }
 
@@ -577,6 +581,34 @@ export interface Target {
     [key: string]: unknown;
   };
   template?: { fps?: number; frames?: { step?: number; base?: number; max?: number }; size_multiple?: number };
+  /** The family each model param must be (target.json `models`), by param. */
+  models?: Record<string, { family: string; label?: string; patterns?: string[]; folder?: string | null }>;
+}
+
+/** One file of GET /h3pipe/models: how it stands against the param's family. */
+export interface ModelFile {
+  name: string;
+  /** named like the family, its header says so, or anything else */
+  match: "name" | "fingerprint" | "other";
+  /** its header says another family: the server skips the shot unless allow_model_mismatch */
+  mismatch: boolean;
+  family: string | null;
+  label: string;
+  confidence: "metadata" | "tensors" | "name" | "unknown";
+  detail: string;
+  base?: string;
+}
+
+/** GET /h3pipe/models?target=…&param=… */
+export interface ModelList {
+  target: string;
+  param: string;
+  family: string;
+  label: string;
+  patterns: string[];
+  /** false: the server can't read model files, so only names were checked */
+  fingerprint: boolean;
+  files: ModelFile[];
 }
 
 export interface TargetList {

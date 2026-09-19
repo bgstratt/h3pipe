@@ -210,7 +210,8 @@ knows from `/h3pipe/render`. Two custom events come from the node pack:
 
 The UI reads ComfyUI's own lists: `GET /models/diffusion_models` (and
 `/models/unet` on older installs) for the model picker, `GET /models/loras` for LoRAs.
-No h3pipe route is needed.
+No h3pipe route is needed. (Later: `GET /h3pipe/models` groups a target's model picker by
+model family; see **Model families** at the end.)
 
 ## As built (Phase 2): readings of the points above that were ambiguous
 
@@ -692,3 +693,76 @@ Nothing new in the routes; what the existing ones now show:
   made stereo), uploaded as `h3pipe/<sha1>.wav`, anchored at frame 0 by a
   `MiniMaxH3AddGuide`, and kept as `<shot>_tNN_dub.wav` (`slot: "dialogue slice"`, `role:
   "audio"`). The sidecar's `inputs` then has `audio` beside `first` / `last`.
+
+## Model families
+
+Each target declares the model family every model setting must be (`target.json`
+`models`: `{"<param>": {"family", "patterns"}}`, for `model`, `text_encoder`, `video_vae`,
+`audio_vae`, `upscaler`, `duration_head` and, on two-stage targets, `model_high` /
+`model_low`). A file passes by name (case-insensitive globs, plus the series config's
+`model_families`), else by its safetensors header (`targets/modelid.py`: tensor names and
+key shapes, `model_version` / other metadata; the weights are never read). Header results
+are cached by (path, size, mtime) in `<ComfyUI user dir>/default/h3pipe/modelid_cache.json`.
+
+### `GET /h3pipe/targets`: `models`
+Each target has `"models": {"<param>": {"family", "label", "patterns", "folder"}}`, e.g.
+`ltx2`'s `"model": {"family": "ltx2.5", "label": "LTX 2.5", "patterns": ["ltx-2.5*",
+"*ltx*2.5*", "*ltx*2_5*"], "folder": "diffusion_models"}`. `{}` for a target that declares
+none.
+
+### `GET /h3pipe/models?target=ltx2&param=model[&ep=…]`
+One model param's files, as ComfyUI lists them (`folder_paths.get_filename_list` of the
+param's folder), each checked against the family:
+```json
+{"target": "ltx2", "param": "model", "family": "ltx2.5", "label": "LTX 2.5",
+ "patterns": ["ltx-2.5*", "*ltx*2.5*", "*ltx*2_5*"], "folder": "diffusion_models",
+ "class_type": "UNETLoader", "field": "unet_name", "fingerprint": true,
+ "files": [
+  {"name": "ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors",
+   "match": "name", "mismatch": false, "family": "ltx2.5", "label": "LTX 2.5",
+   "confidence": "name", "detail": ""},
+  {"name": "wan2.2_i2v_low_noise_14B_fp8_scaled.safetensors", "match": "other",
+   "mismatch": true, "family": "wan2.2-i2v-14b-low", "label": "Wan 2.2 I2V 14B low-noise",
+   "confidence": "name", "base": "wan2.2-i2v-14b",
+   "detail": "wan2.2_i2v_low_noise_14B_fp8_scaled is Wan 2.2 I2V 14B low-noise (tensors + name), but this LTX-2 target's model must be LTX 2.5"},
+  {"name": "z_image_turbo_bf16.safetensors", "match": "other", "mismatch": false,
+   "family": null, "label": "", "confidence": "unknown", "detail": "…"}]}
+```
+- `match` is `name` (named like the family; nothing read), `fingerprint` (the header says
+  it is the family, or a parent family the header can't narrow, e.g. an H3 merge named
+  neither Ref2VA nor FL2VA) or `other`. `files` lists `name`, then `fingerprint`, then
+  `other`, each group in ComfyUI's order.
+- `mismatch: true`: the header says another family. A render with that file is skipped
+  unless the request says `allow_model_mismatch`.
+- `confidence` is how the family was found: `metadata`, `tensors`, `name` (the header's
+  family narrowed to a variant by the name; `base` is the header's family) or `unknown`.
+- `fingerprint: false`: the server couldn't resolve model paths, so only names were checked.
+- Headers are read only for files whose name doesn't match, then cached; the handler runs
+  off the event loop like every route.
+- `param` defaults to `model`. A target that declares no family for the param, or an
+  unknown target, answers 400. `ep` (optional, inside a root) adds that series config's
+  `model_families` patterns.
+
+### `POST /h3pipe/render`: `allow_model_mismatch`
+- Before a take is reserved, every model file the job loads is checked
+  (`h3jobs.check_models`; paths through ComfyUI's `folder_paths`):
+  - name match: nothing to say;
+  - no name match, the header says the family: renders, with a note in the sidecar's `notes`;
+  - unknown header, or not found: renders, with a note;
+  - **another family**: the shot is skipped, `{"shot", "reason": "model mismatch: …
+    (pass allow_model_mismatch: true to render anyway)", "model_mismatch": [check, …]}` in
+    `skipped`. A check is `{"param", "file", "family", "label", "patterns", "match",
+    "found", "message", "block"}`.
+- `allow_model_mismatch: true` (a bool; anything else is 400) renders it anyway; the
+  sidecar's `notes` say "model mismatch, rendered anyway: …".
+- The CLI does the same (`h3render --allow-model-mismatch`), finding files under
+  `$COMFYUI_PATH/models` and caching in the temp folder; without `$COMFYUI_PATH` it checks
+  names only, and a name that doesn't match is a note. `--dry-run --check-nodes` lists
+  every check.
+
+### The editor
+The model picker lists the files of the target's family first, then an "Other files
+(unverified)" group. Picking one of those shows the file's `detail`. When it is a
+`mismatch`, the redo dialog offers "Render anyway (model mismatch)", which sends
+`allow_model_mismatch: true`. A render that skips a shot for a mismatch shows a warning
+toast with the reason. A server without `/h3pipe/models` keeps the flat list.

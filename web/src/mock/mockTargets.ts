@@ -3,7 +3,7 @@
 // here binds its model through a different loader node and has no LoRA widget,
 // so the dev page shows the pickers filtering by the chosen target.
 
-import type { Pass, TargetList } from "../types";
+import type { ModelFile, ModelList, Pass, TargetList } from "../types";
 
 export const H3 = "minimax_h3_ref2va";
 export const LTX = "ltx2";
@@ -33,6 +33,7 @@ export const MOCK_TARGETS: TargetList = {
       },
       workflow: "H3_Ref2VA_Shotlist_v1.json", loader: "H3ShotListLoader", saver: "H3SaveShot",
       template: { fps: 24, frames: { step: 17, base: 5, max: 3592 }, size_multiple: 32 },
+      models: { model: { family: "minimax-h3-ref2va", label: "MiniMax H3 Ref2VA", patterns: ["*h3*ref2v*", "*ref2va*"], folder: "diffusion_models" } },
     },
     {
       id: LTX, kind: "video", label: "LTX-2", short: "LTX-2",
@@ -64,6 +65,7 @@ export const MOCK_WIDGET_CHOICES: Record<string, string[]> = {
     "minimax_h3_ref2va_pruned_int8_convrot.safetensors",
     "minimax_h3_ref2va_bf16.safetensors",
     "wan2.2_t2v_14B_fp8.safetensors",
+    "my_h3_merge_v2.safetensors",
     "krea2.safetensors",
   ],
   "LoraLoaderModelOnly|lora_name": [
@@ -73,6 +75,46 @@ export const MOCK_WIDGET_CHOICES: Record<string, string[]> = {
   ],
   "CheckpointLoaderSimple|ckpt_name": ["ltx-2-19b-dev-fp8.safetensors", "ltx-2-19b-distilled-fp8.safetensors"],
 };
+
+/**
+ * What GET /h3pipe/models says about the mock's files: the names a family's
+ * patterns match, the "headers" of a few others (a renamed H3 merge passes,
+ * the Wan file is another family), the rest unknown.
+ */
+export const MOCK_MODEL_HEADERS: Record<string, { family: string; label: string; confidence: ModelFile["confidence"] }> = {
+  "my_h3_merge_v2.safetensors": { family: "minimax-h3", label: "MiniMax H3", confidence: "tensors" },
+  "wan2.2_t2v_14B_fp8.safetensors": { family: "wan2.2-t2v-14b", label: "Wan 2.2 T2V 14B", confidence: "tensors" },
+};
+
+function glob(pattern: string, name: string): boolean {
+  const re = new RegExp(`^${pattern.toLowerCase().replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*").replace(/\?/g, ".")}$`);
+  return re.test(name.toLowerCase());
+}
+
+export function mockModelFiles(target: string, param: string): ModelList | null {
+  const t = MOCK_TARGETS.targets.find((x) => x.id === target);
+  const m = t?.models?.[param];
+  const w = t?.widgets?.[param];
+  if (!t || !m || !w || !("class_type" in w)) return null;
+  const names = MOCK_WIDGET_CHOICES[`${w.class_type}|${w.field ?? ""}`] ?? [];
+  const label = m.label ?? m.family;
+  const files: ModelFile[] = names.map((name) => {
+    if ((m.patterns ?? []).some((p) => glob(p, name))) {
+      return { name, match: "name", mismatch: false, family: m.family, label, confidence: "name", detail: "" };
+    }
+    const h = MOCK_MODEL_HEADERS[name];
+    if (h && m.family.startsWith(h.family)) {
+      return { name, match: "fingerprint", mismatch: false, family: h.family, label: h.label, confidence: h.confidence, detail: `${param} ${name} isn't named like ${label}, but its header says ${h.label} (${h.confidence})` };
+    }
+    if (h) {
+      return { name, match: "other", mismatch: true, family: h.family, label: h.label, confidence: h.confidence, detail: `${name.replace(/\.safetensors$/, "")} is ${h.label} (${h.confidence}), but this ${t.short ?? t.id} target's ${param} must be ${label}` };
+    }
+    return { name, match: "other", mismatch: false, family: null, label: "", confidence: "unknown", detail: `${param} ${name} isn't named like ${label} and its header matches no family h3pipe knows` };
+  });
+  const rank = { name: 0, fingerprint: 1, other: 2 };
+  files.sort((a, b) => rank[a.match] - rank[b.match]);
+  return { target, param, family: m.family, label, patterns: m.patterns ?? [], fingerprint: true, files };
+}
 
 export function preset(target: string, pass: Pass) {
   return MOCK_TARGETS.targets.find((t) => t.id === target)?.presets?.[pass];

@@ -106,6 +106,30 @@ export function loadWidgetChoices(classType: string, field: string): Promise<voi
   return p;
 }
 
+const modelFilesLoading = new Map<string, Promise<void>>();
+
+/** GET /h3pipe/models for one target's model param (cached per target and
+ * param; failures are quiet: an older server has no such route, and the
+ * picker keeps its flat list). */
+export function loadModelFiles(target: string, param = "model", force = false): Promise<void> {
+  const key = `${target}|${param}`;
+  if (!force && get().modelFiles[key]) return Promise.resolve();
+  const running = modelFilesLoading.get(key);
+  if (running) return running;
+  const p = (async () => {
+    try {
+      const list = await api().modelFiles(target, param, get().ep);
+      set((s) => ({ modelFiles: { ...s.modelFiles, [key]: list } }));
+    } catch {
+      /* no route: the flat list */
+    } finally {
+      modelFilesLoading.delete(key);
+    }
+  })();
+  modelFilesLoading.set(key, p);
+  return p;
+}
+
 /**
  * Retarget a shot: the override's `target`, shared by both passes. `null` (or
  * the built target) goes back to the target the build compiled it for.
@@ -471,7 +495,7 @@ function firstError(r: { passes: Partial<Record<Pass, { ok: boolean; error: stri
   return "";
 }
 
-export function baseRender(ep: string, pass: Pass, shots: string[], allowMissingRefs = false, target: string | null = null): RenderRequest {
+export function baseRender(ep: string, pass: Pass, shots: string[], allowMissingRefs = false, target: string | null = null, allowModelMismatch = false): RenderRequest {
   const r: RenderRequest = {
     ep, pass, shots, redo: false, seed_mode: "auto", seed: null, model: null, loras: null,
     steps: null, prompt: null, parent_take: null, note: "",
@@ -480,6 +504,8 @@ export function baseRender(ep: string, pass: Pass, shots: string[], allowMissing
   if (allowMissingRefs) r.allow_missing_refs = true;
   // the same for a one-off target (Phase 8)
   if (target) r.target = target;
+  // and for "render anyway (model mismatch)"
+  if (allowModelMismatch) r.allow_model_mismatch = true;
   return r;
 }
 
@@ -491,7 +517,16 @@ export function renderReport(r: RenderResult): { severity: "success" | "info" | 
   }
   const skipped = r.skipped ?? [];
   const missing = skipped.filter((x) => x.missing_refs?.length);
-  const other = skipped.filter((x) => !x.missing_refs?.length);
+  const mismatch = skipped.filter((x) => !x.missing_refs?.length && x.model_mismatch?.length);
+  const other = skipped.filter((x) => !x.missing_refs?.length && !x.model_mismatch?.length);
+  if (mismatch.length) {
+    out.push({
+      severity: "warn",
+      summary: `Skipped ${mismatch.length} shot${mismatch.length > 1 ? "s" : ""}: model mismatch`,
+      detail: mismatch.map((x) => `${x.shot}: ${x.model_mismatch!.map((m) => m.message).join("; ")}`).join("\n") +
+        "\nPick a model of the right family, or Redo… with “Render anyway (model mismatch)”.",
+    });
+  }
   if (missing.length) {
     out.push({
       severity: "warn",
@@ -637,6 +672,8 @@ export type RedoSeed = { mode: "new" } | { mode: "same"; seed: Seed } | { mode: 
 export interface RedoPlan {
   /** send allow_missing_refs: true */
   allowMissingRefs?: boolean;
+  /** send allow_model_mismatch: true */
+  allowModelMismatch?: boolean;
   shot: string;
   pass: Pass;
   parent: number | null;
@@ -660,7 +697,7 @@ export function planRedo(p: RedoPlan, ep: string, d: ShotDetail): { override: Ov
   const seed: Seed | null = p.seed.mode === "new" ? null : p.seed.seed;
   const current = d.target || d.built_target || null;
   const target = p.target && p.target !== current ? p.target : null;
-  const base = { ...baseRender(ep, p.pass, [p.shot], !!p.allowMissingRefs, target), redo: true, parent_take: p.parent, note: p.note, seed_mode: seedMode, seed };
+  const base = { ...baseRender(ep, p.pass, [p.shot], !!p.allowMissingRefs, target, !!p.allowModelMismatch), redo: true, parent_take: p.parent, note: p.note, seed_mode: seedMode, seed };
   const prompt = p.lockPrompt ? null : p.prompt;
   // a one-off run on another target isn't saved: the override is the shot's own target's
   if (!p.saveAsOverride || target) {

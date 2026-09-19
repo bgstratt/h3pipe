@@ -3,16 +3,49 @@ import { loadModels } from "../actions";
 import { diffStats, diffWords } from "../lib/diff";
 import type { LoraRow } from "../lib/overrideForm";
 import { shortName } from "../lib/format";
+import { isModelMismatch, modelGroups, modelWarning } from "../lib/targets";
 import { useApp } from "../store";
+import type { ModelList } from "../types";
 
 /** Model picker from ComfyUI's diffusion_models (or unet) list. `""` = the placeholder. */
-/** `choices` (a target's own list) replaces ComfyUI's generic one. */
-export function ModelSelect({ value, onChange, placeholder, choices }: { value: string; onChange: (v: string) => void; placeholder?: string; choices?: string[] }) {
+/** `choices` (a target's own list) replaces ComfyUI's generic one. `grouped`
+ * (GET /h3pipe/models) puts the files of the target's family first, the rest
+ * under "Other files (unverified)", and warns when one of those is picked. */
+export function ModelSelect({ value, onChange, placeholder, choices, grouped }: { value: string; onChange: (v: string) => void; placeholder?: string; choices?: string[]; grouped?: ModelList }) {
   const models = useApp((s) => s.models);
   const err = useApp((s) => s.modelsError);
   useEffect(() => {
     void loadModels();
   }, []);
+  const groups = modelGroups(grouped);
+  if (groups && grouped) {
+    const all = grouped.files.map((f) => f.name);
+    const warn = modelWarning(grouped, value);
+    const mismatch = isModelMismatch(grouped, value);
+    return (
+      <div className="h3-col" style={{ gap: 3 }}>
+        <select className="h3-in" value={value} onChange={(e) => onChange(e.target.value)} title={value || placeholder || ""}>
+          {placeholder != null && <option value="">{placeholder}</option>}
+          {value && !all.includes(value) && <option value={value}>{shortName(value, 48)} (not installed)</option>}
+          {groups.matching.map((f) => (
+            <option key={f.name} value={f.name} title={f.match === "fingerprint" ? `${f.name}\n${f.detail}` : f.name}>
+              {shortName(f.name, 48)}{f.match === "fingerprint" ? ` (${grouped.label} by its header)` : ""}
+            </option>
+          ))}
+          {groups.other.length > 0 && (
+            <optgroup label="Other files (unverified)">
+              {groups.other.map((f) => (
+                <option key={f.name} value={f.name} title={f.detail ? `${f.name}\n${f.detail}` : f.name}>
+                  {shortName(f.name, 48)}{f.mismatch ? ` (${f.label || "another family"})` : ""}
+                </option>
+              ))}
+            </optgroup>
+          )}
+        </select>
+        {warn && <div className={`h3-note ${mismatch ? "h3-note-err" : "h3-note-info"} h3-small`}>{warn}</div>}
+      </div>
+    );
+  }
   const list = choices ?? models ?? [];
   const missing = value && !list.includes(value);
   return (

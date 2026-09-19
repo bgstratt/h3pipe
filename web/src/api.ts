@@ -76,7 +76,7 @@
 
 import type {
   AssembleResult, BrowseFiles, BrowseResult, BuildResult, CancelResult, ComfyQueue, Config, CutEntry,
-  CutFile, EpisodeStatus, EpisodeSummary, OverrideRequest, OverrideResult, Pass, PickRequest, Ref,
+  CutFile, EpisodeStatus, EpisodeSummary, ModelList, OverrideRequest, OverrideResult, Pass, PickRequest, Ref,
   RefGenerateRequest, RefGenerateResult, RefImportRequest, RefKeyframeRequest, RefList, RefOverrideRequest,
   RefPickRequest,
   RefTake, RenderRequest, RenderResult, Seed, ShotDetail, TakeRef, TargetKind, TargetList,
@@ -124,6 +124,8 @@ export interface Api {
   /** ComfyUI's choices for one combo widget (`/object_info/<class_type>`), or
    * null when the node or widget isn't there. */
   widgetChoices(classType: string, field: string): Promise<string[] | null>;
+  /** GET /h3pipe/models: one model param's files, matching the target's family first. */
+  modelFiles(target: string, param: string, ep?: string | null): Promise<ModelList>;
 }
 
 export class ApiError extends Error {
@@ -283,6 +285,14 @@ export function createHttpApi(t: Transport): Api {
     widgetChoices: async (classType, field) => {
       const info = await get<unknown>(`/object_info/${encodeURIComponent(classType)}`);
       return comboChoices(info, classType, field);
+    },
+    modelFiles: async (target, param, ep) => {
+      const r = await get<Partial<ModelList>>(`/h3pipe/models?${qs({ target, param, ep: ep || undefined })}`);
+      return {
+        target: r?.target ?? target, param: r?.param ?? param, family: r?.family ?? "", label: r?.label ?? r?.family ?? "",
+        patterns: Array.isArray(r?.patterns) ? r.patterns : [], fingerprint: !!r?.fingerprint,
+        files: Array.isArray(r?.files) ? r.files : [],
+      };
     },
     comfyQueue: async () => {
       const q = await get<{ queue_running?: unknown[][]; queue_pending?: unknown[][] }>("/queue");

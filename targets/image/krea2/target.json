@@ -42,6 +42,11 @@
     }
   },
 
+  "models": {
+    "_note": "The family the model must be (targets/modelid.py): names first, then the file's header. Krea 2 fine-tunes (renamed, any quantization) have the same tensors and pass as Krea 2 with a note.",
+    "model": {"family": "krea2", "patterns": ["*krea*2*"]}
+  },
+
   "presets": {
     "_note": "No style LoRA by default: references have to match whatever look series.json asks for, and a realism LoRA fights a storybook one (and vice versa).",
     "final": {

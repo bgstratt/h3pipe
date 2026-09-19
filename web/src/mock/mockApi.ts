@@ -17,7 +17,7 @@ import type {
 import fixturesRaw from "./fixtures.json?raw";
 import { FsError, browse as fsBrowse, fsExists } from "./mockFs";
 import { RefError, createMockRefs } from "./mockRefs";
-import { H3, LTX, MOCK_TARGETS, MOCK_WIDGET_CHOICES, ltxPrompt, preset, targetLength } from "./mockTargets";
+import { H3, LTX, MOCK_TARGETS, MOCK_WIDGET_CHOICES, ltxPrompt, mockModelFiles, preset, targetLength } from "./mockTargets";
 
 interface Fixtures {
   ep: string;
@@ -329,6 +329,16 @@ export function createMockApi(emit: Emit, opts: MockOptions = {}): Api {
           model: p?.model ?? cur.model, loras: null, steps: p?.steps ?? cur.steps,
         };
         const prompt = target === H3 ? req.prompt ?? eff.prompt : eff.prompt;
+        // a model file of another family is skipped unless allowed (h3jobs.check_models)
+        const bad = mockModelFiles(target, "model")?.files.find((f) => f.name === (req.model ?? eff.model) && f.mismatch);
+        if (bad && !req.allow_model_mismatch) {
+          out.skipped.push({
+            shot,
+            reason: `model mismatch: ${bad.detail} (pass allow_model_mismatch: true to render anyway)`,
+            model_mismatch: [{ param: "model", file: bad.name, family: bad.family ?? "", label: bad.label, message: bad.detail }],
+          });
+          continue;
+        }
         const built = d.built as { audio_policy?: string; voice_refs?: unknown[] };
         if (target !== H3 && (built.audio_policy === "clone" || built.voice_refs?.length)) {
           (out.warnings ??= []).push({ shot, warning: `audio downgraded to generate: ${target} takes no voice reference (voices come from each voice line)` });
@@ -556,6 +566,12 @@ export function createMockApi(emit: Emit, opts: MockOptions = {}): Api {
     async widgetChoices(classType, field) {
       await wait();
       return MOCK_WIDGET_CHOICES[`${classType}|${field}`] ?? null;
+    },
+    async modelFiles(target, param) {
+      await wait();
+      const r = mockModelFiles(target, param);
+      if (!r) throw new MockError(`${target} declares no model family for ${param}`, 400);
+      return r;
     },
     async comfyQueue() {
       await wait();

@@ -24,6 +24,9 @@ A Target has four parts, as docs/PLAN.md sketches them:
     binding    the workflow file, the loader/saver node classes, and which
                node widget takes the model, LoRAs, steps and seed
     presets    "final" / "proxy": model, lora, steps, width, height
+    models     the model family each model param needs ({"family", "patterns"});
+               check_model(target, param, file, ...) checks a file by name, then
+               by its safetensors header (targets/modelid.py)
 
 and, for a video target, the code behind it:
 
@@ -65,7 +68,9 @@ import math
 import os
 from dataclasses import dataclass, field
 
-HERE = os.path.dirname(os.path.abspath(__file__))
+from . import modelid
+
+HERE =os.path.dirname(os.path.abspath(__file__))
 KINDS = ("video", "image")
 DEFAULT_VIDEO_TARGET = "minimax_h3_ref2va"
 DEFAULT_IMAGE_TARGET = "krea2"
@@ -467,6 +472,29 @@ class Target:
         `dur: model` means something) or "script" (the build's length)."""
         return (self.spec.get("capabilities") or {}).get("duration") or "script"
 
+    # -- model families (target.json "models") -------------------------------
+
+    @property
+    def models(self) -> dict[str, dict]:
+        """The params that take a model file, each with the family it must be
+        (target.json `models`): {param: {"family", "patterns", "folder",
+        "class_type", "field"}}. `folder` is ComfyUI's models folder the file
+        lives in, `class_type`/`field` the loader widget whose choices list
+        it: the target.json entry's own, else the binding's widget for the
+        param and the folder that loader reads (MODEL_FOLDERS)."""
+        out = {}
+        for param, m in (self.spec.get("models") or {}).items():
+            if param.startswith("_") or not isinstance(m, dict) or not m.get("family"):
+                continue
+            w = self.binding.specs(param)
+            ct = m.get("class_type") or (w[0].get("class_type") if w else None)
+            fld = m.get("field") or (w[0].get("field") if w else None)
+            out[param] = {"family": m["family"],
+                          "patterns": [str(p) for p in m.get("patterns") or []],
+                          "folder": m.get("folder") or MODEL_FOLDERS.get((ct, fld)),
+                          "class_type": ct, "field": fld}
+        return out
+
     def capabilities(self) -> dict:
         """What a picker or the core may need to know without asking which
         model this is (GET /h3pipe/targets)."""
@@ -528,7 +556,10 @@ class Target:
                 "saver": self.binding.saver_class or None,
                 "template": self.template.to_json(),
                 "short": self.short,
-                "capabilities": self.capabilities() if self.kind == "video" else {}}
+                "capabilities": self.capabilities() if self.kind == "video" else {},
+                "models": {k: {"family": v["family"], "label": modelid.family_label(v["family"]),
+                               "patterns": list(v["patterns"]), "folder": v["folder"]}
+                           for k, v in self.models.items()}}
 
 
 # ---------------------------------------------------------------------------
@@ -758,3 +789,140 @@ def episode_target(story, series_cfg: dict) -> Target:
     their own shotlists (episode_targets)."""
     shot_targets(story, series_cfg)
     return video_target(series_cfg)
+
+
+# ---------------------------------------------------------------------------
+# model families: is this file the model a target's param needs?
+# ---------------------------------------------------------------------------
+
+# (loader class, widget) -> the ComfyUI models folder its files come from
+MODEL_FOLDERS: dict[tuple, str] = {
+    ("UNETLoader", "unet_name"): "diffusion_models",
+    ("UnetLoaderGGUF", "unet_name"): "diffusion_models",
+    ("CheckpointLoaderSimple", "ckpt_name"): "checkpoints",
+    ("LTXVAudioVAELoader", "ckpt_name"): "checkpoints",
+    ("LTXAVTextEncoderLoader", "ckpt_name"): "checkpoints",
+    ("LTXAVTextEncoderLoader", "text_encoder"): "text_encoders",
+    ("CLIPLoader", "clip_name"): "text_encoders",
+    ("VAELoader", "vae_name"): "vae",
+    ("LatentUpscaleModelLoader", "model_name"): "latent_upscale_models",
+    ("ModelPatchLoader", "name"): "model_patches",
+    ("LoraLoaderModelOnly", "lora_name"): "loras",
+    ("LoraLoader", "lora_name"): "loras",
+}
+
+MODEL_MATCHES = ("name", "fingerprint", "mismatch", "unknown", "unchecked")
+
+
+def series_model_families(series_cfg: dict | None) -> dict[str, list[str]]:
+    """The series config's `model_families`: {family: [globs]} that extend
+    the targets' own name patterns (docs/AUTHORING.md). Keys starting with
+    `_` are comments. ValueError on a malformed block."""
+    raw = (series_cfg or {}).get("model_families")
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        raise ValueError("series.json `model_families` must be an object: "
+                         "{\"<family>\": [\"<glob>\", ...]}")
+    out = {}
+    for fam, pats in raw.items():
+        if fam.startswith("_"):
+            continue
+        if isinstance(pats, str):
+            pats = [pats]
+        if not isinstance(pats, list) or not all(isinstance(p, str) and p.strip() for p in pats):
+            raise ValueError(f"series.json model_families.{fam} must be a list of file name "
+                             f"patterns, e.g. [\"my_merge*\"]")
+        out[fam] = [p.strip() for p in pats]
+    return out
+
+
+def family_names(extra: dict | None = None) -> dict[str, list[str]]:
+    """{family: [globs]}: every target's declared patterns, plus `extra` (the
+    series config's model_families). Used to tell variants apart by name."""
+    out: dict[str, list[str]] = {}
+    for t in list_targets():
+        for m in t.models.values():
+            have = out.setdefault(m["family"], [])
+            have += [p for p in m["patterns"] if p not in have]
+    for fam, pats in (extra or {}).items():
+        have = out.setdefault(fam, [])
+        have += [p for p in pats if p not in have]
+    return out
+
+
+def model_stem(name: str) -> str:
+    """A model file's name without its folder and .safetensors."""
+    base = name.replace("\\", "/").rsplit("/", 1)[-1]
+    return base[:-len(".safetensors")] if base.lower().endswith(".safetensors") else base
+
+
+def check_model(target: Target, param: str, filename: str, resolve=None,
+                extra: dict | None = None, cache=None) -> dict | None:
+    """Is `filename` a model of the family `target` wants for `param`?
+    None when the target declares no family for it (or no file is set).
+
+    `resolve(folder, name)` finds the file on disk (None: not found); with
+    `resolve` None only the name is checked. `extra` is the series config's
+    model_families; `cache` a modelid.ModelIdCache. The answer is
+    {"param", "file", "family", "label", "patterns", "match", "found",
+    "message", "block"}, `match` one of
+
+      name         the name matches the family's patterns (nothing is read)
+      fingerprint  it doesn't, but the header says it is that family (or a
+                   parent family the header can't narrow; `message` says so)
+      mismatch     the header says another family: `block` is true (queueing
+                   stops unless the request allows a model mismatch)
+      unknown      the header says nothing h3pipe can compare, or the file
+                   isn't found
+      unchecked    no models folder to read, and the name alone didn't match
+    """
+    spec = target.models.get(param)
+    if not spec or not filename:
+        return None
+    fam, label = spec["family"], modelid.family_label(spec["family"])
+    pats = list(spec["patterns"]) + [p for p in (extra or {}).get(fam, [])
+                                     if p not in spec["patterns"]]
+    out = {"param": param, "file": filename, "family": fam, "label": label, "patterns": pats,
+           "match": "name", "found": None, "message": "", "block": False}
+    if modelid.name_matches(filename, pats):
+        return out
+    who = f"{param} {model_stem(filename)}"
+    if resolve is None:
+        out.update(match="unchecked", message=(
+            f"{who} isn't named like {label} and wasn't fingerprinted (no ComfyUI models "
+            f"folder to read: set COMFYUI_PATH)"))
+        return out
+    path = resolve(spec["folder"], filename) if spec["folder"] else None
+    if not path:
+        out.update(match="unknown", message=(
+            f"{who} isn't named like {label} and isn't in ComfyUI's "
+            f"{spec['folder'] or 'models'} folder, so it wasn't fingerprinted"))
+        return out
+    found = modelid.identify(path, family_names(extra), cache, filename=filename)
+    out["found"] = found
+    rel = modelid.relation(found.get("family"), fam)
+    how = found.get("confidence")
+    if found.get("base"):                                 # the header's family, the name's variant
+        how = f"{found.get('base_confidence')} + name"
+    if rel in ("same", "variant"):
+        out.update(match="fingerprint", message=(
+            f"{who} isn't named like {label}, but its header says {found['label']} ({how})"))
+    elif rel == "ambiguous":
+        out.update(match="fingerprint", message=(
+            f"{who} isn't named like {label}; its header says {found['label']}, which can't "
+            f"be told from {label} by its tensors, and the name doesn't say which it is"))
+    elif rel == "different" and (found.get("confidence") in ("metadata", "tensors")
+                                 or found.get("base")):
+        out.update(match="mismatch", block=True, message=(
+            f"{model_stem(filename)} is {found['label']} ({how}), but this {target.short} "
+            f"target's {param} must be {label}"))
+    elif found.get("family"):
+        out.update(match="unknown", message=(
+            f"{who} isn't named like {label}; it looks like {found['label']} ({how}), "
+            f"which h3pipe can't verify against {fam}"))
+    else:
+        out.update(match="unknown", message=(
+            f"{who} isn't named like {label} and its header matches no family h3pipe knows "
+            f"({found.get('detail')})"))
+    return out

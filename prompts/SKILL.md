@@ -97,6 +97,36 @@ and pick one with `profile:` under a `#` sequence header or on a `##` shot:
   profile's whole LoRA list.
 - A profile name that isn't in the series config is an error.
 
+### Model files: `model_families`
+
+Every model file a shot loads is checked against the model family its target needs
+(LTX 2.5 for `ltx2`, H3 Ref2VA for `minimax_h3_ref2va`, ...) when it is queued. A file
+named like the family passes. Any other name is identified from the file's own header
+(the tensor names and shapes of a `.safetensors` file; the weights aren't loaded). If the
+header says it's the right family, it renders with a note. If it says it's **another**
+family, the shot is skipped ("wan2.2_i2v_low_noise_14B_fp8_scaled is Wan 2.2 I2V 14B
+low-noise, but this LTX-2 target's model must be LTX 2.5") unless you render anyway.
+
+A header can't tell every family apart. H3 Ref2VA and FL2VA files are identical inside, and
+so are Wan 2.2's high- and low-noise experts and the LTX 2.3 and 2.5 upscalers. For
+those, the name decides. If you rename or merge such a file, add its name to the series
+config so the pipeline knows which one it is:
+
+```json
+"model_families": {
+  "ltx2.5": ["my_ltx25_merge*"],
+  "minimax-h3-ref2va": ["h3_faces_finetune*"]
+}
+```
+
+- Keys are family ids: `minimax-h3-ref2va`, `minimax-h3-fl2va`, `ltx2.5`, `ltx2.3`,
+  `ltx2.5-latent-upscaler`, `krea2`, `wan2.2-i2v-14b-high`, `wan2.2-i2v-14b-low`, ...
+  (`targets/modelid.py` lists them all; each target's `target.json` `models` block says
+  which one each of its model settings needs).
+- Values are file-name patterns: `*` matches anything, case doesn't matter. They add to
+  the target's own patterns; they don't replace them.
+- A matching name is trusted without reading the file, so keep the patterns specific.
+
 ### Writing the `design` sentence
 
 This is the highest-leverage sentence in the pipeline. It is injected verbatim into every

@@ -4,7 +4,7 @@
 import type { ReactNode } from "react";
 import type { OverrideForm } from "../lib/overrideForm";
 import { shortName } from "../lib/format";
-import type { Lora } from "../types";
+import type { Lora, ModelList } from "../types";
 import { DiffView, LoraEditor, ModelSelect } from "./Fields";
 
 export interface OverrideFieldsProps {
@@ -28,6 +28,8 @@ export interface OverrideFieldsProps {
   /** Phase 8: the model picker's list under the shot's target. undefined =
    * ComfyUI's generic list; null = the target has no model widget. */
   modelChoices?: string[] | null;
+  /** GET /h3pipe/models: group the model picker by the target's family */
+  modelFiles?: ModelList;
   /** the same for LoRAs; null hides the LoRA rows */
   loraChoices?: string[] | null;
   /** Phase 8: the prompt can't be overridden (a retargeted shot): show this
@@ -83,7 +85,7 @@ export function OverrideFields(p: OverrideFieldsProps) {
         {p.modelChoices === null ? (
           <span className="h3-muted h3-small">set by the target (it has no model widget)</span>
         ) : (
-          <ModelSelect value={form.model} onChange={(model) => set({ model })} placeholder={p.modelPlaceholder} choices={p.modelChoices} />
+          <ModelSelect value={form.model} onChange={(model) => set({ model })} placeholder={p.modelPlaceholder} choices={p.modelChoices} grouped={p.modelFiles} />
         )}
         {p.loraChoices !== null && (
           <>

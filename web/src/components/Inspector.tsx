@@ -272,6 +272,7 @@ function OverrideEditor({ d, shot }: { d: ShotDetail; shot: string }) {
         effLoras={eff.loras}
         lorasOverridden={ov.loras != null}
         modelChoices={pickers.models}
+        modelFiles={pickers.modelFiles}
         loraChoices={pickers.loras}
         promptLocked={promptLocked}
       />

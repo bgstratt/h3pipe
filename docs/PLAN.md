@@ -931,6 +931,50 @@ Found and left in Phase 7:
 - **Per-target shotlists** (design above), and the override writer using the shot's
   target (`h3edit.set_shot_override` takes `target`; the CLI still passes the default).
 
+## Model families (as built)
+
+Nothing used to check that a model file suits its target: the picker listed every file in
+the loader's folder, and names vary by conversion (int8 / fp8 / nvfp4, "convrot", "comfy",
+renamed by hand). Now:
+
+- **Declared:** `target.json` `models: {"<param>": {"family", "patterns"}}` for every
+  param that takes a model file (`folder` / `class_type` / `field` default from the
+  binding's loader, `targets.MODEL_FOLDERS`). The series config's `model_families` adds
+  name patterns per family.
+- **Fingerprint:** `targets/modelid.py` reads only the safetensors header (8-byte length +
+  JSON). Signatures were built from the installed files' headers (2026-09-19), nothing else:
+
+  | Family | Signature | Confidence |
+  |---|---|---|
+  | `minimax-h3` (Ref2VA, FL2VA) | `adaln_t_table`, `video_patch_proj`, `audio_patch_proj`, `condition_proj`, `token_refiner.*`, 50 `blocks` | tensors. **Ref2VA and FL2VA are identical** (same names, shapes, dtypes, offsets): the name decides |
+  | `ltx2.3` / `ltx2.5` | AV transformer (`patchify_proj`, `audio_patchify_proj`, `av_ca_*`, `audio_ff`); 2.5 adds `keyframes_abs_pos_embedding` and drops the video FF biases | metadata (`model_version` 2.3.0 / 2.3.rc1 / 2.5.0) and tensors agree. Told apart by header (one 2.5 file to compare) |
+  | LTX video VAE 2.3 / 2.5 | 2.3 `decoder.up_blocks`, 2.5 `decoder.det_stages` + `diff_blocks` | metadata + tensors |
+  | LTX audio VAE 2.3 / 2.5 | `audio_vae.*` + `vocoder.*` | same tensors: metadata only |
+  | LTX latent upscaler 2.3 / 2.5 | `res_blocks`, `upsampler`, `final_conv` [128, …] | same tensors, no metadata: name only |
+  | LTX 2.5 text encoder | Gemma 4 (vocab 262144) + `text_embedding_projection` | tensors |
+  | `gemma3-12b` (LTX 2.3's) | vocab 262208, 48 layers, SigLIP vision tower | tensors |
+  | `qwen3vl-32b` (H3's) | `visual.deepstack_merger_list`, merger out 5120, q_proj 8192 | tensors |
+  | MiniMax H3 VAEs | video: `decoder.register_tokens`; audio: `pre_block`, `dec_in_proj` | metadata key + tensors |
+  | `wan2.2-i2v-14b` (high / low) | `patch_embedding` [5120, 36], 40 blocks, no `img_emb` | tensors; **high and low are identical**: name |
+  | `wan2.2-vace-14b` (high / low) | `vace_patch_embedding`, `vace_blocks`, patch in 16 | tensors; high/low by name |
+  | `wan2.2-ti2v-5b` / `wan2.2-fun-inpaint-5b` | `patch_embedding` [3072, 48] / [3072, 100], 30 blocks | tensors |
+  | Wan 2.1 / 2.2 VAE, UMT5-XXL | latent 16 vs 48 channels; `shared` [256384, 4096] | tensors (Qwen-Image's VAE reads as Wan 2.1's) |
+  | `krea2` | `txtfusion.*`, `first`, `last`, `tmlp`, `tproj` | tensors (fine-tunes pass too) |
+
+  int8 "convrot", fp8 "scaled", nvfp4 and "comfy" repacks keep the tensor names; a
+  `model.diffusion_model.` prefix is stripped. Where the header can't narrow a family, a
+  child family is picked by name (builtin hints, the targets' patterns, the series config's).
+  Wan 2.2 T2V 14B, Wan 2.1 and the LTX duration head aren't installed, so they have no
+  signature (unknown: warned, never blocked).
+- **Queue time** (`h3jobs.check_models`, from `h3edit.queue_shots` and `h3render`): name
+  match passes; a fingerprint match passes with a sidecar note; another family blocks the
+  shot (action `mismatch`, skipped with the reason) unless `allow_model_mismatch`; unknown
+  warns. A target family `modelid` doesn't know is never blocked (nothing to compare).
+- **Routes / UI:** `GET /h3pipe/targets` carries `models`; `GET /h3pipe/models` lists one
+  param's files by match; the picker groups them and the redo dialog offers "Render anyway
+  (model mismatch)". See docs/API.md **Model families**.
+- Not done: reference images (`h3refs`, krea2) aren't checked at queue time, only listed.
+
 ## Source of truth
 
 | File | Owner | Rule |
