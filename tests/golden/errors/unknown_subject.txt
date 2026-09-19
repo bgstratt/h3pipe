@@ -1,5 +1,5 @@
 exit 1
 
-  error in unknown_subject.md: line 4: 'zed' is not in the bible's subjects (ada, bo, cy, kettle, narrator, rex, van)
+  error in unknown_subject.md: line 4: 'zed' is not in series.json's subjects (ada, bo, cy, kettle, narrator, rex, van)
     | who: zed
 

@@ -114,7 +114,7 @@
   {
     "path": "audio/voices/cy_sample.wav",
     "kind": "voice sample",
-    "prompt": "A 5-15 second clean recording of Cy speaking. Voice: as written in the bible.",
+    "prompt": "A 5-15 second clean recording of Cy speaking. Voice: as written in series.json.",
     "target": "5-15 seconds of clean speech, mono wav",
     "exists": false,
     "blocks_shots": [

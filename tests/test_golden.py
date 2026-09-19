@@ -13,7 +13,7 @@ A fixture is a folder holding series.json and script.md. Two roots are searched:
 
 plus the `example` fixture, which is examples/series_example.json and
 examples/script_example.md. tests/fixtures/errors/*.md are scripts that must
-fail; each is checked against the kitchen_sink bible and its golden is the
+fail; each is checked against the kitchen_sink series config and its golden is the
 error message.
 
 What is captured per fixture: the story IR (shots.json), both passes' shotlist
@@ -40,7 +40,7 @@ BUILD = os.path.join(ROOT, "h3build.py")
 ROOTS = [(os.path.join(HERE, "fixtures"), os.path.join(HERE, "golden")),
          (os.path.join(HERE, "local", "fixtures"), os.path.join(HERE, "local", "golden"))]
 ERRORS = os.path.join(HERE, "fixtures", "errors")
-ERROR_BIBLE = os.path.join(HERE, "fixtures", "kitchen_sink", "series.json")
+ERROR_SERIES_CFG = os.path.join(HERE, "fixtures", "kitchen_sink", "series.json")
 
 OUTPUTS = ["shotlist/shotlist.json", "shotlist/shotlist_proxy.json", "shotlist/shots.json",
            "refs_todo.json", "refs_todo.md", "refs_todo_proxy.json", "refs_todo_proxy.md"]
@@ -56,9 +56,9 @@ def fixtures() -> dict[str, tuple[str, str, str]]:
             continue
         for name in sorted(os.listdir(fx_root)):
             d = os.path.join(fx_root, name)
-            bible, script = os.path.join(d, "series.json"), os.path.join(d, "script.md")
-            if os.path.isfile(bible) and os.path.isfile(script):
-                found[name] = (bible, script, os.path.join(golden_root, name))
+            series_cfg, script = os.path.join(d, "series.json"), os.path.join(d, "script.md")
+            if os.path.isfile(series_cfg) and os.path.isfile(script):
+                found[name] = (series_cfg, script, os.path.join(golden_root, name))
     return found
 
 
@@ -79,12 +79,12 @@ def norm(data: bytes) -> bytes:
     return data.replace(b"\r\n", b"\n")
 
 
-def capture(bible: str, script: str) -> dict[str, bytes]:
+def capture(series_cfg: str, script: str) -> dict[str, bytes]:
     """Every output of one fixture, keyed by golden file name."""
     out: dict[str, bytes] = {}
     with tempfile.TemporaryDirectory() as tmp:
         for flags in ([], ["--proxy"]):
-            r = h3build(bible, script, "-o", tmp, *flags)
+            r = h3build(series_cfg, script, "-o", tmp, *flags)
             if r.returncode:
                 raise RuntimeError(f"h3build {' '.join(flags)} failed:\n"
                                    + r.stderr.decode("utf-8", "replace"))
@@ -94,13 +94,13 @@ def capture(bible: str, script: str) -> dict[str, bytes]:
     # --check writes nothing and never prints the output folder
     for flags, name in (([], "check.txt"), (["--proxy"], "check_proxy.txt"),
                         (["--pace"], "pace.txt")):
-        r = h3build(bible, script, "--check", *flags)
+        r = h3build(series_cfg, script, "--check", *flags)
         out[name] = norm(r.stdout) + (norm(r.stderr) if r.returncode else b"")
     return out
 
 
 def capture_error(script: str) -> bytes:
-    r = h3build(ERROR_BIBLE, script, "--check")
+    r = h3build(ERROR_SERIES_CFG, script, "--check")
     return f"exit {r.returncode}\n".encode() + norm(r.stderr)
 
 
@@ -109,9 +109,9 @@ def error_golden(name: str) -> str:
 
 
 def update() -> None:
-    for name, (bible, script, gdir) in fixtures().items():
+    for name, (series_cfg, script, gdir) in fixtures().items():
         os.makedirs(gdir, exist_ok=True)
-        for fname, data in capture(bible, script).items():
+        for fname, data in capture(series_cfg, script).items():
             with open(os.path.join(gdir, fname), "wb") as fh:
                 fh.write(data)
         print(f"  {name:20} -> {os.path.relpath(gdir, ROOT)}")
@@ -137,9 +137,9 @@ class GoldenTest(unittest.TestCase):
                              os.path.relpath(golden_path, ROOT))
 
 
-def _fixture_test(bible: str, script: str, gdir: str):
+def _fixture_test(series_cfg: str, script: str, gdir: str):
     def test(self: GoldenTest) -> None:
-        got = capture(bible, script)
+        got = capture(series_cfg, script)
         for fname, data in got.items():
             with self.subTest(file=fname):
                 self._compare(data, os.path.join(gdir, fname))

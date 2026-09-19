@@ -1,6 +1,6 @@
 # h3pipe — script to finished episode with MiniMax H3
 
-Write an episode as a screenplay-flavoured markdown file plus a series bible, and these
+Write an episode as a screenplay-flavoured markdown file plus a series config (`series.json`), and these
 scripts compile it into a shot list, generate every reference image it needs, render each
 shot on a local ComfyUI, and cut the results together.
 
@@ -83,17 +83,17 @@ ComfyUI must be running for `refs` and `render`.
 | Script | What it does | Reads | Writes |
 |---|---|---|---|
 | `h3.py` | One command for every step below; passes any extra flags through | an episode folder | — |
-| `h3build.py` | Compiles the bible and script into shots: H3 prompts, frame counts, seeds, reference slots, audio settings. Checks pacing | `series.json`, `epNN.md` | `shotlist/shotlist.json`, `shotlist_proxy.json`, `refs_todo.md/.json` |
+| `h3build.py` | Compiles the series config and script into shots: H3 prompts, frame counts, seeds, reference slots, audio settings. Checks pacing | `series.json`, `epNN.md` | `shotlist/shotlist.json`, `shotlist_proxy.json`, `refs_todo.md/.json` |
 | `kreagen.py` | Generates every missing reference image with krea2 on ComfyUI and saves it where h3build expects it | `refs_todo.json`, `series.json` | `refs/…` (takes in `refs/_takes/`) |
 | `mksheet.py` | Joins four character views into one 4096×1024 sheet (kreagen calls it) | 4 images | `refs/<char>/<char>_sheet_4panel.png` |
 | `h3render.py` | Queues each shot on ComfyUI through `H3_Ref2VA_Shotlist_v1.json`, waits, skips finished shots | `shotlist*.json`, the workflow | `renders/` or `renders_proxy/` |
-| `h3align.py` | Times the script against a dialogue recording and writes the `audio:` windows | recording, `epNN.md`, `series.json` | updated script and bible, `align_report.md` |
+| `h3align.py` | Times the script against a dialogue recording and writes the `audio:` windows | recording, `epNN.md`, `series.json` | updated script and series config, `align_report.md` |
 | `h3assemble.py` | Joins the rendered shots in cut order (`cut.json`, else script order), trimming timed shots to their windows | `shotlist*.json`, renders | `renders/epNN.mp4`, `epNN_shots.txt` |
 | `h3plan.py` | Legacy: chained-plan compiler for the looping Contex-Loop graph (see the end of this file) | an episode plan JSON (format documented in that file) | `build/` |
 
 ### What you write
 
-- **`series.json`** — the bible: style, characters and props (with a `design` sentence each),
+- **`series.json`** — the series config: style, characters and props (with a `design` sentence each),
   locations (one entry per camera angle, with the light), voices, and audio mode. See
   `examples/series_example.json`.
 - **`epNN.md`** — the script: `# sq` sequences, `## sh` shots with `who:`, `with:`, `size:`,
@@ -110,7 +110,7 @@ for Cursor, Copilot or any system prompt (`prompts/h3-script.instructions.md`). 
 generated from the authoring guide by `python tools/make_prompts.py`, so edit the guide, not
 the copies. Whatever writes the script, `--check` and `--pace` are what say it is correct.
 
-Change the bible or script and run `build` again rather than editing the generated files —
+Change the series config or script and run `build` again rather than editing the generated files —
 `steps:`, `model:` and `lora:` are script fields now, so experiments survive a rebuild.
 If you do hand-edit a shotlist, `all --skip-build` and the individual stages leave it alone.
 
@@ -143,7 +143,7 @@ A distilled LoRA is trained on a fixed set of timesteps, so it does its best wor
 step count: the 8-step v1.0 was distilled at 768p for 8 steps, and the proxy keeps the 4-step
 v0.1 both for speed and because its 544p training is closer to the animatic's size.
 
-Override per pass in the bible (`series` for the final, `proxy` for the animatic):
+Override per pass in the series config (`series` for the final, `proxy` for the animatic):
 
 ```json
 "series": { "steps": 8, "model": "minimax_h3_ref2va_pruned_bf16.safetensors" },
@@ -178,7 +178,7 @@ python h3.py refs Shows\ep05               # everything missing, most-needed fir
 
 - Skips anything already on disk. `--redo` makes a new take (kept in `refs/_takes/`) and
   leaves the live file alone unless you add `--pick`; combine it with `--only`. `--all`
-  works from the whole bible instead of `refs_todo.json`.
+  works from the whole series config instead of `refs_todo.json`.
 - `--only` matches part of the file path, so `dean` also matches `dean_grown`.
 - Each character is made as four square views sharing a seed, then joined by mksheet.
   Every view is a take in `refs/_takes/subject__<char>/`, so one angle can be redone and
@@ -240,7 +240,7 @@ python h3.py render Shows --each --proxy               # every episode
   your ComfyUI's node versions. Failing that, `$COMFYUI_PATH`, then the copy in this repo's
   `workflows/`. `--workflow` or `$H3_WORKFLOW` / `$KREA_WORKFLOW` beat all of those. Keep the
   saved `krea2_refs_t2i.json` free of style LoRAs (experiment under another name), since the
-  references must follow the bible's look.
+  references must follow the series config's look.
 - It converts the canvas workflow to API format itself. If ComfyUI rejects it, save
   **Workflow → Export (API)** and pass that file with `--workflow`.
 
@@ -287,7 +287,7 @@ python h3.py render   Shows\ep05 --only sh020 --redo                 # renders w
 ```
 
 - `takes` marks a take **stale** when rendering the shot now would differ: `script` (the
-  shot changed in the script or bible), `ref` (a reference image or voice changed) or
+  shot changed in the script or series config), `ref` (a reference image or voice changed) or
   `preset` (model, LoRA, steps or size defaults changed). Stale is a hint, not an error.
 - `overrides.json` is how you tweak one shot without touching the script: the exact prompt,
   a seed, model, LoRAs, steps. Prompt, model, LoRAs and steps are per pass (final unless
@@ -312,7 +312,7 @@ python h3.py assemble Shows\ep05 --proxy --audio master          # picture over 
 
 - h3align transcribes the recording with word timings, matches it to the script, and cuts it
   into one continuous run of windows with cuts at the quietest point of each pause.
-- It writes `audio: in-out` on every shot, points the bible at the recording, backs both files
+- It writes `audio: in-out` on every shot, points the series config at the recording, backs both files
   up as `.bak`, and writes `align_report.md`.
 - Speaking shots then default to `dub_keep_foley`: H3 lip-syncs to your line and keeps its own
   sound effects as `_foley.wav`.
@@ -325,13 +325,13 @@ python h3.py assemble Shows\ep05 --proxy --audio master          # picture over 
 | `reference` | Borrows voice and timing only; loose lip sync | — |
 
 Set it per shot (`retention: fully_copy`) or for the episode (`"audio": {"retention": ...}` in
-the bible). `clone` and `generate` shots don't use it.
+the series config). `clone` and `generate` shots don't use it.
 
 ## Project layout
 
 ```
 <episode>/
-  series.json                  bible (you write)
+  series.json                  series config (you write)
   epNN.md                      script (you write)
   shotlist/shotlist.json       generated
   shotlist/shotlist_proxy.json generated
@@ -431,7 +431,7 @@ subject got duplicated.
 `NAME (V.O.):` and `NAME (O.S.):` mark a line as spoken by someone who is not
 on screen. Such a speaker is **not** added to the visible cast: they cost no
 reference slot, are never drawn, and need no character sheet — only a `voice`
-description in the bible (and a `voice_sample` if the shot uses `clone`).
+description in the series config (and a `voice_sample` if the shot uses `clone`).
 
 Only `who:` puts a character on screen. Before this existed, any speaking name
 was auto-added to the cast, so a phone voice from another house burned a slot
@@ -444,7 +444,7 @@ and got rendered into frame.
 | `RILEY (O.S.): line` | in the space, outside frame | only if also in `who:` | `says from off-screen, outside the frame` |
 
 A `(V.O.)` speaker who *is* in `who:` — a character narrating over their own
-shot — additionally gets H3's required lips-closed clause, using the bible's
+shot — additionally gets H3's required lips-closed clause, using the series config's
 optional `pronoun` field, so H3 doesn't animate their mouth over the narration.
 A speaker with no visual reference is identified by their voice description
 followed by `(Sx)`, per H3's spec, rather than an invented `<Subject>`.
@@ -504,7 +504,7 @@ deliberate patter ~5.4. Past 5.8 it stops reading as a person talking fast.
 
 | Field | Meaning |
 |---|---|
-| `pace: slow\|normal\|fast` | per shot, or `speech.pace` in the bible. 3.6 / 4.4 / 5.4 syl/s. |
+| `pace: slow\|normal\|fast` | per shot, or `speech.pace` in the series config. 3.6 / 4.4 / 5.4 syl/s. |
 | `dur: auto` | derive the length from the dialogue at that pace, then snap to the grid. |
 
 `--check` and a normal compile emit the same findings as warnings, each with

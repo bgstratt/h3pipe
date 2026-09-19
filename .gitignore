@@ -4,7 +4,7 @@ __pycache__/
 .venv/
 venv/
 
-# Episode projects: bibles and scripts are yours, generated output is not
+# Episode projects: series configs and scripts are yours, generated output is not
 shotlist/
 refs/
 views/

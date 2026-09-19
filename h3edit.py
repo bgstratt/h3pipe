@@ -54,7 +54,7 @@ def episode_script(root: str) -> str | None:
     return os.path.join(root, cands[0]) if len(cands) == 1 else None
 
 
-def episode_bible(root: str) -> str | None:
+def episode_series_config(root: str) -> str | None:
     """series.json in the episode folder, else in its parent (a series folder)."""
     for d in (root, os.path.dirname(os.path.normpath(root))):
         p = os.path.join(d, "series.json")
@@ -64,7 +64,7 @@ def episode_bible(root: str) -> str | None:
 
 
 def find_episodes(roots: list[str], depth: int = 2) -> list[dict]:
-    """Every folder under `roots` (to `depth` levels) with a bible and a script."""
+    """Every folder under `roots` (to `depth` levels) with a series config and a script."""
     out, seen = [], set()
 
     def visit(d: str, level: int):
@@ -99,7 +99,7 @@ BROWSE_EXTS = {"image": (".png", ".jpg", ".jpeg", ".webp"),
 
 def browse(path: str | None, files: str | None = None) -> dict:
     """Folders for a folder picker: the subfolders of `path`, each flagged when
-    it is an episode (a bible and a script) or holds a bible. No `path`: the
+    it is an episode (a series config and a script) or holds a series config. No `path`: the
     starting points (drives on Windows, and the home folder)."""
     if not path:
         places = []
@@ -110,7 +110,7 @@ def browse(path: str | None, files: str | None = None) -> dict:
             places.append("/")
         home = os.path.expanduser("~")
         return {"path": "", "parent": None,
-                "dirs": [{"name": p, "path": p, "episode": False, "bible": False}
+                "dirs": [{"name": p, "path": p, "episode": False, "series_config": False}
                          for p in [home] + places]}
     path = os.path.abspath(path)
     if not os.path.isdir(path):
@@ -134,14 +134,14 @@ def browse(path: str | None, files: str | None = None) -> dict:
                 except OSError:
                     pass
             continue
-        bible = os.path.isfile(os.path.join(p, "series.json"))
+        has_series_cfg = os.path.isfile(os.path.join(p, "series.json"))
         episode = False
-        if bible:
+        if has_series_cfg:
             try:
                 episode = episode_script(p) is not None
             except OSError:
                 pass
-        dirs.append({"name": n, "path": p, "episode": episode, "bible": bible})
+        dirs.append({"name": n, "path": p, "episode": episode, "series_config": has_series_cfg})
         if len(dirs) >= BROWSE_LIMIT:
             break
     parent = os.path.dirname(path)
@@ -154,9 +154,9 @@ def browse(path: str | None, files: str | None = None) -> dict:
 
 def episode_summary(root: str, script: str | None = None) -> dict:
     title = series = ""
-    bible = episode_bible(root)
-    if bible:
-        b = T.read_json(bible) or {}
+    series_cfg = episode_series_config(root)
+    if series_cfg:
+        b = T.read_json(series_cfg) or {}
         series = (b.get("series") or {}).get("title", "")
     built = {p: os.path.isfile(os.path.join(root, J.shotlist_rel(p))) for p in T.PASSES}
     shots = 0
@@ -171,8 +171,8 @@ def episode_summary(root: str, script: str | None = None) -> dict:
 
 
 def episode_fps(root: str) -> float:
-    bible = episode_bible(root)
-    b = (T.read_json(bible) or {}) if bible else {}
+    series_cfg = episode_series_config(root)
+    b = (T.read_json(series_cfg) or {}) if series_cfg else {}
     return float((b.get("series") or {}).get("fps", 24))
 
 
@@ -549,14 +549,14 @@ def build_episode(root: str, timeout: int = 600) -> dict:
     """h3build for the final pass, then the proxy pass, as `h3.py build` runs
     it. A script error is a result (ok: false, the message in the pass's
     `error`), not an exception."""
-    bible, script = episode_bible(root), episode_script(root)
-    if not bible or not script:
-        why = ("no series.json here or in the parent folder" if not bible
+    series_cfg, script = episode_series_config(root), episode_script(root)
+    if not series_cfg or not script:
+        why = ("no series.json here or in the parent folder" if not series_cfg
                else "can't tell which .md in the folder is the script")
         return {"ok": False, "error": why, "passes": {}}
     passes = {}
     for ps in T.PASSES:
-        rc, out, err = run_tool("h3build.py", [bible, script, "-o", root]
+        rc, out, err = run_tool("h3build.py", [series_cfg, script, "-o", root]
                                 + (["--proxy"] if ps == "proxy" else []), root, timeout)
         passes[ps] = {"ok": rc == 0, "report": out, "error": err.strip() if rc else ""}
     return {"ok": all(p["ok"] for p in passes.values()), "passes": passes}

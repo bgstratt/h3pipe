@@ -1,5 +1,5 @@
 {
-  "_README": "THE BIBLE. Write this ONCE per series. Subjects (anything with identity that appears on screen), locations, the look, the voices. Episodes reference everything by short name and never repeat any of it.",
+  "_README": "THE SERIES CONFIG. Write this ONCE per series. Subjects (anything with identity that appears on screen), locations, the look, the voices. Episodes reference everything by short name and never repeat any of it.",
   "series": {
     "id": "gold_path",
     "title": "The Gold Path",

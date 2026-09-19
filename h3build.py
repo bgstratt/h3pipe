@@ -2,8 +2,8 @@
 """
 h3build.py — script.md + series.json  ->  shots.json (story IR) + shotlist.json
 
-One command. You write a screenplay-flavoured script and a series bible;
-this produces the shotlist the ComfyUI loader reads, a list of any reference
+One command. You write a screenplay-flavoured script and the series config
+(series.json); this produces the shotlist the ComfyUI loader reads, a list of any reference
 assets you still need to make, and a timing report.
 
     python3 h3build.py series.json script.md -o <project_root>
@@ -33,7 +33,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from h3core import ir
 # Reference prompt wording has one home, shared with kreagen and the editor.
 from h3refs import object_prompt, plate_prompt, sheet_prompt, voice_prompt
-from h3core.bible import character_ids, load_bible, series_info, subject_ids
+from h3core.series_config import character_ids, load_series_config, series_info, subject_ids
 # Model-neutral pieces, re-exported under their old names: h3align and others
 # import them from here.
 from h3core.ir import stable_seed  # noqa: F401
@@ -130,7 +130,7 @@ def legacy_episode(story: ir.Episode) -> dict:
 # Ref2VA prompt builder  (h3-prompt-writing six-section format)
 # ---------------------------------------------------------------------------
 
-def build_prompt(shot: dict, seq: dict, bible: dict, panels: int,
+def build_prompt(shot: dict, seq: dict, series_cfg: dict, panels: int,
                  panel_view: str = "body") -> list[str]:
     """Ref2VA six-section prompt.
 
@@ -141,9 +141,9 @@ def build_prompt(shot: dict, seq: dict, bible: dict, panels: int,
     <Picture N> means "use this exact frame as a keyframe", which is not what a
     location plate is for.
     """
-    book = bible["subjects"]
-    look = bible["style"]["look"]
-    loc = bible["locations"][shot.get("plate") or seq["location_key"]]
+    book = series_cfg["subjects"]
+    look = series_cfg["style"]["look"]
+    loc = series_cfg["locations"][shot.get("plate") or seq["location_key"]]
     env = loc["description"]
 
     subjects = shot["_subjects"]                      # ordered, <= 3
@@ -167,7 +167,7 @@ def build_prompt(shot: dict, seq: dict, bible: dict, panels: int,
         H3's spec asks that a speaker's vocal identity — timbre, pitch, rate —
         be established the first time they speak. That matters most when no
         audio reference is fed at all: without it the model picks a voice with
-        nothing to go on, and picks a different one next shot. So the bible's
+        nothing to go on, and picks a different one next shot. So the series config's
         `voice` line rides along on each speaker's FIRST line in a shot and is
         dropped after, which keeps later lines from getting noisy.
 
@@ -381,7 +381,7 @@ def build_prompt(shot: dict, seq: dict, bible: dict, panels: int,
 # which was distilled at 768p for exactly 8 steps. The proxy keeps the 4-step
 # v0.1: a distilled LoRA is trained on a fixed set of timesteps, so it does
 # best at its own step count, and the proxy wants 4 steps for speed.
-# Override either with series.lora / proxy.lora in the bible.
+# Override either with series.lora / proxy.lora in the series config.
 FINAL_MODEL = "minimax_h3_ref2va_pruned_int8_convrot.safetensors"
 FINAL_LORA = "minimax_h3_ref2v_turbo_8step_v1.0_768p_comfyui_bf16.safetensors"
 FINAL_STEPS = 8
@@ -389,11 +389,11 @@ PROXY_LORA = "minimax_h3_ref2v_lightx2v_turbo_4step_v0.1_resized_avg_rank_20_bf1
 PROXY_STEPS = 4
 
 
-def compile_episode(ep: dict, bible: dict, proxy: bool) -> tuple[dict, dict]:
-    s = bible["series"]
+def compile_episode(ep: dict, series_cfg: dict, proxy: bool) -> tuple[dict, dict]:
+    s = series_cfg["series"]
     fps = float(s.get("fps", 24))
     if proxy:
-        p = bible.get("proxy", {})
+        p = series_cfg.get("proxy", {})
         width, height = int(p.get("width", 480)), int(p.get("height", 272))
         steps = int(p.get("steps", PROXY_STEPS))
         lora = p.get("lora", PROXY_LORA)
@@ -410,8 +410,8 @@ def compile_episode(ep: dict, bible: dict, proxy: bool) -> tuple[dict, dict]:
                 f"{nm}={v} is not a multiple of 32 — H3 rejects it. "
                 f"Nearest legal: {v // 32 * 32} or {(v // 32 + 1) * 32}.")
 
-    book = bible["subjects"]
-    audio_cfg = bible.get("audio", {})
+    book = series_cfg["subjects"]
+    audio_cfg = series_cfg.get("audio", {})
     mode = audio_cfg.get("mode", "source_track")
     track = audio_cfg.get("track", "")
     # The recorded dialogue still times the picture when the proxy lets H3
@@ -424,7 +424,7 @@ def compile_episode(ep: dict, bible: dict, proxy: bool) -> tuple[dict, dict]:
     # voices for the cheap pass while the final still clones from your samples.
     # Seeds, lengths and subjects are unaffected, so the passes stay comparable.
     if proxy:
-        pm = bible.get("proxy", {}).get("audio_mode")
+        pm = series_cfg.get("proxy", {}).get("audio_mode")
         if pm:
             mode = pm
             if pm in ("generate", "generated", "generated_audio"):
@@ -439,7 +439,7 @@ def compile_episode(ep: dict, bible: dict, proxy: bool) -> tuple[dict, dict]:
         speaking_policy = "generate"
     else:
         speaking_policy = "clone"
-    speaking_policy = bible.get("audio", {}).get("default_policy", speaking_policy)
+    speaking_policy = series_cfg.get("audio", {}).get("default_policy", speaking_policy)
 
     shots_out, warnings, needed = [], [], {}
     total_req = total_raw = 0
@@ -454,17 +454,17 @@ def compile_episode(ep: dict, bible: dict, proxy: bool) -> tuple[dict, dict]:
 
     def resolve_plate(key: str, where: str, shot_id: str | None = None) -> dict:
         """A location entry, validated, registered as a needed asset."""
-        if key not in bible["locations"]:
+        if key not in series_cfg["locations"]:
             raise ValueError(
-                f"{where}: location '{key}' is not in the bible "
-                f"({', '.join(bible['locations'])})")
-        entry = bible["locations"][key]
+                f"{where}: location '{key}' is not in series.json "
+                f"({', '.join(series_cfg['locations'])})")
+        entry = series_cfg["locations"][key]
         if not entry.get("plate"):
             raise ValueError(
                 f"location '{key}': needs a `plate` path. The background "
                 f"plate is <Picture 4> in every shot there.")
         need(entry["plate"], "background plate",
-             plate_prompt(look=bible['style']['look'], description=entry['description']),
+             plate_prompt(look=series_cfg['style']['look'], description=entry['description']),
              shot_id)
         return entry
 
@@ -481,7 +481,7 @@ def compile_episode(ep: dict, bible: dict, proxy: bool) -> tuple[dict, dict]:
                 blocked[_loc["plate"]].append(_sh["id"])
 
         for i, shot in enumerate(seq["shots"]):
-            loc = (bible["locations"][shot["plate"]] if shot.get("plate") else seq_loc)
+            loc = (series_cfg["locations"][shot["plate"]] if shot.get("plate") else seq_loc)
             # Characters first, then props/vehicles. Slots 1-3 only; slot 4 is
             # always the location plate.
             subjects = shot["cast"] + [p for p in shot["props"] if p not in shot["cast"]]
@@ -502,17 +502,17 @@ def compile_episode(ep: dict, bible: dict, proxy: bool) -> tuple[dict, dict]:
                     f"{'them' if over > 1 else 'it'}.")
 
             # duration
-            pace = shot.get("pace") or bible.get("speech", {}).get("pace", "normal")
+            pace = shot.get("pace") or series_cfg.get("speech", {}).get("pace", "normal")
             if pace not in SPEECH_RATE:
                 raise ValueError(
-                    f"bible speech.pace '{pace}' must be one of {sorted(SPEECH_RATE)}")
+                    f"series.json speech.pace '{pace}' must be one of {sorted(SPEECH_RATE)}")
             need_sec = speech_seconds(shot["dialogue"], pace)
 
             if "audio_in" in shot:
                 dur = shot["audio_out"] - shot["audio_in"]
                 if not recording:
                     raise ValueError(
-                        f"shot {shot['id']}: uses an `audio:` window but the bible has no "
+                        f"shot {shot['id']}: uses an `audio:` window but series.json has no "
                         f"audio.track set.")
             elif shot.get("duration_auto"):
                 if not shot["dialogue"]:
@@ -574,10 +574,10 @@ def compile_episode(ep: dict, bible: dict, proxy: bool) -> tuple[dict, dict]:
                 raise ValueError(f"shot {shot['id']}: retention '{ret_req}' must be one of "
                                  f"{', '.join(RETENTIONS)}")
             if policy in RETENTION_DEFAULT:
-                retention = (ret_req or bible.get("audio", {}).get("retention", "").lower()
+                retention = (ret_req or series_cfg.get("audio", {}).get("retention", "").lower()
                              or RETENTION_DEFAULT[policy])
                 if retention not in RETENTIONS:
-                    raise ValueError(f"bible audio.retention '{retention}' must be one of "
+                    raise ValueError(f"series.json audio.retention '{retention}' must be one of "
                                      f"{', '.join(RETENTIONS)}")
                 if "audio_in" not in shot:
                     raise ValueError(
@@ -610,11 +610,11 @@ def compile_episode(ep: dict, bible: dict, proxy: bool) -> tuple[dict, dict]:
                 e = book[s]
                 if e.get("kind", "character") == "character":
                     need(e.get("sheet"), "character sheet",
-                         sheet_prompt(e['design'], bible['style']['look']), shot["id"])
+                         sheet_prompt(e['design'], series_cfg['style']['look']), shot["id"])
 
                 else:
                     need(e.get("sheet"), f"{e.get('kind', 'prop')} reference",
-                         object_prompt(e['design'], bible['style']['look']), shot["id"])
+                         object_prompt(e['design'], series_cfg['style']['look']), shot["id"])
 
             if seq["continuous"] and i > 0 and 22 / raw > 0.15:
                 warnings.append(
@@ -640,7 +640,7 @@ def compile_episode(ep: dict, bible: dict, proxy: bool) -> tuple[dict, dict]:
                 for v in voices:
                     e = book[v]
                     need(e.get("voice_sample"), "voice sample",
-                         voice_prompt(e['name'], e.get('voice', 'as written in the bible')),
+                         voice_prompt(e['name'], e.get('voice', 'as written in series.json')),
                          shot["id"])
                     voice_refs.append({"subject": v, "sample": e.get("voice_sample", "")})
 
@@ -660,7 +660,7 @@ def compile_episode(ep: dict, bible: dict, proxy: bool) -> tuple[dict, dict]:
                 "voices": voices,
                 "voice_subject": voices[0] if voices else "",
                 "voice_refs": voice_refs,
-                "prompt": build_prompt(shot, seq, bible, panels, panel_view),
+                "prompt": build_prompt(shot, seq, series_cfg, panels, panel_view),
             }
             # per-shot override: the shot beats the sequence beats the pass
             for _k in ("model", "lora"):
@@ -739,7 +739,7 @@ SIZE_HINT = {
 def render_todo(report: dict, root: str) -> str:
     """The asset work order.
 
-    Every prompt here is built from the bible, so the wording that describes a
+    Every prompt here is built from the series config, so the wording that describes a
     character in their sheet prompt is the exact wording that goes into all of
     their shot prompts. Generating from a paraphrase is how a character ends up
     subtly wrong in every shot.
@@ -793,9 +793,9 @@ def print_report(r: dict, root: str) -> None:
     print()
 
 
-def print_pacing(ep: dict, bible: dict, fps: float = 24.0) -> int:
+def print_pacing(ep: dict, series_cfg: dict, fps: float = 24.0) -> int:
     """Every dialogue shot measured against the rate it forces on the delivery."""
-    default = bible.get("speech", {}).get("pace", "normal")
+    default = series_cfg.get("speech", {}).get("pace", "normal")
     rows, crammed, tight, gain = [], 0, 0, 0.0
     for seq in ep["sequences"]:
         for shot in seq["shots"]:
@@ -844,7 +844,7 @@ def print_pacing(ep: dict, bible: dict, fps: float = 24.0) -> int:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("series", help="the bible, e.g. series.json")
+    ap.add_argument("series", help="the series config, e.g. series.json")
     ap.add_argument("script", help="the episode script, e.g. ep01.md")
     ap.add_argument("-o", "--out", default=".", help="project root (where shotlist/ lives)")
     ap.add_argument("--proxy", action="store_true", help="emit the low-res animatic pass")
@@ -854,15 +854,15 @@ def main() -> int:
     args = ap.parse_args()
 
     try:
-        bible = load_bible(args.series)
+        series_cfg = load_series_config(args.series)
         with open(args.script, encoding="utf-8") as fh:
             # parse -> story IR -> the dict the H3 compile code reads
-            story = parse_story(fh.read(), subject_ids(bible), character_ids(bible),
-                                series_info(bible))
+            story = parse_story(fh.read(), subject_ids(series_cfg), character_ids(series_cfg),
+                                series_info(series_cfg))
         ep = legacy_episode(story)
         if args.pace:
-            return print_pacing(ep, bible)
-        doc, report = compile_episode(ep, bible, args.proxy)
+            return print_pacing(ep, series_cfg)
+        doc, report = compile_episode(ep, series_cfg, args.proxy)
     except (ScriptError, ValueError, KeyError) as exc:
         print(f"\n  error in {os.path.basename(args.script)}: {exc}\n", file=sys.stderr)
         return 1

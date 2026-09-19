@@ -1,4 +1,4 @@
 exit 1
 
-  error in unknown_location.md: shot sh010: location 'moon' is not in the bible (kitchen, kitchen_window, street)
+  error in unknown_location.md: shot sh010: location 'moon' is not in series.json (kitchen, kitchen_window, street)
 

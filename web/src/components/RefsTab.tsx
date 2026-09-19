@@ -1,4 +1,4 @@
-// The Refs sidebar tab (Phase 5): every ref in the bible, grouped, with its live
+// The Refs sidebar tab (Phase 5): every ref in the series config, grouped, with its live
 // file, its candidates (takes), pick / generate / import / compare, and the
 // ref's prompt and settings override.
 
@@ -24,7 +24,7 @@ import { Progress, statusClass } from "./Thumb";
 
 const FILTERS: { id: RefFilter; label: string; title: string }[] = [
   { id: "episode", label: "this episode", title: "Refs used by this episode's shots (this pass)" },
-  { id: "all", label: "all", title: "Everything in the bible, used or not" },
+  { id: "all", label: "all", title: "Everything in the series config, used or not" },
   { id: "missing", label: "missing", title: "Refs whose file isn't on disk" },
 ];
 
@@ -34,7 +34,7 @@ const NO_FILE = "series.json names no file for this (e.g. a voice-only character
 /** A ref's live file (the one renders read), or a "missing" placeholder. */
 function LiveThumb({ ep, r, size }: { ep: string; r: Ref; size: number }) {
   if (!r.path) {
-    // the bible names no file for it (a voice-only character has no sheet)
+    // the series config names no file for it (a voice-only character has no sheet)
     return (
       <div className="h3-refthumb h3-thumb h3-empty" style={{ width: size, height: size }} title={NO_FILE}>
         <span className="h3-thumb-label">no file</span>
@@ -297,7 +297,7 @@ function RefOverrideEditor({ r }: { r: Ref }) {
   const has = r.override.fields.length > 0;
   return (
     <div className="h3-col">
-      {r.override.stale && <div className="h3-note"><b>Override stale.</b> The bible's text for this ref changed since the override was written.</div>}
+      {r.override.stale && <div className="h3-note"><b>Override stale.</b> The series config's text for this ref changed since the override was written.</div>}
       {!r.override_values && has && (
         <div className="h3-note h3-note-info h3-small">This server doesn't send the override's values (only that {r.override.fields.join(", ")} are set); the form shows what a generate uses now.</div>
       )}
@@ -305,14 +305,14 @@ function RefOverrideEditor({ r }: { r: Ref }) {
         form={form}
         set={set}
         builtPrompt={src.built_prompt}
-        builtLabel="bible"
+        builtLabel="series config"
         promptOverridden={r.override.fields.includes("prompt")}
         showDiff={showDiff}
         setShowDiff={setShowDiff}
         rows={7}
-        seedPlaceholder={`${eff?.seed ?? ""} (bible)`}
-        modelPlaceholder={`(bible) ${ov.model == null && eff ? shortName(eff.model, 40) : ""}`}
-        stepsPlaceholder={`${ov.steps == null && eff ? eff.steps : ""} (bible)`}
+        seedPlaceholder={`${eff?.seed ?? ""} (series config)`}
+        modelPlaceholder={`(series config) ${ov.model == null && eff ? shortName(eff.model, 40) : ""}`}
+        stepsPlaceholder={`${ov.steps == null && eff ? eff.steps : ""} (series config)`}
         effLoras={eff?.loras ?? null}
         lorasOverridden={ov.loras != null || r.override.fields.includes("loras")}
       />
@@ -321,7 +321,7 @@ function RefOverrideEditor({ r }: { r: Ref }) {
         <button className="h3-btn h3-primary" disabled={!dirty || busy} onClick={() => void save()}>{busy ? "Saving…" : "Save"}</button>
         <button className="h3-btn" disabled={!dirty || busy} onClick={() => setForm(base)}>Discard</button>
         <span className="h3-grow" />
-        <button className="h3-btn h3-danger" disabled={!has || busy} onClick={() => confirm(`Put ${r.name} back to the bible's settings?`) && void revertRefOverride(r.id)}>Revert</button>
+        <button className="h3-btn h3-danger" disabled={!has || busy} onClick={() => confirm(`Put ${r.name} back to the series config's settings?`) && void revertRefOverride(r.id)}>Revert</button>
       </div>
       <div className="h3-muted h3-small">Used by the next Generate. Candidates already made keep their settings.</div>
     </div>
@@ -444,7 +444,7 @@ export function RefsTab() {
     <div className="h3-surface">
       <div className="h3-bar">
         <span className="h3-title">Refs</span>
-        {refs && <span className="h3-muted h3-small">{refs.length} in the bible</span>}
+        {refs && <span className="h3-muted h3-small">{refs.length} in the series config</span>}
         <span className="h3-grow" />
         {loading && <i className="pi pi-spin pi-spinner h3-muted" />}
         <PassToggle />
@@ -481,7 +481,7 @@ export function RefsTab() {
                   {!isCollapsed && g.refs.map((r) => <RefRow key={r.id} ep={ep} r={r} />)}
                   {!isCollapsed && !g.refs.length && (
                     <div className="h3-muted h3-small h3-pad">
-                      {g.id === "keyframes" && !g.total ? KEYFRAMES_EMPTY : g.total ? `None match “${FILTERS.find((f) => f.id === filter)?.label}”.` : "None in the bible."}
+                      {g.id === "keyframes" && !g.total ? KEYFRAMES_EMPTY : g.total ? `None match “${FILTERS.find((f) => f.id === filter)?.label}”.` : "None in the series config."}
                     </div>
                   )}
                 </div>

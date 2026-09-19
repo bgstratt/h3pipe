@@ -63,14 +63,14 @@ describe("mock API", () => {
 });
 
 describe("mock refs", () => {
-  it("lists the kitchen_sink bible, grouped by kind, with character views", async () => {
+  it("lists the kitchen_sink series config, grouped by kind, with character views", async () => {
     const api = createMockApi(() => {}, { latency: 0 });
     const ep = (await api.episodes())[0].ep;
     const { refs } = await api.refs(ep);
     const ids = refs.map((r) => r.id);
     expect(ids).toEqual(expect.arrayContaining(["subject:ada", "subject:rex", "subject:kettle", "subject:van", "location:street", "voice:ada"]));
     expect(ids).not.toContain("subject:_note");
-    expect(refs.find((r) => r.id === "subject:rex")!.kind).toBe("character"); // no kind in the bible
+    expect(refs.find((r) => r.id === "subject:rex")!.kind).toBe("character"); // no kind in the series config
     expect(refs.find((r) => r.id === "subject:ada")!.views).toHaveLength(4);
     expect(refs.find((r) => r.id === "subject:van")!.kind).toBe("vehicle");
   });

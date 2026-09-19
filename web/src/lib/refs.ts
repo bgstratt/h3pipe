@@ -48,7 +48,7 @@ export function usedBy(r: Pick<Ref, "used_by">, pass: Pass): string[] {
 export function blockedShots(r: Ref, st: EpisodeStatus | undefined, pass: Pass): string[] {
   if (!st) return r.exists ? [] : usedBy(r, pass);
   const p = normPath(r.path);
-  if (!p) return [];                       // the bible names no file: it blocks nothing
+  if (!p) return [];                       // the series config names no file: it blocks nothing
   return st.shots.filter((s) => missingOf(s).some((m) => normPath(m.path) === p)).map((s) => s.shot);
 }
 

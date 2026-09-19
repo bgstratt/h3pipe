@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
-h3refs.py — references (refs) as takes, driven by the bible.
+h3refs.py — references (refs) as takes, driven by the series config.
 
 A ref is a conditioning input a render reads that the pipeline generates or
-you supply (docs/API.md, "References"). Refs are listed from the bible, not
+you supply (docs/API.md, "References"). Refs are listed from the series config, not
 from refs_todo, so a character nobody uses yet can still be generated:
 
     subject:<id>            a character (four views, stitched into its sheet),
-                            prop or vehicle: the bible's `sheet` path
+                            prop or vehicle: the series config's `sheet` path
     location:<id>           the location's `plate`
     voice:<id>              a subject's `voice_sample` (imported takes only)
     shot:<shot>:first|last  a shot's first / last keyframe, at
@@ -15,10 +15,10 @@ from refs_todo, so a character nobody uses yet can still be generated:
                             and pick only: nothing generates keyframes yet)
 
 Where things live. Series refs belong to the folder holding series.json (the
-episode, or its parent when the bible is shared by a series); shot keyframes
-belong to the episode. Call that folder the ref's home:
+episode, or its parent when the series config is shared by a series); shot
+keyframes belong to the episode. Call that folder the ref's home:
 
-    <home>/<path the bible names>                   the live file renders read
+    <home>/<path series.json names>                 the live file renders read
     <home>/refs/_takes/<key>/<key>[_<view>]_tNN.png  a candidate (take)
     <home>/refs/_takes/<key>/<key>[_<view>]_tNN.json its sidecar
     <home>/refs/_picks.json                         which take is live
@@ -310,47 +310,47 @@ class StitchError(RuntimeError):
 
 
 # ---------------------------------------------------------------------------
-# the series: the bible and where its paths resolve
+# the series: the series config and where its paths resolve
 # ---------------------------------------------------------------------------
 
-def episode_bible(ep: str) -> str | None:
+def episode_series_config(ep: str) -> str | None:
     """series.json in the episode folder, else in its parent (h3edit's rule)."""
-    return E.episode_bible(ep)
+    return E.episode_series_config(ep)
 
 
 @dataclass
 class Series:
     ep: str                 # the episode folder (absolute)
-    bible_file: str
+    config_file: str
     home: str               # the folder holding series.json: series ref paths start here
-    bible: dict
+    series_cfg: dict
 
     @property
     def look(self) -> str:
-        return (self.bible.get("style") or {}).get("look", "")
+        return (self.series_cfg.get("style") or {}).get("look", "")
 
 
 def load_series(ep: str) -> Series:
-    """The episode's bible, filtered as h3build reads it. FileNotFoundError if
+    """The episode's series config, filtered as h3build reads it. FileNotFoundError if
     there is none; ValueError if it can't be read."""
-    from h3core.bible import load_bible
+    from h3core.series_config import load_series_config
     ep = os.path.abspath(ep)
-    path = episode_bible(ep)
+    path = episode_series_config(ep)
     if not path:
         raise FileNotFoundError(f"no series.json in {ep} or its parent folder")
-    return Series(ep, path, os.path.dirname(os.path.abspath(path)), load_bible(path))
+    return Series(ep, path, os.path.dirname(os.path.abspath(path)), load_series_config(path))
 
 
 def ref_file(home: str, path: str) -> str:
     """THE rule for where a ref path points: relative to the ref's home (the
-    bible's folder for series refs, the episode for shot keyframes), unless
+    series config's folder for series refs, the episode for shot keyframes), unless
     absolute. Every file this module reads or writes goes through it."""
     return os.path.normpath(path if os.path.isabs(path) else os.path.join(home, path))
 
 
 def ep_rel(ep: str, path: str | None) -> str | None:
     """`path` relative to the episode, forward slashes (URL-ready). A ref under
-    a parent-folder bible comes out as ../refs/..."""
+    a parent-folder series config comes out as ../refs/..."""
     if not path:
         return None
     try:
@@ -369,7 +369,7 @@ class Ref:
     scope: str              # series | shot
     kind: str               # character | prop | vehicle | ... | location | voice | keyframe
     name: str
-    path: str               # as the bible names it (relative to `home`); "" if none
+    path: str               # as the series config names it (relative to `home`); "" if none
     home: str
     entry: dict = field(default_factory=dict)
     subject: str | None = None
@@ -401,15 +401,15 @@ def ref_key(ref_id: str) -> str:
 
 
 def series_refs(s: Series) -> list[Ref]:
-    """Every ref the bible names, subjects first (bible order), then locations,
+    """Every ref the series config names, subjects first (series config order), then locations,
     then voices."""
     out = []
-    book = s.bible["subjects"]
+    book = s.series_cfg["subjects"]
     for sid, e in book.items():
         kind = e.get("kind", "character")
         out.append(Ref(f"subject:{sid}", "series", kind, e.get("name", sid),
                        e.get("sheet") or "", s.home, e, sid))
-    for lid, e in s.bible["locations"].items():
+    for lid, e in s.series_cfg["locations"].items():
         out.append(Ref(f"location:{lid}", "series", "location", e.get("name", lid),
                        e.get("plate") or "", s.home, e))
     for sid, e in book.items():
@@ -477,7 +477,7 @@ def find_ref(s: Series, ref_id) -> Ref:
     if not re.match(r"(subject|location|voice):", ref_id):
         raise RefError(f"unknown kind of ref {ref_id!r}: subject:<id>, location:<id>, "
                        f"voice:<id> or shot:<shot>:first|last")
-    raise UnknownRef(f"{ref_id} is not in {os.path.basename(s.bible_file)}")
+    raise UnknownRef(f"{ref_id} is not in {os.path.basename(s.config_file)}")
 
 
 def check_view(ref: Ref, view, required: bool = False) -> str | None:
@@ -495,19 +495,19 @@ def check_view(ref: Ref, view, required: bool = False) -> str | None:
 
 
 # ---------------------------------------------------------------------------
-# prompts, sizes and seeds as the bible gives them
+# prompts, sizes and seeds as the series config gives them
 # ---------------------------------------------------------------------------
 
 def built_prompt(s: Series, ref: Ref, view: str | None = None,
                  view_size: tuple[int, int] = VIEW_SIZE) -> str | None:
-    """The prompt the bible gives this ref (and view): what a generate uses
-    unless overridden. None when the bible lacks what it needs. A character
+    """The prompt the series config gives this ref (and view): what a generate uses
+    unless overridden. None when the series config lacks what it needs. A character
     with no view gets its hand-made-sheet description (as in refs_todo)."""
     e = ref.entry
     if ref.kind == "keyframe":
         return None
     if ref.kind == "voice":
-        return voice_prompt(e.get("name", ref.subject), e.get("voice", "as written in the bible"))
+        return voice_prompt(e.get("name", ref.subject), e.get("voice", "as written in series.json"))
     if ref.kind == "location":
         return plate_prompt(s.look, e["description"]) if e.get("description") else None
     if not e.get("design"):
@@ -529,7 +529,7 @@ def gen_size(ref: Ref, view_size: tuple[int, int] = VIEW_SIZE) -> tuple[int, int
 
 def stable_seed(ref: Ref) -> int:
     """kreagen's seeds: a character's four views share seed_for(<id>); anything
-    else uses seed_for(<the path the bible names>)."""
+    else uses seed_for(<the path the series config names>)."""
     if ref.kind == "character":
         return seed_for(ref.subject)
     return seed_for(ref.path or ref.id)
@@ -543,7 +543,7 @@ def can_generate(s: Series, ref: Ref) -> str | None:
         return "nothing generates keyframes yet: import an image"
     if built_prompt(s, ref, VIEW_TAGS[0] if ref.has_views else None) is None:
         what = "description" if ref.kind == "location" else "design"
-        return f"no {what} in {os.path.basename(s.bible_file)} for {ref.id}"
+        return f"no {what} in {os.path.basename(s.config_file)} for {ref.id}"
     return None
 
 
@@ -731,7 +731,7 @@ def _atomic_copy(src: str, dst: str) -> None:
 # The same fields as a shot override. A view's fields beat the ref's. A
 # character's prompt is per view (one text can't describe four views).
 # `base_hash` is the hash of the built prompt the override was written
-# against; when the bible changes that prompt, the override is stale.
+# against; when the series config changes that prompt, the override is stale.
 
 OVERRIDES_FILE = os.path.join("refs", "_overrides.json")
 PICKS_FILE = os.path.join("refs", "_picks.json")
@@ -883,7 +883,7 @@ def pick_take(s: Series, ref: Ref, view: str | None, take: int,
     if t.status != "ok" and not force:
         raise NotUsable(f"{ref.id}{' ' + view if view else ''} t{take:02d} is {t.status}")
     if not ref.path:
-        raise RefError(f"{os.path.basename(s.bible_file) if ref.scope == 'series' else 'the episode'}"
+        raise RefError(f"{os.path.basename(s.config_file) if ref.scope == 'series' else 'the episode'}"
                        f" names no file for {ref.id}")
     picks = load_picks(ref.home)
     block = picks["refs"].setdefault(ref.id, {})
@@ -1427,14 +1427,14 @@ def ref_json(s: Series, ref: Ref, usage: dict | None = None,
         if out["effective"]:
             out["prompt"] = out["effective"]["prompt"]
     # flat aliases the editor reads (docs/API.md): the override's values, and
-    # the bible's prompt before any override, for the prompt diff
+    # the series config's prompt before any override, for the prompt diff
     out["override_values"] = out["override"]["values"]
     out["built_prompt"] = built_prompt(s, ref, None, view_size)
     return out
 
 
 def list_refs(ep: str, view_size=VIEW_SIZE) -> list[dict]:
-    """Every ref of the episode's bible, then the shot keyframes that exist."""
+    """Every ref of the episode's series config, then the shot keyframes that exist."""
     s = load_series(ep)
     refs = series_refs(s) + keyframe_refs(s.ep)
     usage = used_by(s, refs)

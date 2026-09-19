@@ -11,7 +11,7 @@ export interface OverrideFieldsProps {
   set: (patch: Partial<OverrideForm>) => void;
   /** what the prompt is without an override */
   builtPrompt: string;
-  /** "built" for shots, "bible" for refs */
+  /** "built" for shots, "series config" for refs */
   builtLabel?: string;
   promptOverridden: boolean;
   showDiff: boolean;
@@ -36,7 +36,7 @@ export function OverrideFields(p: OverrideFieldsProps) {
         <span className="h3-h h3-grow">Prompt {p.promptOverridden ? <span className="h3-badge h3-b-override">override</span> : <span className="h3-muted">({built})</span>}</span>
         <label className="h3-check h3-small"><input type="checkbox" checked={p.showDiff} onChange={(e) => p.setShowDiff(e.target.checked)} /> diff</label>
         <button className="h3-btn" disabled={!promptChanged} title={`Put the ${built} prompt back in the box`} onClick={() => set({ prompt: p.builtPrompt })}>
-          {built === "built" ? "Built" : "Bible"}
+          {built === "built" ? "Built" : "Series config"}
         </button>
       </div>
       {p.showDiff ? (

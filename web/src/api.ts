@@ -19,11 +19,11 @@
 //    needs a file picker, so the client sends `files=image|audio` and reads an
 //    optional `files: [{name, path, size?}]`. A server without it gets the
 //    typed-path fallback in the dialog.
-//  - TODO(contract): ref files live beside the bible, which (Phase 5 layout) can be
+//  - TODO(contract): ref files live beside the series config, which (Phase 5 layout) can be
 //    the episode's parent folder, but `GET /h3pipe/file` only serves paths inside
 //    `ep`. `refFileUrl` uses `/h3pipe/file` with the ref's path as given, plus
 //    `v=<sha1>` to beat the browser's image cache after a re-pick. A
-//    `/h3pipe/refs/file?ep&path` (paths relative to the bible) would settle it.
+//    `/h3pipe/refs/file?ep&path` (paths relative to the series config) would settle it.
 //  - TODO(contract): `GET /h3pipe/refs` gives the effective `prompt` and the
 //    override's field *names*, not the override's values or the effective
 //    seed/model/LoRAs/steps, so the ref override editor can't show them. Read

@@ -6,13 +6,13 @@ This is the working plan for the next round of development. `CLAUDE.md` points h
 
 ## Goals
 
-1. **Script + bible in, episode out, with a tight tweak loop.** You write `epNN.md` and
+1. **Script + series config in, episode out, with a tight tweak loop.** You write `epNN.md` and
    `series.json`; everything else can be driven from a UI inside ComfyUI: generate
    refs, render shots, tweak a shot's prompt/seed/model/LoRA/steps, redo, compare
    takes, pick the take each shot uses, assemble.
 2. **Nothing is lost.** Every take is kept with the exact settings that produced it.
    Picking an earlier take never deletes a later one. UI tweaks survive a rebuild.
-3. **Model-agnostic core.** The script and bible describe *the film*; nothing in them
+3. **Model-agnostic core.** The script and series config describe *the film*; nothing in them
    should assume MiniMax H3 or Krea. Adding a model means adding a *target*, not
    editing the pipeline. Different kinds of shot can use different models/LoRAs.
 4. **Nothing breaks on the way.** Every refactor is proven by comparing generated
@@ -39,19 +39,19 @@ This is the working plan for the next round of development. `CLAUDE.md` points h
 | **UI tweaks live in `overrides.json`, not the script** | Story edits (action, camera, dialogue) are model-free and belong in `epNN.md`. Compiled edits (the exact H3 prompt text, seed, model, LoRAs, steps) are target-specific and belong in an editor-owned sidecar. A "promote to script" action moves story edits across later. |
 | **Redo uses a new seed by default, recorded in the take** | Today a redo reuses `stable_seed` and mostly reproduces the last take. Take 1 still uses `stable_seed` (the derivation is unchanged); redo offers new (default) / same / typed seed. |
 | **Every render is frozen** | At queue time the job's exact one-shot shotlist is written beside the take. The take can always be reproduced or used as the starting point of a redo, whatever the script says now. |
-| **Refs are driven by the bible and have takes too** | Refs belong to the series, not an episode, and you want to lock designs before a script uses them. Candidates are takes; the picked one is copied to the path the bible names. |
+| **Refs are driven by the series config and have takes too** | Refs belong to the series, not an episode, and you want to lock designs before a script uses them. Candidates are takes; the picked one is copied to the path the series config names. |
 | ComfyUI-Sonder-Editor is **inspiration only** | Borrow ideas (model templates, recipes, frozen job provenance, take gallery/compare). No code: it is GPL-3. |
 | Prompt formats are **code**, everything else about a target is **data** | Writing an H3 prompt is real logic; a declarative DSL would only move that complexity somewhere worse. |
 
 ## Project layout
 
 Today each episode folder holds its own `series.json` and `refs/`, so several episodes
-duplicate the bible and refs drift apart. Target layout:
+duplicate the series config and refs drift apart. Target layout:
 
 ```
 Shows/gold_path/
-  series.json            the bible
-  refs/                  picked refs, at the paths the bible names
+  series.json            the series config
+  refs/                  picked refs, at the paths the series config names
   refs/_takes/<ref>/     ref candidates + sidecars
   ep01/
     ep01.md              the script
@@ -63,8 +63,8 @@ Shows/gold_path/
     renders_proxy/<shot>/
 ```
 
-The bible is looked up in the episode folder first, then its parent, so today's
-per-episode layout keeps working. Bible paths are relative to the folder holding
+The series config is looked up in the episode folder first, then its parent, so today's
+per-episode layout keeps working. Series config paths are relative to the folder holding
 `series.json`; build writes them into the shotlist relative to the episode.
 
 ## Architecture
@@ -78,7 +78,7 @@ per-episode layout keeps working. Bible paths are relative to the folder holding
                           + shotlist.<target>)     ├─ queue ─▶ renders/<shot>/<shot>_tNN.*
                                  overrides.json ───┘              (mp4, frozen shotlist,
                                                                     sidecar, thumbs)
- series.json ─── refs ─▶ refs/_takes/<ref>/… ─ pick ─▶ refs/<path the bible names>
+ series.json ─── refs ─▶ refs/_takes/<ref>/… ─ pick ─▶ refs/<path the series config names>
                                                                          │
                                                   cut.json ─ assemble ─▶ epNN.mp4
 ```
@@ -192,12 +192,12 @@ An **ordered list**, so the cut can differ from script order.
 
 ## 4. References
 
-- **The Refs tab lists every subject and location in the bible**, not just what one
+- **The Refs tab lists every subject and location in the series config**, not just what one
   episode's `refs_todo.json` needs. `refs_todo` becomes an episode filter and badge
   ("blocks 12 shots in ep05").
 - **A ref's candidates are takes**, stored in `refs/_takes/<ref>/<ref>_tNN.png` with
   sidecars (the same shape as video takes: prompt, seed, model, LoRAs). Picking a take
-  copies it to the path the bible names, and every video take records that file's sha1,
+  copies it to the path the series config names, and every video take records that file's sha1,
   so re-picking a ref marks dependent takes stale (`ref`).
 - **Character sheets:** each of the four views has its own takes. A pick per view, then
   `mksheet` stitches them.
@@ -205,7 +205,7 @@ An **ordered list**, so the cut can differ from script order.
 - **Prompt tweaks:** ref prompt and seed tweaks go in `refs/_overrides.json`, the same
   shape as shot overrides, keyed by ref.
 - **Two fixes in `kreagen` along the way:**
-  - It gets the character id from the bible entry, not by guessing from the filename.
+  - It gets the character id from the series config entry, not by guessing from the filename.
     Today `basename.split("_sheet")[0]` silently skips any sheet not named
     `<id>_sheet…`.
   - There is one source for sheet prompt wording. Today `h3build.need()` writes a
@@ -217,7 +217,7 @@ An **ordered list**, so the cut can differ from script order.
 |---|---|
 | Sidebar **Shots** tab | Episode picker; bin grouped by sequence → shot, expanding to takes; badges (stale, override, queued/rendering, placeholder, no take). |
 | Sidebar **Inspector** (the selected shot) | Built values (read-only); the override editor: prompt text with a diff against the built text, seed, model/LoRA/steps pickers (from ComfyUI's model lists); Render / Redo buttons; pass toggle. |
-| Sidebar **Refs** tab | Bible subjects and locations; picked ref and candidates; generate / redo / import / pick. |
+| Sidebar **Refs** tab | Series config subjects and locations; picked ref and candidates; generate / redo / import / pick. |
 | Sidebar **Queue** tab | Jobs from this episode with live progress (ComfyUI websocket); cancel. |
 | Bottom panel **Timeline** | The cut: take thumbnails in cut order, width ∝ duration, hover scrub; pass toggle; later, drag to reorder and the dialogue waveform. |
 | Floating **Take viewer** | One shot: a large player, all its takes as a strip below, click to load A / B for side-by-side or wipe compare, "Use this take", "Redo from this take". Opens by double-clicking a thumbnail. |
@@ -354,24 +354,24 @@ Use it on a real episode, then decide and write down here:
 
 **Phase 5 — references**: backend merged 2026-09-18 (`h3refs.py`, `H3SaveRefTake`, the
 ref routes, `kreagen` on takes); the Refs tab is in progress.
-- **Known gap:** a bible in the episode's *parent* folder. `h3refs` resolves ref paths
-  against the bible's folder, but `h3build` writes the bible's paths into the shotlist
+- **Known gap:** a series config in the episode's *parent* folder. `h3refs` resolves ref paths
+  against the series config's folder, but `h3build` writes the series config's paths into the shotlist
   unchanged, and the loader resolves them against the episode. Fix: `h3build` rebases
   ref paths to be relative to the episode (an intended golden change, needing a
-  parent-bible fixture). Today's episodes each have their own `series.json`, so this
+  parent-folder series config fixture). Today's episodes each have their own `series.json`, so this
   only matters for the series-folder layout.
 
 **Phase 5 — references** (the original bullets)
-- Series/episode layout: look up the bible in the parent folder; paths resolve relative
-  to the bible.
+- Series/episode layout: look up the series config in the parent folder; paths resolve relative
+  to the series config.
 - Ref takes, picks, per-view sheet picks, import, `refs/_overrides.json`; the two
   `kreagen` fixes above; ref routes and the Refs tab.
-- Exit: generate a new character's sheet from the bible alone (no episode uses it yet);
+- Exit: generate a new character's sheet from the series config alone (no episode uses it yet);
   re-picking a ref marks dependent video takes `ref`-stale.
 
 **Phase 6 — extract the story IR, no behaviour change**
 - ✅ New package (`h3pipe/` or `core/`): `story.py` (parse → IR), `ir.py` (dataclasses +
-  JSON), `bible.py`.
+  JSON), `series_config.py`.
 - ✅ `h3build.py` becomes: parse → IR → the current H3 compile code (still in place).
 - ✅ Write `shotlist/shots.json` alongside the existing outputs; `shot_hash` becomes the
   IR hash (not yet: that is `h3jobs`, left for after Phases 2/3 land).
@@ -400,7 +400,7 @@ ref routes, `kreagen` on takes); the Refs tab is in progress.
 - Promote to script (needs the parser to record each shot's line span).
 - Drag-reorder and trims in the timeline; play-through of the cut; master dialogue
   waveform under the timeline.
-- Bible editing in the UI (design sentences → regenerate refs).
+- Series config editing in the UI (design sentences → regenerate refs).
 
 ## Story IR — `shotlist/shots.json` (Phase 6)
 
@@ -417,7 +417,7 @@ grid, no `<Picture N>`, no H3 vocabulary. Sketch (fields follow the current pars
       "id": "sh020",
       "cast": ["riley", "huey"],          // on-screen characters, script order
       "props": [],                        // with:
-      "plate": "street",                  // location/angle key into the bible
+      "plate": "street",                  // location/angle key into the series config
       "size": "medium",
       "camera": "pushes in with small amplitude at slow speed on the two of them",
       "action": "Riley runs into frame from the left and stops hard beside Huey…",
@@ -470,7 +470,7 @@ shot gets its model setup without repeating it on every shot.
 targets/
   video/minimax_h3_ref2va/
     target.json        template, recipe, binding, presets
-    prompt.py          compile(shot_ir, bible, ctx) -> CompiledShot
+    prompt.py          compile(shot_ir, series_cfg, ctx) -> CompiledShot
     workflow.json      the graph (moved from workflows/)
   image/krea2/
     target.json
@@ -485,11 +485,11 @@ class Target(Protocol):
     id: str
     kind: Literal["video", "image"]
     template: Template        # snap(seconds) -> frames, validate(width, height)
-    recipe: Recipe            # pack(shot, bible) -> slots, required refs
+    recipe: Recipe            # pack(shot, series_cfg) -> slots, required refs
     binding: WorkflowBinding  # graph + widget map
     presets: dict[str, Preset]
-    def compile(self, shot: ShotIR, bible: Bible, preset: Preset) -> CompiledShot: ...
-    def required_refs(self, shot: ShotIR, bible: Bible) -> list[RefRequest]: ...
+    def compile(self, shot: ShotIR, series_cfg: SeriesConfig, preset: Preset) -> CompiledShot: ...
+    def required_refs(self, shot: ShotIR, series_cfg: SeriesConfig) -> list[RefRequest]: ...
 ```
 
 `binding` example:

@@ -1072,7 +1072,7 @@ export async function revertRefOverride(ref: string, view: string | null = null)
   return withBusy(`refoverride|${ref}`, async () => {
     try {
       await api().deleteRefOverride(ep, ref, view);
-      host().toast("info", `${refLabel(ref, view)}: back to the bible's settings`);
+      host().toast("info", `${refLabel(ref, view)}: back to the series config's settings`);
       await loadRefs(ep);
     } catch (e) {
       report(`Couldn't revert ${refLabel(ref, view)}`, e);

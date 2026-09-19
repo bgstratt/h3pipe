@@ -2,7 +2,7 @@
 """
 h3plan.py -- Episode -> MiniMax H3 chain plan compiler.
 
-Takes one episode file (script + cast bible + dialogue-track timings) and emits
+Takes one episode file (script + cast + dialogue-track timings) and emits
 the plan_json payloads for MiniMaxH3ChainPlan, one per render unit, plus a
 scheduled-reference table, a shot manifest, and a timing report.
 

@@ -1,10 +1,10 @@
-// The dev page's stateful refs, built from the kitchen_sink bible
+// The dev page's stateful refs, built from the kitchen_sink series config
 // (tests/fixtures/kitchen_sink/series.json). The mock episode (DeanStories ep05)
 // uses other names, so its shots are mapped onto kitchen_sink refs by index:
 // synthetic, but enough to see missing refs block shots, and picks unblock them.
 // Candidate images are SVGs made on the fly (data: URLs).
 
-import bibleRaw from "../../../tests/fixtures/kitchen_sink/series.json?raw";
+import seriesCfgRaw from "../../../tests/fixtures/kitchen_sink/series.json?raw";
 import { VIEWS } from "../lib/refs";
 import type {
   Lora, MissingRef, Override, OverrideFields, Pass, Ref, RefEffective, RefGenerateRequest, RefGenerateResult,
@@ -12,7 +12,7 @@ import type {
 } from "../types";
 import { fsFileExists } from "./mockFs";
 
-interface Bible {
+interface SeriesConfig {
   style?: { look?: string };
   subjects: Record<string, { kind?: string; name?: string; design?: string; sheet?: string; voice_sample?: string } | string>;
   locations: Record<string, { description?: string; plate?: string } | string>;
@@ -114,8 +114,8 @@ export function createMockRefs(opts: {
   nextPrompt: () => string;
   onLiveChange: (ref: string) => void;
 }): MockRefs {
-  const bible = JSON.parse(bibleRaw) as Bible;
-  const look = bible.style?.look ?? "";
+  const seriesCfg = JSON.parse(seriesCfgRaw) as SeriesConfig;
+  const look = seriesCfg.style?.look ?? "";
   const refs: MRef[] = [];
   const images = new Map<string, string>();
 
@@ -123,7 +123,7 @@ export function createMockRefs(opts: {
   const takePath = (r: MRef, view: string | null, take: number, ext = "png") =>
     `refs/_takes/${key(r.id)}/${key(r.id)}${view ? `_${view}` : ""}_t${String(take).padStart(2, "0")}.${ext}`;
 
-  for (const [id, raw] of Object.entries(bible.subjects)) {
+  for (const [id, raw] of Object.entries(seriesCfg.subjects)) {
     if (id.startsWith("_") || typeof raw !== "object") continue;
     const kind = (raw.kind ?? "character") as Ref["kind"];
     const name = raw.name ?? id;
@@ -143,7 +143,7 @@ export function createMockRefs(opts: {
       });
     }
   }
-  for (const [id, raw] of Object.entries(bible.locations)) {
+  for (const [id, raw] of Object.entries(seriesCfg.locations)) {
     if (id.startsWith("_") || typeof raw !== "object") continue;
     const base_prompt = `A background plate, no people: ${raw.description ?? id}. ${look}.`;
     refs.push({
@@ -154,7 +154,7 @@ export function createMockRefs(opts: {
   }
   const byId = (id: string) => {
     const r = refs.find((x) => x.id === id);
-    if (!r) throw new RefError(`No ref ${id} in the bible`, 404);
+    if (!r) throw new RefError(`No ref ${id} in series.json`, 404);
     return r;
   };
 

@@ -1,7 +1,7 @@
 # Writing an episode for h3pipe
 
 Everything the renderer does comes from two files you write by hand: `series.json`, the
-bible, and `epNN.md`, the script. This document is the whole format. It is written to be
+series config, and `epNN.md`, the script. This document is the whole format. It is written to be
 useful to a person, and to be pasted into an AI assistant's instructions — `prompts/` holds
 generated copies for that.
 
@@ -15,10 +15,10 @@ shot 93. So:
   "Riley walks down the dirt path, already halfway along."
 - Never write "as before", "same as the last shot", "still holding the ball". State it fresh
   or it does not exist.
-- Character descriptions live in the bible, written once, injected into every prompt they
+- Character descriptions live in the series config, written once, injected into every prompt they
   appear in. Never repeat a character's appearance in the script.
 
-## The bible: series.json
+## The series config: series.json
 
 ```json
 {
@@ -125,7 +125,7 @@ sound: running footsteps on grass, fabric movement
 | Line | Meaning |
 |---|---|
 | `= id  Title` | episode header, once at the top |
-| `# sqNN  location` | sequence; the location must be a bible key |
+| `# sqNN  location` | sequence; the location must be a series config key |
 | `## shNNN` | a shot. **Every `##` is a cut** — no `CUT TO:` needed |
 | `who: a, b` | characters on screen, becoming `<Picture 1..3>` in this order |
 | `with: x, y` | props and vehicles, taking the next free slot |
@@ -240,7 +240,7 @@ extra in the action text without referencing it. Crowds cost nothing that way �
 won't look the same from shot to shot.
 
 A `(V.O.)` or `(O.S.)` speaker costs no slot, is never drawn, and needs no sheet — only a
-`voice` in the bible. A shot may have no `who:` at all: an establishing plate with narration
+`voice` in the series config. A shot may have no `who:` at all: an establishing plate with narration
 over it.
 
 ### Crowds and extras
@@ -305,7 +305,7 @@ python h3build.py series.json ep01.md --check     # counts, runtime, references,
 python h3build.py series.json ep01.md --pace      # dialogue pacing per shot
 ```
 
-Errors name the line and quote it. Common ones: a name in `who:` that is not in the bible; a
+Errors name the line and quote it. Common ones: a name in `who:` that is not in the series config; a
 location with no plate; an ALL-CAPS `NAME:` line for someone who cannot speak (usually a typo,
 which would otherwise become action prose); more than three subjects; a shot with neither
 `dur:` nor `audio:`; `dur: auto` on a shot with no dialogue.

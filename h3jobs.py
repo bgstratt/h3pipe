@@ -570,7 +570,7 @@ def frozen_shotlist(job: Job) -> dict:
 def ref_slots(doc: dict, shot: dict) -> list[dict]:
     """Every reference the loader will read for `shot`: {slot, kind ("image" |
     "audio"), path, subject?}. Paths as the shotlist writes them (relative to
-    the episode unless absolute); an empty path means the bible names none."""
+    the episode unless absolute); an empty path means the series config names none."""
     book = doc.get("subjects", {})
     out = []
     for i, sid in enumerate((shot.get("subjects") or [])[:3], start=1):

@@ -1,5 +1,5 @@
 """
-h3core.story — the script parser: epNN.md text + the bible's ids -> story IR.
+h3core.story — the script parser: epNN.md text + the series config's ids -> story IR.
 
     parse_story(text, subject_ids, character_ids, series) -> ir.Episode
     parse_script(text, subject_ids, character_ids)        -> dict (legacy shape)
@@ -160,11 +160,11 @@ def _parse(text: str, subject_ids: set[str],
                     raise ScriptError(
                         n, line,
                         f"'{lower}' is a {'prop' if lower not in upper.values() else 'subject'} "
-                        f"in the bible, not a character — only characters can speak. "
+                        f"in series.json, not a character — only characters can speak. "
                         f"Change its kind to 'character', or write this as action.")
                 raise ScriptError(
                     n, line,
-                    f"'{name}' is not a character in the bible "
+                    f"'{name}' is not a character in series.json "
                     f"({', '.join(sorted(upper.values()))}). Typo, or write it as action.")
         if m and m.group(1).strip().upper() in upper:
             if shot is None:
@@ -198,7 +198,7 @@ def _parse(text: str, subject_ids: set[str],
                 for c in names:
                     if c not in subject_ids:
                         raise ScriptError(n, line,
-                                          f"'{c}' is not in the bible's subjects "
+                                          f"'{c}' is not in series.json's subjects "
                                           f"({', '.join(sorted(subject_ids))})")
                 bucket = "cast" if key in ("who", "cast") else "props"
                 merged: list[str] = []
@@ -323,6 +323,6 @@ def episode_from_parsed(ep: dict, seq_lines: list[int],
 def parse_story(text: str, subject_ids: set[str], character_ids: set[str],
                 series: dict | None = None) -> Episode:
     """Parse a script into the story IR. `series` ({fps, width, height}, from
-    bible.series_info) is carried on the episode header."""
+    series_config.series_info) is carried on the episode header."""
     ep, seq_lines, spans = _parse(text, subject_ids, character_ids)
     return episode_from_parsed(ep, seq_lines, spans, series)

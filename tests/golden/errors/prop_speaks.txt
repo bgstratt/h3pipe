@@ -1,5 +1,5 @@
 exit 1
 
-  error in prop_speaks.md: line 5: 'kettle' is a prop in the bible, not a character — only characters can speak. Change its kind to 'character', or write this as action.
+  error in prop_speaks.md: line 5: 'kettle' is a prop in series.json, not a character — only characters can speak. Change its kind to 'character', or write this as action.
     | KETTLE: Wheee.
 

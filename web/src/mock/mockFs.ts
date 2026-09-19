@@ -5,7 +5,7 @@ import type { BrowseDir, BrowseFile, BrowseResult } from "../types";
 
 interface Node {
   episode?: boolean;
-  bible?: boolean;
+  series_config?: boolean;
   dirs?: Record<string, Node>;
   files?: Record<string, number>; // name -> size in bytes
 }
@@ -20,11 +20,11 @@ const TREE: Record<string, Node> = {
       Shows: {
         dirs: {
           DeanStories: {
-            bible: true,
-            dirs: { ep05: { episode: true, bible: false, dirs: { shotlist: {}, renders_proxy: {} } }, refs: { dirs: { _bg: {}, _takes: {} } }, audio: {} },
+            series_config: true,
+            dirs: { ep05: { episode: true, series_config: false, dirs: { shotlist: {}, renders_proxy: {} } }, refs: { dirs: { _bg: {}, _takes: {} } }, audio: {} },
             files: { "series.json": 9_120 },
           },
-          KitchenSink: { bible: true, dirs: { drafts: {} }, files: { "series.json": 4_310 } },
+          KitchenSink: { series_config: true, dirs: { drafts: {} }, files: { "series.json": 4_310 } },
         },
       },
       AI: { dirs: { ComfyUI: { dirs: { models: {}, custom_nodes: {} } } } },
@@ -85,9 +85,9 @@ export class FsError extends Error {
 export function browse(path: string | null | undefined, files: boolean): BrowseResult {
   if (!path) {
     const dirs: BrowseDir[] = [
-      { name: `Home (${HOME})`, path: HOME, episode: false, bible: false },
-      { name: "C:\\", path: "C:\\", episode: false, bible: false },
-      { name: "D:\\", path: "D:\\", episode: false, bible: false },
+      { name: `Home (${HOME})`, path: HOME, episode: false, series_config: false },
+      { name: "C:\\", path: "C:\\", episode: false, series_config: false },
+      { name: "D:\\", path: "D:\\", episode: false, series_config: false },
     ];
     return { path: "", parent: null, episode: false, truncated: false, dirs, ...(files ? { files: [] } : {}) };
   }
@@ -98,7 +98,7 @@ export function browse(path: string | null | undefined, files: boolean): BrowseR
   const parent = p.length === 1 ? "" : p.length === 2 ? `${p[0].toUpperCase()}\\` : [p[0].toUpperCase(), ...p.slice(1, -1)].join("\\");
   const dirs: BrowseDir[] = Object.entries(n.dirs ?? {})
     .sort(([a], [b]) => a.localeCompare(b))
-    .map(([name, d]) => ({ name, path: join(norm, name), episode: !!d.episode, bible: !!d.bible || !!d.episode }));
+    .map(([name, d]) => ({ name, path: join(norm, name), episode: !!d.episode, series_config: !!d.series_config || !!d.episode }));
   const out: BrowseResult = { path: norm, parent, episode: !!n.episode, truncated: false, dirs };
   if (files) {
     out.files = Object.entries(n.files ?? {})

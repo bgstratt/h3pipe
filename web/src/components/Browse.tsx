@@ -155,7 +155,7 @@ function BrowseBody({ b }: { b: BrowseState }) {
             <i className={d.episode ? "pi pi-video" : "pi pi-folder"} />
             <span className="h3-grow h3-ell">{d.name}</span>
             {d.episode && <span className="h3-badge h3-b-cut">episode</span>}
-            {!d.episode && d.bible && <span className="h3-badge">series</span>}
+            {!d.episode && d.series_config && <span className="h3-badge">series</span>}
             {roots.some((r) => r.replace(/[\\/]+$/, "").toLowerCase() === d.path.replace(/[\\/]+$/, "").toLowerCase()) && <span className="h3-badge h3-b-ok">root</span>}
           </div>
         ))}

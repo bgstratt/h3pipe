@@ -147,8 +147,8 @@ describe("browse helpers", () => {
 });
 
 // Regression: the real server sends `path: null` (and `prompt: null`) for a
-// voice-only character with no sheet in the bible. The Refs tab crashed on it.
-describe("a ref whose bible entry names no file", () => {
+// voice-only character with no sheet in the series config. The Refs tab crashed on it.
+describe("a ref whose series config entry names no file", () => {
   const narrator = ref("subject:narrator", "character", {
     path: null, exists: false, sha1: null, prompt: null, can_generate: false,
     why_not: "no `sheet` path in series.json",
