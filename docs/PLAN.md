@@ -3,7 +3,7 @@
 Status (2026-09-19): Phases 0, 1, 2, 3, 5, 6 and 7 done and in use; Phase 4 (evaluate) is
 ongoing through use. Phase 8 (LTX-2.5 as the second video target, mixed-target episodes,
 retargeting) is built, green on every golden, and live-checked from the CLI; the
-inspector's target picker is the UI half, in progress in `web/`. The remaining LTX work
+editor's target picker is merged too (route-level live check pending a restart). The remaining LTX work
 (ingredients / subject refs, final-quality settings, keyframe generation) is listed under
 **Phase 8 — as built**.
 This is the working plan for the next round of development. `CLAUDE.md` points here.
