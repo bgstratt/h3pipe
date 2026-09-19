@@ -2,6 +2,7 @@
 // root, but they all live in one bundle, so they all see this module.
 
 import { useSyncExternalStore } from "react";
+import type { ToastAction } from "./host";
 import type { RefFilter } from "./lib/refs";
 import type {
   BuildResult, Config, EpisodeStatus, EpisodeSummary, ModelList, Pass, Ref, ShotDetail, TakeRef, TargetList,
@@ -134,6 +135,12 @@ export interface Toast {
   severity: "success" | "info" | "warn" | "error";
   summary: string;
   detail?: string;
+  action?: ToastAction;
+}
+
+/** The What's missing window: one target's files, or (target null) every target. */
+export interface MissingPanelState {
+  target: string | null;
 }
 
 export interface AppState {
@@ -188,6 +195,12 @@ export interface AppState {
   /** Phase 7: GET /h3pipe/targets (null until loaded, or on a server without it) */
   targets: TargetList | null;
   targetsError: string | null;
+  /** readiness (`?ready=1`) is being fetched */
+  readinessLoading: boolean;
+  /** when the target list (with readiness) was last loaded, ms since epoch */
+  readinessAt: number | null;
+  /** the What's missing window (null: closed) */
+  missingPanel: MissingPanelState | null;
   /** ComfyUI choices of the combo widgets targets bind, by "class_type|field" */
   widgetChoices: Record<string, string[]>;
   /** GET /h3pipe/models, by "target|param" */
@@ -245,6 +258,9 @@ export function initialState(prefs: Prefs = {}): AppState {
     modelsError: null,
     targets: null,
     targetsError: null,
+    readinessLoading: false,
+    readinessAt: null,
+    missingPanel: null,
     widgetChoices: {},
     modelFiles: {},
     zoom: clampZoom(prefs.zoom ?? ZOOM_DEFAULT),

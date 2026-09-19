@@ -38,7 +38,7 @@ describe("keyframes", () => {
     expect(keyframeNote(TARGETS, "minimax_h3_ref2va")).toBe("used by LTX; not by MiniMax H3 Ref2VA");
     expect(keyframeNote(TARGETS, "ltx2")).toBeNull();
     expect(keyframeNote(null, "minimax_h3_ref2va")).toBeNull(); // the server doesn't say: no note
-    expect(keyframeNote(MOCK_TARGETS, "minimax_h3_ref2va")).toBe("used by LTX; not by MiniMax H3 Ref2VA");
+    expect(keyframeNote(MOCK_TARGETS, "minimax_h3_ref2va")).toBe("used by LTX, Wan; not by MiniMax H3 Ref2VA");
   });
 
   it("turns the viewer's playhead into a frame, the end into 'last'", () => {

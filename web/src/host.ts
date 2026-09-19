@@ -20,10 +20,18 @@ export type Severity = "success" | "info" | "warn" | "error";
  * viewer are floating windows in the overlay, opened through actions. */
 export type Surface = "shots" | "refs" | "timeline";
 
+/** A button on a toast (e.g. "What's missing"). */
+export interface ToastAction {
+  label: string;
+  run: () => void;
+}
+
 export interface Host {
   /** Subscribe to a websocket event; the callback gets the event's `detail`. */
   on(event: HostEvent, cb: (detail: unknown) => void): () => void;
-  toast(severity: Severity, summary: string, detail?: string): void;
+  /** A toast; one with an `action` shows a button (ComfyUI's own toasts can't,
+   * so the ComfyUI host shows those in the editor's overlay). */
+  toast(severity: Severity, summary: string, detail?: string, action?: ToastAction): void;
   /** Bring a surface into view (open its sidebar tab / bottom panel). */
   show(surface: Surface): void;
 }
@@ -31,6 +39,7 @@ export interface Host {
 const noopHost: Host = {
   on: () => () => {},
   toast: (sev, summary, detail) => console.log(`[h3pipe ${sev}] ${summary}`, detail ?? ""),
+  // (a noop host's toast drops the action)
   show: () => {},
 };
 

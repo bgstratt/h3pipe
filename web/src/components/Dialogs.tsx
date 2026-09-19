@@ -10,6 +10,7 @@ import type { Pass, ShotDetail, TakeDetail, TargetList } from "../types";
 import { DiffView, LoraEditor, ModelSelect } from "./Fields";
 import { useDetail, useDetailError, useShotStatus } from "./hooks";
 import { MissingRefsNote } from "./MissingRefs";
+import { ResolvedNotes, TargetReadinessNote } from "./Readiness";
 import { TargetSelect, useTargetPickers, useTargets } from "./Targets";
 
 export function Dialog({ title, onClose, children, footer, wide }: { title: ReactNode; onClose: () => void; children: ReactNode; footer?: ReactNode; wide?: boolean }) {
@@ -232,6 +233,7 @@ function RedoBody({ d, shot, openPass, parent }: { d: ShotDetail; shot: string; 
               <span className="h3-small h3-muted">
                 for this run{oneOff ? ` (the shot stays on ${targetLabel(list, current)})` : ""} · {size.text}
               </span>
+              <TargetReadinessNote id={runTarget} list={list} />
             </div>
           </>
         )}
@@ -361,6 +363,7 @@ export function SidecarDialog() {
   const d = useDetail(sc?.shot, sc?.pass);
   const derr = useDetailError(sc?.shot, sc?.pass);
   const t = useMemo(() => d?.takes.find((x) => x.take === sc?.take), [d, sc?.take]);
+  const targets = useApp((s) => s.targets);
   if (!sc || !ep) return null;
   const json = t ? JSON.stringify(t.sidecar, null, 2) : "";
   return (
@@ -390,6 +393,9 @@ export function SidecarDialog() {
               </span>,
             ])}
           </div>
+          {t.sidecar?.resolved && (
+            <ResolvedNotes resolved={t.sidecar.resolved} target={typeof t.sidecar.target === "string" ? t.sidecar.target : d?.target} list={targets} />
+          )}
           {t.sidecar ? <pre className="h3-pre">{json}</pre> : <div className="h3-muted">No sidecar: this take is from before sidecars.</div>}
         </>
       )}

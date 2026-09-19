@@ -12,6 +12,7 @@ import { renderingTakes, statusKey, store, useApp } from "../store";
 import type { Pass, ShotStatus, TakeSummary, TargetList } from "../types";
 import { aspectOf, useStatus } from "./hooks";
 import { MissingRefsSummary } from "./MissingRefs";
+import { EpisodeTarget } from "./Readiness";
 import { useTargets } from "./Targets";
 import { Badges, Progress, Thumb, statusClass } from "./Thumb";
 
@@ -367,6 +368,7 @@ export function ShotsTab() {
         )}
       </div>
       <EpisodeHeader />
+      <EpisodeTarget />
       <BuildBar />
       <ShotBin />
     </div>

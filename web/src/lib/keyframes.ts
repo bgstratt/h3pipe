@@ -55,7 +55,7 @@ export function usesKeyframes(list: TargetList | null | undefined, target: strin
  */
 export function keyframeNote(list: TargetList | null | undefined, target: string | null | undefined): string | null {
   if (usesKeyframes(list, target) !== false) return null;
-  const users = videoTargets(list).filter((t) => (keyframeCaps(t) ?? []).length > 0).map((t) => targetShort(list, t.id));
+  const users = [...new Set(videoTargets(list).filter((t) => (keyframeCaps(t) ?? []).length > 0).map((t) => targetShort(list, t.id)))];
   const by = users.length ? `used by ${users.join(", ")}; ` : "";
   return `${by}not by ${targetLabel(list, target)}`;
 }

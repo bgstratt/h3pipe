@@ -8,14 +8,15 @@ import { normPath, splitByMissingRefs } from "./lib/missingRefs";
 import { buildPlaylist, startOf, totalDuration, type PlayItem } from "./lib/playlist";
 import { keyframeRefId, keyframeSource, type KeyframeEnd } from "./lib/keyframes";
 import { hasViews, missingPlan, viewLabel, type RefFilter } from "./lib/refs";
-import { renderWarnings } from "./lib/targets";
+import { folderPath, isMissingFileSkip, readinessOf, skipMissingFiles } from "./lib/readiness";
+import { overrideTargetValue, renderWarnings, seriesDefaultTarget, shotTarget } from "./lib/targets";
 import {
   detailKey, persistPrefs, statusKey, store, type AppState, type BrowseState, type CompareMode,
   type RefTakeRef,
 } from "./store";
 import type {
   EpisodeStatus, Lora, OverrideFields, Pass, ProgressEvent, PromptEvent, Ref, RefEvent,
-  RefGenerateRequest, RefTake, RenderRequest, RenderResult, Seed, SeedMode, ShotDetail, TakeEvent, TakeRef,
+  RefGenerateRequest, RefTake, RenderRequest, RenderResult, RenderSkip, Seed, SeedMode, ShotDetail, TakeEvent, TakeRef,
 } from "./types";
 
 const set = store.set;
@@ -66,21 +67,82 @@ export async function start() {
 
 let targetsLoading: Promise<void> | null = null;
 
-/** GET /h3pipe/targets once. A server without it leaves `targets` null, and the
- * UI keeps its pre-target behaviour (no picker, unfiltered model lists). */
+/** GET /h3pipe/targets?ready=1 once (readiness included; a server that doesn't
+ * know `ready` just leaves it out, and a failing `ready=1` falls back to the
+ * plain list). A server without the route leaves `targets` null, and the UI
+ * keeps its pre-target behaviour (no picker, unfiltered model lists). */
 export function loadTargets(force = false): Promise<void> {
-  if (!force && (get().targets || targetsLoading)) return targetsLoading ?? Promise.resolve();
+  if (targetsLoading) return targetsLoading;
+  if (!force && get().targets) return Promise.resolve();
+  set({ readinessLoading: true });
   targetsLoading = (async () => {
     try {
-      const targets = await api().targets();
-      set({ targets, targetsError: null });
+      let targets;
+      try {
+        targets = await api().targets({ ready: true });
+      } catch (e) {
+        // readiness failing (ComfyUI busy, older server) mustn't lose the picker
+        if (e instanceof ApiError && e.status === 404) throw e;
+        targets = await api().targets();
+      }
+      set({ targets, targetsError: null, readinessAt: Date.now() });
     } catch (e) {
       set({ targetsError: errText(e) });
     } finally {
       targetsLoading = null;
+      set({ readinessLoading: false });
     }
   })();
   return targetsLoading;
+}
+
+/** Re-check what's installed (the What's missing panel's Refresh). */
+export async function refreshReadiness(): Promise<void> {
+  await loadTargets(true);
+  const err = get().targetsError;
+  if (err) host().toast("error", "Couldn't check the models", err);
+}
+
+/** Open the What's missing window, for one target or (null) all of them.
+ * Readiness older than a minute is re-checked. */
+export function openMissing(target: string | null = null) {
+  set({ missingPanel: { target }, menu: null });
+  const at = get().readinessAt;
+  if (!at || Date.now() - at > 60_000) void loadTargets(true);
+}
+
+export function closeMissing() {
+  set({ missingPanel: null });
+}
+
+/**
+ * The episode's default target (overrides.json `episode.target`): every shot
+ * without a target of its own renders on it. `null` goes back to series.json's.
+ */
+export async function setEpisodeTarget(target: string | null): Promise<boolean> {
+  const ep = get().ep;
+  if (!ep) return false;
+  return withBusy("episode-target", async () => {
+    try {
+      await api().putEpisodeTarget(ep, target);
+      // every shot that follows the episode target changed: refetch both passes
+      // and drop the cached shot details (their `target` / `effective` moved)
+      set((s) => ({ details: Object.fromEntries(Object.entries(s.details).filter(([k]) => !k.startsWith(`${ep}|`))) }));
+      await Promise.all((["final", "proxy"] as Pass[]).map((p) => (get().status[statusKey(ep, p)] || p === get().pass ? refreshEpisode(ep, p) : Promise.resolve(undefined))));
+      if (get().shot) void loadDetail(get().shot!, get().pass, true, ep);
+      const st = get().status[statusKey(ep, get().pass)];
+      const label = (id: string | null | undefined) => get().targets?.targets.find((t) => t.id === id)?.label ?? id ?? "";
+      host().toast(
+        "success",
+        target ? `The episode now renders on ${label(target)}` : `The episode is back on series.json's target${st?.target ? ` (${label(st.target)})` : ""}`,
+        target ? "Every shot without a target of its own. Set in the editor (overrides.json); series.json isn't changed." : undefined,
+      );
+      return true;
+    } catch (e) {
+      report("Couldn't change the episode's target", e);
+      return false;
+    }
+  });
 }
 
 const choicesLoading = new Map<string, Promise<void>>();
@@ -137,7 +199,7 @@ export function loadModelFiles(target: string, param = "model", force = false): 
 export async function setShotTarget(shot: string, target: string | null, builtTarget?: string | null): Promise<boolean> {
   const ep = get().ep;
   if (!ep) return false;
-  const value = target && target !== builtTarget ? target : null;
+  const value = overrideTargetValue(target, builtTarget, get().status[statusKey(ep, get().pass)]);
   return withBusy(`override|${shot}`, async () => {
     try {
       await api().putOverride({ ep, pass: get().pass, shot, both: true, fields: { target: value } });
@@ -149,7 +211,7 @@ export async function setShotTarget(shot: string, target: string | null, builtTa
       const label = (id: string | null | undefined) => get().targets?.targets.find((t) => t.id === id)?.label ?? id ?? "";
       host().toast(
         "success",
-        value ? `${shot} now renders on ${label(value)}` : `${shot} is back on ${label(builtTarget) || "its built target"}`,
+        value ? `${shot} now renders on ${label(value)}` : target ? `${shot} is back on ${label(target)} (no target of its own)` : `${shot} is back on its own target`,
         value ? "Both passes. Its prompt, model, LoRAs and steps come from the new target; a per-pass prompt override is ignored." : undefined,
       );
       return true;
@@ -509,16 +571,53 @@ export function baseRender(ep: string, pass: Pass, shots: string[], allowMissing
   return r;
 }
 
+export interface RenderToast {
+  severity: "success" | "info" | "warn";
+  summary: string;
+  detail: string;
+  /** a "What's missing" button: the targets the skipped shots need files for
+   * (empty: the server didn't name them) */
+  missingTargets?: string[];
+}
+
+/** Skips for missing files, one line per file (or reason) with the shots it
+ * stopped: a whole episode on a target without its LoRA is one line, not 45. */
+function missingFilesDetail(skips: RenderSkip[]): string {
+  const byLine = new Map<string, string[]>();
+  for (const x of skips) {
+    const f = skipMissingFiles(x);
+    const keys = f.length ? f.map((m) => `${m.want}${m.folder ? ` (${folderPath(m.folder)})` : ""}`) : [x.reason];
+    for (const k of keys) byLine.set(k, [...(byLine.get(k) ?? []), x.shot]);
+  }
+  const MAX = 6;
+  return [...byLine].map(([k, shots]) => {
+    const list = shots.length > MAX ? `${shots.slice(0, MAX).join(", ")} and ${shots.length - MAX} more` : shots.join(", ");
+    return `${k}: ${list}`;
+  }).join("\n");
+}
+
 /** The toasts after a render call: what queued, what was skipped and why, what failed. */
-export function renderReport(r: RenderResult): { severity: "success" | "info" | "warn"; summary: string; detail: string }[] {
-  const out: { severity: "success" | "info" | "warn"; summary: string; detail: string }[] = [];
+export function renderReport(r: RenderResult, targetLabel: (id: string) => string = (id) => id): RenderToast[] {
+  const out: RenderToast[] = [];
   if (r.queued.length) {
     out.push({ severity: "success", summary: `Queued ${r.queued.length} take${r.queued.length > 1 ? "s" : ""}`, detail: r.queued.map((q) => `${q.shot} ${tn(q.take)}`).join(", ") });
   }
   const skipped = r.skipped ?? [];
-  const missing = skipped.filter((x) => x.missing_refs?.length);
-  const mismatch = skipped.filter((x) => !x.missing_refs?.length && x.model_mismatch?.length);
-  const other = skipped.filter((x) => !x.missing_refs?.length && !x.model_mismatch?.length);
+  const files = skipped.filter(isMissingFileSkip);
+  const rest = skipped.filter((x) => !isMissingFileSkip(x));
+  if (files.length) {
+    const targets = [...new Set(files.map((x) => x.target).filter((t): t is string => !!t))];
+    const what = targets.length === 1 ? `${targetLabel(targets[0])} isn't ready` : "required model files missing";
+    out.push({
+      severity: "warn",
+      summary: `Skipped ${files.length} shot${files.length > 1 ? "s" : ""}: ${what}`,
+      detail: missingFilesDetail(files) + "\nDownload the files (What's missing), then Refresh there and render again.",
+      missingTargets: targets,
+    });
+  }
+  const missing = rest.filter((x) => x.missing_refs?.length);
+  const mismatch = rest.filter((x) => !x.missing_refs?.length && x.model_mismatch?.length);
+  const other = rest.filter((x) => !x.missing_refs?.length && !x.model_mismatch?.length);
   if (mismatch.length) {
     out.push({
       severity: "warn",
@@ -555,7 +654,18 @@ export async function queueRender(req: RenderRequest): Promise<RenderResult | un
       const learned: Record<string, TakeRef> = {};
       for (const q of r.queued) learned[q.prompt_id] = { ep: req.ep, pass: req.pass, shot: q.shot, take: q.take };
       set((s) => ({ prompts: { ...s.prompts, ...learned } }));
-      for (const t of renderReport(r)) host().toast(t.severity, t.summary, t.detail || undefined);
+      const label = (id: string) => get().targets?.targets.find((t) => t.id === id)?.label ?? id;
+      for (const t of renderReport(r, label)) {
+        if (!t.missingTargets) {
+          host().toast(t.severity, t.summary, t.detail || undefined);
+          continue;
+        }
+        // the target: the one the server named, else this run's, else all of them
+        const one = t.missingTargets.length === 1 ? t.missingTargets[0] : !t.missingTargets.length && req.target ? req.target : null;
+        host().toast(t.severity, t.summary, t.detail || undefined, { label: "What's missing", run: () => openMissing(one) });
+        // what's installed may have changed since the list was loaded
+        void loadTargets(true);
+      }
       for (const x of r.errors ?? []) host().toast("error", `${x.shot} didn't queue`, x.error);
       const warnings = renderWarnings(r);
       if (warnings.length) {
@@ -590,7 +700,10 @@ export function requestRender(shots: string[], redo = false, title?: string) {
   const st = s.ep ? s.status[statusKey(s.ep, s.pass)] : undefined;
   if (!s.ep || !shots.length) return;
   const { blocked } = splitByMissingRefs(st?.shots ?? [], shots);
-  if (blocked.length) {
+  // a shot on a target that isn't ready would be skipped: show the dialog, which says so
+  const def = seriesDefaultTarget(s.targets, st);
+  const notReady = shots.some((id) => readinessOf(s.targets, shotTarget(st?.shots.find((x) => x.shot === id), def))?.status === "not_ready");
+  if (blocked.length || notReady) {
     set({ renderAsk: { shots, pass: s.pass, redo, title: title ?? `Render ${shots.length === 1 ? shots[0] : `${shots.length} shots`}` }, menu: null });
     return;
   }

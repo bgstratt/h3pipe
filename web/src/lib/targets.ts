@@ -63,6 +63,25 @@ export function shotTarget(
   return s?.target || s?.built_target || fallback;
 }
 
+/**
+ * The `target` to send in a shot override when the shot is set to `chosen`:
+ * null when it's what the shot would render on anyway (its script's target,
+ * else the episode's), so the retarget is cleared. A shot built for the series
+ * target has no script target of its own, so it falls back to the episode
+ * target; picking its built target then has to be sent explicitly when the
+ * episode target differs (see TODO(contract) in api.ts).
+ */
+export function overrideTargetValue(
+  chosen: string | null | undefined,
+  built: string | null | undefined,
+  episode?: Pick<EpisodeStatus, "target" | "series_target" | "target_source"> | null,
+): string | null {
+  if (!chosen) return null;
+  const scriptOwn = !!built && !!episode?.series_target && built !== episode.series_target;
+  const fallback = !episode?.target || !episode.target_source || scriptOwn ? built : episode.target;
+  return chosen !== fallback ? chosen : null;
+}
+
 /** True when the shot now renders on a target other than the one it was built for. */
 export function isRetargeted(s: { target?: string | null; built_target?: string | null } | null | undefined): boolean {
   return !!s?.target && !!s.built_target && s.target !== s.built_target;

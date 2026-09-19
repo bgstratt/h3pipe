@@ -19,6 +19,7 @@ import { FloatingWindow, defaultInspectorRect } from "./FloatingWindow";
 import { aspectOf, useDetail, useDetailError, useShotStatus, useStatus } from "./hooks";
 import { MissingRefsNote } from "./MissingRefs";
 import { OverrideFields } from "./OverrideFields";
+import { ResolvedNotes, TargetReadinessNote } from "./Readiness";
 import { PassToggle } from "./ShotsTab";
 import { TargetSelect, useTargetPickers, useTargets } from "./Targets";
 import { Badges } from "./Thumb";
@@ -33,6 +34,10 @@ function TargetPicker({ d, shot }: { d: ShotDetail | undefined; shot: string }) 
   const current = shotTarget(src, seriesDefault);
   const built = src?.built_target ?? null;
   const note = retargetNote(list, src);
+  const tsrc = s?.target_source;
+  const srcNote = targetSourceNote(tsrc, targetLabel(list, seriesDefault));
+  // with target_source known, only a shot override can be reverted; else the old rule
+  const canRevert = tsrc ? tsrc === "override" : isRetargeted(src);
   if (!list) {
     // a server without /h3pipe/targets: say what the shot renders on, if it says
     return src?.target ? <div className="h3-small h3-muted" title={error ?? ""}>target: {src.target}</div> : null;
@@ -49,13 +54,40 @@ function TargetPicker({ d, shot }: { d: ShotDetail | undefined; shot: string }) 
           title="The video model this shot renders on (both passes). Its prompt, model, LoRA and steps defaults come with it."
           onChange={(id) => id && id !== current && void setShotTarget(shot, id, built)}
         />
-        {isRetargeted(src) && (
-          <button className="h3-btn" disabled={busy} title={`Back to ${targetLabel(list, built)}, the target the build compiled this shot for`} onClick={() => void setShotTarget(shot, null, built)}>
+        {canRevert && (
+          <button className="h3-btn" disabled={busy} title="Remove this shot's own target: it goes back to its script's target, else the episode's" onClick={() => void setShotTarget(shot, null, built)}>
             Revert target
           </button>
         )}
       </div>
-      {note && <span className="h3-small h3-muted">{note}</span>}
+      {srcNote && <span className="h3-small h3-muted">{srcNote}</span>}
+      {note && !srcNote && <span className="h3-small h3-muted">{note}</span>}
+      <TargetReadinessNote id={current} list={list} />
+    </div>
+  );
+}
+
+/** Where the shot's target comes from, in words (null for an older server). */
+function targetSourceNote(src: string | null | undefined, episodeLabel: string): string | null {
+  switch (src) {
+    case "episode": return `follows the episode's model (${episodeLabel})`;
+    case "override": return "set for this shot in the editor";
+    case "script": return "set by the script (a target: line or a profile)";
+    case "request": return "set for this run";
+    default: return null;
+  }
+}
+
+/** The selected (else the cut) take's model substitutions, from its sidecar. */
+function TakeResolved({ d, take }: { d: ShotDetail; take: number | null }) {
+  const { list } = useTargets();
+  const t = d.takes.find((x) => x.take === take);
+  const sc = t?.sidecar;
+  if (!t || !sc?.resolved) return null;
+  return (
+    <div className="h3-col" style={{ gap: 2 }}>
+      <span className="h3-small h3-muted">{tn(t.take)} rendered with:</span>
+      <ResolvedNotes resolved={sc.resolved} target={typeof sc.target === "string" ? sc.target : d.target} list={list} />
     </div>
   );
 }
@@ -316,6 +348,7 @@ export function Inspector() {
   const d = useDetail(shot);
   const derr = useDetailError(shot);
   const s = useShotStatus(shot);
+  const selTake = useApp((st) => st.take);
   const [allowMissing, setAllowMissing] = useState(false);
   const renderBusy = useApp((st) => !!shot && Object.keys(st.busy).some((k) => k.startsWith(`render|${pass}|`) && k.split("|")[2].split(",").includes(shot)));
 
@@ -344,6 +377,7 @@ export function Inspector() {
           {s.subjects.length > 0 && <div className="h3-small h3-muted">subjects: {s.subjects.join(", ")}</div>}
           <Badges badges={badges} />
           <TargetPicker d={d} shot={shot} />
+          {d && <TakeResolved d={d} take={selTake ?? ct?.take ?? null} />}
           <MissingRefsNote blocked={missing.length ? [{ shot, refs: missing }] : []} allow={allowMissing} setAllow={setAllowMissing} />
           <Keyframes shot={shot} />
           <div className="h3-row h3-wrap">

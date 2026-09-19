@@ -16,7 +16,7 @@
 
 import { app as comfyApp } from "comfyui/app";
 import { api as comfyApi } from "comfyui/api";
-import { start } from "./actions";
+import { pushToast, start } from "./actions";
 import { createHttpApi } from "./api";
 import { setApi, setHost, type Host, type HostEvent, type Surface } from "./host";
 import { mountOverlay, mountSurface, unmountSurface } from "./surfaces";
@@ -74,7 +74,12 @@ const comfyHost: Host = {
     api.addEventListener(event, fn);
     return () => api.removeEventListener(event, fn);
   },
-  toast(severity, summary, detail) {
+  toast(severity, summary, detail, action) {
+    // ComfyUI's toasts have no buttons: a toast with an action shows in the editor's overlay
+    if (action) {
+      pushToast({ severity, summary, detail, action }, 12000);
+      return;
+    }
     const t = app.extensionManager?.toast;
     if (t?.add) t.add({ severity, summary, detail, life: severity === "error" ? 10000 : 4000 });
     else console[severity === "error" ? "error" : "log"](`[h3pipe] ${summary}`, detail ?? "");
