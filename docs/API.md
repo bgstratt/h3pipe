@@ -467,3 +467,22 @@ write the shot **without** the missing refs, when it can:
 - The take's sidecar says what happened: `missing_refs` (the slots, as before),
   `missing_mode` (`"recompiled"` or `"blank"`), and `missing_note` (why it fell back to
   `blank`). The last two are only present on a take rendered anyway.
+
+## Phase 8 additions: retargeting a shot (contract written before building)
+
+- **`PUT /h3pipe/override`:** `fields.target` sets a shot's video target, e.g.
+  `"ltx2"`, or `null` to go back to the built target. It is **shared by both passes**,
+  like `seed`. The shot's IR (`shotlist/shots.json`) is recompiled for that target at
+  queue time. The target's own prompt, model, LoRA and steps defaults apply. The
+  per-pass `prompt` override is ignored for a retargeted shot, because a prompt written
+  for one model isn't valid for another. The response and the override view show
+  `target`.
+- **`POST /h3pipe/render`** takes an optional `"target"` for one run, beating the
+  override.
+- **`GET /h3pipe/episode`** and **`GET /h3pipe/shot`:** each shot's `target` is the one
+  its next render will use: request, then override, then script, then series config.
+  `built_target` is what the build compiled it for. Shot detail's `effective` also
+  carries `target` and that target's `width`/`height`/`length`.
+- **Takes** record the `target` they rendered with (already true since Phase 7).
+- **`GET /h3pipe/targets`** is what the UI's target picker lists, video targets only.
+  Model and LoRA pickers filter by the chosen target's binding widgets.

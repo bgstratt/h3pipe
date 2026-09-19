@@ -389,7 +389,8 @@ ref routes, `kreagen` on takes); the Refs tab is in progress.
   as-built shape (`h3core/ir.py`'s docstring) differs slightly from the sketch below.
 - Exit: goldens byte-identical; `shots.json` contains no H3 vocabulary.
 
-**Phase 7 — targets, H3 only** — built 2026-09-18; real-ComfyUI exit check pending
+**Phase 7 — targets, H3 only** — ✅ done 2026-09-18 (live check passed: a CLI render and an editor-route render on the
+real ComfyUI, a `kreagen` dry run, and workflows still read from ComfyUI's saved copies)
 - `targets/` loader + `Target` protocol; move the H3 code per the table in *Targets*.
 - `jobs` / `graph_for` driven by `binding`; `kreagen` driven by `targets/image/krea2`.
 - Render profiles (see *Targets*).
