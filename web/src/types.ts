@@ -103,7 +103,9 @@ export interface ShotStatus {
   target_source?: ShotTargetSource | null;
 }
 
-export type ShotTargetSource = "request" | "override" | "script" | "episode";
+/** "series" / "default": the shot has no target of its own and follows the episode's
+ * default (series.json's, or MiniMax H3), as "episode" does for an editor-set one. */
+export type ShotTargetSource = "request" | "override" | "script" | "episode" | "series" | "default";
 /** Where the episode's default target comes from: set in the editor
  * (overrides.json `episode.target`), the series config's `series.target`, or
  * the built-in default. */

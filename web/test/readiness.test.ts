@@ -308,3 +308,14 @@ describe("mock readiness and the episode target", () => {
     expect(resolutionNotes(sc.resolved)).toEqual(["rendered with base settings: wan2.2_vace_lightx2v_4steps_lora_high_noise.safetensors missing"]);
   });
 });
+
+// Regression (real ep38 data): shots on the episode default come back with
+// target_source "default" or "series", not only "episode"; they follow it.
+import { targetCounts as _tc } from "../src/lib/readiness";
+describe("targetCounts with the server's default/series sources", () => {
+  it("counts them as following the episode target", () => {
+    const shots = [{ orphan: false, target_source: "default" }, { orphan: false, target_source: "series" },
+      { orphan: false, target_source: "episode" }, { orphan: false, target_source: "script" }, { orphan: false, target_source: "override" }] as any;
+    expect(_tc(shots)).toEqual({ episode: 3, own: 2, unknown: 0 });
+  });
+});

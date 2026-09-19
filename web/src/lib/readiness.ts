@@ -253,7 +253,9 @@ export function targetCounts(shots: Pick<ShotStatus, "orphan" | "target_source">
   const out = { episode: 0, own: 0, unknown: 0 };
   for (const s of shots ?? []) {
     if (s.orphan) continue;
-    if (s.target_source === "episode") out.episode++;
+    // no target of its own: it follows the episode default, whether the editor,
+    // series.json or the built-in default set it
+    if (s.target_source === "episode" || s.target_source === "series" || s.target_source === "default") out.episode++;
     else if (s.target_source) out.own++;
     else out.unknown++;
   }
