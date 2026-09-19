@@ -4,7 +4,7 @@
 
 import { memo, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import {
-  copyText, generateRef, loadRefs, openBrowse, openImageCompare, pickRef, revertRefOverride, saveRefOverride,
+  copyText, generateMissing, generateRef, loadRefs, openBrowse, openImageCompare, pickRef, revertRefOverride, saveRefOverride,
   selectRefTake, setRefsFilter, toggleRefOpen,
 } from "../actions";
 import { errText } from "../api";
@@ -12,7 +12,7 @@ import { api } from "../host";
 import { shortName, tn } from "../lib/format";
 import { formFromDetail, isDirty, overrideFields, type OverrideForm, type OverrideSource } from "../lib/overrideForm";
 import {
-  VIEWS, blockedShots, canGenerate, groupRefs, hasViews, isAudioRef, pickedTake, refCounts, takesOf, unpickedViews, usedBy,
+  VIEWS, blockedShots, canGenerate, groupRefs, hasViews, missingPlan, isAudioRef, pickedTake, refCounts, takesOf, unpickedViews, usedBy,
   viewLabel, viewOf, type RefFilter,
 } from "../lib/refs";
 import { store, useApp } from "../store";
@@ -439,6 +439,8 @@ export function RefsTab() {
 
   const groups = useMemo(() => groupRefs(refs ?? [], filter, pass), [refs, filter, pass]);
   const counts = useMemo(() => refCounts(refs ?? [], st, pass), [refs, st, pass]);
+  const plan = useMemo(() => missingPlan(refs ?? [], pass), [refs, pass]);
+  const genBusy = useApp((s) => !!s.busy["refgen|missing"]);
 
   return (
     <div className="h3-surface">
@@ -454,11 +456,25 @@ export function RefsTab() {
       {ep && (
         <>
           <div className="h3-pad h3-col" style={{ gap: 4 }}>
-            <span className="h3-seg" title="Which refs to list">
-              {FILTERS.map((f) => (
-                <button key={f.id} className={filter === f.id ? "h3-on" : ""} title={f.title} onClick={() => setRefsFilter(f.id)}>{f.label}</button>
-              ))}
-            </span>
+            <div className="h3-row h3-wrap">
+              <span className="h3-seg" title="Which refs to list">
+                {FILTERS.map((f) => (
+                  <button key={f.id} className={filter === f.id ? "h3-on" : ""} title={f.title} onClick={() => setRefsFilter(f.id)}>{f.label}</button>
+                ))}
+              </span>
+              <span className="h3-grow" />
+              {plan.length > 0 && (
+                <button
+                  className="h3-btn h3-primary"
+                  disabled={genBusy}
+                  title={`Queue one candidate for each ref this episode is missing (${pass}); each goes live when it finishes:
+${plan.map((p) => p.label).join(", ")}`}
+                  onClick={() => void generateMissing()}
+                >
+                  <i className={genBusy ? "pi pi-spin pi-spinner" : "pi pi-sparkles"} /> Generate missing ({plan.length})
+                </button>
+              )}
+            </div>
             {counts.missing > 0 && (
               <div className="h3-note">
                 <b>{counts.missing} ref{counts.missing > 1 ? "s" : ""} missing</b>

@@ -4,7 +4,7 @@ import { renderReport } from "../src/actions";
 import { crumbs, depthBelow, reachable } from "../src/lib/browse";
 import { shotBadges } from "../src/lib/format";
 import { missingRefsSummary, missingRefsTitle, splitByMissingRefs } from "../src/lib/missingRefs";
-import { blockedShots, canGenerate, groupOf, groupRefs, hasViews, refCounts, unpickedViews, usedBy } from "../src/lib/refs";
+import { blockedShots, canGenerate, groupOf, groupRefs, hasViews, missingPlan, refCounts, unpickedViews, usedBy } from "../src/lib/refs";
 import type { EpisodeStatus, MissingRef, Ref, ShotStatus } from "../src/types";
 
 function ref(id: string, kind: Ref["kind"], over: Partial<Ref> = {}): Ref {
@@ -182,5 +182,31 @@ describe("single-image refs as the server sends them", () => {
   it("never reports views to pick for a single-image ref", () => {
     expect(unpickedViews(plate)).toEqual([]);
     expect(unpickedViews(bumble)).toHaveLength(4);
+  });
+});
+
+describe("Generate missing", () => {
+  const V = (view: string, picked: number | null, statuses: string[] = []) =>
+    ({ view, picked, takes: statuses.map((status, i) => ({ take: i + 1, status })) });
+  const used = { proxy: ["sh010"], final: ["sh010"] };
+  const refs = [
+    ref("location:a", "location", { exists: false, used_by: used, views: [] }),                         // yes
+    ref("location:b", "location", { exists: false, used_by: used, takes: [{ take: 1, status: "queued" }] as any }), // in flight
+    ref("location:c", "location", { exists: false, used_by: used, takes: [{ take: 1, status: "failed" }] as any }), // retry
+    ref("location:d", "location", { exists: false, used_by: { proxy: [], final: [] } }),                  // unused here
+    ref("location:e", "location", { exists: true, used_by: used }),                                       // live
+    ref("voice:x", "voice", { exists: false, used_by: used }),                                            // not generatable
+    ref("subject:n", "character", { exists: false, path: null, used_by: used }),                          // no file named
+    ref("subject:bo", "character", { exists: false, used_by: used, name: "Bo",
+      views: ["01_threequarter", "02_side", "03_back", "04_face"].map((v) => V(v, null)) as any }),   // all four
+    ref("subject:cy", "character", { exists: false, used_by: used, name: "Cy",
+      views: [V("01_threequarter", 1, ["ok"]), V("02_side", null, ["queued"]), V("03_back", null, ["failed"]), V("04_face", null)] as any }),
+  ];
+  it("queues only what is missing, used here, generatable and not already on its way", () => {
+    expect(missingPlan(refs, "proxy").map((p) => [p.ref, p.view])).toEqual([
+      ["location:a", null], ["location:c", null],
+      ["subject:bo", null],                                      // one call, four views, one seed
+      ["subject:cy", "03_back"], ["subject:cy", "04_face"],
+    ]);
   });
 });

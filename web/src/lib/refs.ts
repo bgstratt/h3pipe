@@ -130,3 +130,31 @@ export function refCounts(refs: Ref[], st: EpisodeStatus | undefined, pass: Pass
 export function hasViews(r: Pick<Ref, "views">): boolean {
   return !!r.views && r.views.length > 0;
 }
+
+/** One Generate call "Generate missing" will make: a ref, and the view (null
+ * for a non-character, or for a character that needs all four views). */
+export interface MissingGen { ref: string; view: string | null; label: string }
+
+const inFlight = (t: { status: string }) => t.status === "queued" || t.status === "ok";
+
+/**
+ * What "Generate missing" queues for this episode and pass: every ref with no
+ * live file that this pass uses and that can be generated, skipping anything
+ * already queued or finished and waiting to be auto-picked. A character gets
+ * only the views that still need a candidate (all four together as one call,
+ * sharing a seed, when none has one).
+ */
+export function missingPlan(refs: Ref[], pass: Pass): MissingGen[] {
+  const out: MissingGen[] = [];
+  for (const r of refs) {
+    if (r.exists || !r.path || !canGenerate(r) || !usedBy(r, pass).length) continue;
+    if (hasViews(r)) {
+      const need = r.views!.filter((v) => v.picked == null && !v.takes.some(inFlight)).map((v) => v.view);
+      if (need.length === r.views!.length) out.push({ ref: r.id, view: null, label: r.name });
+      else for (const v of need) out.push({ ref: r.id, view: v, label: `${r.name} ${v.replace(/^\d+_/, "")}` });
+    } else if (!r.takes.some(inFlight)) {
+      out.push({ ref: r.id, view: null, label: r.name });
+    }
+  }
+  return out;
+}

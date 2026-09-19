@@ -6,7 +6,7 @@ import { reachable, sameDir } from "./lib/browse";
 import { absPath, promptText, sameEp, tn } from "./lib/format";
 import { normPath, splitByMissingRefs } from "./lib/missingRefs";
 import { buildPlaylist, startOf, totalDuration, type PlayItem } from "./lib/playlist";
-import { viewLabel, type RefFilter } from "./lib/refs";
+import { hasViews, missingPlan, viewLabel, type RefFilter } from "./lib/refs";
 import {
   detailKey, persistPrefs, statusKey, store, type AppState, type BrowseState, type CompareMode,
   type RefTakeRef,
@@ -1001,6 +1001,52 @@ export async function generateRef(req: Omit<RefGenerateRequest, "ep">): Promise<
       return false;
     }
   });
+}
+
+/**
+ * Queue one candidate for every ref this episode is missing (lib/refs
+ * missingPlan). Each lands live through the server's auto-pick as it finishes.
+ * Asks first: it can be a lot of GPU work.
+ */
+export async function generateMissing(): Promise<void> {
+  const s = get();
+  const ep = s.ep;
+  if (!ep) return;
+  const plan = missingPlan(s.refs[ep] ?? [], s.pass);
+  if (!plan.length) {
+    host().toast("info", "Nothing to generate", "Every missing ref already has a candidate queued or waiting.");
+    return;
+  }
+  const views = plan.reduce((n, p) => n + (p.view == null && isCharacterRef(s.refs[ep], p.ref) ? 4 : 1), 0);
+  if (!confirm(`Generate ${plan.length} missing ref${plan.length > 1 ? "s" : ""} (${views} image${views > 1 ? "s" : ""}) on ComfyUI?\n\n`
+    + plan.map((p) => `• ${p.label}`).join("\n")
+    + "\n\nEach becomes live automatically when it finishes (you can pick another candidate later).")) return;
+  await withBusy("refgen|missing", async () => {
+    let queued = 0;
+    const failed: string[] = [];
+    const learned: Record<string, RefTakeRef> = {};
+    for (const p of plan) {
+      try {
+        const r = await api().refsGenerate({
+          ep, ref: p.ref, view: p.view, count: 1, seed_mode: "auto", seed: null,
+          prompt: null, model: null, loras: null, steps: null, note: "generate missing",
+        });
+        for (const q of r.queued) learned[q.prompt_id] = { ep, ref: q.ref, view: q.view ?? null, take: q.take };
+        queued += r.queued.length;
+        for (const x of r.errors) failed.push(`${p.label}: ${x.error}`);
+      } catch (e) {
+        failed.push(`${p.label}: ${errText(e)}`);
+      }
+    }
+    set((st) => ({ refPrompts: { ...st.refPrompts, ...learned } }));
+    if (queued) host().toast("success", `Queued ${queued} image${queued > 1 ? "s" : ""} for ${plan.length - failed.length} missing ref${plan.length - failed.length === 1 ? "" : "s"}`, "They go live as they finish.");
+    if (failed.length) host().toast("error", `${failed.length} didn't queue`, failed.join("\n"));
+    scheduleRefsRefresh(0);
+  });
+}
+
+function isCharacterRef(refs: Ref[] | undefined, id: string): boolean {
+  return !!refs?.find((r) => r.id === id && hasViews(r));
 }
 
 function replaceRef(ep: string, ref: Ref) {
