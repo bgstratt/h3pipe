@@ -42,7 +42,7 @@ export interface TakeSummary {
   queued: string | null;
   finished: string | null;
   save_notes: string;
-  /** Not in the contract yet (see TODO in api.ts); read if a server sends it. */
+  /** the ComfyUI prompt id of a queued take (its progress events) */
   comfy_prompt_id?: string;
   /** Phase 7: the video target the take rendered with, from its sidecar
    * (null for a take from before sidecars; absent from older servers). */
@@ -145,12 +145,11 @@ export interface EpisodeStatus {
   series_target?: string | null;
 }
 
-/** PUT /h3pipe/episode-target: "the episode's target info" (TODO(contract): shape). */
+/** PUT /h3pipe/episode-target: the episode's target fields, as GET /h3pipe/episode has them. */
 export interface EpisodeTargetResult {
   target?: string | null;
   target_source?: EpisodeTargetSource | null;
   series_target?: string | null;
-  [key: string]: unknown;
 }
 
 export interface Lora {
@@ -211,12 +210,11 @@ export interface Override {
 }
 
 /**
- * Where a negative prompt comes from (API.md "Negatives"): the request, the
- * shot's override, the episode's negative.txt, the series config, the target's
- * preset. TODO(contract): the value strings aren't pinned down; lib/negative.ts
- * reads the likely spellings.
+ * Where a negative prompt comes from (API.md "Phase 8.5 as built"): the request,
+ * the shot's override, the episode's negative.txt, the series config, the
+ * target's preset, or none (a target without a negative param: H3, Klein edit).
  */
-export type NegativeSource = "request" | "override" | "negative.txt" | "episode" | "series" | "preset" | (string & {});
+export type NegativeSource = "request" | "override" | "negative.txt" | "series" | "preset" | "none" | (string & {});
 
 export interface Effective {
   prompt: string;
@@ -230,28 +228,34 @@ export interface Effective {
   width?: number | null;
   height?: number | null;
   length?: number | null;
-  /** Phase 8.5 (TODO(contract): only takes are said to record it): the
-   * negative a render would use now, and where it comes from. */
+  /** Phase 8.5: the negative a render would use now (null for `none`), and where it comes from. */
   negative?: string | null;
   negative_source?: NegativeSource | null;
   /** a two-stage target's low-noise model a render would use now */
   model_low?: string | null;
+  /** Phase 8: what to know before rendering (an ignored prompt override, an
+   * audio fallback), and why the shot can't render on its target. */
+  notes?: string[];
+  error?: string;
 }
 
 /** What a ref is to a shot (API.md "Inspector: the refs a shot uses"). */
-export type RefRole = "subject" | "plate" | "first" | "last" | "reference_sheet";
+export type RefRole = "subject" | "plate" | "first" | "last" | "reference_sheet" | "voice" | "recording";
 
 /** One ref a shot's current target reads (`GET /h3pipe/shot` `refs_used`). */
 export interface RefUsed {
-  id: string;
+  /** null for a recording, or a plate the series config doesn't name */
+  id: string | null;
   kind: string;
   role: RefRole | (string & {});
-  /** the live file, relative like a ref's `path` */
+  /** the live file, relative to the episode (`../` beside a parent-folder series config) */
   path: string | null;
   exists: boolean;
   need?: KeyframeNeed | null;
-  /** a small picture of it, when the server has one (else `path`) */
+  /** the picture to show, relative like `path`; null when the file isn't on disk */
   thumb?: string | null;
+  /** the loader slot ("Picture 1", "sheet panel 2") */
+  slot?: string;
 }
 
 export interface ShotDetail {
@@ -268,6 +272,7 @@ export interface ShotDetail {
   target?: string | null;
   built_target?: string | null;
   profile?: string | null;
+  target_source?: ShotTargetSource | null;
   /** Phase 8.5: the refs the shot's current target reads. Absent from older servers. */
   refs_used?: RefUsed[];
 }
@@ -312,28 +317,21 @@ export interface RenderSkip {
   reason: string;
   take?: number;
   missing_refs?: MissingRef[];
-  /** TODO(contract): the files that stopped a shot whose target isn't ready
-   * ("blocked before a take is reserved, naming the file and where to get
-   * it"). Read as `missing_files` or `missing` (entries like readiness's). */
+  /** the files that stopped a shot whose target isn't ready (no take reserved) */
   missing_files?: MissingFile[];
-  missing?: MissingFile[];
-  /** the shot's target, when the server names it */
+  /** the shot's target (a missing-files skip) */
   target?: string;
   /** the model checks that stopped the shot (h3jobs.check_models) */
   model_mismatch?: { param: string; file: string; family: string; label: string; message: string }[];
-  warnings?: RenderWarningRaw[];
 }
 
-/** A render warning. The contract doesn't give a shape (see api.ts): read as a
- * string or an object with `shot` and `warning`/`message`/`text`. */
-export type RenderWarningRaw = string | { shot?: string; warning?: string; message?: string; text?: string };
-
+/** POST /h3pipe/render. What a render will change (an audio fallback, an ignored
+ * prompt override) isn't here: it is in shot detail's `effective.notes`
+ * beforehand and the take's sidecar `notes` after. */
 export interface RenderResult {
-  queued: { shot: string; take: number; prompt_id: string; seed: Seed; seed_source: string; target?: string; warnings?: RenderWarningRaw[] }[];
+  queued: { shot: string; take: number; prompt_id: string; seed: Seed; seed_source: string; target?: string }[];
   skipped: RenderSkip[];
-  errors: { shot: string; error: string; take?: number; warnings?: RenderWarningRaw[] }[];
-  /** e.g. audio downgraded to generate for a target with no voice reference */
-  warnings?: RenderWarningRaw[];
+  errors: { shot: string; error: string; take?: number }[];
 }
 
 export interface TakeRef {
@@ -343,8 +341,26 @@ export interface TakeRef {
   take: number;
 }
 
-/** API.md says cancel "returns the take's new status" without a shape. */
-export type CancelResult = { status?: TakeStatus } & Record<string, unknown>;
+/** POST /h3pipe/cancel: the take's new status (failed, "cancelled"). */
+export interface CancelResult {
+  shot: string;
+  pass: Pass;
+  take: number;
+  status: TakeStatus;
+  save_notes: string;
+  finished: string | null;
+}
+
+/** POST /h3pipe/discard (Phase 8.6): the take's files moved to `_trash/`. */
+export interface DiscardResult {
+  shot: string;
+  take: number;
+  pass?: Pass;
+  /** the files' new paths (under `_trash/`), relative to the episode */
+  moved: string[];
+  /** the pass's cut picked that take: the pick is gone (back to the latest usable) */
+  cut_changed: boolean;
+}
 
 export interface PickRequest {
   ep: string;
@@ -394,8 +410,12 @@ export interface OverrideRequest {
   fields: OverrideFields;
 }
 
+/** PUT / DELETE /h3pipe/override: each pass's override (with its `stale`),
+ * the target the next render uses and the one the build compiled for. */
 export interface OverrideResult {
   override: Partial<Record<Pass, Override & { stale?: boolean }>>;
+  target?: string;
+  built_target?: string;
 }
 
 export interface AssembleResult {
@@ -464,7 +484,7 @@ export interface BrowseResult {
   episode: boolean;
   truncated: boolean;
   dirs: BrowseDir[];
-  /** Not in the contract: only when the request asks for files (see api.ts). */
+  /** only when the request asks for files (`files=image|audio`) */
   files?: BrowseFile[];
 }
 
@@ -479,46 +499,74 @@ export type RefKind = "character" | "prop" | "vehicle" | "location" | "voice" | 
 
 export interface RefTake {
   take: number;
+  /** the character view it belongs to (null for every other ref) */
+  view?: string | null;
   status: TakeStatus;
+  /** finished with a file: it can be picked */
+  usable?: boolean;
   seed: Seed | null;
-  /** the candidate file (image, or audio for a voice), relative like `path` */
+  seed_source?: string | null;
+  /** the candidate image, relative like `path`; null for a voice (see `audio`) or no file */
   image: string | null;
+  /** a voice's candidate recording (then `image` is null) */
+  audio?: string | null;
   /** "frame": a keyframe cut out of a video take (POST /h3pipe/refs/keyframe) */
   source: "generated" | "imported" | "frame";
   /** where a "frame" take came from */
   from?: RefFrameSource;
   note: string;
-  /** Not in the contract's list example; read if a server sends them. */
-  prompt?: string;
-  model?: string;
-  steps?: number;
+  prompt?: string | null;
+  model?: string | null;
+  steps?: number | null;
   loras?: Lora[] | null;
+  overrides?: string[];
   queued?: string | null;
   finished?: string | null;
   save_notes?: string;
-  comfy_prompt_id?: string;
+  comfy_prompt_id?: string | null;
   /** image size, once the saver or the import has written it */
   width?: number | null;
   height?: number | null;
-  /** Phase 8.5 (not in the contract's list): the image target it was generated with */
+  /** the image target it was generated with */
   target?: string | null;
+  /** an upload's file name (POST /h3pipe/refs/import, multipart) */
+  original_name?: string;
+}
+
+/** A ref's override as `/refs` lists it: the field names, `stale`, and the values. */
+export interface RefOverrideInfo {
+  fields: string[];
+  stale: boolean;
+  values?: Override;
 }
 
 export interface RefView {
   /** 01_threequarter | 02_side | 03_back | 04_face */
   view: string;
   picked: number | null;
+  /** Clear (DELETE /h3pipe/refs/pick) removed its pick; auto-pick leaves it alone */
+  cleared?: boolean;
+  /** what this view generates with now */
+  prompt?: string | null;
+  /** the view's override: its values are the character's own fields, then the view's */
+  override?: RefOverrideInfo;
+  effective?: RefEffective | null;
   takes: RefTake[];
 }
 
-/** What a generate would use now (not in the contract yet: see api.ts). */
+/** What a generate (seed_mode auto, nothing else set) would use now. A
+ * character's top-level `effective` is just `{target}`: each view has the rest. */
 export interface RefEffective {
-  prompt: string;
-  seed: Seed;
-  model: string;
-  loras: Lora[] | null;
-  steps: number;
-  /** Phase 8.5 (TODO(contract)): the image target a generate uses now */
+  prompt?: string;
+  /** null when a generate would pick a new seed */
+  seed?: Seed | null;
+  seed_source?: string;
+  model?: string | null;
+  loras?: Lora[] | null;
+  steps?: number | null;
+  width?: number | null;
+  height?: number | null;
+  /** the image target a generate uses now */
   target?: string | null;
 }
 
@@ -531,17 +579,29 @@ export type KeyframeMethod = "continuity" | "generate" | "import" | "none" | (st
 
 /** A reference image an edit target receives with a keyframe generate. */
 export interface EditRef {
-  id: string;
+  /** null for a composite (a single-reference target gets one collage of the parts) */
+  id: string | null;
+  role?: "subject" | "plate" | "composite" | (string & {});
   view?: string | null;
+  /** null for a composite until a generate composes it */
   path?: string | null;
+  /** a composite's name, and what it is made of */
+  name?: string;
+  parts?: { role?: string; subject?: string; location?: string; name?: string; kind?: string; view?: string | null; path?: string | null }[];
 }
 
-/** The series config's `refs` block, as the editor sees it. */
+/** Where an image-target default comes from: set in the editor for the episode
+ * (PUT /h3pipe/refs/defaults), the series config's `refs` block, or built in. */
+export type RefDefaultSource = "editor" | "series" | "default";
+
+/** GET /h3pipe/refs `defaults`: the image targets refs and keyframes generate with. */
 export interface RefDefaults {
   /** the image target series refs generate with */
   target?: string | null;
+  target_source?: RefDefaultSource | null;
   /** the image target keyframes generate with */
   keyframe_target?: string | null;
+  keyframe_target_source?: RefDefaultSource | null;
 }
 
 export interface Ref {
@@ -557,17 +617,25 @@ export interface Ref {
   used_by: Partial<Record<Pass, string[]>>;
   /** the prompt a generate would use now; null when the series config lacks what it needs */
   prompt: string | null;
+  /** the id as a file-name stem (`:` as `__`) */
+  key?: string;
+  /** the series config subject it belongs to (null for a location or a keyframe) */
+  subject?: string | null;
   /** false when this ref can't be generated; `why_not` says why */
   can_generate?: boolean;
   why_not?: string | null;
-  override: { fields: string[]; stale: boolean };
-  /** characters only */
+  override: RefOverrideInfo;
+  /** a character's four views; `[]` for every other ref */
   views?: RefView[];
   takes: RefTake[];
   picked: number | null;
-  /** TODO(contract): see api.ts. The override's values and the effective settings. */
+  /** Clear removed its pick (auto-pick leaves it alone until something is picked) */
+  cleared?: boolean;
+  /** the ref's own override values (the same as `override.values`) */
   override_values?: Override;
-  effective?: RefEffective;
+  /** what a generate uses now; null when it can't be generated */
+  effective?: RefEffective | null;
+  /** the series config's prompt before any override (a character's: its sheet text) */
   built_prompt?: string;
   // ---- Phase 8.5: keyframes as needed refs ----
   /** required (e.g. Wan 14B I2V's first frame) or optional; absent from older
@@ -578,18 +646,23 @@ export interface Ref {
   which?: "first" | "last" | null;
   /** a keyframe: the video target that will read it */
   target?: string | null;
-  /** TODO(contract): the script's `first:` / `last:` line asks for this
-   * keyframe (so "missing" and Generate missing include it when optional). */
+  /** the script's `first:` / `last:` line asks for this keyframe (so
+   * "missing" and Generate missing include it when optional) */
   requested?: boolean;
-  /** TODO(contract): the references an edit target gets with a keyframe generate */
+  /** the script's raw `first:` / `last:` value */
+  script?: string | null;
+  /** whether the shot's target reads that end */
+  reads?: boolean | null;
+  /** a path the script names (method "import") */
+  import_path?: string;
+  /** with an edit keyframe target: exactly the references a generate feeds it */
   edit_refs?: EditRef[];
 }
 
 export interface RefList {
   refs: Ref[];
-  /** TODO(contract): the series config's `refs` defaults. Absent: the
-   * target list's image default, and the contract's keyframe rule. */
-  defaults?: RefDefaults;
+  /** the episode's image targets (null when the series config's `refs` block is bad) */
+  defaults?: RefDefaults | null;
 }
 
 export interface RefGenerateRequest {
@@ -610,9 +683,36 @@ export interface RefGenerateRequest {
 }
 
 export interface RefGenerateResult {
-  queued: { ref: string; view: string | null; take: number; prompt_id: string; seed: Seed }[];
-  errors: { ref?: string; view?: string | null; error: string }[];
+  queued: { ref: string; view: string | null; take: number; prompt_id: string; seed: Seed; target?: string }[];
+  errors: { ref?: string; view?: string | null; error: string; take?: number }[];
 }
+
+/** POST /h3pipe/refs/generate-missing (Phase 8.6). */
+export interface RefGenerateMissingRequest {
+  ep: string;
+  pass?: Pass;
+  /** default both */
+  kinds?: ("series" | "keyframe")[];
+  target?: string | null;
+  keyframe_target?: string | null;
+  /** plan only: the same shape, nothing queued (take / prompt_id null) */
+  dry_run?: boolean;
+}
+
+/** How Generate missing filled a ref: a generated candidate, a frame from the
+ * neighbouring take (continuity), or the script's file (import). */
+export type MissingMethod = "generate" | "continuity" | "import" | (string & {});
+
+export interface RefGenerateMissingResult {
+  /** a still (method generate); a dry run's take / prompt_id are null, and seed when a new one would be drawn */
+  queued: { ref: string; view?: string | null; take: number | null; prompt_id: string | null; seed?: Seed | null; seed_source?: string | null; target?: string | null; method?: MissingMethod }[];
+  /** filled at once: a continuity frame or the script's file (a dry run's take is null) */
+  picked: { ref: string; take: number | null; method?: MissingMethod; view?: string | null }[];
+  skipped: { ref: string; reason: string; view?: string | null }[];
+  /** as `/refs/generate`'s errors (`missing_files` when a model isn't installed) */
+  errors: { ref?: string; view?: string | null; error: string; take?: number; missing_files?: MissingFile[] }[];
+}
+
 
 export interface RefPickRequest {
   ep: string;
@@ -626,6 +726,28 @@ export interface RefImportRequest {
   ref: string;
   view?: string | null;
   source_path: string;
+  /** Phase 8.6: pick it at once */
+  pick?: boolean;
+}
+
+/** POST /h3pipe/refs/import as multipart/form-data (Phase 8.6, drag and drop). */
+export interface RefUploadRequest {
+  ep: string;
+  ref: string;
+  view?: string | null;
+  /** pick it at once (sent as "1") */
+  pick?: boolean;
+  file: Blob;
+  /** the file's name (a File has its own) */
+  name?: string;
+}
+
+/** POST /h3pipe/refs/discard (Phase 8.6): move a candidate to `_trash/`. */
+export interface RefDiscardRequest {
+  ep: string;
+  ref: string;
+  view?: string | null;
+  take: number;
 }
 
 /** A keyframe take's source: shot, take and pass, and the frame index used. */
@@ -666,7 +788,8 @@ export interface RefEvent {
   view: string | null;
   take: number | null;
   /** queued | ok | failed | picked, or cleared (DELETE /h3pipe/refs/pick) */
-  status: TakeStatus | "picked" | "cleared";
+  status: TakeStatus | "picked" | "cleared" | (string & {});
+
 }
 
 // ---------------------------------------------------------------------------
@@ -756,10 +879,14 @@ export interface MissingFile {
   url?: string | null;
   /** what to search for when there's no URL */
   source?: string | null;
-  /** TODO(contract): for an optional file, the feature it enables. Not in the
-   * contract; read if sent, else the param's label is used. */
+  /** an optional file: the feature it enables (the same words as its `features_off` entry) */
   feature?: string | null;
+  /** the family's label */
+  label?: string | null;
+  /** which passes miss the file */
+  passes?: Pass[];
 }
+
 
 export interface Resolution {
   want?: string | null;

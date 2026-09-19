@@ -4,7 +4,7 @@
 // warnings a render response may carry. Pure functions; the components call them.
 
 import type {
-  EpisodeStatus, ModelFile, ModelList, RenderResult, ShotDetail, ShotStatus, Target, TargetList, TargetWidget, TakeSummary,
+  EpisodeStatus, ModelFile, ModelList, ShotDetail, ShotStatus, Target, TargetList, TargetWidget, TakeSummary,
 } from "../types";
 import { tn, type Badge } from "./format";
 
@@ -68,8 +68,9 @@ export function shotTarget(
  * null when it's what the shot would render on anyway (its script's target,
  * else the episode's), so the retarget is cleared. A shot built for the series
  * target has no script target of its own, so it falls back to the episode
- * target; picking its built target then has to be sent explicitly when the
- * episode target differs (see TODO(contract) in api.ts).
+ * target; picking its built target is then sent explicitly when the episode
+ * target differs, and the server keeps it as the shot's own (API.md "Pinning a
+ * shot to its built target"). Without an episode target the server clears it.
  */
 export function overrideTargetValue(
   chosen: string | null | undefined,
@@ -292,65 +293,4 @@ export function runSize(d: Pick<ShotDetail, "effective" | "pass" | "target" | "b
   const p = d ? findTarget(list, chosen)?.presets?.[d.pass] : undefined;
   if (p?.width && p?.height) return { text: `size set by the target (its ${d!.pass} preset is ${p.width}×${p.height})`, exact: false };
   return { text: "size set by the target", exact: false };
-}
-
-// ---------------------------------------------------------------------------
-// render warnings
-// ---------------------------------------------------------------------------
-
-export interface RenderWarning {
-  shot?: string;
-  text: string;
-}
-
-function warningText(w: unknown): RenderWarning | null {
-  if (typeof w === "string") return w.trim() ? { text: w } : null;
-  if (w && typeof w === "object") {
-    const o = w as Record<string, unknown>;
-    const text = [o.warning, o.message, o.text, o.reason, o.detail].find((x) => typeof x === "string" && x.trim()) as string | undefined;
-    if (!text) return null;
-    return { shot: typeof o.shot === "string" ? o.shot : undefined, text };
-  }
-  return null;
-}
-
-function warningsIn(v: unknown, shot?: string): RenderWarning[] {
-  if (v == null) return [];
-  const arr = Array.isArray(v) ? v : [v];
-  const out: RenderWarning[] = [];
-  for (const w of arr) {
-    const x = warningText(w);
-    if (x) out.push({ ...x, shot: x.shot ?? shot });
-  }
-  return out;
-}
-
-/**
- * Every warning a render response carries, wherever it sits (the contract
- * doesn't pin it down): a top-level `warnings`, and `warning`/`warnings` on
- * queued, skipped and errored entries. Deduplicated; never throws.
- */
-export function renderWarnings(r: RenderResult | null | undefined): RenderWarning[] {
-  if (!r || typeof r !== "object") return [];
-  const out: RenderWarning[] = [];
-  const o = r as unknown as Record<string, unknown>;
-  out.push(...warningsIn(o.warnings));
-  out.push(...warningsIn(o.warning));
-  for (const key of ["queued", "skipped", "errors"]) {
-    const list = o[key];
-    if (!Array.isArray(list)) continue;
-    for (const e of list) {
-      if (!e || typeof e !== "object") continue;
-      const x = e as Record<string, unknown>;
-      const shot = typeof x.shot === "string" ? x.shot : undefined;
-      out.push(...warningsIn(x.warnings, shot), ...warningsIn(x.warning, shot));
-    }
-  }
-  const seen = new Set<string>();
-  return out.filter((w) => {
-    const k = `${w.shot ?? ""}|${w.text}`;
-    if (seen.has(k)) return false;
-    seen.add(k);
-    return true;
-  });
 }

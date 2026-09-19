@@ -4,33 +4,27 @@
 import type { Target } from "../types";
 
 /**
- * "from negative.txt", "from series.json", "target default", "shot override",
- * "this run"; "" when unknown. The contract doesn't pin the value strings
- * (TODO(contract) in api.ts), so the likely spellings are all read.
+ * `negative_source` in words (API.md "Phase 8.5 as built": request | override |
+ * negative.txt | series | preset | none): "this run", "shot override", "from
+ * negative.txt", "from series.json", "target default"; "" for none (the target
+ * takes no negative) or unknown.
  */
 export function negativeSourceLabel(src: string | null | undefined): string {
-  switch ((src ?? "").trim().toLowerCase()) {
+  switch (src ?? "") {
     case "negative.txt":
-    case "negative_txt":
-    case "episode":
-    case "file":
       return "from negative.txt";
     case "series":
-    case "series.json":
-    case "series_config":
       return "from series.json";
     case "preset":
-    case "target":
-    case "default":
-    case "target_default":
       return "target default";
     case "override":
-    case "shot":
       return "shot override";
     case "request":
       return "this run";
+    case "none":
     case "":
       return "";
+
     default:
       return String(src);
   }
@@ -44,7 +38,8 @@ export function negativeSourceLabel(src: string | null | undefined): string {
 export function takesNegative(t: Pick<Target, "capabilities"> | undefined, eff?: { negative?: string | null; negative_source?: string | null } | null): boolean {
   if (t?.capabilities?.negative_prompt === true) return true;
   if (t?.capabilities?.negative_prompt === false) return false;
-  return eff?.negative != null || !!eff?.negative_source;
+  if (eff?.negative_source) return eff.negative_source !== "none";
+  return eff?.negative != null;
 }
 
 /** The negative has no effect at cfg ≤ 1 (turbo presets). */

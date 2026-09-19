@@ -6,18 +6,20 @@
 // `missing_refs`.
 
 import type { Api } from "../api";
-import { ApiError, parseJsonSeedSafe, targetsQuery } from "../api";
+import { ApiError, UPLOAD_LIMIT, parseJsonSeedSafe, targetsQuery } from "../api";
 import type { HostEvent } from "../host";
 import { reachable } from "../lib/browse";
 import { promptText } from "../lib/format";
 import type {
-  CutEntry, EpisodeStatus, EpisodeSummary, Lora, MissingRef, Override, Pass, RefUsed, RenderResult, ShotDetail,
-  ShotStatus, ShotTargetSource, TakeDetail, TakeSummary,
+  CutEntry, EpisodeStatus, EpisodeSummary, Lora, MissingRef, Override, OverrideResult, Pass, RefGenerateMissingResult, RefUsed,
+  RenderResult, ShotDetail, ShotStatus, ShotTargetSource, TakeDetail, TakeSummary,
 } from "../types";
+import { keyframeWanted } from "../lib/keyframes";
+import { hasViews } from "../lib/refs";
 import fixturesRaw from "./fixtures.json?raw";
 import { FsError, browse as fsBrowse, fsExists } from "./mockFs";
 import { RefError, createMockRefs } from "./mockRefs";
-import { MOCK_REF_DEFAULTS, svgImage, type KeyframeNeedSpec } from "./mockRefs";
+import { svgImage, type KeyframeNeedSpec } from "./mockRefs";
 import {
   H3, H3_FL2V, LTX, LTX_REFS, MOCK_TARGETS, MOCK_WIDGET_CHOICES, WAN_I2V, ltxPrompt, mockModelFiles, mockReadiness, mockTakeResolved,
   preset, targetLength,
@@ -128,25 +130,36 @@ export function createMockApi(emit: Emit, opts: MockOptions = {}): Api {
     return out;
   }
 
-  /** The refs a shot's current target reads (GET /h3pipe/shot `refs_used`). */
+  /** The refs a shot's current target reads (GET /h3pipe/shot `refs_used`), as
+   * h3edit.refs_used sends them: `kind` image | audio, `need` on every entry,
+   * `thumb` only when the file is there, `id` null for a composed sheet. */
   function refsUsedOf(shot: string, target: string): RefUsed[] {
     const caps = MOCK_TARGETS.targets.find((t) => t.id === target)?.capabilities;
     const out: RefUsed[] = [];
+    let pic = 1;
     if (caps?.subject_refs !== false) {
       for (const id of refs.usedByShot(shotIds.indexOf(shot))) {
         const r = refs.info(id);
-        if (!r || r.kind === "voice") continue;
-        out.push({ id, kind: r.kind, role: r.kind === "location" ? "plate" : "subject", path: r.path, exists: r.exists, need: null, thumb: r.path });
+        if (!r) continue;
+        const audio = r.kind === "voice";
+        // a voice sample is read only by targets that take one
+        if (audio && !caps?.voice_reference) continue;
+        out.push({
+          id, kind: audio ? "audio" : "image", role: audio ? "voice" : r.kind === "location" ? "plate" : "subject", path: r.path,
+          exists: r.exists, need: "required", thumb: r.exists ? r.path : null, slot: audio ? "Audio 1" : `Picture ${pic++}`,
+        });
       }
     }
     for (const n of refs.keyframeNeeds(shot)) {
       if (n.method === "none") continue;
       const id = `shot:${shot}:${n.which}`;
       const r = refs.info(id);
-      out.push({ id, kind: "keyframe", role: n.which, path: r?.path ?? `refs/shots/${shot}/${n.which}.png`, exists: !!r?.exists, need: n.need });
+      const path = r?.path ?? `refs/shots/${shot}/${n.which}.png`;
+      out.push({ id, kind: "image", role: n.which, path, exists: !!r?.exists, need: n.need, thumb: r?.exists ? path : null, slot: `${n.which} frame` });
     }
     if (target === LTX_REFS) {
-      out.push({ id: `sheet:${shot}`, kind: "reference_sheet", role: "reference_sheet", path: `refs/_sheets/${shot}_refsheet.png`, exists: true, need: null });
+      const path = `refs/_sheets/${shot}_refsheet.png`;
+      out.push({ id: null, kind: "image", role: "reference_sheet", path, exists: true, need: "required", thumb: path, slot: "reference sheet" });
     }
     return out;
   }
@@ -253,6 +266,12 @@ export function createMockApi(emit: Emit, opts: MockOptions = {}): Api {
       // retargeted: the target's own prompt and defaults; the prompt override is ignored
       const p = preset(target, pass);
       const caps = MOCK_TARGETS.targets.find((t) => t.id === target)?.capabilities;
+      const built = d.built as { audio_policy?: string; voice_refs?: unknown[] };
+      const notes = [
+        ...(ov.prompt != null ? [`the prompt override was ignored: a prompt written for ${H3} isn't valid for ${target}`] : []),
+        ...(!caps?.voice_reference && (built.audio_policy === "clone" || built.voice_refs?.length)
+          ? [`audio clone renders as generate on ${target}: it takes no voice reference (voices come from each voice line)`] : []),
+      ];
       // Phase 8.5: request → shot override → negative.txt (Wan) → series.json → preset
       const neg = caps?.negative_prompt
         ? ov.negative != null
@@ -266,7 +285,7 @@ export function createMockApi(emit: Emit, opts: MockOptions = {}): Api {
         prompt: ltxPrompt(d.built_prompt), seed, seed_source,
         model: ov.model ?? p?.model ?? "", loras: ov.loras !== undefined ? ov.loras : null, steps: ov.steps ?? p?.steps ?? 8,
         target, width: p?.width ?? null, height: p?.height ?? null, length: targetLength(target, frames),
-        ...neg, ...low,
+        ...neg, ...low, ...(notes.length ? { notes } : {}),
       };
     }
     return {
@@ -276,6 +295,8 @@ export function createMockApi(emit: Emit, opts: MockOptions = {}): Api {
       loras: ov.loras !== undefined ? ov.loras : base?.loras ?? null,
       steps: ov.steps ?? b.steps ?? 4,
       target, width: st(pass).width, height: st(pass).height, length: frames || null,
+      // H3 takes no negative
+      negative: null, negative_source: "none",
     };
   }
 
@@ -289,7 +310,7 @@ export function createMockApi(emit: Emit, opts: MockOptions = {}): Api {
       // Phase 8: the target the next render uses, and the one the build compiled for
       const tg = shotTargetOf(shot, d.override);
       d.target = s.target = tg.target;
-      s.target_source = tg.source;
+      d.target_source = s.target_source = tg.source;
       d.built_target = s.built_target = SCRIPT_TARGETS[shot] ?? SERIES_TARGET;
       s.profile = d.profile = null;
       for (const t of s.takes) {
@@ -305,7 +326,8 @@ export function createMockApi(emit: Emit, opts: MockOptions = {}): Api {
   function shotTargetOf(shot: string, ov: Override): { target: string; source: ShotTargetSource } {
     if (ov.target) return { target: ov.target, source: "override" };
     if (SCRIPT_TARGETS[shot]) return { target: SCRIPT_TARGETS[shot], source: "script" };
-    return { target: episodeTarget ?? SERIES_TARGET, source: "episode" };
+    // no target of its own: the editor's episode target, else series.json's
+    return { target: episodeTarget ?? SERIES_TARGET, source: episodeTarget ? "episode" : "series" };
   }
 
   function syncEpisodeTarget() {
@@ -347,7 +369,21 @@ export function createMockApi(emit: Emit, opts: MockOptions = {}): Api {
   }
   syncEpisodeTarget();
 
+  /** PUT / DELETE /h3pipe/override's answer: both passes, and the targets. */
+  function overrideResult(shot: string): OverrideResult {
+    const res: OverrideResult = { override: {} };
+    for (const p of ["final", "proxy"] as Pass[]) {
+      const d = detail[p]?.[shot];
+      if (!d) continue;
+      res.override[p] = { ...clone(d.override), stale: d.override_stale };
+      res.target = d.target ?? undefined;
+      res.built_target = d.built_target ?? undefined;
+    }
+    return res;
+  }
+
   function randomSeed(): string {
+
     // new seeds stay below 2^53 (PLAN.md)
     return String(Math.floor(Math.random() * 2 ** 52));
   }
@@ -511,10 +547,6 @@ export function createMockApi(emit: Emit, opts: MockOptions = {}): Api {
           });
           continue;
         }
-        const built = d.built as { audio_policy?: string; voice_refs?: unknown[] };
-        if (target !== H3 && (built.audio_policy === "clone" || built.voice_refs?.length)) {
-          (out.warnings ??= []).push({ shot, warning: `audio downgraded to generate: ${target} takes no voice reference (voices come from each voice line)` });
-        }
         let seed: string;
         let src: string;
         if (req.seed != null) { seed = req.seed; src = "typed"; }
@@ -566,7 +598,29 @@ export function createMockApi(emit: Emit, opts: MockOptions = {}): Api {
       if (td) td.status = "failed";
       emit("execution_interrupted", { prompt_id: String(td?.sidecar?.comfy_prompt_id ?? "") });
       emit("h3pipe.take", { ...ref, status: "failed", thumb: null });
-      return { status: "failed" };
+      t.finished = new Date().toISOString();
+      return { shot: ref.shot, pass: ref.pass, take: ref.take, status: "failed", save_notes: "cancelled", finished: t.finished };
+    },
+    async discard(ref) {
+      await wait();
+      need(ref.ep);
+      const s = shotSt(ref.pass, ref.shot);
+      const i = s.takes.findIndex((x) => x.take === ref.take);
+      if (i < 0) throw new MockError(`${ref.shot} has no ${ref.pass} take ${ref.take}`, 404);
+      const t = s.takes[i];
+      if (t.status === "queued") throw new MockError(`${ref.shot} t${String(ref.take).padStart(2, "0")} is queued: cancel it first`, 409);
+      // the files' new paths, under _trash/
+      const stem = `${st(ref.pass).folder}/${ref.shot}/${ref.shot}_t${String(ref.take).padStart(2, "0")}`;
+      const moved = [t.mp4, t.thumb, t.strip, `${stem}.json`].filter((x): x is string => !!x)
+        .map((p) => p.replace(`${st(ref.pass).folder}/`, `${st(ref.pass).folder}/_trash/`));
+      s.takes.splice(i, 1);
+      const d = det(ref.pass, ref.shot);
+      d.takes = d.takes.filter((x) => x.take !== ref.take);
+      const before = cut[ref.pass].length;
+      cut[ref.pass] = cut[ref.pass].filter((c) => !(c.shot === ref.shot && c.take === ref.take));
+      recut(ref.pass);
+      emit("h3pipe.episode", { ep: EP });
+      return { shot: ref.shot, take: ref.take, pass: ref.pass, moved, cut_changed: cut[ref.pass].length !== before };
     },
     async pick(req) {
       await wait();
@@ -613,12 +667,7 @@ export function createMockApi(emit: Emit, opts: MockOptions = {}): Api {
       }
       syncOverrideSummary(req.shot);
       emit("h3pipe.episode", { ep: EP });
-      const res: Record<string, Override & { stale: boolean }> = {};
-      for (const p of ["final", "proxy"] as Pass[]) {
-        const d = detail[p]?.[req.shot];
-        if (d) res[p] = { ...clone(d.override), stale: d.override_stale };
-      }
-      return { override: res };
+      return overrideResult(req.shot);
     },
     async deleteOverride(ep, shot, pass) {
       await wait();
@@ -632,7 +681,7 @@ export function createMockApi(emit: Emit, opts: MockOptions = {}): Api {
       }
       syncOverrideSummary(shot);
       emit("h3pipe.episode", { ep: EP });
-      return {};
+      return overrideResult(shot);
     },
     async assemble(ep, pass) {
       await wait(1500);
@@ -647,7 +696,112 @@ export function createMockApi(emit: Emit, opts: MockOptions = {}): Api {
     async refs(ep) {
       await wait();
       need(ep);
-      return { refs: refs.list(), defaults: { ...MOCK_REF_DEFAULTS } };
+      return { refs: refs.list(), defaults: refs.defaults() };
+    },
+    async putRefDefaults(ep, fields) {
+      await wait();
+      need(ep);
+      if (!("target" in fields) && !("keyframe_target" in fields)) throw new MockError("give target and/or keyframe_target", 400);
+      const defaults = refs.setDefaults(fields);
+      emit("h3pipe.episode", { ep: EP });
+      return { defaults };
+    },
+    async refsGenerateMissing(req) {
+      await wait();
+      need(req.ep);
+      const pass = req.pass ?? "proxy";
+      const kinds = req.kinds ?? ["series", "keyframe"];
+      const out: RefGenerateMissingResult = { queued: [], picked: [], skipped: [], errors: [] };
+      const list = refs.list();
+      const inFlight = (ts: { status: string }[]) => ts.some((t) => t.status === "queued" || t.status === "ok");
+      if (kinds.includes("series")) {
+        for (const r of list) {
+          if (r.kind === "keyframe" || r.exists || !r.path || r.cleared || !(r.used_by[pass] ?? []).length) continue;
+          if (r.can_generate === false) {
+            out.skipped.push({ ref: r.id, reason: r.why_not ?? "can't be generated" });
+            continue;
+          }
+          // skipped if any candidate is queued or waits to be picked; a character
+          // missing all four views gets one generate (view null, a shared seed)
+          const all = hasViews(r) ? r.views!.flatMap((v) => v.takes) : r.takes;
+          if (inFlight(all)) {
+            out.skipped.push({ ref: r.id, reason: "a candidate is queued or waiting to be picked" });
+            continue;
+          }
+          const missingViews = hasViews(r) ? r.views!.filter((v) => v.picked == null && !v.cleared).map((v) => v.view) : [];
+          const views: (string | null)[] = !hasViews(r) || missingViews.length === r.views!.length ? [null] : missingViews;
+          for (const view of views) {
+            if (req.dry_run) {
+              out.queued.push({ ref: r.id, view, take: null, prompt_id: null, seed: null, target: req.target ?? r.effective?.target ?? null, method: "generate" });
+              continue;
+            }
+            const g = refs.generate({
+              ep: req.ep, ref: r.id, view, count: 1, seed_mode: "auto", seed: null, prompt: null, model: null, loras: null, steps: null,
+              note: "generate missing", ...(req.target ? { target: req.target } : {}),
+            });
+            out.queued.push(...g.queued.map((q) => ({ ...q, seed_source: "stable", method: "generate" })));
+          }
+        }
+      }
+      if (kinds.includes("keyframe")) {
+        const s = st(pass);
+        const order = s.shots.filter((x) => !x.orphan);
+        for (const r of list) {
+          if (r.kind !== "keyframe" || r.exists || r.cleared || r.need == null || !keyframeWanted(r)) continue;
+          if (inFlight(r.takes)) {
+            out.skipped.push({ ref: r.id, reason: "a candidate is already queued or waiting to go live" });
+            continue;
+          }
+          const i = order.findIndex((x) => x.shot === r.shot);
+          const src = order[i + (r.which === "first" ? -1 : 1)];
+          if (r.method === "continuity" && src && src.cut.take != null && src.cut.usable) {
+            if (req.dry_run) {
+              out.picked.push({ ref: r.id, take: null, method: "continuity" });
+              continue;
+            }
+            const k = await api.refsKeyframe({ ep: req.ep, pass, shot: r.shot!, which: r.which!, pick: true });
+            out.picked.push({ ref: r.id, take: k.picked, method: "continuity" });
+            continue;
+          }
+          if (r.method === "import") {
+            out.skipped.push({ ref: r.id, reason: "the script asks for an imported file: drop one on it, or Import…" });
+            continue;
+          }
+          if (req.dry_run) {
+            out.queued.push({ ref: r.id, view: null, take: null, prompt_id: null, seed: null, target: req.keyframe_target ?? r.effective?.target ?? null, method: "generate" });
+            continue;
+          }
+          const g = refs.generate({
+            ep: req.ep, ref: r.id, view: null, count: 1, seed_mode: "auto", seed: null, prompt: null, model: null, loras: null, steps: null,
+            note: "generate missing", ...(req.keyframe_target ? { target: req.keyframe_target } : {}),
+          });
+          out.queued.push(...g.queued.map((q) => ({ ...q, seed_source: "stable", method: "generate" })));
+        }
+      }
+
+      if (!req.dry_run && (out.queued.length || out.picked.length)) emit("h3pipe.episode", { ep: EP });
+      return out;
+    },
+    async refsUpload(req, onProgress) {
+      need(req.ep);
+      const name = req.name ?? "upload";
+      const total = req.file.size;
+      if (total > UPLOAD_LIMIT) throw new MockError(`${name} is over 64 MB`, 413);
+      // simulated progress, in quarters
+      for (let q = 1; q <= 4; q++) {
+        await wait(80);
+        onProgress?.(Math.round((total * q) / 4), total);
+      }
+      const t = refs.upload({ ref: req.ref, view: req.view ?? null, name, pick: !!req.pick });
+      emit("h3pipe.episode", { ep: EP });
+      return t;
+    },
+    async refsDiscard(req) {
+      await wait();
+      need(req.ep);
+      const r = refs.discard({ ref: req.ref, view: req.view ?? null, take: req.take });
+      emit("h3pipe.episode", { ep: EP });
+      return r;
     },
     async refsUnpick(ep, ref, view) {
       await wait();
@@ -718,14 +872,16 @@ export function createMockApi(emit: Emit, opts: MockOptions = {}): Api {
     async putRefOverride(req) {
       await wait();
       need(req.ep);
-      refs.putOverride(req.ref, req.fields);
-      return {};
+      const override = refs.putOverride(req.ref, req.fields, req.view ?? null);
+      emit("h3pipe.episode", { ep: EP });
+      return { override };
     },
-    async deleteRefOverride(ep, ref) {
+    async deleteRefOverride(ep, ref, view) {
       await wait();
       need(ep);
-      refs.deleteOverride(ref);
-      return {};
+      const override = refs.deleteOverride(ref, view ?? null);
+      emit("h3pipe.episode", { ep: EP });
+      return { override };
     },
     async models() {
       await wait();

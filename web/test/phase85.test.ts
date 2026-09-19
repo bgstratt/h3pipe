@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 import { createHttpApi } from "../src/api";
 import { ESTIMATE_TITLE, fmtShotSeconds, lengthEstimated } from "../src/lib/format";
 import {
-  editRefsFor, editRefsText, generateTarget, imageModeText, refDefaults, refTargetOf, refsSnippet,
+  editRefsFor, editRefsText, imageModeText, refDefaults, refTargetOf, refsSnippet,
 } from "../src/lib/imageTargets";
 import {
   clearKeyframeText, keyframeBlocks, keyframeGroups, keyframeOf, keyframePlan, keyframeWanted, methodLabel, needLabel,
@@ -124,50 +124,43 @@ describe("image targets for refs", () => {
     default: { image: "krea2" },
   };
 
-  it("resolves the series defaults, and the contract's keyframe rule without them", () => {
-    expect(refDefaults(list, null)).toEqual({ refs: "krea2", keyframes: "flux2_klein_edit", source: "default" });
-    const notReady = { ...list, targets: [list.targets[0], { ...list.targets[1], readiness: { ...list.targets[1].readiness!, status: "not_ready" as const } }] };
-    expect(refDefaults(notReady, null).keyframes).toBe("krea2");
-    expect(refDefaults(list, { target: "z_image_turbo", keyframe_target: "flux_kontext" })).toEqual({ refs: "z_image_turbo", keyframes: "flux_kontext", source: "series" });
+  it("reads the episode's defaults and their sources from /refs", () => {
+    const served = { target: "krea2", target_source: "default" as const, keyframe_target: "flux2_klein_edit", keyframe_target_source: "default" as const };
+    expect(refDefaults(list, served)).toEqual({ refs: "krea2", keyframes: "flux2_klein_edit", refsSource: "default", keyframesSource: "default" });
+    expect(refDefaults(list, { target: "z_image_turbo", target_source: "editor", keyframe_target: "flux_kontext", keyframe_target_source: "series" }))
+      .toEqual({ refs: "z_image_turbo", keyframes: "flux_kontext", refsSource: "editor", keyframesSource: "series" });
+    // a series config whose refs block the server can't read: `defaults: null`
+    expect(refDefaults(list, null)).toEqual({ refs: "krea2", keyframes: "krea2", refsSource: "default", keyframesSource: "default" });
     expect(imageModeText(list.targets[1])).toBe("edit, up to 2 references");
     expect(imageModeText(list.targets[0])).toBe("text to image");
   });
 
-  it("sends a target only for a session choice that isn't the default, never over a ref's own", () => {
-    const d = refDefaults(list, null);
-    const a = ref("subject:ada", "character");
-    const k = kf("sh020", "first");
-    expect(generateTarget(a, d, {})).toBeNull();
-    expect(generateTarget(a, d, { refs: "krea2" })).toBeNull();
-    expect(generateTarget(a, d, { refs: "z_image_turbo" })).toBe("z_image_turbo");
-    expect(generateTarget(k, d, { refs: "z_image_turbo" })).toBeNull();
-    expect(generateTarget(k, d, { keyframes: "krea2" })).toBe("krea2");
-    const own = ref("subject:bo", "character", { override_values: { target: "flux2_klein" } });
-    expect(generateTarget(own, d, { refs: "z_image_turbo" })).toBeNull();
-    expect(refTargetOf(own, d, { refs: "z_image_turbo" })).toEqual({ target: "flux2_klein", source: "override" });
-    expect(refTargetOf(k, d)).toEqual({ target: "flux2_klein_edit", source: "series" });
+  it("a ref's image target: its own override, else what the server says it uses, else the default", () => {
+    const d = refDefaults(list, { target: "krea2", keyframe_target: "flux2_klein_edit" });
+    const own = ref("subject:bo", "character", { override_values: { target: "flux2_klein" }, effective: { target: "flux2_klein" } });
+    expect(refTargetOf(own, d)).toEqual({ target: "flux2_klein", source: "override" });
+    expect(refTargetOf(ref("subject:ada", "character", { effective: { target: "z_image_turbo" } }), d)).toEqual({ target: "z_image_turbo", source: "effective" });
+    expect(refTargetOf(kf("sh020", "first"), d)).toEqual({ target: "flux2_klein_edit", source: "default" });
     expect(refsSnippet("keyframes", "flux_kontext")).toBe('"refs": {"keyframe_target": "flux_kontext"}');
     expect(refsSnippet("refs", "krea2")).toBe('"refs": {"target": "krea2"}');
   });
 
-  it("says which references an edit target gets: the server's, else a guess capped at max_refs", () => {
-    const refs = [
-      ref("subject:ada", "character", { name: "Ada", used_by: { proxy: ["sh020"] } }),
-      ref("subject:bo", "character", { name: "Bo", used_by: { proxy: ["sh020"] } }),
-      ref("location:kitchen", "location", { name: "kitchen", used_by: { proxy: ["sh020"] } }),
-      ref("voice:ada", "voice", { used_by: { proxy: ["sh020"] } }),
-    ];
+  it("says which references an edit target gets: exactly the server's edit_refs", () => {
+    const refs = [ref("subject:ada", "character", { name: "Ada" }), ref("location:kitchen", "location", { name: "kitchen" })];
     const edit = list.targets[1];
-    const guess = editRefsFor(kf("sh020", "first"), edit, refs, "proxy", "close-up");
-    expect(guess.exact).toBe(false);
-    expect(guess.refs.map((x) => x.label)).toEqual(["Ada (face)", "Bo (face)"]); // max_refs 2
-    const wide = editRefsFor(kf("sh020", "first"), { ...edit, capabilities: { mode: "edit", max_refs: 4 } }, refs, "proxy", "wide");
-    expect(wide.refs.map((x) => x.label)).toEqual(["Ada (body)", "Bo (body)", "kitchen (plate)"]);
-    const exact = editRefsFor(kf("sh020", "first", { edit_refs: [{ id: "location:kitchen" }] }), edit, refs, "proxy");
-    expect(exact).toMatchObject({ exact: true, refs: [{ id: "location:kitchen", label: "kitchen" }] });
-    expect(editRefsText(list, "flux2_klein_edit", exact)).toBe("Flux 2 Klein edit with kitchen");
-    expect(editRefsFor(kf("sh020", "first"), list.targets[0], refs, "proxy").refs).toEqual([]); // t2i
+    const plan = editRefsFor(kf("sh020", "first", {
+      edit_refs: [
+        { id: "subject:ada", role: "subject", view: "04_face", path: "refs/_takes/subject__ada/subject__ada_04_face_t01.png" },
+        { id: "location:kitchen", role: "plate", path: "refs/_bg/kitchen.png" },
+      ],
+    }), edit, refs);
+    expect(plan.refs.map((x) => x.label)).toEqual(["Ada (face)", "kitchen (plate)"]);
+    expect(editRefsText(list, "flux2_klein_edit", plan)).toBe("Flux 2 Klein edit with Ada (face), kitchen (plate)");
+    expect(editRefsFor(kf("sh020", "first"), edit, refs).refs).toEqual([]); // nothing picked yet
+    expect(editRefsText(list, "flux2_klein_edit", editRefsFor(kf("sh020", "first"), edit, refs))).toMatch(/no reference images yet/);
+    expect(editRefsFor(kf("sh020", "first", { edit_refs: [{ id: "location:kitchen" }] }), list.targets[0], refs).refs).toEqual([]); // t2i
   });
+
 });
 
 describe("refs this shot uses", () => {
@@ -217,10 +210,9 @@ describe("refs this shot uses", () => {
 describe("negatives", () => {
   it("labels where the negative comes from", () => {
     expect(negativeSourceLabel("negative.txt")).toBe("from negative.txt");
-    expect(negativeSourceLabel("episode")).toBe("from negative.txt");
+    expect(negativeSourceLabel("none")).toBe(""); // the target takes no negative
     expect(negativeSourceLabel("series")).toBe("from series.json");
     expect(negativeSourceLabel("preset")).toBe("target default");
-    expect(negativeSourceLabel("target")).toBe("target default");
     expect(negativeSourceLabel("override")).toBe("shot override");
     expect(negativeSourceLabel("request")).toBe("this run");
     expect(negativeSourceLabel(null)).toBe("");
@@ -284,7 +276,7 @@ describe("mock: Phase 8.5", () => {
     const api = createMockApi(() => {}, { latency: 0 });
     const ep = (await api.episodes())[0].ep;
     const { refs, defaults } = await api.refs(ep);
-    expect(defaults).toEqual({ target: "krea2", keyframe_target: "flux2_klein_edit" });
+    expect(defaults).toEqual({ target: "krea2", target_source: "default", keyframe_target: "flux2_klein_edit", keyframe_target_source: "default" });
     const k = (id: string) => refs.find((r) => r.id === id)!;
     expect(k("shot:sh060:first")).toMatchObject({ need: "required", method: "continuity", target: "wan22_i2v", exists: false, can_generate: true });
     expect(k("shot:sh070:first")).toMatchObject({ need: "required", exists: true, picked: 1 });

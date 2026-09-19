@@ -1,15 +1,13 @@
-// Image targets for refs (docs/API.md "Phase 8.5: Image targets"): which image
-// model series refs and keyframes generate with (the series config's `refs`
-// block, a per-ref override, the Refs tab's session choice), and which
-// reference images an edit target gets with a keyframe. Pure functions.
+// Image targets for refs (docs/API.md "Phase 8.5 as built": image defaults):
+// which image model series refs and keyframes generate with (the episode's
+// choice, the series config's `refs` block, the built-in default, or a per-ref
+// override), and which reference images an edit target gets with a keyframe.
+// Pure functions.
 
-import type { EditRef, Pass, Ref, RefDefaults, Target, TargetList } from "../types";
-import { isKeyframeRef, keyframeOf } from "./keyframes";
-import { readinessOf } from "./readiness";
-import { findTarget, targetLabel } from "./targets";
+import type { EditRef, Ref, RefDefaultSource, RefDefaults, Target, TargetList } from "../types";
+import { isKeyframeRef } from "./keyframes";
+import { targetLabel } from "./targets";
 
-/** The contract's default keyframe target when it is ready. */
-export const KEYFRAME_EDIT_DEFAULT = "flux2_klein_edit";
 /** The built-in refs target (Phase 7). */
 export const REFS_DEFAULT = "krea2";
 
@@ -35,66 +33,52 @@ export function imageModeText(t: Pick<Target, "capabilities"> | undefined): stri
 export interface ResolvedRefDefaults {
   refs: string;
   keyframes: string;
-  /** "series": the server sent the series config's block; "default": the fallback rule */
-  source: "series" | "default";
+  /** where each comes from: set in the editor for this episode, the series config, built in */
+  refsSource: RefDefaultSource;
+  keyframesSource: RefDefaultSource;
+}
+
+function source(s: string | null | undefined): RefDefaultSource {
+  return s === "editor" || s === "series" ? s : "default";
 }
 
 /**
- * The series defaults: the server's (TODO(contract): `defaults` on /refs),
- * else the list's image default (else krea2) for refs, and flux2_klein_edit
- * for keyframes when it is ready (else the refs target), as the contract says.
+ * The episode's image targets, as `GET /h3pipe/refs` `defaults` gives them.
+ * Without them (a series config whose `refs` block the server can't read): the
+ * list's image default for both.
  */
 export function refDefaults(list: TargetList | null | undefined, served?: RefDefaults | null): ResolvedRefDefaults {
-  const refs = served?.target || list?.default?.image || imageTargets(list).find((t) => t.default)?.id || REFS_DEFAULT;
-  let keyframes = served?.keyframe_target || "";
-  if (!keyframes) {
-    const edit = findTarget(list, KEYFRAME_EDIT_DEFAULT);
-    const ready = readinessOf(list, KEYFRAME_EDIT_DEFAULT)?.status;
-    keyframes = edit && (ready === "ready" || ready === "degraded") ? KEYFRAME_EDIT_DEFAULT : refs;
-  }
-  return { refs, keyframes, source: served?.target || served?.keyframe_target ? "series" : "default" };
+  const fallback = list?.default?.image || imageTargets(list).find((t) => t.default)?.id || REFS_DEFAULT;
+  const refs = served?.target || fallback;
+  return {
+    refs,
+    keyframes: served?.keyframe_target || refs,
+    refsSource: source(served?.target_source),
+    keyframesSource: source(served?.keyframe_target_source),
+  };
+}
+
+/** "set for this episode" / "series.json" / "built-in default" */
+export function refDefaultSourceLabel(s: RefDefaultSource): string {
+  return s === "editor" ? "set for this episode" : s === "series" ? "series.json refs block" : "built-in default";
 }
 
 export function refTargetKind(r: Pick<Ref, "id" | "kind" | "scope">): RefTargetKind {
   return isKeyframeRef(r) ? "keyframes" : "refs";
 }
 
-/** The session choice in the Refs tab, per kind (null: the series default). */
-export type RefTargetChoice = Partial<Record<RefTargetKind, string | null>>;
-
 /**
- * The image target a generate of `r` uses: the ref's own override, else the
- * tab's choice, else the series default. `source` says which.
+ * The image target a generate of `r` uses: the ref's own override, else what
+ * the server says it uses now (`effective.target`), else the episode default.
  */
 export function refTargetOf(
   r: Pick<Ref, "id" | "kind" | "scope"> & Partial<Pick<Ref, "override_values" | "effective">>,
   defaults: ResolvedRefDefaults,
-  choice: RefTargetChoice = {},
-): { target: string; source: "override" | "choice" | "series" | "effective" } {
+): { target: string; source: "override" | "effective" | "default" } {
   const own = r.override_values?.target;
   if (own) return { target: own, source: "override" };
-  const kind = refTargetKind(r);
-  const c = choice[kind];
-  if (c) return { target: c, source: "choice" };
   if (r.effective?.target) return { target: r.effective.target, source: "effective" };
-  return { target: kind === "keyframes" ? defaults.keyframes : defaults.refs, source: "series" };
-}
-
-/**
- * The `target` to send with a generate: the tab's choice when it differs from
- * the series default and the ref has no override of its own (a request's
- * target beats the override, so it mustn't be sent then). null otherwise.
- */
-export function generateTarget(
-  r: Pick<Ref, "id" | "kind" | "scope"> & Partial<Pick<Ref, "override_values">>,
-  defaults: ResolvedRefDefaults,
-  choice: RefTargetChoice = {},
-): string | null {
-  if (r.override_values?.target) return null;
-  const kind = refTargetKind(r);
-  const c = choice[kind];
-  const def = kind === "keyframes" ? defaults.keyframes : defaults.refs;
-  return c && c !== def ? c : null;
+  return { target: refTargetKind(r) === "keyframes" ? defaults.keyframes : defaults.refs, source: "default" };
 }
 
 /** The series.json snippet that makes a choice permanent. */
@@ -108,51 +92,38 @@ export function refsSnippet(kind: RefTargetKind, id: string): string {
 
 export interface EditRefsPlan {
   refs: { id: string; label: string; view?: string | null }[];
-  /** true when the server listed them (`edit_refs`); false: the UI's guess */
-  exact: boolean;
   max: number | null;
 }
 
-/** Face or body by shot size, as the contract says (a guess at the size words). */
-export function viewForSize(size: string | null | undefined): string {
-  return /close|cu\b|ecu|face/i.test(size ?? "") ? "04_face" : "01_threequarter";
-}
+const VIEW_WORD: Record<string, string> = { "04_face": "face", "01_threequarter": "body" };
 
 /**
  * What an edit target receives with `r`'s keyframe generate: the server's
- * `edit_refs` when it sends them, else a guess: the picked characters (then
- * props) the shot uses, then its plate, up to `max_refs`. Empty for a t2i target.
+ * `edit_refs` (exactly what a generate feeds, after `max_refs`). Empty for a
+ * text-to-image target.
  */
-export function editRefsFor(
-  r: Ref,
-  target: Target | undefined,
-  refs: Ref[],
-  pass: Pass,
-  size?: string | null,
-): EditRefsPlan {
+export function editRefsFor(r: Pick<Ref, "edit_refs">, target: Target | undefined, refs: Ref[]): EditRefsPlan {
   const max = target?.capabilities?.max_refs ?? null;
-  if (!isEditTarget(target)) return { refs: [], exact: true, max };
-  const name = (id: string) => refs.find((x) => x.id === id)?.name ?? id.replace(/^[a-z]+:/, "");
-  if (Array.isArray(r.edit_refs)) {
-    return { refs: r.edit_refs.map((e: EditRef) => ({ id: e.id, view: e.view ?? null, label: name(e.id) })), exact: true, max };
-  }
-  const shot = keyframeOf(r)?.shot;
-  if (!shot) return { refs: [], exact: false, max };
-  const uses = refs.filter((x) => !isKeyframeRef(x) && x.kind !== "voice" && x.exists && (x.used_by?.[pass] ?? []).includes(shot));
-  const order = (x: Ref) => (x.kind === "character" ? 0 : x.kind === "location" ? 2 : 1);
-  const sorted = [...uses].sort((a, b) => order(a) - order(b) || a.name.localeCompare(b.name));
-  const view = viewForSize(size);
-  const out = sorted.map((x) => ({
-    id: x.id,
-    view: x.kind === "character" ? view : null,
-    label: x.kind === "location" ? `${x.name} (plate)` : x.kind === "character" ? `${x.name} (${view === "04_face" ? "face" : "body"})` : x.name,
-  }));
-  return { refs: max != null ? out.slice(0, max) : out, exact: false, max };
+  if (!isEditTarget(target)) return { refs: [], max };
+  const name = (id: string) => refs.find((x) => x.id === id)?.name ?? id.replace(/^[a-z]+:/, "").replace(/_/g, " ");
+  return {
+    refs: (r.edit_refs ?? []).map((e: EditRef) => {
+      const view = e.view ?? null;
+      // a single-reference target gets one collage of the parts (no file until a generate)
+      if (e.role === "composite" || !e.id) {
+        const parts = (e.parts ?? []).map((p) => p.name ?? p.subject ?? p.location ?? "").filter(Boolean);
+        return { id: e.id ?? "composite", view: null, label: e.name ? e.name : parts.length ? `one collage of ${parts.join(", ")}` : "one collage" };
+      }
+      const what = e.role === "plate" ? "plate" : view ? VIEW_WORD[view] ?? view.replace(/^\d+_/, "") : "";
+      return { id: e.id, view, label: what ? `${name(e.id)} (${what})` : name(e.id) };
+    }),
+    max,
+  };
 }
 
 /** "Flux 2 Klein edit with Ada (face), kitchen (plate)" */
 export function editRefsText(list: TargetList | null | undefined, targetId: string, plan: EditRefsPlan): string {
   const label = targetLabel(list, targetId);
-  if (!plan.refs.length) return plan.exact ? `${label} (no reference images)` : `${label}: no picked references for this shot yet`;
-  return `${label} with ${plan.refs.map((x) => x.label).join(", ")}${plan.exact ? "" : " (guessed)"}`;
+  if (!plan.refs.length) return `${label} (no reference images yet: pick the characters' views and the plate)`;
+  return `${label} with ${plan.refs.map((x) => x.label).join(", ")}`;
 }

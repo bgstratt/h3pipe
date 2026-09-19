@@ -110,6 +110,16 @@ export function isAudioRef(r: Pick<Ref, "kind">): boolean {
   return r.kind === "voice";
 }
 
+/** A candidate's file: its image, or a voice's `audio` (whose `image` is null). */
+export function takeFile(t: Pick<RefTake, "image" | "audio">): string | null {
+  return t.image ?? t.audio ?? null;
+}
+
+/** A candidate that can be picked: the server's `usable`, else finished with a file. */
+export function takeUsable(t: Pick<RefTake, "status" | "image" | "audio" | "usable">): boolean {
+  return t.usable ?? (t.status === "ok" && !!takeFile(t));
+}
+
 /** Generation isn't offered for voices (nothing generates them yet). Keyframes
  * are generated from Phase 8.5 on (a still by the keyframe image model), on a
  * server that lists them as needed refs (with `need`) or says `can_generate`. */

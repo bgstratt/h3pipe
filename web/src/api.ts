@@ -1,145 +1,42 @@
 // The typed client for docs/API.md: one function per route. The same `Api`
 // interface is implemented by the mock (src/mock/) for the dev page.
 //
-// CONTRACT TODOs (gaps found while building the UI; see the report):
-//  - TODO(contract): `POST /h3pipe/cancel` says it "returns the take's new status"
-//    without a shape. Typed here as `{status?: ...}`; the UI only needs 2xx.
-//  - TODO(contract): `PUT /h3pipe/override` returns each pass's override "plus
-//    stale per pass"; whether `stale` sits inside each pass object or beside
-//    it is not pinned down. The UI refetches `/h3pipe/shot` instead of reading it.
+// What the contract still leaves open (the UI works around each one):
 //  - TODO(contract): shot_detail has no pre-override ("built") model/LoRAs/steps
-//    once an override sets them; the inspector can only show the effective
-//    values plus the raw built shotlist entry (which omits series defaults).
+//    once an override sets them; `built` is the raw shotlist entry, which omits
+//    the series config's defaults. The inspector shows the effective values.
 //  - TODO(contract): a placeholder cut entry's take lives in the other pass;
 //    episode_status gives its number but not its thumb/strip/mp4, so the UI
 //    loads the other pass's status to draw it.
-//
-// Round 2 / Phase 5 (refs) gaps:
-//  - TODO(contract): `GET /h3pipe/browse` lists folders only. Importing a ref
-//    needs a file picker, so the client sends `files=image|audio` and reads an
-//    optional `files: [{name, path, size?}]`. A server without it gets the
-//    typed-path fallback in the dialog.
-//  - TODO(contract): ref files live beside the series config, which (Phase 5 layout) can be
-//    the episode's parent folder, but `GET /h3pipe/file` only serves paths inside
-//    `ep`. `refFileUrl` uses `/h3pipe/file` with the ref's path as given, plus
-//    `v=<sha1>` to beat the browser's image cache after a re-pick. A
-//    `/h3pipe/refs/file?ep&path` (paths relative to the series config) would settle it.
-//  - TODO(contract): `GET /h3pipe/refs` gives the effective `prompt` and the
-//    override's field *names*, not the override's values or the effective
-//    seed/model/LoRAs/steps, so the ref override editor can't show them. Read
-//    here as optional `override_values`, `effective` and `built_prompt`.
-//  - TODO(contract): per-view prompts/overrides for a character: `/refs` has one
-//    `prompt` per ref; the override routes take `view`, but nothing lists a view's
-//    own prompt or override. The UI edits the ref-level override only.
-//  - TODO(contract): the ref override routes are "the same shape as the shot
-//    override routes"; the response of PUT/DELETE isn't pinned down. The UI
-//    refetches `/h3pipe/refs`.
-//  - TODO(contract): `PUT /h3pipe/refs/pick` doesn't say whether it sends
-//    `h3pipe.episode` (a pick changes `missing_refs` and makes takes ref-stale).
-//    The UI refetches the episode itself after a pick or import.
-//  - TODO(contract): `/refs/generate` progress: the UI matches ComfyUI `progress`
-//    events by the `prompt_id`s it gets back; after a reload a queued ref take
-//    carries no prompt id (read as optional `comfy_prompt_id`).
-//  - TODO(contract): `POST /h3pipe/refs/import` "returns the new take": typed as
-//    a RefTake (plus `view`).
-//  - TODO(contract): a render's `skipped[].reason` for missing refs is free text;
-//    the UI groups by the presence of `missing_refs` instead.
-//
-// Phase 8 (retargeting) gaps, found while building the target picker:
 //  - TODO(contract): `GET /h3pipe/shot` takes no `target`, so the redo/render
 //    dialogs can't show the size and length a one-off run on *another* target
-//    would use. They show `effective.width/height/length` for the shot's own
-//    target and "size set by the target" (plus the target's preset size) for
-//    any other. A `target=` parameter on /h3pipe/shot would settle it.
-//  - TODO(contract): render warnings (e.g. audio downgraded to generate for a
-//    target with no voice reference) have no documented place or shape. The UI
-//    reads a top-level `warnings`, and `warning`/`warnings` on queued, skipped
-//    and errored entries, each a string or `{shot, warning|message|text}`.
-//  - TODO(contract): the per-pass prompt override is ignored for a retargeted
-//    shot, and there's no prompt override per target yet. The inspector shows
-//    `effective.prompt` read-only for a retargeted shot until there is.
-//  - TODO(contract): does `DELETE /h3pipe/override?pass=` keep `target` (shared,
-//    like `seed`)? The UI assumes so: "Revert <pass>" leaves the target and
-//    "Revert all" clears it; the picker has its own revert (`target: null`).
-//  - TODO(contract): the episode's top-level `target` is read as the series
-//    default for the "not the default" badge; the list's `default.video` is the
-//    fallback. Say which one is the series default once episodes mix targets.
-//  - TODO(contract): whether `GET /h3pipe/targets?kind=video` or the unfiltered
-//    list is canonical for the picker; the client asks for all and filters.
-//  - TODO(contract): the model/LoRA pickers read choices from ComfyUI's own
-//    `/object_info/<class_type>` for a `{class_type, field}` widget (as API.md
-//    suggests); a LoRA widget names its file field `name`, not `field`.
-//
-// Continuity keyframes: (the missing "Clear" is DELETE /h3pipe/refs/pick in Phase 8.5)
-//
-// Phase 8.5 (image targets, keyframes as needed refs, negatives), built against
-// the contract before the backend:
-//  - TODO(contract): the series config's `refs` block (`target`,
-//    `keyframe_target`) has no route. The client reads an optional top-level
-//    `defaults: {target, keyframe_target}` on `GET /h3pipe/refs`; without it the
-//    Refs tab uses the list's `default.image` and the contract's keyframe rule
-//    (flux2_klein_edit when ready, else the refs target).
-//  - TODO(contract): there is no episode-level image-target override (the
-//    video side has `PUT /h3pipe/episode-target`). The Refs tab's model picker
-//    is a session choice sent as each generate's `target` (never for a ref
-//    with its own `target` override), and offers the series.json snippet.
-//  - TODO(contract): a ref's effective image target isn't listed. Read as
-//    optional `effective.target`; else the ref override's `target`, else the
-//    defaults above.
-//  - TODO(contract): "missing includes only required ones plus any whose
-//    script asks": nothing says which optional keyframes the script asks for.
-//    Read as an optional `requested: true` on the keyframe ref.
-//  - TODO(contract): which references an edit target gets with a keyframe
-//    generate isn't listed. Read as an optional `edit_refs: [{id, view, path}]`;
-//    else the UI guesses from the refs the shot uses (subjects, then the plate),
-//    up to `max_refs`, and says it's a guess.
-//  - TODO(contract): `DELETE /h3pipe/refs/pick`'s response isn't given. Read as
-//    the ref (as `/refs` lists it) when it looks like one; the UI refetches
-//    `/refs` and the episode either way.
-//  - TODO(contract): `negative_source` is said to be recorded on the take only,
-//    with no value strings. The inspector reads `effective.negative` /
-//    `effective.negative_source` on `GET /h3pipe/shot` and the sidecar's, and
-//    accepts request | override | negative.txt (or episode / file) | series
-//    (or series.json) | preset (or target / default).
-//  - TODO(contract): `refs_used[].thumb` isn't described (a path like `path`?
-//    a URL?). Read as a ref-relative path, served like `path`.
-//  - TODO(contract): `reference_image` is read as a path relative to the
-//    episode (served through `/h3pipe/file`).
-//  - TODO(contract): `model_low` with `GET /h3pipe/models?param=model_low`
-//    needs the target (`target=`) as for `model`; the client sends it.
-//
-// Readiness and the episode target (API.md, 2026-09-19), built against the
-// contract before the backend:
-//  - TODO(contract): `PUT /h3pipe/episode-target` "returns the episode's target
-//    info": typed as `{target, target_source, series_target}`. The UI refetches
-//    `/h3pipe/episode` anyway (the h3pipe.episode event, and a direct refetch).
-//  - TODO(contract): a render skipped because the target isn't ready ("blocked
-//    before a take is reserved, naming the file and where to get it") has no
-//    pinned shape. Read as `missing_files` or `missing` (readiness entries) on
-//    the skip, plus an optional `target`; else spotted from `reason`
-//    (lib/readiness.ts isMissingFileSkip).
-//  - TODO(contract): an optional file's missing entry doesn't say which feature
-//    it enables ("enables <feature>"). Read as an optional `feature`, else the
-//    param's `models` label, else the param name ("duration head").
-//  - TODO(contract): `features_off` isn't tied to the missing entry that turned
-//    it off; the panel lists both.
-//  - TODO(contract): with an episode target set, `PUT /h3pipe/override`'s rule
-//    "setting the shot's built target clears the retarget" means a shot can't
-//    be pinned to its built target when the episode target differs. The UI
-//    sends the built target explicitly in that case (not null) and says so.
-//  - TODO(contract): does `?ready=1` compose with `kind=`? The client sends
-//    both when asked; the editor asks for all targets with `ready=1`.
-//  - TODO(contract): whether `GET /h3pipe/shot` carries `target_source` too;
-//    the UI reads it from the episode status.
+//    would use (they show the target's preset size instead).
+//  - TODO(contract): there is no prompt override per target: a retargeted
+//    shot's per-pass prompt override is ignored, so the inspector shows its
+//    `effective.prompt` read-only.
+//  - TODO(contract): a character view's `override.values` in `GET /h3pipe/refs`
+//    are the character's own fields merged with the view's, and a view has no
+//    `built_prompt`. The per-view editor can't tell a view's own field from an
+//    inherited one, nor diff an overridden view prompt against the series
+//    config's text.
 
 import type {
   AssembleResult, BrowseFiles, BrowseResult, BuildResult, CancelResult, ComfyQueue, Config, CutEntry,
-  CutFile, EpisodeStatus, EpisodeSummary, EpisodeTargetResult, ModelList, OverrideRequest, OverrideResult, Pass, PickRequest, Ref,
-  RefGenerateRequest, RefGenerateResult, RefImportRequest, RefKeyframeRequest, RefList, RefOverrideRequest,
-  RefPickRequest,
-  RefTake, RenderRequest, RenderResult, Seed, ShotDetail, TakeRef, TargetKind, TargetList,
+  CutFile, DiscardResult, EpisodeStatus, EpisodeSummary, EpisodeTargetResult, ModelList, OverrideRequest, OverrideResult, Pass,
+  PickRequest, Ref, RefDefaults, RefDiscardRequest, RefGenerateMissingRequest, RefGenerateMissingResult, RefGenerateRequest,
+  RefGenerateResult, RefImportRequest, RefKeyframeRequest, RefList, RefOverrideInfo, RefOverrideRequest, RefPickRequest,
+  RefTake, RefUploadRequest, RenderRequest, RenderResult, Seed, ShotDetail, TakeRef, TargetKind, TargetList,
 } from "./types";
 import { comboChoices } from "./lib/targets";
+
+/** A ref take as the import routes return it. */
+export type ImportedTake = RefTake & { view?: string | null };
+
+/** Upload progress: bytes sent so far, and the total (0 when unknown). */
+export type UploadProgress = (sent: number, total: number) => void;
+
+/** POST /h3pipe/refs/import (multipart) refuses a file over this (413). */
+export const UPLOAD_LIMIT = 64 * 1024 * 1024;
 
 export interface Api {
   getConfig(): Promise<Config>;
@@ -154,28 +51,42 @@ export interface Api {
   readJson<T = unknown>(ep: string, path: string): Promise<T>;
   render(req: RenderRequest): Promise<RenderResult>;
   cancel(take: TakeRef): Promise<CancelResult>;
+  /** POST /h3pipe/discard: move a take's files to `_trash/` (409 while queued). */
+  discard(take: TakeRef): Promise<DiscardResult>;
   pick(req: PickRequest): Promise<{ cut: CutFile }>;
   putCut(ep: string, pass: Pass, entries: CutEntry[]): Promise<{ cut: CutFile }>;
   putOverride(req: OverrideRequest): Promise<OverrideResult>;
-  deleteOverride(ep: string, shot: string, pass?: Pass): Promise<unknown>;
+  deleteOverride(ep: string, shot: string, pass?: Pass): Promise<OverrideResult>;
   assemble(ep: string, pass: Pass, partial: boolean): Promise<AssembleResult>;
-  /** Folders on the ComfyUI machine; no path = the starting points. `files` asks
-   * for files too (not in the contract yet, see the TODO above). */
+  /** Folders on the ComfyUI machine; no path = the starting points. `files`
+   * lists image or audio files too (for importing a ref). */
   browse(path?: string | null, files?: BrowseFiles | null): Promise<BrowseResult>;
   refs(ep: string): Promise<RefList>;
-  /** URL of a ref file (live file or a candidate); `version` busts the image cache. */
+  /** URL of a ref file (live file or a candidate, `../` beside a parent-folder
+   * series config); `version` busts the image cache after a re-pick. */
   refFileUrl(ep: string, path: string, version?: string | null): string;
   refsGenerate(req: RefGenerateRequest): Promise<RefGenerateResult>;
+  /** POST /h3pipe/refs/generate-missing: one candidate for every missing series
+   * ref, and every needed keyframe filled (continuity, a still, or the script's file). */
+  refsGenerateMissing(req: RefGenerateMissingRequest): Promise<RefGenerateMissingResult>;
   refsPick(req: RefPickRequest): Promise<Ref>;
-  refsImport(req: RefImportRequest): Promise<RefTake & { view?: string | null }>;
+  refsImport(req: RefImportRequest): Promise<ImportedTake>;
+  /** POST /h3pipe/refs/import as multipart (drag and drop, a file picker), with
+   * upload progress where the transport can report it. */
+  refsUpload(req: RefUploadRequest, onProgress?: UploadProgress): Promise<ImportedTake>;
+  /** POST /h3pipe/refs/discard: move a candidate to `_trash/`; its pick is cleared.
+   * Returns the ref as `refs` lists it. */
+  refsDiscard(req: RefDiscardRequest): Promise<Ref>;
   /** A shot's first / last keyframe from a frame of a video take (continuity);
    * returns the keyframe ref as `refs` lists it. */
   refsKeyframe(req: RefKeyframeRequest): Promise<Ref>;
   /** DELETE /h3pipe/refs/pick: unpick a ref (its live file is removed; its takes
    * stay). For a keyframe this is Clear: the shot renders without one. */
-  refsUnpick(ep: string, ref: string, view?: string | null): Promise<Ref | null>;
-  putRefOverride(req: RefOverrideRequest): Promise<unknown>;
-  deleteRefOverride(ep: string, ref: string, view?: string | null): Promise<unknown>;
+  refsUnpick(ep: string, ref: string, view?: string | null): Promise<Ref>;
+  /** PUT /h3pipe/refs/defaults: the episode's image targets (null clears one; a key left out is kept). */
+  putRefDefaults(ep: string, fields: { target?: string | null; keyframe_target?: string | null }): Promise<{ defaults: RefDefaults }>;
+  putRefOverride(req: RefOverrideRequest): Promise<{ override: RefOverrideResult }>;
+  deleteRefOverride(ep: string, ref: string, view?: string | null): Promise<{ override: RefOverrideResult }>;
   /** ComfyUI's own lists (not h3pipe routes). */
   models(): Promise<string[]>;
   loras(): Promise<string[]>;
@@ -192,6 +103,9 @@ export interface Api {
   /** GET /h3pipe/models: one model param's files, matching the target's family first. */
   modelFiles(target: string, param: string, ep?: string | null): Promise<ModelList>;
 }
+
+/** A ref override route's answer: the (effective) override values, plus `stale`. */
+export type RefOverrideResult = NonNullable<RefOverrideInfo["values"]> & { stale?: boolean };
 
 export interface TargetsQuery {
   kind?: TargetKind;
@@ -252,6 +166,48 @@ export interface Transport {
   fetch(path: string, init?: RequestInit): Promise<Response>;
   /** the absolute URL of a server path, for <img src> / <video src> */
   url(path: string): string;
+  /** POST a multipart form with upload progress (XMLHttpRequest); without it,
+   * uploads go through `fetch` and report no progress. */
+  upload?(path: string, form: FormData, onProgress?: UploadProgress): Promise<{ status: number; statusText: string; text: string }>;
+}
+
+/** An XMLHttpRequest upload to `url`, for a Transport's `upload`. */
+export function xhrUpload(url: string, form: FormData, onProgress?: UploadProgress): Promise<{ status: number; statusText: string; text: string }> {
+  return new Promise((resolve, reject) => {
+    const x = new XMLHttpRequest();
+    x.open("POST", url);
+    if (onProgress) x.upload.onprogress = (e) => onProgress(e.loaded, e.lengthComputable ? e.total : 0);
+    x.onload = () => resolve({ status: x.status, statusText: x.statusText, text: x.responseText });
+    x.onerror = () => reject(new Error("the upload didn't reach ComfyUI"));
+    x.onabort = () => reject(new Error("the upload was cancelled"));
+    x.send(form);
+  });
+}
+
+/** The server's JSON (seeds kept as strings), or an ApiError for a failed status. */
+function answer<T>(method: string, route: string, status: number, statusText: string, text: string): T {
+  let data: unknown = undefined;
+  if (text) {
+    try {
+      data = parseJsonSeedSafe(text);
+    } catch {
+      data = undefined;
+    }
+  }
+  if (status < 200 || status >= 300) {
+    const msg = (data && typeof data === "object" && typeof (data as { error?: unknown }).error === "string")
+      ? (data as { error: string }).error
+      : status === 413
+        ? `The file is too big to upload (the limit is ${UPLOAD_LIMIT / 1024 / 1024} MB).`
+        : status === 404 && route.startsWith("/h3pipe/") && data === undefined
+          ? `${route} isn't there (HTTP 404). Is the h3pipe node pack loaded and up to date?`
+          : `${method} ${route} failed: HTTP ${status} ${statusText}`.trim();
+    throw new ApiError(msg, status, route);
+  }
+  if (data === undefined && text) {
+    throw new ApiError(`${method} ${route} answered with something that isn't JSON.`, status, route);
+  }
+  return data as T;
 }
 
 function qs(params: Record<string, string | undefined | null>): string {
@@ -273,30 +229,27 @@ export function createHttpApi(t: Transport): Api {
     } catch (e) {
       throw new ApiError(`Can't reach ComfyUI (${method} ${route}): ${errText(e)}`, 0, route);
     }
-    const text = await res.text();
-    let data: unknown = undefined;
-    if (text) {
-      try {
-        data = parseJsonSeedSafe(text);
-      } catch {
-        data = undefined;
-      }
-    }
-    if (!res.ok) {
-      const msg = (data && typeof data === "object" && typeof (data as { error?: unknown }).error === "string")
-        ? (data as { error: string }).error
-        : res.status === 404 && route.startsWith("/h3pipe/") && data === undefined
-          ? `${route} isn't there (HTTP 404). Is the h3pipe node pack loaded and up to date?`
-          : `${method} ${route} failed: HTTP ${res.status} ${res.statusText}`.trim();
-      throw new ApiError(msg, res.status, route);
-    }
-    if (data === undefined && text) {
-      throw new ApiError(`${method} ${route} answered with something that isn't JSON.`, res.status, route);
-    }
-    return data as T;
+    return answer<T>(method, route, res.status, res.statusText, await res.text());
   }
 
   const get = <T>(path: string) => call<T>("GET", path);
+
+  /** A multipart POST (the browser sets the boundary): with progress through
+   * the transport's `upload` when it has one, else plain `fetch`. */
+  async function postForm<T>(path: string, form: FormData, onProgress?: UploadProgress): Promise<T> {
+    const route = path.split("?")[0];
+    try {
+      if (t.upload) {
+        const r = await t.upload(path, form, onProgress);
+        return answer<T>("POST", route, r.status, r.statusText, r.text);
+      }
+      const res = await t.fetch(path, { method: "POST", body: form });
+      return answer<T>("POST", route, res.status, res.statusText, await res.text());
+    } catch (e) {
+      if (e instanceof ApiError) throw e;
+      throw new ApiError(`Can't reach ComfyUI (POST ${route}): ${errText(e)}`, 0, route);
+    }
+  }
 
   return {
     getConfig: () => get("/h3pipe/config"),
@@ -314,6 +267,7 @@ export function createHttpApi(t: Transport): Api {
       return call("POST", "/h3pipe/render", req);
     },
     cancel: (take) => call("POST", "/h3pipe/cancel", take),
+    discard: ({ ep, pass, shot, take }) => call("POST", "/h3pipe/discard", { ep, shot, take, pass }),
     pick: (req) => call("PUT", "/h3pipe/pick", req),
     putCut: (ep, pass, entries) => call("PUT", "/h3pipe/cut", { ep, pass, entries }),
     putOverride: (req) => {
@@ -336,13 +290,30 @@ export function createHttpApi(t: Transport): Api {
       const { target, ...rest } = req;
       return call("POST", "/h3pipe/refs/generate", target ? { ...rest, target } : rest);
     },
-    refsPick: (req) => call("PUT", "/h3pipe/refs/pick", req),
-    refsImport: (req) => call("POST", "/h3pipe/refs/import", req),
-    refsKeyframe: (req) => call("POST", "/h3pipe/refs/keyframe", req),
-    refsUnpick: async (ep, ref, view) => {
-      const r = await call<unknown>("DELETE", `/h3pipe/refs/pick?${qs({ ep, ref, view: view || undefined })}`);
-      return r && typeof r === "object" && "id" in r ? (r as Ref) : null;
+    refsGenerateMissing: (req) => {
+      // only what's set: the server's defaults apply to the rest
+      const body: Record<string, unknown> = { ep: req.ep };
+      for (const k of ["pass", "kinds", "target", "keyframe_target"] as const) if (req[k] != null) body[k] = req[k];
+      if (req.dry_run) body.dry_run = true;
+      return call("POST", "/h3pipe/refs/generate-missing", body);
     },
+    refsPick: (req) => call("PUT", "/h3pipe/refs/pick", req),
+    refsImport: ({ pick, ...req }) => call("POST", "/h3pipe/refs/import", pick ? { ...req, pick: true } : req),
+    refsUpload: (req, onProgress) => {
+      const form = new FormData();
+      form.append("ep", req.ep);
+      form.append("ref", req.ref);
+      if (req.view) form.append("view", req.view);
+      if (req.pick) form.append("pick", "1");
+      const name = req.name ?? (typeof File !== "undefined" && req.file instanceof File ? req.file.name : "upload");
+      form.append("file", req.file, name);
+      return postForm("/h3pipe/refs/import", form, onProgress);
+    },
+    refsDiscard: ({ ep, ref, view, take }) => call("POST", "/h3pipe/refs/discard", view ? { ep, ref, view, take } : { ep, ref, take }),
+    refsKeyframe: (req) => call("POST", "/h3pipe/refs/keyframe", req),
+    refsUnpick: (ep, ref, view) => call("DELETE", `/h3pipe/refs/pick?${qs({ ep, ref, view: view || undefined })}`),
+    putRefDefaults: (ep, fields) => call("PUT", "/h3pipe/refs/defaults", { ep, ...fields }),
+
     putRefOverride: (req) => {
       const s = req.fields.seed;
       if (s !== undefined && s !== null && !isSeed(s)) {

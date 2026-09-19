@@ -4,8 +4,8 @@
 
 import { memo, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import {
-  clearRef, copyText, generateMissing, generateRef, keyframeFromTake, loadRefs, openBrowse, openImageCompare, pickRef, refGenerateTarget,
-  revertRefOverride, saveRefOverride, selectRefTake, setRefTargetChoice, setRefsFilter, toggleRefOpen,
+  clearRef, copyText, discardRefTake, dismissMissingResult, generateMissing, generateRef, keyframeFromTake, loadRefs, openBrowse,
+  openImageCompare, pickRef, revertRefOverride, saveRefOverride, selectRefTake, setRefDefault, setRefsFilter, toggleRefOpen,
 } from "../actions";
 import {
   cutNeighbour, isKeyframeRef, keyframeBlocks, keyframeGroups, keyframeOf, keyframePlan, keyframeSource, methodLabel, methodTitle,
@@ -15,14 +15,15 @@ import { errText } from "../api";
 import { api } from "../host";
 import { shortName, tn } from "../lib/format";
 import {
-  editRefsFor, editRefsText, imageModeText, imageTargets, isEditTarget, refDefaults, refTargetOf, refsSnippet,
+  editRefsFor, editRefsText, imageModeText, imageTargets, isEditTarget, refDefaultSourceLabel, refDefaults, refTargetOf, refsSnippet,
   type RefTargetKind, type ResolvedRefDefaults,
 } from "../lib/imageTargets";
+import { missingResultText } from "../lib/lookback";
 import { formFromDetail, isDirty, overrideFields, type OverrideForm, type OverrideSource } from "../lib/overrideForm";
 import { pickWarning, readinessBadge, targetOptionText } from "../lib/readiness";
 import {
-  VIEWS, blockedShots, canGenerate, groupRefs, hasViews, missingPlan, isAudioRef, pickedTake, refCounts, takesOf, unpickedViews, usedBy,
-  viewLabel, viewOf, type RefFilter,
+  VIEWS, blockedShots, canGenerate, groupRefs, hasViews, missingPlan, isAudioRef, pickedTake, refCounts, takeFile, takeUsable, takesOf,
+  unpickedViews, usedBy, viewLabel, viewOf, type RefFilter,
 } from "../lib/refs";
 import { findTarget, targetLabel, targetShort } from "../lib/targets";
 import { store, useApp } from "../store";
@@ -32,6 +33,7 @@ import { useTargets } from "./Targets";
 import { OverrideFields } from "./OverrideFields";
 import { PassToggle } from "./ShotsTab";
 import { Progress, statusClass } from "./Thumb";
+import { DropSlot, UploadButton } from "./Upload";
 
 const FILTERS: { id: RefFilter; label: string; title: string }[] = [
   { id: "episode", label: "this episode", title: "Refs used by this episode's shots (this pass)" },
@@ -42,7 +44,7 @@ const FILTERS: { id: RefFilter; label: string; title: string }[] = [
 export const KEYFRAMES_EMPTY = "No shot's target reads keyframes. Use a previous shot's frame (right-click a shot) or import one";
 const NO_FILE = "series.json names no file for this (e.g. a voice-only character has no sheet)";
 
-/** The series defaults for image models (the server's, else the fallback rule). */
+/** The episode's image targets for refs and keyframes (GET /h3pipe/refs `defaults`). */
 function useRefDefaults(): ResolvedRefDefaults {
   const list = useApp((s) => s.targets);
   const served = useApp((s) => (s.ep ? s.refDefaults[s.ep] : null));
@@ -51,34 +53,39 @@ function useRefDefaults(): ResolvedRefDefaults {
 
 /**
  * "Refs render with: Krea 2 ✓ · Keyframes with: Flux 2 Klein edit ✓". Each is
- * a picker over the image targets, the series default marked; a choice other
- * than the default is this session's (sent as each generate's `target`, never
- * for a ref with its own override) and offers the series.json snippet.
+ * a picker over the image targets. A choice is the episode's (PUT
+ * /h3pipe/refs/defaults, kept in overrides.json); the first option goes back to
+ * the series config's (or the built-in) default. An episode choice offers the
+ * series.json snippet that makes it permanent.
  */
 function ImageModelBar() {
   const { list } = useTargets();
   const defaults = useRefDefaults();
-  const choice = useApp((s) => s.refTargetChoice);
+  const busyRefs = useApp((s) => !!s.busy["refdefaults|refs"]);
+  const busyKf = useApp((s) => !!s.busy["refdefaults|keyframes"]);
   const images = imageTargets(list);
   if (!list || !images.length) return null;
   const row = (kind: RefTargetKind, label: string) => {
-    const def = kind === "keyframes" ? defaults.keyframes : defaults.refs;
-    const value = choice[kind] || def;
-    const t = findTarget(list, value);
-    const warn = pickWarning(targetLabel(list, value), t?.readiness);
+    const cur = kind === "keyframes" ? defaults.keyframes : defaults.refs;
+    const src = kind === "keyframes" ? defaults.keyframesSource : defaults.refsSource;
+    const t = findTarget(list, cur);
+    const warn = pickWarning(targetLabel(list, cur), t?.readiness);
     const badge = readinessBadge(t?.readiness);
+    const editor = src === "editor";
     return (
       <span className="h3-row" style={{ gap: 4 }}>
         <span className="h3-muted h3-small">{label}</span>
         <select
           className="h3-in"
-          value={value}
-          title={`${imageModeText(t) || "image model"}${badge ? ` · ${badge.title}` : ""}\nThe series default is ${targetLabel(list, def)}${defaults.source === "series" ? " (series.json refs block)" : ""}.`}
-          onChange={(e) => setRefTargetChoice(kind, e.target.value === def ? null : e.target.value)}
+          value={editor ? cur : ""}
+          disabled={kind === "keyframes" ? busyKf : busyRefs}
+          title={`${imageModeText(t) || "image model"}${badge ? ` · ${badge.title}` : ""}\nNow: ${targetLabel(list, cur)} (${refDefaultSourceLabel(src)}). A choice here is this episode's; a ref with its own model keeps it.`}
+          onChange={(e) => void setRefDefault(kind, e.target.value || null)}
         >
+          <option value="">{editor ? "(back to the series config's default)" : `${targetLabel(list, cur)} (${refDefaultSourceLabel(src)})`}</option>
           {images.map((x) => (
             <option key={x.id} value={x.id} title={imageModeText(x)}>
-              {targetOptionText(x, x.id === def).replace(" (default)", " (series default)")}{isEditTarget(x) ? " · edit" : ""}
+              {targetOptionText(x)}{isEditTarget(x) ? " · edit" : ""}
             </option>
           ))}
         </select>
@@ -86,22 +93,25 @@ function ImageModelBar() {
       </span>
     );
   };
-  const custom = (["refs", "keyframes"] as RefTargetKind[]).filter((k) => choice[k]);
+  const custom = (["refs", "keyframes"] as RefTargetKind[]).filter((k) => (k === "keyframes" ? defaults.keyframesSource : defaults.refsSource) === "editor");
   return (
     <div className="h3-col" style={{ gap: 3 }}>
       <div className="h3-row h3-wrap" style={{ gap: 8 }}>
         {row("refs", "Refs render with:")}
         {row("keyframes", "Keyframes with:")}
       </div>
-      {custom.map((k) => (
-        <div key={k} className="h3-note h3-note-info h3-small">
-          This session sends {targetLabel(list, choice[k])} for {k === "keyframes" ? "keyframe" : "ref"} generates (a ref with its own model keeps it).
-          To make it the series default, add to series.json:{" "}
-          <code className="h3-mono">{refsSnippet(k, choice[k]!)}</code>{" "}
-          <button className="h3-link" onClick={() => void copyText(refsSnippet(k, choice[k]!), "Snippet")}>copy</button>{" "}
-          <button className="h3-link" onClick={() => setRefTargetChoice(k, null)}>back to the default</button>
-        </div>
-      ))}
+      {custom.map((k) => {
+        const id = k === "keyframes" ? defaults.keyframes : defaults.refs;
+        return (
+          <div key={k} className="h3-note h3-note-info h3-small">
+            This episode generates {k === "keyframes" ? "keyframes" : "refs"} with {targetLabel(list, id)} (kept in overrides.json; series.json isn't changed).
+            To make it the series default, add to series.json:{" "}
+            <code className="h3-mono">{refsSnippet(k, id)}</code>{" "}
+            <button className="h3-link" onClick={() => void copyText(refsSnippet(k, id), "Snippet")}>copy</button>{" "}
+            <button className="h3-link" onClick={() => void setRefDefault(k, null)}>back to the series default</button>
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -112,7 +122,6 @@ function KeyframeActions({ r }: { r: Ref }) {
   const pass = useApp((s) => s.pass);
   const st = useStatus();
   const refs = useApp((s) => (s.ep ? s.refs[s.ep] : undefined));
-  const choice = useApp((s) => s.refTargetChoice);
   const defaults = useRefDefaults();
   const { list } = useTargets();
   const busyFrame = useApp((s) => !!k && !!s.busy[`keyframe|${k.shot}|${k.which}`]);
@@ -122,10 +131,9 @@ function KeyframeActions({ r }: { r: Ref }) {
   const src = cutNeighbour(st, k.shot, k.which === "first" ? -1 : 1);
   const srcSt = src ? st?.shots.find((x) => x.shot === src) : undefined;
   const srcOk = !!srcSt && srcSt.cut.take != null && srcSt.cut.usable;
-  const tg = refTargetOf(r, defaults, choice);
+  const tg = refTargetOf(r, defaults);
   const target = findTarget(list, tg.target);
-  const size = st?.shots.find((x) => x.shot === k.shot)?.size;
-  const plan = editRefsFor(r, target, refs ?? [], pass, size);
+  const plan = editRefsFor(r, target, refs ?? []);
   const gen = canGenerate(r);
   const cont = k.which === "first" ? "From previous shot" : "From next shot";
   return (
@@ -147,13 +155,11 @@ function KeyframeActions({ r }: { r: Ref }) {
           title={gen
             ? `A still of ${k.shot}'s ${k.which === "first" ? "opening" : "closing"} moment, made with ${editRefsText(list, tg.target, plan)}`
             : r.why_not || "This server doesn't generate keyframes"}
-          onClick={() => {
-            const target = refGenerateTarget(r);
-            void generateRef({ ref: r.id, view: null, count: 1, seed_mode: "auto", seed: null, prompt: null, model: null, loras: null, steps: null, note: "", ...(target ? { target } : {}) });
-          }}
+          onClick={() => void generateRef({ ref: r.id, view: null, count: 1, seed_mode: "auto", seed: null, prompt: null, model: null, loras: null, steps: null, note: "" })}
         >
           <i className={busyGen ? "pi pi-spin pi-spinner" : "pi pi-sparkles"} /> Generate
         </button>
+        <UploadButton refId={r.id} view={null} kind="image" title={`Upload an image from this computer as ${k.shot}'s ${k.which} keyframe, live at once (or drop one on this row)`} />
         <button
           className="h3-btn"
           disabled={busyGen}
@@ -194,7 +200,7 @@ function LiveThumb({ ep, r, size }: { ep: string; r: Ref; size: number }) {
   }
   if (isAudioRef(r)) {
     return (
-      <div className={`h3-refthumb h3-thumb${r.exists ? "" : " h3-empty h3-missing"}`} style={{ width: size, height: size }} title={r.path}>
+      <div className={`h3-refthumb h3-thumb${r.exists ? "" : " h3-empty h3-missing"}`} style={{ width: size, height: size }} title={r.exists ? r.path : `${r.path} isn't on disk: drop an audio file here, or Upload…`}>
         <i className="pi pi-volume-up" style={{ fontSize: size / 2.6 }} />
         {!r.exists && <span className="h3-thumb-label">missing</span>}
       </div>
@@ -202,7 +208,7 @@ function LiveThumb({ ep, r, size }: { ep: string; r: Ref; size: number }) {
   }
   if (!r.exists) {
     return (
-      <div className="h3-refthumb h3-thumb h3-empty h3-missing" style={{ width: size, height: size }} title={`${r.path} isn't on disk`}>
+      <div className="h3-refthumb h3-thumb h3-empty h3-missing" style={{ width: size, height: size }} title={`${r.path} isn't on disk${hasViews(r) ? "" : ": drop an image here, or Upload…"}`}>
         <span>missing</span>
       </div>
     );
@@ -231,7 +237,9 @@ const Candidate = memo(function Candidate({ ep, r, view, t, live, selected }: {
   ep: string; r: Ref; view: string | null; t: RefTake; live: boolean; selected: boolean;
 }) {
   const prog = useCandidateProgress(r.id, view, t.take);
-  const url = t.image ? api().refFileUrl(ep, t.image) : null;
+  // a voice's candidate is `audio` (its `image` is null)
+  const file = takeFile(t);
+  const url = file ? api().refFileUrl(ep, file) : null;
   const click = (e: MouseEvent) => {
     // read at click time, so candidates don't all re-render on every selection
     const sel = store.get().refSel;
@@ -242,7 +250,7 @@ const Candidate = memo(function Candidate({ ep, r, view, t, live, selected }: {
     selectRefTake(r.id, view, selected ? null : t.take);
   };
   const title = [
-    `${tn(t.take)} · ${t.status}${live ? " · live" : ""} · ${t.source}`,
+    `${tn(t.take)} · ${t.status}${live ? " · live" : ""} · ${t.source}${t.original_name ? ` (${t.original_name})` : ""}`,
     keyframeSource(t) ? `from ${keyframeSource(t)}` : "",
     t.seed ? `seed ${t.seed}` : "",
     t.note ? `“${t.note}”` : "",
@@ -314,16 +322,17 @@ function CandidateGrid({ ep, r, view, cols }: { ep: string; r: Ref; view: string
   );
 }
 
-/** The selected candidate's actions: pick, compare, details. */
+/** The selected candidate's actions: pick, compare, discard, details. */
 function Selection({ r }: { r: Ref }) {
   const sel = useApp((s) => (s.refSel && s.refSel.ref === r.id ? s.refSel : null));
   const busy = useApp((s) => !!s.busy[`refpick|${r.id}`]);
+  const busyDiscard = useApp((s) => !!sel && !!s.busy[`refdiscard|${r.id}|${sel.view ?? ""}|${sel.take}`]);
   if (!sel) return null;
   const t = takesOf(r, sel.view).find((x) => x.take === sel.take);
   if (!t) return null;
   const picked = pickedOf(r, sel.view);
   const live = picked === t.take;
-  const usable = t.status === "ok" && !!t.image;
+  const usable = takeUsable(t);
   return (
     <div className="h3-ref-sel">
       <div className="h3-row h3-wrap">
@@ -355,12 +364,24 @@ function Selection({ r }: { r: Ref }) {
             <i className="pi pi-times" /> {isKeyframeRef(r) ? "Clear" : "Unpick"}
           </button>
         )}
+        <button
+          className="h3-btn h3-danger"
+          disabled={t.status === "queued" || busyDiscard}
+          title={t.status === "queued"
+            ? "Still queued: it can be discarded once it has finished or failed"
+            : `Move ${tn(t.take)} to refs/_takes/_trash (nothing is deleted)${live ? "; it is live, so the ref is cleared too" : ""}`}
+          onClick={() => void discardRefTake(r.id, sel.view, t.take)}
+        >
+          <i className={busyDiscard ? "pi pi-spin pi-spinner" : "pi pi-trash"} /> Discard
+        </button>
       </div>
-      {(t.prompt || t.model || t.note || keyframeSource(t) || (t.status === "failed" && t.save_notes)) && (
+      {(t.prompt || t.model || t.note || t.original_name || keyframeSource(t) || (t.status === "failed" && t.save_notes)) && (
         <div className="h3-kv">
           {keyframeSource(t) && <><span>from</span><span>{keyframeSource(t)}</span></>}
+          {t.original_name && <><span>file</span><span>{t.original_name}</span></>}
+          {t.target && <><span>model</span><span>{t.target}</span></>}
           {t.note && <><span>note</span><span>{t.note}</span></>}
-          {t.model && <><span>model</span><span title={t.model}>{shortName(t.model, 40)}</span></>}
+          {t.model && <><span>file</span><span title={t.model}>{shortName(t.model, 40)}</span></>}
           {t.steps != null && <><span>steps</span><span>{t.steps}</span></>}
           {t.status === "failed" && t.save_notes && <><span>error</span><span className="h3-err">{t.save_notes}</span></>}
           {t.prompt && <><span>prompt</span><span className="h3-small" title={t.prompt}>{t.prompt.length > 180 ? t.prompt.slice(0, 179) + "…" : t.prompt}</span></>}
@@ -379,6 +400,7 @@ function GenerateBar({ r }: { r: Ref }) {
   const [seedMode, setSeedMode] = useState<SeedMode>("auto");
   const gen = canGenerate(r);
   const importView = isChar ? view || null : null;
+  const kind = isAudioRef(r) ? "audio" : "image";
   return (
     <div className="h3-row h3-wrap h3-genbar">
       {isChar && (
@@ -401,13 +423,10 @@ function GenerateBar({ r }: { r: Ref }) {
             className="h3-btn h3-primary"
             disabled={busy}
             title={isChar && !view ? "Queue all four views, sharing one seed per candidate" : "Queue new candidates"}
-            onClick={() => {
-              const target = refGenerateTarget(r);
-              void generateRef({
-                ref: r.id, view: isChar ? view || null : null, count, seed_mode: seedMode, seed: null,
-                prompt: null, model: null, loras: null, steps: null, note: "", ...(target ? { target } : {}),
-              });
-            }}
+            onClick={() => void generateRef({
+              ref: r.id, view: isChar ? view || null : null, count, seed_mode: seedMode, seed: null,
+              prompt: null, model: null, loras: null, steps: null, note: "",
+            })}
           >
             <i className={busy ? "pi pi-spin pi-spinner" : "pi pi-sparkles"} /> Generate {count > 1 ? `${count} more` : "1 more"}
           </button>
@@ -417,10 +436,13 @@ function GenerateBar({ r }: { r: Ref }) {
         className="h3-btn"
         disabled={busy || (isChar && !view)}
         title={isChar && !view ? "Choose a view to import into" : `Import ${isAudioRef(r) ? "an audio file" : "an image"} from the ComfyUI machine as a new candidate`}
-        onClick={() => openBrowse({ purpose: "import", ref: r.id, view: importView, files: isAudioRef(r) ? "audio" : "image" })}
+        onClick={() => openBrowse({ purpose: "import", ref: r.id, view: importView, files: kind })}
       >
         <i className="pi pi-download" /> Import…
       </button>
+      {!isChar && (
+        <UploadButton refId={r.id} view={null} kind={kind} title={`Upload ${kind === "audio" ? "an audio file" : "an image"} from this computer as a new candidate, live at once (or drop one on this row)`} />
+      )}
     </div>
   );
 }
@@ -429,14 +451,14 @@ function GenerateBar({ r }: { r: Ref }) {
 function RefTargetOverride({ r }: { r: Ref }) {
   const { list } = useTargets();
   const defaults = useRefDefaults();
-  const choice = useApp((s) => s.refTargetChoice);
   const busy = useApp((s) => !!s.busy[`refoverride|${r.id}`]);
   const images = imageTargets(list);
   if (!images.length) return null;
   const own = r.override_values?.target ?? "";
   const kind: RefTargetKind = isKeyframeRef(r) ? "keyframes" : "refs";
-  const fallback = choice[kind] || (kind === "keyframes" ? defaults.keyframes : defaults.refs);
-  const cur = refTargetOf(r, defaults, choice);
+  const fallback = kind === "keyframes" ? defaults.keyframes : defaults.refs;
+  const src = kind === "keyframes" ? defaults.keyframesSource : defaults.refsSource;
+  const cur = refTargetOf(r, defaults);
   const t = findTarget(list, cur.target);
   return (
     <div className="h3-col" style={{ gap: 2 }}>
@@ -446,10 +468,10 @@ function RefTargetOverride({ r }: { r: Ref }) {
           className="h3-in h3-grow"
           value={own}
           disabled={busy}
-          title="This ref's own image model (kept in refs/_overrides.json). Empty: the Refs tab's choice, else the series default."
+          title={`This ref's own image model (kept in refs/_overrides.json). Empty: the ${kind === "keyframes" ? "keyframes'" : "refs'"} model above.`}
           onChange={(e) => void saveRefOverride(r.id, { target: e.target.value || null })}
         >
-          <option value="">{`(${choice[kind] ? "this session's" : "series default"}: ${targetLabel(list, fallback)})`}</option>
+          <option value="">{`(${refDefaultSourceLabel(src)}: ${targetLabel(list, fallback)})`}</option>
           {images.map((x) => <option key={x.id} value={x.id}>{targetOptionText(x)}{isEditTarget(x) ? " · edit" : ""}</option>)}
         </select>
       </div>
@@ -458,14 +480,60 @@ function RefTargetOverride({ r }: { r: Ref }) {
   );
 }
 
-/** The ref's prompt/seed/model/LoRA/steps override, with the inspector's form. */
+/**
+ * The ref's prompt/seed/model/LoRA/steps override, with the inspector's form.
+ * A character's settings are per view (each view generates with its own
+ * prompt); "all views" holds what they share (seed, model, LoRAs, steps), and
+ * its prompt is per view only.
+ */
 function RefOverrideEditor({ r }: { r: Ref }) {
+  const chars = hasViews(r);
+  const [view, setView] = useState<string | null>(chars ? r.views![0].view : null);
+  return (
+    <div className="h3-col">
+      <RefTargetOverride r={r} />
+      {chars && (
+        <div className="h3-row h3-wrap">
+          <span className="h3-seg" title="Each view generates with its own prompt and settings; all views share the character's">
+            {r.views!.map((v) => (
+              <button key={v.view} className={view === v.view ? "h3-on" : ""} onClick={() => setView(v.view)}>
+                {viewLabel(v.view)}{v.override?.fields.some((f) => f !== "target") ? " •" : ""}
+              </button>
+            ))}
+            <button className={view == null ? "h3-on" : ""} title="Settings every view shares (no prompt: that is per view)" onClick={() => setView(null)}>
+              all views{r.override.fields.some((f) => f !== "target") ? " •" : ""}
+            </button>
+          </span>
+        </div>
+      )}
+      <RefSettingsForm key={`${r.id}|${view ?? ""}`} r={r} view={chars ? view : null} />
+    </div>
+  );
+}
+
+/** The override form for a ref, or for one of a character's views. */
+function RefSettingsForm({ r, view }: { r: Ref; view: string | null }) {
   const busy = useApp((s) => !!s.busy[`refoverride|${r.id}`]);
-  const src: OverrideSource = useMemo(() => ({
-    override: r.override_values ?? {},
-    effective: { prompt: r.effective?.prompt ?? r.prompt ?? "" },
-    built_prompt: r.built_prompt ?? (r.override.fields.includes("prompt") ? "" : r.prompt ?? ""),
-  }), [r]);
+  const chars = hasViews(r);
+  // a character's own level has no prompt (a prompt override is per view)
+  const noPrompt = chars && !view;
+  // everything from `r`, so a refetch (a new `r`) is the only thing that rebases the form
+  const { ovInfo, eff, ovFields, src } = useMemo(() => {
+    const v = view ? viewOf(r, view) : undefined;
+    const ovInfo = v ? v.override : r.override;
+    const values = (v ? v.override?.values : r.override_values ?? r.override.values) ?? {};
+    const eff = v ? v.effective ?? null : hasViews(r) ? null : r.effective ?? null;
+    const ovFields = ovInfo?.fields ?? [];
+    const prompt = v ? v.prompt ?? eff?.prompt ?? "" : eff?.prompt ?? r.prompt ?? "";
+    const overridden = ovFields.includes("prompt");
+    const src: OverrideSource = {
+      override: values,
+      effective: { prompt },
+      // a view lists no series-config prompt: without a prompt override its prompt is it
+      built_prompt: v ? (overridden ? "" : prompt) : r.built_prompt ?? (overridden ? "" : prompt),
+    };
+    return { ovInfo, eff, ovFields, src };
+  }, [r, view]);
   const initial = useMemo(() => formFromDetail(src), [src]);
   const [form, setForm] = useState<OverrideForm>(initial);
   const [base, setBase] = useState<OverrideForm>(initial);
@@ -490,39 +558,51 @@ function RefOverrideEditor({ r }: { r: Ref }) {
       setErr(errText(e));
       return;
     }
-    await saveRefOverride(r.id, fields);
+    await saveRefOverride(r.id, fields, view);
   };
-  const eff = r.effective;
-  const ov = r.override_values ?? {};
-  const has = r.override.fields.length > 0;
+  const ov = src.override;
+  // the image target is its own picker (and per ref, never per view)
+  const has = ovFields.some((f) => f !== "target");
+  const who = view ? `${r.name} (${viewLabel(view)})` : r.name;
+  const promptOverridden = ovFields.includes("prompt");
   return (
     <div className="h3-col">
-      <RefTargetOverride r={r} />
-      {r.override.stale && <div className="h3-note"><b>Override stale.</b> The series config's text for this ref changed since the override was written.</div>}
-      {!r.override_values && has && (
-        <div className="h3-note h3-note-info h3-small">This server doesn't send the override's values (only that {r.override.fields.join(", ")} are set); the form shows what a generate uses now.</div>
+      {ovInfo?.stale && <div className="h3-note"><b>Override stale.</b> The series config's text for {view ? "this view" : "this ref"} changed since the override was written.</div>}
+      {view && (
+        <div className="h3-small h3-muted">
+          What {viewLabel(view)} generates with. Seed, model, LoRAs and steps set for all views show here too; a change here is this view's own.
+          {promptOverridden && " (The series config's text for this view shows again once its prompt is reverted.)"}
+        </div>
       )}
       <OverrideFields
         form={form}
         set={set}
         builtPrompt={src.built_prompt}
         builtLabel="series config"
-        promptOverridden={r.override.fields.includes("prompt")}
+        promptOverridden={promptOverridden}
+        promptLocked={noPrompt ? { label: "the sheet's description, read-only", note: "A character's prompt is per view: pick a view above to change what it generates.", text: r.built_prompt ?? r.prompt ?? "" } : null}
         showDiff={showDiff}
         setShowDiff={setShowDiff}
         rows={7}
-        seedPlaceholder={`${eff?.seed ?? ""} (series config)`}
-        modelPlaceholder={`(series config) ${ov.model == null && eff ? shortName(eff.model, 40) : ""}`}
-        stepsPlaceholder={`${ov.steps == null && eff ? eff.steps : ""} (series config)`}
+        seedPlaceholder={`${eff?.seed ?? (eff?.seed_source === "new" ? "new each time" : "")} (series config)`}
+        modelPlaceholder={`(series config) ${ov.model == null && eff?.model ? shortName(eff.model, 40) : ""}`}
+        stepsPlaceholder={`${ov.steps == null && eff?.steps != null ? eff.steps : ""} (series config)`}
         effLoras={eff?.loras ?? null}
-        lorasOverridden={ov.loras != null || r.override.fields.includes("loras")}
+        lorasOverridden={ov.loras != null || ovFields.includes("loras")}
       />
       {err && <div className="h3-note h3-note-err">{err}</div>}
       <div className="h3-row h3-wrap">
         <button className="h3-btn h3-primary" disabled={!dirty || busy} onClick={() => void save()}>{busy ? "Saving…" : "Save"}</button>
-        <button className="h3-btn" disabled={!dirty || busy} onClick={() => setForm(base)}>Discard</button>
+        <button className="h3-btn" disabled={!dirty || busy} onClick={() => setForm(base)}>Discard edits</button>
         <span className="h3-grow" />
-        <button className="h3-btn h3-danger" disabled={!has || busy} onClick={() => confirm(`Put ${r.name} back to the series config's settings?`) && void revertRefOverride(r.id)}>Revert</button>
+        <button
+          className="h3-btn h3-danger"
+          disabled={!has || busy}
+          title={view ? `Remove ${viewLabel(view)}'s own settings (the ones for all views stay)` : "Remove this ref's settings (its image model stays)"}
+          onClick={() => confirm(`Put ${who} back to the series config's settings?`) && void revertRefOverride(r.id, view)}
+        >
+          Revert
+        </button>
       </div>
       <div className="h3-muted h3-small">Used by the next Generate. Candidates already made keep their settings.</div>
     </div>
@@ -555,13 +635,15 @@ function RefDetail({ ep, r }: { ep: string; r: Ref }) {
               const rv = viewOf(r, v.view);
               const live = rv ? pickedTake(rv) : undefined;
               return (
-                <div key={v.view} className="h3-view-col">
+                <DropSlot key={v.view} refId={r.id} view={v.view} kind="image" className="h3-view-col" title={`Drop an image on ${v.label}: it becomes a new candidate and goes live`}>
                   <div className="h3-view-head" title={v.view}>
                     {v.label}
-                    <span className={live ? "h3-muted" : "h3-err"}>{live ? ` ${tn(live.take)}` : " —"}</span>
+                    <span className={live ? "h3-muted" : "h3-err"}>{live ? ` ${tn(live.take)}` : rv?.cleared ? " cleared" : " —"}</span>
+                    <span className="h3-grow" />
+                    <UploadButton refId={r.id} view={v.view} kind="image" label="" title={`Upload an image from this computer as ${r.name}'s ${v.label} view, live at once (or drop one on this column)`} />
                   </div>
                   <CandidateGrid ep={ep} r={r} view={v.view} cols />
-                </div>
+                </DropSlot>
               );
             })}
           </div>
@@ -600,9 +682,18 @@ function RefRow({ ep, r }: { ep: string; r: Ref }) {
   const need = needLabel(r.need);
   const method = kf ? methodLabel(r.method, kf.which) : "";
   // an optional keyframe with no file isn't "missing": the shot renders without it
-  const showMissing = !r.exists && (!kf || r.need !== "optional" || !!r.requested) && r.method !== "none";
+  const showMissing = !r.exists && !!r.path && (!kf || r.need !== "optional" || !!r.requested) && r.method !== "none";
+  const chars = hasViews(r);
   return (
-    <div className={`h3-ref${open ? " h3-open" : ""}`} data-ref={r.id}>
+    <DropSlot
+      refId={r.id}
+      view={null}
+      kind={isAudioRef(r) ? "audio" : "image"}
+      refuse={chars ? (open ? "Drop onto one of the views below" : "A character takes a picture per view: open it and drop onto a view") : !r.path ? "The series config names no file for this ref" : null}
+      className={`h3-ref${open ? " h3-open" : ""}`}
+      dataRef={r.id}
+    >
+
       <div className="h3-ref-row" onClick={() => toggleRefOpen(r.id)}>
         <span className="h3-chev">{open ? "▼" : "▶"}</span>
         <LiveThumb ep={ep} r={r} size={40} />
@@ -648,7 +739,7 @@ function RefRow({ ep, r }: { ep: string; r: Ref }) {
         </div>
       </div>
       {open && <RefDetail ep={ep} r={r} />}
-    </div>
+    </DropSlot>
   );
 }
 
@@ -673,6 +764,7 @@ export function RefsTab() {
   const kplan = useMemo(() => keyframePlan(refs ?? [], st), [refs, st]);
   const planLabels = [...plan.map((p) => p.label), ...kplan.map((k) => k.label)];
   const genBusy = useApp((s) => !!s.busy["refgen|missing"]);
+  const lastMissing = useApp((s) => (s.ep ? s.missingResult[s.ep] : undefined));
   const focus = useApp((s) => s.refFocus);
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -720,19 +812,29 @@ export function RefsTab() {
                 ))}
               </span>
               <span className="h3-grow" />
-              {planLabels.length > 0 && (
+              {(planLabels.length > 0 || counts.missing > 0) && (
                 <button
                   className="h3-btn h3-primary"
                   disabled={genBusy}
                   title={`Queue one candidate for each ref this episode is missing (${pass}); each goes live when it finishes.
-Keyframes: required ones, and optional ones the script asks for (continuity from the neighbouring take when it has one, else a still):
-${planLabels.join(", ")}`}
+Keyframes: required ones, and optional ones the script asks for (continuity from the neighbouring take when it has one, else a still; a file the script names is imported).
+It lists what it will do first.${planLabels.length ? `\n${planLabels.join(", ")}` : ""}`}
                   onClick={() => void generateMissing()}
                 >
-                  <i className={genBusy ? "pi pi-spin pi-spinner" : "pi pi-sparkles"} /> Generate missing ({planLabels.length})
+                  <i className={genBusy ? "pi pi-spin pi-spinner" : "pi pi-sparkles"} /> Generate missing{planLabels.length ? ` (${planLabels.length})` : ""}
                 </button>
               )}
             </div>
+            {lastMissing && lastMissing.pass === pass && (
+              <div className="h3-note h3-note-info h3-small">
+                {missingResultText(lastMissing).summary}.
+                {lastMissing.skipped.length > 0 && (
+                  <span title={lastMissing.skipped.map((x) => `${x.ref}${x.view ? ` (${x.view})` : ""}: ${x.reason}`).join("\n")}> (hover for the skipped)</span>
+                )}{" "}
+                <button className="h3-link" onClick={dismissMissingResult}>dismiss</button>
+              </div>
+            )}
+
             {counts.missing > 0 && (
               <div className="h3-note">
                 <b>{counts.missing} ref{counts.missing > 1 ? "s" : ""} missing</b>
