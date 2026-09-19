@@ -1666,3 +1666,70 @@ named changes shape.
   their current order. `--copy-from PASS [WHAT]` (default `all`) copies onto the pass
   `--proxy` picks (final without it). `--move` and `--trim` refuse a locked shot without
   `--force`. A refusal exits 1, a usage error 2.
+
+## Phase 9c: audio — a recording from the editor, and generated voice refs (contract written before building, 2026-09-19)
+
+Two halves, built in parallel. **A: recordings.** The timeline's "Audio: clips | recording"
+toggle only works for an episode whose series config sets `audio.track`, and nothing in the
+editor can set one; `h3align.py` already attaches a recording and writes the `audio:` windows
+from the command line. **B: voice refs.** Voice references are import-only today. ComfyUI can
+generate speech locally with the installed LTX-2 audio models (`LTXVAudioOnlyModel`,
+`LTXVAudioOnlyEmptyVideoLatent`, `LTXVEmptyLatentAudio`, `LTXVReferenceAudio`,
+`LTXVAudioVAEDecode`, both audio VAEs), so a voice ref becomes a generated take like any
+other. Each half writes its own "as built" section.
+
+### A. Attaching and aligning a recording
+- **`GET /h3pipe/align/ready`** → `{"ready", "ffmpeg", "missing": ["faster-whisper", …],
+  "python", "install": "…pip line…", "models": {"default": "medium.en"}}`. `h3align` needs
+  ffmpeg, numpy and faster-whisper (or openai-whisper); none of the whisper packages is
+  installed on this machine, so the editor must say what to install and where (the Python
+  that runs the pipeline).
+- **`POST /h3pipe/track`** `{ep, source_path}` or multipart (`file`, as `/refs/import`):
+  puts the recording at `<ep>/audio/<name>` (an existing file is used in place when
+  `source_path` is already inside the episode), sets the series config's `audio.track` and
+  `audio.mode: "source_track"` through the Phase 9a save path (history copy, atomic write),
+  rebuilds, and returns `{"track": {…as `GET /h3pipe/episode`'s…}, "hash", "build"}`.
+  `{ep, track: null}` clears it (the mode goes back to what it was, or `generate`).
+- **`POST /h3pipe/align`** `{ep, track?, model?: "medium.en", snap?: true, dry_run?: false}`:
+  runs `h3align` in a subprocess. 409 `{"missing": [...]}` when a dependency is missing.
+  Progress arrives as `h3pipe.align` `{"ep", "stage": "transcribe" | "match" | "write",
+  "pct", "text"}`. Returns `{"ok", "report", "changes": [{"shot", "audio_in", "audio_out",
+  "note"}], "script_hash", "series_hash", "build"}`. `dry_run` writes nothing.
+  `h3align`'s `.bak` files are replaced by the Phase 9a `_history/` copies, so the editor and
+  the command line keep one history.
+- **`GET /h3pipe/episode`:** `track` gains `words` (whether a cached transcript sits beside
+  the recording) and `aligned` (how many shots carry a window).
+
+### B. Voice refs, generated
+- **A new target kind, `audio`** (`targets/audio/<id>/`), built exactly like the image
+  targets: `target.json` (label, capabilities, models with tiers, presets, downloads),
+  binding, prompt writer, workflow, `check_graph` against `/object_info`, family-based file
+  resolution, readiness. **`GET /h3pipe/targets?kind=audio[&ready=1]`**; `capabilities` is
+  `{"mode": "t2a" | "voice_clone", "reference_audio": bool, "max_seconds"}`.
+  - First target: **`ltx2_voice`** — LTX-2 audio-only, with `LTXVReferenceAudio` used when
+    the ref has a sample to copy (`identity_guidance_scale` a preset value); the `base`
+    preset is the dev model, the accelerator preset the distilled one.
+- **`POST /h3pipe/refs/generate` on a voice ref** queues a candidate wav, like an image
+  candidate: `{ep, ref: "voice:bolt", count, seed_mode, seed, prompt, target, note,
+  seconds?}`. The default prompt (`targets/audio/common.py voice_prompt`) is the character's
+  series config `voice` line, their design in one sentence, and a line to say: the
+  character's longest line in this episode's script, else a fixed neutral sentence; the
+  sidecar records the sentence. The take is a wav under `refs/_takes/voice:<id>/`, saved by a
+  new `H3SaveRefAudio` node (like `H3SaveRefTake`), and `h3pipe.ref` reports it as usual.
+- **Picking** a voice candidate copies it to the series config's `voice_sample` path for that
+  character; when the character has none, it writes `refs/voices/<id>.wav` **and** sets
+  `voice_sample` in the series config through the 9a save path (history copy), saying so in
+  the response: `{"ref", "path", "series_changed": true}`.
+- **`POST /h3pipe/refs/voice-from-take`** `{ep, ref, shot, take, pass, start, end}`: cuts
+  `start..end` seconds out of that take's audio (`h3peaks.clip_audio` picks the file) into a
+  new candidate with `source: "from_take"`, recording the shot, take and span. This is the
+  no-model path: a line the model already spoke in a take becomes the voice sample.
+- **Defaults:** `PUT /h3pipe/refs/defaults` and `GET /h3pipe/refs`'s `defaults` gain
+  `voice_target` / `voice_target_source`; the series config's `refs.voice_target` and a
+  per-ref `target` override layer as for images.
+- **CLI:** `kreagen` (and `h3.py refs`) generate voice refs too, with `--voice-target` and
+  `--from-take SHOT:TAKE:START-END`.
+- **UI:** a voice ref row gets Generate (count, prompt, seconds), a candidate list with a
+  player and the waveform (`GET /h3pipe/peaks`), pick / clear / discard / upload as for
+  images, and "Use a line from a take…" — pick a shot and take, drag the span on its
+  waveform, preview, then save it as a candidate.
