@@ -830,7 +830,7 @@ shared code in `targets/video/wan/`: `common.py` the compile, ref slots and grap
   not yet tried; the editor's model picker for `model_low`; `H3SaveShot` writing `fps`
   needs a ComfyUI restart to take effect (the queuer's value covers it until then).
 
-**Phase 8.5 — refs and keyframes** (planned 2026-09-19; contract in `docs/API.md`, "Phase 8.5")
+**Phase 8.5 — refs and keyframes** ✅ done 2026-09-19 (contract and as-built notes in `docs/API.md`, "Phase 8.5"). Live on the scratch copy: a Z-Image plate; a Flux 2 Klein edit keyframe that kept Bolt on model from his sheet and the workshop plate (framing came out medium, not close-up); then a Wan I2V render from that keyframe. Left: a stronger framing hint for keyframes; a composed character+plate reference for Kontext's single slot; one "generate missing" route.
 - **More image models for refs, chosen like video targets:** `z_image_turbo`, `flux2_klein` (t2i),
   `flux2_klein_edit` (edit with reference images), `flux_kontext`, from the user's saved
   workflows. The series config's `refs` block holds the defaults; the UI can override them per ref.
