@@ -365,8 +365,8 @@ export function ShotsTab() {
             <button className="h3-btn h3-icon" title="Edit the series config (series.json)" onClick={() => openSource("series")}><i className="pi pi-book" /></button>
             <button className="h3-btn h3-icon" title="Inspect the selected shot" onClick={() => openInspector()}><i className="pi pi-sliders-h" /></button>
             <button className="h3-btn h3-icon" title="Play all: the cut from its takes" onClick={() => playAll()}><i className="pi pi-play" /></button>
-            <button className="h3-btn h3-icon" title="Open the timeline" onClick={() => host().show("timeline")}><i className="pi pi-images" /></button>
-            <button className="h3-btn h3-icon" title="Open the Refs tab" onClick={() => host().show("refs")}><i className="pi pi-palette" /></button>
+            <button className="h3-btn h3-icon" title="Open the timeline" onClick={() => host().show("timeline")}><i className="h3-ico-film" /></button>
+            <button className="h3-btn h3-icon" title="Open the Refs tab" onClick={() => host().show("refs")}><i className="h3-ico-images" /></button>
             <button className="h3-btn h3-icon" title="Refresh" onClick={() => void refreshEpisode()}><i className="pi pi-refresh" /></button>
           </span>
         )}
