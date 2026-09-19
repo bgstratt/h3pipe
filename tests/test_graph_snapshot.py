@@ -78,6 +78,11 @@ class GraphSnapshotTest(unittest.TestCase):
             for sid, w in want[ps].items():
                 with self.subTest(pass_=ps, shot=sid):
                     self.assertIn(sid, got[ps], f"{sid} is no longer built")
+                    # Phase 7's one intended addition: the frozen shotlist
+                    # records its target (the sidecar always did)
+                    frozen = got[ps][sid]["shotlist"]
+                    if "target" not in w["shotlist"]:
+                        self.assertEqual(frozen.pop("target", None), "minimax_h3_ref2va")
                     for part in ("graph", "shotlist", "sidecar"):
                         self.assertEqual(got[ps][sid][part], w[part], f"{ps} {sid} {part}")
 

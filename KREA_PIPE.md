@@ -21,10 +21,11 @@ Existing files are skipped unless `--redo`, which can be combined with `--only`.
 ## Which graph runs
 
 `--workflow <file>` drives a specific ComfyUI workflow. With no flag, kreagen
-looks for `krea2_refs_t2i.json` in `workflows/` beside the scripts, then beside
-them, then `$KREA_WORKFLOW`, then `$COMFYUI_PATH`'s workflows folder — found
-means used. `--no-workflow` forces the built-in graph, whose model files are
-the constants at the top of `kreagen.py`. The run header says which one it took.
+looks for `$KREA_WORKFLOW`, then `krea2_refs_t2i.json` as saved in the running
+ComfyUI, then `$COMFYUI_PATH`'s workflows folder, then the repo copy
+(`targets/image/krea2/workflow.json`) — found means used. `--no-workflow` forces the built-in graph, whose
+model files are in `targets/image/krea2/target.json`. The run header says which
+one it took.
 
 Per run, `--unet`, `--lora` and `--lora-strength` override what the graph says;
 `--lora` splices a `LoraLoader` into a graph that has none. Per image, kreagen
@@ -56,9 +57,9 @@ sheet and the 27 shot prompts still cannot drift.
 
 `krea2_h3_refs_t2i.json` is a krea2 turbo text-to-image graph with three
 changes from the stock one. kreagen can drive that file directly — save it as
-`workflows/krea2_refs_t2i.json`, or point `--workflow` at it — and otherwise
-builds the same shape of graph in API form from the constants at the top of
-`kreagen.py`. Driving the file is the better habit: the model, LoRA, sampler
+`krea2_refs_t2i.json` among ComfyUI's workflows, or point `--workflow` at it — and
+otherwise builds the same shape of graph in API form from the krea2 target
+(`targets/image/krea2/target.json` and `graph.py`). Driving the file is the better habit: the model, LoRA, sampler
 and scheduler then live on the canvas, where you can see them.
 
 **1. 1280×720 → 1344×768.** 720 isn't divisible by 32. Per the h3pipe README

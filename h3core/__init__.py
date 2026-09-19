@@ -7,6 +7,7 @@ h3core — the model-free core of the pipeline.
     speech.py          dialogue pacing: syllables, speech time, forced rate
 
 Nothing here knows about a model: no frame grid, no reference slots, no prompt
-format. Those belong to a target (today the H3 compile code in h3build.py).
+format. Those belong to a target (targets/: today MiniMax H3, in
+targets/video/minimax_h3_ref2va/).
 Stdlib only.
 """

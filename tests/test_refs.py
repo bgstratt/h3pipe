@@ -25,8 +25,8 @@ import h3refs as R  # noqa: E402
 import h3takes as T  # noqa: E402
 from test_render import ENV, FIXTURE, FakeComfy, png_bytes, stub_refs  # noqa: E402
 
-REFS_WF = os.path.join(ROOT, "workflows", R.REFS_WORKFLOW)
-H3_WF = os.path.join(ROOT, "workflows", J.WORKFLOW_NAME)
+REFS_WF = os.path.join(ROOT, "targets", "image", "krea2", "workflow.json")
+H3_WF = os.path.join(ROOT, "targets", "video", "minimax_h3_ref2va", "workflow.json")
 
 try:
     import PIL  # noqa: F401

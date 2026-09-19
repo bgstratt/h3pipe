@@ -27,8 +27,9 @@ cd h3pipe
 ```
 
 Copy `comfy_nodes/` into `ComfyUI/custom_nodes/ComfyUI-H3-Shotlist/` and restart ComfyUI,
-then load `workflows/H3_Ref2VA_Shotlist_v1.json`. `h3render` finds that workflow beside the
-scripts; set `H3_WORKFLOW` to override, or pass `--workflow`.
+then load `targets/video/minimax_h3_ref2va/workflow.json` (save it in ComfyUI as `H3_Ref2VA_Shotlist_v1.json`). `h3render`
+finds that workflow in ComfyUI's saved workflows, else in the repo; set `H3_WORKFLOW` to
+override, or pass `--workflow`.
 
 `kreagen.py` generates reference images with a Krea2 image stack; the model file names are
 constants at the top of that file, and you will want to point them at whatever image model
@@ -191,7 +192,7 @@ python h3.py refs Shows\ep05               # everything missing, most-needed fir
   image model. Match the LoRA to the look in `series.json`: a realism LoRA helps live action
   and hurts a flat 2D show.
 - **Drives your own ComfyUI workflow when it finds one.** Save a text-to-image graph as
-  `krea2_refs_t2i.json` in `workflows/` (or set `$KREA_WORKFLOW`, or pass `--workflow`), and
+  `krea2_refs_t2i.json` among ComfyUI's workflows (or set `$KREA_WORKFLOW`, or pass `--workflow`), and
   kreagen sets the prompt, size, seed, steps and cfg on it per image instead of using its
   built-in graph. That is the no-Python way to change the model, LoRA, sampler or scheduler
   for reference art. `--no-workflow` forces the built-in graph.
@@ -200,7 +201,7 @@ python h3.py refs Shows\ep05               # everything missing, most-needed fir
   are found by following the sampler's own links. At cfg 1.0 the negative encoder is replaced
   with `ConditioningZeroOut`, since guidance is off and encoding it would be wasted; above 1.0
   with `--negative-file`, a graph wired straight to `ConditioningZeroOut` gets a text encoder
-  put back. `workflows/krea2_refs_t2i.json` is a working example with no LoRA — point its
+  put back. `targets/image/krea2/workflow.json` is a working example with no LoRA — point its
   loaders at your own models. `--lora` splices a LoRA node into a graph that has none, or
   sets the one that is already there. If a graph carries a step-distilled LoRA, pass the
   matching `--steps`.
@@ -237,8 +238,8 @@ python h3.py render Shows --each --proxy               # every episode
   `--workflow`, `--dry-run` (writes the API job to `h3render_graph.json`).
 - The workflow comes from the running ComfyUI's saved workflows
   (`H3_Ref2VA_Shotlist_v1.json`; `kreagen` uses `krea2_refs_t2i.json`), so it always matches
-  your ComfyUI's node versions. Failing that, `$COMFYUI_PATH`, then the copy in this repo's
-  `workflows/`. `--workflow` or `$H3_WORKFLOW` / `$KREA_WORKFLOW` beat all of those. Keep the
+  your ComfyUI's node versions. Failing that, `$COMFYUI_PATH`, then the copy in this repo
+  (`targets/video/minimax_h3_ref2va/workflow.json`, `targets/image/krea2/workflow.json`). `--workflow` or `$H3_WORKFLOW` / `$KREA_WORKFLOW` beat all of those. Keep the
   saved `krea2_refs_t2i.json` free of style LoRAs (experiment under another name), since the
   references must follow the series config's look.
 - It converts the canvas workflow to API format itself. If ComfyUI rejects it, save
@@ -371,7 +372,7 @@ Re-render one shot: set the index, switch to `fixed`, bump **take**, queue.
 ### Install
 
 Copy `comfy_nodes/` into `ComfyUI/custom_nodes/ComfyUI-H3-Shotlist/`, restart,
-then load `workflows/H3_Ref2VA_Shotlist_v1.json`. Optional: `pip install demucs` for the
+then load `targets/video/minimax_h3_ref2va/workflow.json`. Optional: `pip install demucs` for the
 `dub_keep_foley` policy. When `comfy_nodes/h3_shotlist.py`
 changes, copy it over again and restart ComfyUI.
 

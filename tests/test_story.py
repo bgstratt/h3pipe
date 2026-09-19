@@ -76,7 +76,8 @@ class FixtureTest(unittest.TestCase):
     def test_ir_carries_everything_compile_reads(self):
         """The dict compile gets back from the IR is the parser's dict, give or
         take what compile provably ignores."""
-        keep_seq = {"id", "location_key", "continuous", "shots", "model", "lora", "steps"}
+        keep_seq = {"id", "location_key", "continuous", "shots", "model", "lora", "steps",
+                    "profile", "target"}
         for name, (series_cfg_path, script, _g) in fixtures().items():
             with self.subTest(fixture=name):
                 story, series_cfg, text = load_story(series_cfg_path, script)

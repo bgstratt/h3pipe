@@ -50,7 +50,8 @@ Workflow file
     --workflow, else $H3_WORKFLOW, else H3_Ref2VA_Shotlist_v1.json as saved in
     the running ComfyUI (its user workflows, fetched over the API, so the graph
     always matches that ComfyUI's node versions), else $COMFYUI_PATH's
-    workflows folder, else the copy in this repo. It prints which. Either the
+    workflows folder, else the copy in this repo (the target's, at
+    targets/video/minimax_h3_ref2va/workflow.json). It prints which. Either the
     normal UI save or an API export (Workflow > Export (API)) works; the UI save
     is converted here. If ComfyUI rejects a converted graph, export the API
     version once and pass it with --workflow.
@@ -214,7 +215,10 @@ def main() -> int:
                   "those shots with flat grey stand-ins")
         for j in todo:
             if j.missing:
-                print(f"    ~ {j.id}: rendering WITHOUT {', '.join(r['slot'] for r in j.missing)}")
+                how = ("prompt rewritten without them" if j.missing_mode == "recompiled"
+                       else "grey stand-ins" + (f" ({j.missing_why})" if j.missing_why else ""))
+                print(f"    ~ {j.id}: rendering WITHOUT {', '.join(r['slot'] for r in j.missing)}"
+                      f": {how}")
             if j.override_stale:
                 print(f"    ! {j.id}: overrides.json was written against an older build of "
                       f"this shot ({', '.join(j.overridden)} still applied)")

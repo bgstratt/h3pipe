@@ -135,3 +135,34 @@ ADA: Well.
 BO: Well what?
 ADA: Put the tea on.
 NARRATOR (V.O.): They did.
+
+# sq04  kitchen
+profile: quick
+
+// sequence profile: steps from `quick`, everything else from the pass
+## sh310
+who: cy
+dur: 2.33
+Cy climbs onto a stool and peers into the steaming kettle.
+
+// a shot's profile beats its sequence's: model, a LoRA list and steps from
+// dialogue_close; target: naming the series target explicitly
+## sh320
+who: ada
+size: close
+dur: auto
+profile: dialogue_close
+target: minimax_h3_ref2va
+Ada points a wooden spoon at the kettle.
+ADA: Don't you dare.
+
+// a shot's own lines beat its profile: steps 9 over dialogue_close's 7, and a
+// lora line replaces the profile's LoRA list; the model still comes from it
+## sh330
+who: bo
+dur: auto
+profile: dialogue_close
+steps: 9
+lora: shot_lora.safetensors
+Bo lifts the kettle off the burner with a grin.
+BO: Too late.

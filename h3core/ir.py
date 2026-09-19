@@ -8,10 +8,12 @@ model, a prompt format or a pass, so one file serves every target and both
 passes.
 
     Episode   id, title, series {fps, width, height}, sequences
-    Sequence  id, location, continuous, overrides, source {line}, shots
+    Sequence  id, location, continuous, overrides, source {line}, shots,
+              target?, profile?
     Shot      id, cast, props, plate, size, camera, action, dialogue, sound,
               music, extras, text, timing, pace, audio, preserve, seed_key,
-              overrides {model, lora, steps}, source {line, end_line}, unparsed
+              overrides {model, lora, steps}, source {line, end_line}, unparsed,
+              target?, profile?
     Line      speaker, mode ("on" | "vo" | "os"), delivery, line
 
 `timing` is one of {"audio_in", "audio_out"} (a window on the recorded
@@ -23,6 +25,12 @@ every dialogue shot, not only `auto` ones.
 `audio` is the script's explicit intent (generate | dub | dub_keep_foley |
 clone) or null; the default is decided per target. `preserve` is how strictly a
 recording is reused: strict | loose | style, or null.
+
+`target` and `profile` are the script's `target:` / `profile:` lines (a
+video target id, a series config profile name), or null. Both are omitted from
+the JSON when null, so a script that uses neither gives the same shots.json it
+always has. Which target a shot renders on is decided by the targets package
+(series config default -> profiles -> sequence -> shot), not here.
 
 `unparsed` holds script values the parser could not interpret, keyed by IR
 field (e.g. {"steps": "eight"}). They are carried rather than rejected so the
@@ -49,6 +57,13 @@ def stable_seed(*parts: str) -> int:
 def _overrides(d: dict | None = None) -> dict:
     d = d or {}
     return {"model": d.get("model"), "lora": d.get("lora"), "steps": d.get("steps")}
+
+
+def _put_choice(d: dict, node) -> None:
+    """`target` and `profile`, only when set (see the module docstring)."""
+    for k in ("target", "profile"):
+        if getattr(node, k):
+            d[k] = getattr(node, k)
 
 
 @dataclass
@@ -90,6 +105,8 @@ class Shot:
     overrides: dict = field(default_factory=_overrides)
     source: dict = field(default_factory=dict)
     unparsed: dict = field(default_factory=dict)
+    target: str | None = None
+    profile: str | None = None
 
     def to_json(self) -> dict:
         d = {"id": self.id, "cast": list(self.cast), "props": list(self.props),
@@ -102,6 +119,7 @@ class Shot:
              "pace": self.pace, "audio": self.audio, "preserve": self.preserve,
              "seed_key": self.seed_key, "overrides": dict(self.overrides),
              "source": dict(self.source)}
+        _put_choice(d, self)
         if self.unparsed:
             d["unparsed"] = dict(self.unparsed)
         return d
@@ -117,7 +135,8 @@ class Shot:
                    timing=dict(d["timing"]) if d.get("timing") is not None else None,
                    pace=d.get("pace"), audio=d.get("audio"), preserve=d.get("preserve"),
                    seed_key=d.get("seed_key", ""), overrides=_overrides(d.get("overrides")),
-                   source=dict(d.get("source", {})), unparsed=dict(d.get("unparsed", {})))
+                   source=dict(d.get("source", {})), unparsed=dict(d.get("unparsed", {})),
+                   target=d.get("target"), profile=d.get("profile"))
 
 
 @dataclass
@@ -129,10 +148,13 @@ class Sequence:
     source: dict = field(default_factory=dict)
     shots: list[Shot] = field(default_factory=list)
     unparsed: dict = field(default_factory=dict)
+    target: str | None = None
+    profile: str | None = None
 
     def to_json(self) -> dict:
         d = {"id": self.id, "location": self.location, "continuous": self.continuous,
              "overrides": dict(self.overrides), "source": dict(self.source)}
+        _put_choice(d, self)
         if self.unparsed:
             d["unparsed"] = dict(self.unparsed)
         d["shots"] = [s.to_json() for s in self.shots]
@@ -145,7 +167,8 @@ class Sequence:
                    overrides=_overrides(d.get("overrides")),
                    source=dict(d.get("source", {})),
                    shots=[Shot.from_json(s) for s in d.get("shots", [])],
-                   unparsed=dict(d.get("unparsed", {})))
+                   unparsed=dict(d.get("unparsed", {})),
+                   target=d.get("target"), profile=d.get("profile"))
 
 
 @dataclass

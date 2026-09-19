@@ -1,0 +1,77 @@
+{
+  "id": "minimax_h3_ref2va",
+  "kind": "video",
+  "label": "MiniMax H3 Ref2VA",
+  "short": "H3",
+  "code": "compile.py",
+
+  "template": {
+    "_note": "H3 renders 17k+5 frames, at most 3592; width and height must be multiples of 32. A shot after the first in a continuous sequence spends 22 frames on the chain.",
+    "fps": 24,
+    "frames": {"step": 17, "base": 5, "max": 3592},
+    "size_multiple": 32,
+    "continuous": {"chain_frames": 22, "warn_above": 0.15}
+  },
+
+  "recipe": {
+    "_note": "Pictures 1-3 are the shot's subjects (characters first, then props and vehicles, in script order); Picture 4 is always the location plate. Each character is fed ONE panel of its 4-panel sheet: the face panel on a single-character close-up, the three-quarter body panel otherwise. Clone mode feeds one voice sample per speaker, at most 3.",
+    "subject_slots": ["Picture 1", "Picture 2", "Picture 3"],
+    "plate_slot": "Picture 4",
+    "voice_slots": ["Audio 1", "Audio 2", "Audio 3"],
+    "sheet_panels": 4,
+    "panels": 1,
+    "face_sizes": ["close", "cu"],
+    "policies": ["generate", "dub", "dub_keep_foley", "clone"],
+    "retention": {
+      "_note": "H3's audio retention markers, and the IR's neutral `preserve` mapped onto them. fully_copy makes a dub slice the whole soundtrack; partially_copy copies the voices and lets H3 add foley; reference only borrows timbre and timing.",
+      "values": ["fully_copy", "partially_copy", "reference"],
+      "default": {"dub": "fully_copy", "dub_keep_foley": "partially_copy"},
+      "from_preserve": {"strict": "fully_copy", "loose": "partially_copy", "style": "reference"}
+    },
+    "refs": {
+      "character": {"kind": "character sheet", "shape": "sheet", "views": 4},
+      "object": {"kind": "{kind} reference", "shape": "object"},
+      "location": {"kind": "background plate", "shape": "plate"},
+      "voice": {"kind": "voice sample", "shape": "voice"}
+    },
+    "size_hints": {
+      "character sheet": "4096x1024 or larger (horizontal 4-panel strip)",
+      "prop reference": "1024x1024 or larger",
+      "vehicle reference": "1024x1024 or larger",
+      "background plate": "1344x768 (the render resolution)",
+      "voice sample": "5-15 seconds of clean speech, mono wav"
+    }
+  },
+
+  "binding": {
+    "workflow": "workflow.json",
+    "workflow_name": "H3_Ref2VA_Shotlist_v1.json",
+    "env": "H3_WORKFLOW",
+    "loader": {"class_type": "H3ShotListLoader",
+               "inputs": {"root": "project_root", "shotlist": "shotlist_file", "index": "index"}},
+    "saver": {"class_type": "H3SaveShot",
+              "inputs": {"root": "project_root", "subfolder": "subfolder", "take": "take",
+                         "sidecar": "sidecar"}},
+    "params": {
+      "model": {"class_type": "UNETLoader", "field": "unet_name"},
+      "loras": {"class_type": "LoraLoaderModelOnly", "name": "lora_name",
+                "strength": "strength_model", "input": "model", "chain": true},
+      "steps": {"via": "loader"},
+      "seed": {"via": "loader"}
+    },
+    "review_nodes": ["SaveVideo", "CreateVideo"]
+  },
+
+  "presets": {
+    "_note": "Turbo LoRA per pass. The final pass uses lightx2v's 8-step Ref2V v1.0, distilled at 768p for exactly 8 steps. The proxy keeps the 4-step v0.1: a distilled LoRA is trained on a fixed set of timesteps, so it does best at its own step count, and the proxy wants 4 steps for speed. The series config's `series` and `proxy` blocks override these.",
+    "final": {
+      "model": "minimax_h3_ref2va_pruned_int8_convrot.safetensors",
+      "lora": "minimax_h3_ref2v_turbo_8step_v1.0_768p_comfyui_bf16.safetensors",
+      "steps": 8, "width": 1344, "height": 768
+    },
+    "proxy": {
+      "lora": "minimax_h3_ref2v_lightx2v_turbo_4step_v0.1_resized_avg_rank_20_bf16.safetensors",
+      "steps": 4, "width": 480, "height": 272
+    }
+  }
+}

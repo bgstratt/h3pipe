@@ -1,7 +1,8 @@
 # h3pipe — plan: a shot/take editor, then model-agnostic targets
 
 Status (2026-09-18): Phases 0, 1, 2, 3, 5 and 6 done and in use; Phase 4 (evaluate) is
-ongoing through use. Next: Phase 7 (targets) with Phase 8 (a second model) proving it.
+ongoing through use. Phase 7 (targets, H3 only) is built and green on every golden; its
+real-ComfyUI exit check is still to run. Next: Phase 8 (LTX 2.3/2.5 as the second target).
 This is the working plan for the next round of development. `CLAUDE.md` points here.
 
 ## Goals
@@ -162,8 +163,16 @@ by build, so the build goldens are unaffected.
 - **Promote to script** (a later phase) writes story-level edits back into `epNN.md`
   and drops the matching override.
 
-Precedence for any render parameter: target default → preset (final/proxy) → series
-→ sequence → shot (script) → profile → `overrides.json` → the redo dialog.
+Precedence for any render parameter: target preset (final/proxy) → the series
+config's pass block (`series` / `proxy`) → sequence profile → sequence lines → shot
+profile → shot lines (script) → `overrides.json` → the redo dialog.
+
+Changed in Phase 7 (it used to read "… → shot (script) → profile → …"): a profile now
+sits just *below* the explicit lines of the level that names it. A profile is a bundle
+of defaults, and the natural edit is "this shot uses `dialogue_close`, but at 9 steps";
+with the profile above the shot's lines, that `steps: 9` would be silently ignored. And
+a shot's profile beats its sequence's lines, because it is the more specific choice.
+`target` layers the same way, starting from the series config's `series.target`.
 
 ## 3. The cut — `epNN/cut.json`
 
@@ -380,12 +389,34 @@ ref routes, `kreagen` on takes); the Refs tab is in progress.
   as-built shape (`h3core/ir.py`'s docstring) differs slightly from the sketch below.
 - Exit: goldens byte-identical; `shots.json` contains no H3 vocabulary.
 
-**Phase 7 — targets, H3 only**
+**Phase 7 — targets, H3 only** — built 2026-09-18; real-ComfyUI exit check pending
 - `targets/` loader + `Target` protocol; move the H3 code per the table in *Targets*.
 - `jobs` / `graph_for` driven by `binding`; `kreagen` driven by `targets/image/krea2`.
 - Render profiles (see *Targets*).
 - Exit: goldens byte-identical; render and refs still work on a real episode, from the
   CLI and the UI.
+- As built:
+  - `targets/__init__.py`: `load_target`, `list_targets`, `episode_target`, `Target`
+    (`template`, `recipe`, `binding`, `presets`, `compile_episode`, `compile`,
+    `required_refs`, `ref_slots`, `compile_without`, `ref_prompt`, `describe`),
+    `Template`, `Binding`, `Preset`, `RefRequest`, and the profile layering.
+  - `targets/video/minimax_h3_ref2va/`: `target.json`, `compile.py` (the old
+    `compile_episode`, per shot), `prompt.py` (`build_prompt`), `workflow.json` (moved
+    from `workflows/`; ComfyUI's saved copy is still found by its old name).
+  - `targets/image/krea2/`: `target.json` (the model stack), `prompt.py` (all ref
+    wording), `graph.py` (the built-in graph and patching), `workflow.json`.
+  - `h3build` is parse → IR → `episode_target` → `target.compile_episode` → write. It
+    keeps `snap_up`, `RETENTIONS`, `legacy_episode`, `compile_episode`, `FINAL_*`/`PROXY_*`
+    and `SIZE_HINT` as compatibility names.
+  - `h3jobs.graph_for` / `apply_loras` follow the job's target's binding; frozen shotlists
+    and sidecars record the real target id.
+  - `GET /h3pipe/targets`; `target` (and `profile`) on episode shots, shot detail and takes.
+  - Proof: every golden byte-identical, local real episodes included; the only golden
+    changes are kitchen_sink's new profile sequence and two new error cases. The queued
+    graph, frozen shotlist and sidecar of every kitchen_sink shot were snapshotted from
+    the pre-Phase-7 code (`tests/golden/graphs/`) and still match, except for the frozen
+    shotlist's new top-level `target`.
+  - Stretch, done: render anyway is target-aware (API.md, *Render anyway, target-aware*).
 
 **Phase 8 — a second video target**
 - LTX 2.3 or Wan 2.2: its template, recipe, binding and a prose `prompt.py`.
@@ -511,24 +542,91 @@ class Target(Protocol):
 one. The editor's pickers come from `binding.params` plus ComfyUI's model lists, so they
 work for any target.
 
-Target selection: `series.json` default → profile → sequence → shot `target:` → UI
-override. Output file per target: `shotlist/shotlist.<target>.json` (+ `.proxy`). Keep
-writing `shotlist.json` / `shotlist_proxy.json` for the default target until the node
-and the `jobs` module are updated.
+Target selection (as built in Phase 7): `series.target` (default `minimax_h3_ref2va`) →
+sequence profile → sequence `target:` → shot profile → shot `target:` → (later) a UI
+override. Phase 7 builds one target per episode: a shot that resolves to any other target
+is a build error that says so ("Episodes that mix targets arrive with Phase 8").
+
+**Phase 8 design: per-target shotlists.** Build groups shots by resolved target. The
+series target keeps writing `shotlist/shotlist.json` / `shotlist_proxy.json` exactly as
+now; every other target writes `shotlist/shotlist.<target>.json` /
+`shotlist.<target>_proxy.json` with only its shots, and a top-level `"target"`
+(`h3jobs.shotlist_target` already reads it; its absence means the default). `shots.json`
+stays one file. `refs_todo` merges every target's ref requests (the image refs are the
+same series refs; only a target's recipe can add, e.g., keyframes). Then:
+- `h3jobs.load_shotlist(root, pass_)` becomes "the shotlist holding this shot":
+  `plan_job` takes (root, pass, shot id) and finds the file; `plan_episode` walks all of
+  them in `shots.json` order.
+- `h3edit.episode_status` merges them in cut order; each shot already carries `target`.
+- Seeds don't change: `stable_seed` is per shot id, whatever the target.
+- Retargeting one shot from the inspector writes `target` into `overrides.json`'s shot
+  block (not per-target); the next build or a queue-time recompile moves it.
 
 Things in `h3build.py` that are H3 leaking into the core today, and where they go:
 
-| Now | Goes to |
-|---|---|
-| `snap_up`, grid constants, `%32` check | H3 template |
-| slot ordering, `panels`/`panel_view`, `background` = Picture 4 | H3 recipe |
-| max 3 voice refs in clone mode | H3 recipe (validation) |
-| `continuous` chaining costs 22 frames warning | H3 template (warning hook) |
-| `RETENTIONS`, `RETENTION_DEFAULT` | H3 prompt/recipe mapping from `preserve` |
-| `build_prompt` | `targets/video/minimax_h3_ref2va/prompt.py` |
-| `FINAL_*`, `PROXY_*`, the LoRA-steps mismatch warning | H3 presets |
-| `need(...)` reference prompts (4-panel sheet 4096x1024, prop 1024x1024) | split: the *shape* of the ref (4-panel sheet) is the video recipe's `RefRequest`; the *wording* belongs to the image target |
-| `kreagen.VIEWS`, `VIEW_TMPL`, `SAMPLER`, workflow constants | `targets/image/krea2/` |
+| Now | Goes to | Phase 7 |
+|---|---|---|
+| `snap_up`, grid constants, `%32` check | H3 template | moved: `target.json` `template` + `targets.Template` |
+| slot ordering, `panels`/`panel_view`, `background` = Picture 4 | H3 recipe | moved: `recipe` + `compile.py` |
+| max 3 voice refs in clone mode | H3 recipe (validation) | moved: `recipe.voice_slots` |
+| `continuous` chaining costs 22 frames warning | H3 template (warning hook) | moved: `template.continuous` + `Template.continuous_warning` |
+| `RETENTIONS`, `RETENTION_DEFAULT` | H3 prompt/recipe mapping from `preserve` | moved: `recipe.retention` |
+| `build_prompt` | `targets/video/minimax_h3_ref2va/prompt.py` | moved |
+| `FINAL_*`, `PROXY_*`, the LoRA-steps mismatch warning | H3 presets | moved: `presets`; the check in `compile.py` |
+| `need(...)` reference prompts (4-panel sheet 4096x1024, prop 1024x1024) | split: the *shape* of the ref (4-panel sheet) is the video recipe's `RefRequest`; the *wording* belongs to the image target | moved: `RefRequest` from `compile.py`, wording in `krea2/prompt.py`; refs_todo's size hints are `recipe.size_hints` |
+| `kreagen.VIEWS`, `VIEW_TMPL`, `SAMPLER`, workflow constants | `targets/image/krea2/` | moved; `h3refs` re-exports them |
+| `h3jobs.ref_slots` (Picture 1–3/4, Audio 1–3) | H3 recipe | moved (found in Phase 7) |
+| `h3jobs` `UNETLoader` / `LoraLoaderModelOnly` / loader / saver names | binding | moved |
+
+Found and left in Phase 7:
+- `comfy_nodes/h3_shotlist.py` (the H3 loader) keeps its own `snap_up`, /32 check and
+  slot logic. It *is* the H3 target's loader node (`binding.loader`), per-target by the
+  open question below; a second target brings its own loader.
+- `h3align` snaps with `h3build.snap_up`, i.e. H3's grid, whatever the series target.
+  It needs the episode's target (`targets.video_target(series_cfg).template`).
+- `h3edit.episode_status` exposes `audio_policy`, `subjects` and `length` straight from
+  the built H3 entry; an LTX shotlist must carry the same keys or the bin changes.
+- `refs_todo.json` still calls each ref's size hint `target` (a name from before targets
+  existed); renaming it is a golden change.
+- `h3render` and the Refs routes resolve the workflow of the *default* target's binding
+  (`h3jobs.WORKFLOW_NAME`) for the CLI; the render route already uses the shotlist's
+  target. Harmless with one target per kind.
+- The kreagen views are the krea2 target's way to make a 4-view sheet; a 4-view sheet is
+  still what every character ref *is* (`h3refs`, `mksheet`). That's the series ref's
+  shape, fine while every video target consumes sheets.
+
+## Phase 8: what LTX needs that Phase 7 doesn't cover
+
+- **Template:** an `8k+1` grid is expressible (`frames: {step: 8, base: 1, max: …}`), but
+  LTX also wants width/height multiples of 32 *and* a max resolution per model, and may
+  prefer a different fps (25/30): `Template` has no max size and treats fps as fixed.
+- **Recipe:** H3's slots are named pictures; LTX takes *image conditioning at frame
+  indices* (first/last keyframe, optional middle frames) with a strength each. A recipe
+  needs "conditioning items" (`{ref, frame_index, strength}`) rather than slot names, and
+  `RefRequest` needs the `keyframe` shape (`shot:<id>:first|last` refs exist in h3refs
+  but nothing generates them). A shot with no keyframe must still render (T2V).
+- **Subjects without slots:** LTX has no identity refs, so characters are described in
+  words (the `_unreferenced` path in the H3 prompt is the same idea) or given a
+  first-frame still generated from the sheet + plate — a new image-target job (img2img /
+  composition), not one kreagen does today.
+- **Prose prompt:** `prompt.py` returns one string, not six sections; the editor's diff
+  and the loader already accept a string.
+- **Audio:** LTX 2.x generates audio with the video but takes no voice reference, so
+  `clone` / `dub` have to be rejected or mapped to `generate` + a recording laid over in
+  assemble. Policies are target-declared (`recipe.policies`) but nothing validates a
+  shot's policy against the target yet.
+- **Binding:** LTX's graph has no `H3ShotListLoader`; either a generic loader node or an
+  LTX loader that reads the same frozen shotlist, and the seed/steps are probably patched
+  on the sampler nodes directly (`{"class_type", "field"}` params, already supported).
+  Frames/size are widgets too (`EmptyLTXVLatentVideo.length/width/height`): add them to
+  `binding.params` and have `graph_for` patch every `{"class_type","field"}` param from
+  the job, not only model/LoRAs/steps/seed.
+- **Two-stage / upscaler passes and distilled vs dev models:** presets hold one
+  model + one LoRA string; LTX setups often need a model *and* a separate upscaler or
+  distilled LoRA per pass. `Preset.extra` can carry them, but `plan_job` only reads
+  model/lora/steps.
+- **Per-target shotlists** (design above), and the override writer using the shot's
+  target (`h3edit.set_shot_override` takes `target`; the CLI still passes the default).
 
 ## Source of truth
 
@@ -550,6 +648,7 @@ Things in `h3build.py` that are H3 leaking into the core today, and where they g
 - Take cleanup: a "discard take" that moves files to `renders/_trash/` rather than deleting?
 - Layered LoRAs from several levels (series + profile + shot): does a lower level
   replace the list or append to it? Default to replace until real use says otherwise.
+  (Phase 7 implements replace: the most specific level that names LoRAs wins outright.)
 
 ## Defaults to revisit in Phase 4
 
