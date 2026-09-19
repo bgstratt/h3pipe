@@ -1357,8 +1357,8 @@ What can't be expressed stays in `overrides.json`, with the reason.
   - Ref overrides → the matching subject/location/view fields of the series config where
     the loader has one (design sentences, per-view prompts, `target`); else `left`.
 - Script edits are line-level: an existing `key:` line in the shot's own block (not the
-  sequence header's) is replaced, else a new line is inserted after the shot's last
-  `key:` line (or right after `## shot`). Nothing else in the file changes. Series config
+  sequence header's) is replaced, else a new line is inserted after the `key:` lines that
+  open the shot's block (or right after `## shot`), never below its dialogue. Nothing else in the file changes. Series config
   edits rewrite the JSON with 2-space indent, keeping key order and non-ASCII text; if the
   file wasn't already formatted that way the diff says so.
 

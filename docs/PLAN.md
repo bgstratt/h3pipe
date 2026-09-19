@@ -908,8 +908,8 @@ deviation)
   have no `built_prompt`. Manual: a real `dur: model` render, FL2VA with a recording,
   final-size looks on FL2VA/LTX/Wan, and voice generation (no voice target yet).
 
-**Phase 9a — script and series config windows, promote** (in progress 2026-09-19; contract
-in `docs/API.md`, "Phase 9a")
+**Phase 9a — script and series config windows, promote** ✅ done 2026-09-19 (contract and
+as built in `docs/API.md`, "Phase 9a"; `h3source.py`, `h3promote.py`, `h3.py promote`)
 - Floating **Script** and **Series config** windows (CodeMirror 6: a script-format mode and
   JSON), live check errors at their lines, save → rebuild, `_history/` copies, and a
   reload/keep-mine choice when the file was changed outside ComfyUI (the usual case).

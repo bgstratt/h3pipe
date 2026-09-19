@@ -409,6 +409,13 @@ class PromoteTest(ApiTest):
         text = "= ep01\n\n# sq01 kitchen\n## sh010\nAda waits.\nADA: Hi.\n"
         self.assertEqual(P.edit_script(text, {"sh010": (4, 6)}, {"sh010": [("steps", "7")]}),
                          "= ep01\n\n# sq01 kitchen\n## sh010\nsteps: 7\nAda waits.\nADA: Hi.\n")
+        # a new line goes after the block's opening key lines, not below a
+        # trailing `music:`; a trailing key that exists is still replaced
+        text = "# sq01 kitchen\n## sh010\nwho: ada\nAda waits.\nADA: Hi.\nmusic: soft\n"
+        self.assertEqual(
+            P.edit_script(text, {"sh010": (2, 6)},
+                          {"sh010": [("steps", "7"), ("music", "none")]}),
+            "# sq01 kitchen\n## sh010\nwho: ada\nsteps: 7\nAda waits.\nADA: Hi.\nmusic: none\n")
 
     # -- apply -----------------------------------------------------------------
 

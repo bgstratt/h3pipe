@@ -234,18 +234,25 @@ def edit_script(text: str, spans: dict[str, tuple[int, int]],
                 edits: dict[str, list[tuple[str, str]]]) -> str:
     """`text` with each shot's `key: value` lines set: an existing line of
     that key in the shot's own block replaced (the last, which is the one the
-    parser keeps), else inserted after the block's last `key:` line (or its
-    `##` line). Nothing else changes."""
+    parser keeps), else inserted after the `key:` lines that open the block
+    (or its `##` line), so a new line never lands below the dialogue or a
+    trailing `sound:`/`music:`. Nothing else changes."""
     from h3core.story import META_KEYS
     lines = text.split("\n")
     for sid in sorted(edits, key=lambda k: spans[k][0], reverse=True):
         first, last = spans[sid]
-        found, last_meta = {}, first
+        found, last_meta, leading = {}, first, True
         for n in range(first + 1, last + 1):
-            m = META.match(lines[n - 1].rstrip())
+            raw = lines[n - 1].rstrip()
+            if not raw.strip() or raw.strip().startswith("//"):
+                continue
+            m = META.match(raw)
             if m and m.group(1) in META_KEYS:
                 found[m.group(1)] = n
-                last_meta = n
+                if leading:
+                    last_meta = n
+            else:
+                leading = False
         inserts = []
         for key, value in edits[sid]:
             if key in found:
