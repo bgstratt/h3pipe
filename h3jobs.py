@@ -22,9 +22,21 @@ overrides.json, or typed in the request, beats both. The seed actually used is
 recorded in the sidecar with where it came from (`seed_source`).
 
 Which workflow, loader, saver and widgets a job uses is the shot's target's
-`binding` (targets/<kind>/<id>/target.json): a built shotlist belongs to one
-video target (`shotlist_target`, the default one until Phase 8 writes
-per-target shotlists), and the frozen shotlist and the sidecar record it.
+`binding` (targets/<kind>/<id>/target.json). A built shotlist belongs to one
+video target (`shotlist_target`): shotlist.json is the series target's, and an
+episode that mixes targets has shotlist.<target>.json beside it
+(`load_shotlists`, `find_shot`, `episode_shots` find a shot in whichever holds
+it). A shot can render on another target than its build's: overrides.json's
+`target` or the request's (`retarget` compiles its IR from shots.json for that
+target at queue time). The frozen shotlist and the sidecar record the target.
+
+A target with no loader node (ltx2) gets every value patched into the
+workflow's widgets (`graph_for`: prompt, size, length, fps, seeds, ...), its
+saver put in place of the workflow's own (`prepare_saver`), its own graph code
+run (`patch_graph`: keyframes) and the graph pruned to what the saver needs.
+Images it conditions on are uploaded to ComfyUI's input folder first
+(`stage_inputs`). Canvas saves are converted here, subgraphs included
+(`ui_to_api`); `check_graph` validates a graph against /object_info.
 
 LoRAs are a list of {"name", "strength"}. The first goes into the workflow's
 LoRA loader (the binding's `loras` class, LoraLoaderModelOnly for H3); the rest
@@ -987,8 +999,11 @@ def plan_job(root: str, pass_: str, doc: dict, index: int, req: RenderRequest,
             return ov[name]
         return built_value
 
-    if target.id != built_target.id and "prompt" in ov:
-        # a prompt written for one model isn't a prompt for another
+    if target.id != built_target.id and (
+            "prompt" in ov
+            or "prompt" in T.shot_override(overrides or {}, sid, pass_, built_target.id)):
+        # a prompt written for one model isn't a prompt for another: the
+        # retargeted shot renders its new target's own prompt
         ov = {k: v for k, v in ov.items() if k != "prompt"}
         notes.append(f"the prompt override was ignored: {sid} is retargeted from "
                      f"{built_target.id} to {target.id}")

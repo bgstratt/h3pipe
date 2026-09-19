@@ -49,6 +49,24 @@ Models come from [Comfy-Org/MiniMax-H3](https://huggingface.co/Comfy-Org/MiniMax
 turbo LoRAs from [lightx2v/Minimax-h3-Turbo](https://huggingface.co/lightx2v/Minimax-h3-Turbo).
 Swap any of them per pass or per shot — see **Steps, model and LoRA**.
 
+**LTX-2 (the `ltx2` target, optional).** Shots or sequences can render on LTX-2.5 instead
+(`target: ltx2`, or retarget one from the editor / `h3.py override --target ltx2`). It needs
+ComfyUI's LTX-2.5 nodes (core ComfyUI) and these files, from
+[Lightricks/LTX-2.5](https://huggingface.co/Lightricks/LTX-2.5) and
+[Comfy-Org/gemma-4](https://huggingface.co/Comfy-Org/gemma-4):
+
+| Role | File used here |
+|---|---|
+| Diffusion model (distilled, both passes) | `ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors` |
+| Text encoder (`CLIPLoader`, type `ltxv`) | `gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors` |
+| Video / audio VAE | `ltx-2.5-video-vae-bf16.safetensors` / `ltx-2.5-audio-vae-bf16.safetensors` |
+| Latent upscaler (x2, second stage) | `ltx-2.5-latent-spatial-upscaler-x2-bf16-1.0.safetensors` |
+
+The file names are the target's presets (`targets/video/ltx2/target.json`). The workflow is
+ComfyUI's LTX-2.5 image-to-video template, run text-to-video unless the shot has keyframes.
+No h3pipe loader node is involved, so an LTX shot renders on any ComfyUI that has
+`H3SaveShot`.
+
 ```
   you write                  generated                      rendered
   ─────────                  ─────────                      ────────
@@ -233,6 +251,13 @@ python h3.py render Shows --each --proxy               # every episode
   (`--lora a.safetensors --lora b.safetensors:0.6`); the extras are chained after the
   workflow's LoRA loader. `--note` stores a remark in each take's sidecar.
   It prints what it will use, and warns when one episode needs more than one model or LoRA.
+- **Targets.** Each shot renders with its own target's workflow: H3 shots through Shot List
+  Loader, `ltx2` shots with every value patched into the LTX-2.5 graph. `--target ltx2`
+  renders the chosen shots on another target for this run (their story is compiled for it
+  on the spot, no rebuild); `h3.py override <ep> <shot> --target ltx2` does it for every
+  run. An LTX shot's keyframes (`refs/shots/<shot>/first.png`, `last.png`) are uploaded into
+  ComfyUI's `input/h3pipe/` first. `--dry-run --check-nodes` also asks the running ComfyUI
+  (`/object_info`) whether it knows every node and input of the graph.
 - Failed shots are reported and skipped; `--stop-on-error` halts instead.
 - Other flags: `--panel-mode`, `--save-frames` / `--no-frames`, `--no-review-copy`, `--comfy URL`,
   `--workflow`, `--dry-run` (writes the API job to `h3render_graph.json`).

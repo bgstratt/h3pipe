@@ -1,5 +1,8 @@
 # LTX 2.3 / 2.5 as a target: groundwork for Phase 8
 
+(Phase 8 has been built on this: the `ltx2` target, from the 2.5 distilled I2V workflow,
+with subgraphs flattened by the converter. See docs/PLAN.md, **Phase 8 — as built**.)
+
 Surveyed 2026-09-18 from the workflows saved in ComfyUI (`user/default/workflows`) and
 the installed models. These are facts about the user's install and the LTX graphs,
 gathered while Phase 7 (targets) was being built.

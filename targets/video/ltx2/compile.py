@@ -122,7 +122,7 @@ def _compile(ctx: Ctx, sq: ir.Sequence, shot: ir.Shot, ep_id: str) -> dict:
            **{k: v for k, v in (sq.overrides or {}).items() if v is not None}}
     sh = {"id": shot.id, "profile": shot.profile, "target": shot.target,
           **{k: v for k, v in (shot.overrides or {}).items() if v is not None}}
-    for d, node in ((seq, sq), (sh, shot)):
+    for node in (sq, shot):
         if "steps" in node.unparsed:
             raise ValueError(f"{'shot' if node is shot else 'sequence'} {node.id}: steps "
                              f"must be a whole number, not {node.unparsed['steps']!r}")

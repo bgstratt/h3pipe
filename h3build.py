@@ -11,12 +11,15 @@ assets you still need to make, and a timing report.
     python3 h3build.py series.json script.md --check
 
 It runs in three steps: parse the script into the model-free story IR
-(h3core.story, written to shotlist/shots.json), pick the episode's video
-target (targets.episode_target: the series config's `series.target`, checked
-against every `target:` and `profile:` the script names), and compile the IR
-with that target (`target.compile_episode`). Everything model-specific -- the
-frame grid, reference slots, the prompt format, audio policy, presets -- is the
-target's (targets/video/<id>/). This file only parses, reports and writes.
+(h3core.story, written to shotlist/shots.json), pick each shot's video target
+(targets.episode_targets: the series config's `series.target`, then every
+`target:` and `profile:` the script names), and compile each target's shots
+with it (`target.compile_episode`). The series target's shots go to
+shotlist.json (always written); another target's to shotlist.<target>.json
+(`_proxy` likewise), and refs_todo merges what they all need. Everything
+model-specific -- the frame grid, reference slots, the prompt format, audio
+policy, presets -- is the target's (targets/video/<id>/). This file only
+parses, reports and writes.
 """
 
 from __future__ import annotations
@@ -141,10 +144,12 @@ def print_report(r: dict, root: str) -> None:
 
 
 def print_pacing(story: ir.Episode, series_cfg: dict, fps: float = 24.0,
-                 template: TG.Template | None = None) -> int:
+                 template: TG.Template | None = None,
+                 templates: dict[str, TG.Template] | None = None) -> int:
     """Every dialogue shot measured against the rate it forces on the delivery,
-    in the window the target will actually render (`template`)."""
-    snap = (template or DEFAULT_TARGET.template).snap
+    in the window the target will actually render (`template`, or per shot
+    `templates` in an episode that mixes targets)."""
+    default_snap = (template or DEFAULT_TARGET.template).snap
     default = series_cfg.get("speech", {}).get("pace", "normal")
     rows, crammed, tight, gain = [], 0, 0, 0.0
     for seq in story.sequences:
@@ -152,6 +157,8 @@ def print_pacing(story: ir.Episode, series_cfg: dict, fps: float = 24.0,
             dialogue = [{"who": d.speaker, "line": d.line} for d in shot.dialogue]
             if not dialogue:
                 continue
+            snap = (templates[shot.id].snap if templates and shot.id in templates
+                    else default_snap)
             pace = shot.pace or default
             t = shot.timing or {}
             if "audio_in" in t:
@@ -216,7 +223,9 @@ def main() -> int:
         groups = TG.episode_targets(story, series_cfg)
         target = groups[0][0]
         if args.pace:
-            return print_pacing(story, series_cfg, template=target.template)
+            per_shot = {sid: t.template for t, ids in groups[1:] for sid in ids}
+            return print_pacing(story, series_cfg, template=target.template,
+                                templates=per_shot)
         pass_ = "proxy" if args.proxy else "final"
         built = [(t, *t.compile_episode(story, series_cfg, pass_, only=ids))
                  for t, ids in groups]

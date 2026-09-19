@@ -1,8 +1,11 @@
 # h3pipe — plan: a shot/take editor, then model-agnostic targets
 
-Status (2026-09-18): Phases 0, 1, 2, 3, 5 and 6 done and in use; Phase 4 (evaluate) is
-ongoing through use. Phase 7 (targets, H3 only) is built and green on every golden; its
-real-ComfyUI exit check is still to run. Next: Phase 8 (LTX 2.3/2.5 as the second target).
+Status (2026-09-19): Phases 0, 1, 2, 3, 5, 6 and 7 done and in use; Phase 4 (evaluate) is
+ongoing through use. Phase 8 (LTX-2.5 as the second video target, mixed-target episodes,
+retargeting) is built, green on every golden, and live-checked from the CLI; the
+inspector's target picker is the UI half, in progress in `web/`. The remaining LTX work
+(ingredients / subject refs, final-quality settings, keyframe generation) is listed under
+**Phase 8 — as built**.
 This is the working plan for the next round of development. `CLAUDE.md` points here.
 
 ## Goals
@@ -425,6 +428,108 @@ real ComfyUI, a `kreagen` dry run, and workflows still read from ComfyUI's saved
   Overrides and takes are keyed by target already.
 - Exit: the same episode builds and renders a proxy pass on both targets; a single shot
   can be retargeted from the inspector.
+- ✅ Built 2026-09-19 (backend and CLI; the inspector's picker is the `web/` half). See
+  **Phase 8 — as built** below.
+
+**Phase 8 — as built**
+- **Subgraphs** (`h3jobs.flatten_subgraphs`, run by `ui_to_api`): a node whose `type` is a
+  `definitions.subgraphs` id is replaced by its inner nodes (ids `<instance>:<inner>`, as
+  ComfyUI names them; nested subgraphs expand the same way). Each subgraph input is wired
+  to whatever feeds the instance; an unfed input takes the instance's promoted widget value
+  (`widgets_values`), else, for `proxyWidgets` saves, the inner widget's value, and the
+  frontend's rule that the value reaches sockets too (the ingredients template's switch) is
+  kept. Server primitives (`PrimitiveInt`/`Boolean`/`String[Multiline]`/`Float`) are inlined
+  into widgets and kept as nodes where they feed a socket (`ComfyMathExpression`); Reroutes
+  and bypassed nodes pass through (by matching type); muted nodes drop out. Refused with a
+  `WorkflowError`: a bypassed subgraph instance, a bypassed node with no input of its output
+  type, promoted widget values that don't line up. `check_graph` validates a graph against
+  `/object_info` (every class known, every link and required input present); the user's
+  three LTX saves are fixtures and pass it. The H3 graph snapshot is unchanged.
+- **`targets/video/ltx2/`** (the 2.5 distilled I2V template, as saved in ComfyUI):
+  - Template: `8k+1` frames up to 481, fps `"series"`, sizes multiples of **64** (two-stage:
+    the base latent is half size and needs 32), `size_fit: snap`, max 1 MP / 1536 long side.
+  - Binding: no loader; every value is a widget. Params can name several widgets (both
+    `RandomNoise` seeds, length into the video and audio latents, fps into conditioning,
+    audio latent and saver) and pick among nodes of one class with `feeds` / `title` /
+    `all`, and `scale` (the half-size base latent). `saver.replace` puts `H3SaveShot` in
+    place of `CreateVideo` (images from `VAEDecodeTiled`, audio from `LTXVAudioVAEDecode`)
+    and drops `SaveVideo`/`PreviewAny`; `prune` drops everything the saver doesn't need,
+    which takes the prompt enhancer out. LoRAs are inserted after the `UNETLoader` when the
+    workflow has no loader (`insert_after`). The text encoder, VAEs and upscaler are params
+    too, filled from the preset.
+  - Recipe: no refs are required. `keyframes: [first, last]` are optional ref slots
+    (`refs/shots/<shot>/first|last.png`); `patch_graph` feeds `first` to both
+    `LTXVImgToVideoInplace` (0.7 base, 1.0 refine), or splices them out for text-to-video,
+    and adds `last` as an `LTXVAddGuide` (frame -1) plus `LTXVCropGuides` per stage.
+    Images reach `LoadImage` as `input/h3pipe/<sha1>.png` through ComfyUI's
+    `POST /upload/image` (CLI and routes alike; no path guessing).
+  - Audio: `recipe.policies: [generate]` and `policy_fallback` are the declared capability;
+    `Target.audio_policy(intent)` is what compiles check. clone / dub / dub_keep_foley
+    shots render with generate, with `audio_intent`/`audio_note` on the entry, a build
+    warning and the note in the take's sidecar.
+  - Prompt (`prompt.py`): one paragraph in the LTX-2 caption style (from ComfyUI's
+    `TextGenerateLTX2Prompt` system prompts): `Style: <look>.`, then shot size, location and
+    camera (static when the script names no move), each subject's `design`, extras, the
+    action, on-screen text, each line quoted with speaker, voice (first line only) and
+    delivery, then sound and music. Negative prompt is a preset value.
+  - Presets: final 768×512, proxy 448×256, both the int8 distilled model, gemma4 12B text
+    encoder, the 2.5 VAEs and x2 upscaler. `steps: 8` is recorded, not patched (the
+    distilled `ManualSigmas` schedule is fixed). A series written for another target lends
+    `ltx2` only its sizes, not its model/LoRA/steps (`Target.preset`).
+- **Mixed-target episodes:** `targets.shot_targets` / `episode_targets` replace Phase 7's
+  error. Build compiles each target's own shots (`compile_episode(..., only=ids)`; H3 keeps
+  each shot's place in its sequence, so its entries are byte-identical to a full build) and
+  writes `shotlist.<target>[_proxy].json` beside the series target's files (unchanged, and
+  always written); refs_todo merges every target's requests. `h3jobs.load_shotlists` /
+  `find_shot` / `episode_shots` (script order) are how everything finds a shot:
+  `plan_episode`, `episode_status`, `shot_detail`, `queue_shots`, sweeps, picks, the refs'
+  `used_by` and keyframe listing, and `h3assemble` (which also checks a take's frames
+  against its own sidecar length).
+- **Retargeting:** `overrides.json` `shots.<id>.target` (shared by both passes;
+  `h3takes.shot_target` / `set_shot_target`) or a request's `target`. `h3jobs.retarget`
+  compiles the shot's IR from `shots.json` for that target at queue time, after checking
+  the build is current (the built target must reproduce the built entry, as
+  `compile_without` does). Overrides come from the new target's block; any prompt override
+  is ignored and the sidecar says so; a take on another target doesn't count as done;
+  `stale` gains `target`. The routes, `h3render --target` and `h3.py override --target`
+  all use it.
+- **Leaks fixed:** `h3align` snaps each shot to its own target's grid; LTX entries carry the
+  neutral keys the bin reads (`length`, `subjects`, `audio_policy`, `background`, `seed`,
+  `steps`, `prompt`); `h3.py override` writes the shot's current target's block; `h3render`
+  resolves each job's target's workflow (`--workflow` applies to `--target`'s, else the
+  series target's) and gains `--dry-run --check-nodes`; `--pace` uses each shot's grid.
+- **Live check (2026-09-19, a scratch copy of DeanStories ep05, proxy):** three LTX renders
+  from the CLI on the running ComfyUI, no restart and no new node: text-only via
+  `--target ltx2` (sh050, 73 frames, 39 s), first keyframe via `h3.py override --target`
+  (sh040, 18 s), first + last keyframes via `--target` (sh030, 21 s). Each: sidecar `ok`,
+  73 frames (8k+1), 448×256 with AAC audio, thumbnail and strip written; the last frame
+  matched the last keyframe. The mixed H3/LTX proxy cut assembled.
+- **Left for full LTX parity:**
+  - **Subject references (IC-LoRA "ingredients").** Design: a third ref shape,
+    `reference_sheet`, per shot: one composite image on black, one clean panel per element
+    (each character's face + body from its picked views, each prop, the plate), made by an
+    image-target job (`mksheet` can already stitch; it needs a layout and a black ground).
+    The `ltx2_ingredients` target (2.3 dev + `ltx-2.3-22b-ic-lora-ingredients` LoRA at
+    ~1.4) binds it to the template's `RepeatImageBatch` → `ResizeAndPadImage` path as a
+    static control video at the output size, ≥121 frames, and writes the two-part prompt
+    ("Reference sheet: … / Generated video: …") from the same IR: the first half lists the
+    panels from the series config's `design`s, the second is today's prose. Its bucket is
+    768×448, 121 frames, 24 fps, so the template pins those and shots longer than 5 s split.
+    `required_refs` returns the sheet (blocking, like H3's pictures); the sheet's sha1 goes
+    in the sidecar so re-picking a view marks the take `ref`-stale.
+  - **Final-quality settings:** the final preset is the distilled model at 768×512 with the
+    template's sigmas. Worth evaluating: the 2.3 dev model + distilled LoRA (0.75) as a
+    `final` profile, series-size finals (1344×768 fits the 1 MP cap), exposing the
+    `ManualSigmas` schedules as a preset value, and whether 25 fps (LTX's native) should be
+    offered per series.
+  - **Keyframe generation:** keyframes are imported (Refs tab) or cut from another take by
+    hand. Generating them — a still from the shot's prose prompt through the image target,
+    or the previous shot's last frame for continuous sequences — is the next step; the
+    storage, takes and pick already exist (`shot:<id>:first|last`).
+  - The editor's target picker (Inspector and redo dialog) against `GET /h3pipe/targets`.
+  - Per-target pass blocks in the series config (`targets.ltx2.series` / `.proxy`) if one
+    series needs different LTX model/steps than the target's presets.
+  - `H3SaveShot` still names the generated mix `_h3.wav` for any target.
 
 **Phase 9 — later**
 - Script pane: `epNN.md` in a text editor with live `--check` errors beside the lines;
@@ -547,6 +652,8 @@ Target selection (as built in Phase 7): `series.target` (default `minimax_h3_ref
 sequence profile → sequence `target:` → shot profile → shot `target:` → (later) a UI
 override. Phase 7 builds one target per episode: a shot that resolves to any other target
 is a build error that says so ("Episodes that mix targets arrive with Phase 8").
+(Phase 8: mixed episodes build; the UI override is `overrides.json`'s shot `target`, and
+only an unknown target is an error.)
 
 **Phase 8 design: per-target shotlists.** Build groups shots by resolved target. The
 series target keeps writing `shotlist/shotlist.json` / `shotlist_proxy.json` exactly as
@@ -585,18 +692,23 @@ Found and left in Phase 7:
   open question below; a second target brings its own loader.
 - `h3align` snaps with `h3build.snap_up`, i.e. H3's grid, whatever the series target.
   It needs the episode's target (`targets.video_target(series_cfg).template`).
+  (Fixed in Phase 8: each shot snaps to its own target's grid, `h3align.shot_grids`.)
 - `h3edit.episode_status` exposes `audio_policy`, `subjects` and `length` straight from
   the built H3 entry; an LTX shotlist must carry the same keys or the bin changes.
+  (Fixed in Phase 8: `ltx2` entries carry them.)
 - `refs_todo.json` still calls each ref's size hint `target` (a name from before targets
   existed); renaming it is a golden change.
 - `h3render` and the Refs routes resolve the workflow of the *default* target's binding
   (`h3jobs.WORKFLOW_NAME`) for the CLI; the render route already uses the shotlist's
-  target. Harmless with one target per kind.
+  target. Harmless with one target per kind. (Fixed in Phase 8 for `h3render` and the
+  render route: each job's own target. The Refs routes still use the one image target.)
 - The kreagen views are the krea2 target's way to make a 4-view sheet; a 4-view sheet is
   still what every character ref *is* (`h3refs`, `mksheet`). That's the series ref's
   shape, fine while every video target consumes sheets.
 
 ## Phase 8: what LTX needs that Phase 7 doesn't cover
+
+(Written before Phase 8; kept as the reasoning. What was built is **Phase 8 — as built**.)
 
 - **Template:** an `8k+1` grid is expressible (`frames: {step: 8, base: 1, max: …}`), but
   LTX also wants width/height multiples of 32 *and* a max resolution per model, and may
