@@ -130,8 +130,8 @@ export function install() {
         console.error("[h3pipe] this ComfyUI frontend has no extensionManager.registerSidebarTab; the editor needs frontend >= 1.3");
         return;
       }
-      em.registerSidebarTab({ ...tab("shots", "h3 Shots"), icon: "pi pi-video", tooltip: "h3pipe: episode, shots and takes" });
-      em.registerSidebarTab({ ...tab("refs", "h3 Refs"), icon: "pi pi-palette", tooltip: "h3pipe: references (characters, props, locations, voices)" });
+      em.registerSidebarTab({ ...tab("shots", "h3 Shots"), icon: "h3-ico-film", tooltip: "h3pipe: episode, shots and takes" });
+      em.registerSidebarTab({ ...tab("refs", "h3 Refs"), icon: "h3-ico-images", tooltip: "h3pipe: references (characters, props, locations, voices)" });
       mountOverlay();
       await start();
     },

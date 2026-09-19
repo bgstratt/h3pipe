@@ -152,7 +152,7 @@ function BrowseBody({ b }: { b: BrowseState }) {
             onDoubleClick={() => (d.episode && !importing ? void openEpisode(d, here || null) : void go(d.path))}
             title={d.episode && !importing ? `${d.path}\nDouble-click to open this episode` : d.path}
           >
-            <i className={d.episode ? "pi pi-video" : "pi pi-folder"} />
+            <i className={d.episode ? "h3-ico-film" : "pi pi-folder"} />
             <span className="h3-grow h3-ell">{d.name}</span>
             {d.episode && <span className="h3-badge h3-b-cut">episode</span>}
             {!d.episode && d.series_config && <span className="h3-badge">series</span>}
