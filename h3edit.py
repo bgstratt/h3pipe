@@ -760,6 +760,21 @@ def take_span(root: str, e: T.CutEntry, fps: float) -> int | None:
     return n if abs(tf - fps) < 1e-3 else max(1, round(n * fps / tf))
 
 
+def dialogue_windows(root: str, pass_: str, fps: float) -> dict[str, int]:
+    """Shot id -> the frames its dialogue window keeps, rounded against the
+    earliest window exactly as h3assemble does (shots without one left out)."""
+    try:
+        shots = [d["shots"][i] for d, i in J.episode_shots(root, pass_)]
+    except FileNotFoundError:
+        return {}
+    wins = [s for s in shots if "audio_in" in s and "audio_out" in s]
+    if not wins:
+        return {}
+    base = min(s["audio_in"] for s in wins)
+    return {s["id"]: round((s["audio_out"] - base) * fps) - round((s["audio_in"] - base) * fps)
+            for s in wins}
+
+
 def _trim(v, what: str) -> int:
     if v is None:
         return 0
@@ -771,8 +786,10 @@ def _trim(v, what: str) -> int:
 def check_trims(root: str, pass_: str, entries: list[dict]) -> None:
     """CutError for a trim that isn't a whole number >= 0, or trims that
     leave less than one frame of the take an entry uses (when its frame count
-    is known; a take not rendered yet can be trimmed ahead)."""
-    fps = None
+    is known; a take not rendered yet can be trimmed ahead). A shot with a
+    dialogue window counts from the window's frames, as h3assemble cuts the
+    clip to its window before the trims."""
+    fps, windows = None, None
     for raw in entries:
         sid = raw.get("shot")
         ti = _trim(raw.get("trim_in"), f"{sid}: trim_in")
@@ -780,9 +797,14 @@ def check_trims(root: str, pass_: str, entries: list[dict]) -> None:
         if not (ti or to):
             continue
         fps = fps or pass_fps(root, pass_)
+        if windows is None:
+            windows = dialogue_windows(root, pass_, fps)
         src = raw.get("pass") or pass_
         e = T.CutEntry(shot=sid, pass_=src, take=raw.get("take"), placeholder=src != pass_)
         span = take_span(root, e, fps)
+        keep = windows.get(sid)
+        if keep:
+            span = keep if span is None else min(keep, span)
         if span is not None and span - ti - to < 1:
             which = f"t{e.take:02d}" if isinstance(e.take, int) else "its take"
             raise CutError(f"{sid}: trim_in {ti} + trim_out {to} leave nothing of "

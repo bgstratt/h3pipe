@@ -1578,9 +1578,10 @@ named changes shape.
   its `pass`, else the latest usable one), counting its `frames` (the sidecar's) in the
   pass's cut frames; a take at another rate (Wan 14B's 16 fps) counts by duration,
   `round(frames × cut fps / take fps)`. A take whose length isn't known (nothing rendered, a
-  picked take that isn't usable, a sidecar without `frames`) isn't checked. The dialogue-window
-  trim assemble applies first is not counted: trims are against the take as `cut.frames` shows
-  it. The 400 names the shot. A float, a string or a boolean trim is 400 too.
+  picked take that isn't usable, a sidecar without `frames`) isn't checked. A shot with a
+  dialogue window counts from the window's frames (the smaller of that and the take's), as
+  assemble cuts to the window before trimming, so it is checked even before it has a take
+  (changed after merging: first built without the window). The 400 names the shot. A float, a string or a boolean trim is 400 too.
 - **[settled] History:** `<ep>/_history/cut.json.<YYYYmmdd-HHMMSS>` (`-2`, `-3`… within a
   second), the newest 30, through the same helper as source saves. A write that would change
   nothing writes nothing and makes no copy; there is no copy when there was no `cut.json`.

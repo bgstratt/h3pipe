@@ -127,6 +127,16 @@ class CutEditTest(Base):
         with self.assertRaises(E.CutError):
             E.replace_cut(self.ep, "proxy", [{"shot": "sh010", "trim_out": 2.0}])
 
+    def test_dialogue_window_counts(self):
+        """assemble cuts a windowed shot to its window before the trims, so the
+        check counts from the window (sh110: 1.0-3.5 s), even with no take yet."""
+        fps = E.pass_fps(self.ep, "proxy")
+        keep = E.dialogue_windows(self.ep, "proxy", fps)["sh110"]
+        self.assertEqual(keep, round(2.5 * fps))
+        self.put_cut([{"shot": "sh110", "trim_in": keep - 2, "trim_out": 1}])
+        msg = self.put_cut([{"shot": "sh110", "trim_in": keep - 1, "trim_out": 1}], 400)
+        self.assertIn(f"({keep} frames)", msg)
+
     def test_other_rate_take_counts_by_duration(self):
         self.render("sh010")
         n = self.length("sh010")
