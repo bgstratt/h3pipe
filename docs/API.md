@@ -1295,3 +1295,69 @@ left it open). Nothing here changes a field the contract named.
   - **The prompt** is rewritten for that one image, unless it was typed or overridden.
   - **The sidecar's `notes`** say so: "couldn't compose one reference from N (...); sent
     Ada alone".
+
+## Phase 9a: script and series config windows, promote (contract written before building, 2026-09-19)
+
+The editor can now show and edit the episode's two authored files and move overrides into
+them. This replaces the old rule "the editor never writes series.json": it writes it only
+through these routes, only on an explicit save or promote, and always keeps the previous
+version. Backend and UI build against this in parallel; the backend writes "Phase 9a as
+built" with [differs]/[added]/[settled].
+
+### Reading and checking
+- **`GET /h3pipe/source?ep=…&file=script|series`** → `{"file", "path"` (relative to the
+  episode; `../series.json` for a parent-folder series config), `"text", "hash"` (sha1 of the
+  bytes), `"mtime", "shots": [{"id", "line", "end_line"}]` (script only; from the parser's
+  source spans, empty if it doesn't parse)`}`. `&hash_only=1` returns just `{file, hash,
+  mtime}` (the UI polls this on focus to notice edits made outside ComfyUI).
+- **`POST /h3pipe/source/check`** `{ep, file, text}`: parses and checks **without writing**.
+  A script is checked against the series config on disk; a series config is checked on its
+  own (valid JSON, loads) and then with the script on disk. Returns `{"ok", "errors":
+  [{"file", "line", "col"?, "message"}], "warnings": [{...same}], "shots": [...]}` — the
+  same messages `h3.py check` prints, with 1-based line numbers into the given text. A JSON
+  syntax error carries its line/col.
+
+### Saving
+- **`PUT /h3pipe/source`** `{ep, file, text, base_hash, rebuild: true}`:
+  - 409 `{"error": "changed on disk", "hash", "text"}` if the file's hash isn't `base_hash`
+    (edited outside meanwhile). The UI offers reload or overwrite (overwrite = resend with
+    the new `base_hash`).
+  - A series config that isn't valid JSON is refused (400 with line/col). A script with
+    errors **is** saved (it's the user's file), and the check result comes back.
+  - Before writing, the old file is copied to `<ep>/_history/<name>.<YYYYmmdd-HHMMSS>`
+    (the newest 30 per file are kept). The write is atomic (temp file + replace), keeping
+    the file's existing line endings and encoding (UTF-8, BOM kept if present).
+  - `rebuild: true` runs the same build as `POST /h3pipe/build` after a successful write.
+  - Returns `{"hash", "check": {...as above}, "build": {...as /build} | null}` and emits
+    `h3pipe.episode`.
+
+### Promote
+Moves overrides that the authored files can express into them, then drops those overrides.
+What can't be expressed stays in `overrides.json`, with the reason.
+- **`GET /h3pipe/promote?ep=…[&shot=…]`** → a plan:
+  `{"items": [{"id", "scope": "shot" | "episode" | "ref", "shot"?, "ref"?, "view"?,
+  "field", "value", "dest": "script" | "series", "line"? , "summary"}], "left": [{"scope",
+  "shot"?, "ref"?, "field", "reason"}], "diffs": {"script": "<unified diff>", "series":
+  "<unified diff>"}, "hashes": {"script", "series"}}`.
+- **`POST /h3pipe/promote`** `{ep, items: [ids] | "all", hashes: {script, series}}`: 409 as
+  for `PUT /h3pipe/source` if either file changed since the plan. Writes the files (with
+  `_history/` copies), removes exactly the promoted override fields, rebuilds, and returns
+  `{"promoted": [ids], "left": [...], "hashes", "build"}`; emits `h3pipe.episode` (and
+  `h3pipe.ref` for promoted ref overrides).
+- **What maps where** (the backend confirms each against the parser and the series config
+  loader, and lists anything else under `left`):
+  - Shot `target` → a `target:` line in that shot's block.
+  - Shot `model` / `loras` / `steps` → `model:` / `lora:` / `steps:` lines, only when the
+    script line would mean the same thing (e.g. the value is the same in both passes, or the
+    script line only affects the pass the override is for); else `left` with the reason.
+  - Shot `prompt` (compiled text), `seed`, `negative`, `note` → `left` (compiled text has no
+    script form; a seed is kept by picking the take; a negative is per target/pass).
+  - Episode `target` → the series config's series-wide target; `refs_target` /
+    `keyframe_target` → its `refs` block.
+  - Ref overrides → the matching subject/location/view fields of the series config where
+    the loader has one (design sentences, per-view prompts, `target`); else `left`.
+- Script edits are line-level: an existing `key:` line in the shot's own block (not the
+  sequence header's) is replaced, else a new line is inserted after the shot's last
+  `key:` line (or right after `## shot`). Nothing else in the file changes. Series config
+  edits rewrite the JSON with 2-space indent, keeping key order and non-ASCII text; if the
+  file wasn't already formatted that way the diff says so.
