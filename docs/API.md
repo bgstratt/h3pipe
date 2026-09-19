@@ -1125,3 +1125,51 @@ here too) or **[settled]** (the contract left it open).
 - **[settled]** `length_estimated: true` appears only on estimated shots.
 - **[added]** `model_low` is a per-pass override field; `GET /h3pipe/models?target=...&param=
   model_low` works for `wan22_i2v` and `wan22_vace` (`target` is required, as for `model`).
+
+## Phase 8.6: look-back (contract written before building, 2026-09-19)
+
+Loose ends from Phases 1-8, finished before Phase 9. Backend and UI build against this in
+parallel; the backend writes a "Phase 8.6 as built" section with [differs]/[added]/[settled].
+
+### Discarding takes and ref candidates
+Nothing is deleted: a discarded file moves to a `_trash/` folder beside it, keeping its
+relative name, so a mistake can be undone by hand. Discarding is refused (409) for a take
+that is `queued` (cancel it first).
+- **`POST /h3pipe/discard`** `{ep, shot, take, pass}`: moves the take's sidecar and every
+  output it names (video, audio, reference image, thumbnails) from
+  `renders[_proxy]/<shot>/` to `renders[_proxy]/_trash/<shot>/`. If `cut.json` picks that
+  take for that pass, the pick is removed (the cut falls back to the latest usable take).
+  Returns `{"shot", "take", "moved": [paths relative to the episode], "cut_changed": bool}`
+  and emits `h3pipe.episode`.
+- **`POST /h3pipe/refs/discard`** `{ep, ref, view?, take}`: moves the candidate (sidecar and
+  image/audio) from `refs/_takes/...` to `refs/_takes/_trash/...`. If it is the ref's (or
+  view's) pick, the ref is cleared exactly as `DELETE /h3pipe/refs/pick` does. Returns the
+  ref as `GET /h3pipe/refs` lists it and emits `h3pipe.ref`.
+- `GET /h3pipe/episode` and `GET /h3pipe/refs` never list anything under `_trash/`.
+- **CLI:** `h3.py discard <ep> <shot> <take> [--proxy]`; `kreagen --discard REF[:VIEW]:TAKE`.
+
+### Generate missing, one route
+- **`POST /h3pipe/refs/generate-missing`** `{ep, pass?, kinds?: ["series", "keyframe"],
+  target?, keyframe_target?, dry_run?: false}`: queues one candidate for every series ref
+  that is missing (no live file, not cleared, no queued candidate), and fills every needed
+  keyframe as `h3.py keyframe --missing` does (continuity when the previous shot has a usable
+  take in the pass's cut, else a still; a script path is imported and picked). Returns
+  `{"queued": [{ref, view, take, prompt_id, seed, target, method}], "picked": [{ref, take,
+  method}], "skipped": [{ref, reason}], "errors": [...]}`. `dry_run` returns the same
+  shape with nothing queued (take/prompt_id null). The UI's "Generate missing" button uses
+  this instead of its two-step fallback.
+
+### Uploading a ref (drag and drop)
+- **`POST /h3pipe/refs/import`** also accepts `multipart/form-data` with fields `ep`, `ref`,
+  `view` (optional), `pick` (optional, `"1"` picks it) and `file` (an image, or audio for a
+  voice). Same result as the JSON form: a new take with `source: "imported"`, plus
+  `original_name`. 400 for a file type the ref can't use; 413 over 64 MB. The JSON form
+  also takes `pick`.
+
+### Keyframe polish
+- The keyframe prompt states the framing more strongly (a close-up must fill the frame with
+  the face; the size word is repeated in the "Drawn as" sentence and as a closing line).
+- A single-reference edit target (`max_refs: 1`, Kontext) gets one **composed reference**:
+  the characters' reference panels pasted over the plate (side by side, bottom-aligned,
+  about two thirds of the frame height), made by `h3_refsheet.py` and uploaded like any
+  reference; the sidecar's `references` records `role: "composite"` with its parts.
