@@ -118,10 +118,16 @@ def source_path(ep: str, file: str) -> str:
     return p
 
 
+def read_file(ep: str, file: str, path: str) -> Source:
+    """A Source for a path given by name rather than found in the episode
+    (h3align's `--script`, the series config it was pointed at). Its history
+    copies still go to the episode's `_history/`."""
+    with open(path, "rb") as fh:
+        return Source(ep, file, path, fh.read())
+
+
 def read_source(ep: str, file: str) -> Source:
-    p = source_path(ep, file)
-    with open(p, "rb") as fh:
-        return Source(ep, file, p, fh.read())
+    return read_file(ep, file, source_path(ep, file))
 
 
 def source_json(src: Source, hash_only: bool = False) -> dict:
@@ -452,6 +458,21 @@ def write_source(src: Source, text: str) -> str:
     save_history(src.ep, src)
     atomic_write(src.path, data)
     return hashlib.sha1(data).hexdigest()
+
+
+def dump_series(raw: dict, like: str) -> str:
+    """A series config as the editor writes it: 2-space indent, key order and
+    non-ASCII text kept, a final newline if the file had one (h3promote's
+    format, shared by every route that edits the series config)."""
+    return json.dumps(raw, indent=2, ensure_ascii=False) + ("\n" if like.endswith("\n") else "")
+
+
+def formatted(text: str) -> bool:
+    """Whether a series config text is already what dump_series writes."""
+    try:
+        return dump_series(json.loads(text), text).rstrip("\n") == text.rstrip("\n")
+    except ValueError:
+        return False
 
 
 def save_source(ep: str, file: str, text: str, base_hash: str | None) -> dict:

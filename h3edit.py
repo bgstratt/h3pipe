@@ -398,12 +398,16 @@ def episode_status(root: str, pass_: str, folder: str | None = None) -> dict:
             } for t in takes],
         })
     d = doc0.get("defaults", {})
+    track = episode_track(root)
+    if track is not None:
+        # how many shots the build gave a dialogue window (h3align's work)
+        track["aligned"] = sum(1 for s in out if "audio_in" in s)
     return {"episode": doc0.get("episode", os.path.basename(root)),
             "title": doc0.get("title", ""), "pass": pass_,
             **episode_target_info(root, ov, J.shotlist_target(doc0).id),
             "fps": fps, "width": d.get("width"),
             "height": d.get("height"), "folder": folder or T.pass_subfolder(pass_),
-            "track": episode_track(root),
+            "track": track,
             "shots": out}
 
 
@@ -415,11 +419,28 @@ def take_audio(root: str, t: T.Take) -> str | None:
     return rel(root, p) if p else None
 
 
+def words_cache(recording: str) -> str:
+    """Where h3align caches a recording's word timings."""
+    return recording + ".words.json"
+
+
+def has_words(recording: str) -> bool:
+    """Whether a usable transcript sits beside the recording (h3align's rule:
+    the cache is newer than the recording, else it transcribes again)."""
+    cache = words_cache(recording)
+    try:
+        return os.path.getmtime(cache) >= os.path.getmtime(recording)
+    except OSError:
+        return False
+
+
 def episode_track(root: str) -> dict | None:
     """The series config's recorded dialogue (`audio.track`, relative to the
     episode) as {"path" (relative to the episode, forward slashes; absolute
-    when it is on another drive), "duration" (seconds), "rate" (Hz), "exists"},
-    or None when the series config names none."""
+    when it is on another drive), "duration" (seconds), "rate" (Hz), "exists",
+    "words" (a cached transcript sits beside it)}, or None when the series
+    config names none. `aligned` (how many shots carry a window) is added by
+    episode_status, which knows the shots."""
     cfg = episode_series_config(root)
     try:
         b = (T.read_json(cfg) or {}) if cfg else {}
@@ -435,11 +456,22 @@ def episode_track(root: str) -> dict | None:
     except ValueError:                                    # another drive
         path = full
     if not os.path.isfile(full):
-        return {"path": path, "duration": None, "rate": None, "exists": False}
+        return {"path": path, "duration": None, "rate": None, "exists": False,
+                "words": False}
     info = h3peaks.media_info(full)
     dur = info["duration"]
     return {"path": path, "duration": round(dur, 6) if dur is not None else None,
-            "rate": info["rate"], "exists": True}
+            "rate": info["rate"], "exists": True, "words": has_words(full)}
+
+
+def track_info(root: str, pass_: str = "proxy") -> dict | None:
+    """episode_track with `aligned` (how many of the pass's shots carry a
+    dialogue window), for the routes that change the recording without asking
+    for the whole episode status."""
+    track = episode_track(root)
+    if track is not None:
+        track["aligned"] = len(dialogue_windows(root, pass_, pass_fps(root, pass_)))
+    return track
 
 
 def episode_target_info(root: str, ov: dict | None = None, built: str | None = None) -> dict:

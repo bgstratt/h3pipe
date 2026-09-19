@@ -1733,3 +1733,136 @@ other. Each half writes its own "as built" section.
   player and the waveform (`GET /h3pipe/peaks`), pick / clear / discard / upload as for
   images, and "Use a line from a take…" — pick a shot and take, drag the span on its
   waveform, preview, then save it as a candidate.
+
+### Phase 9c-A as built
+
+Part A above is implemented: `h3track.py` (the readiness check, the recording, running
+h3align), `h3align.py` writing through h3source, `h3edit.track_info` and three thin routes.
+Each point is **[differs]**, **[added]** or **[settled]**, as for 9a and 9b. No field the
+contract named changes shape except where marked [differs].
+
+**`GET /h3pipe/align/ready`**
+- **[settled]** `{"ready", "ffmpeg", "missing", "python", "install", "models"}` as the
+  contract wrote them. `ffmpeg` is the path `shutil.which` finds (null when it isn't on
+  PATH); `missing` lists `ffmpeg`, `numpy` and `faster-whisper` by their pip names, in that
+  order; `install` is the pip line for the missing **packages** only, quoting the
+  interpreter (`"…\python_embeded\python.exe" -m pip install faster-whisper`), and `""`
+  when only ffmpeg is missing.
+- **[settled] The interpreter** is `sys.executable`: inside ComfyUI that is its embedded
+  Python, which is also what runs h3align (`h3edit.run_tool`'s rule), so the answer is about
+  the Python that would really transcribe. Either Whisper counts: `openai-whisper` alone
+  makes it ready.
+- **[added] `packages`** `{"numpy", "faster-whisper", "openai-whisper"}`: the installed
+  version (`""` when the package is there but has no metadata), null when it isn't
+  installed. **[added] `ffmpeg_hint`** (a line to show when ffmpeg is missing) and
+  **[added] `models.choices`** (the model names h3align takes) beside `models.default`.
+- **[settled] The probe** runs `importlib.util.find_spec` and `importlib.metadata.version`
+  in a subprocess of that interpreter, so it sees what h3align will; the answer is cached
+  for 30 seconds per interpreter (`h3track.PROBE_TTL`), and if the subprocess can't run at
+  all this process's own view is used instead. Nothing is imported, so the check is cheap
+  and can't crash on a broken install.
+
+**`POST /h3pipe/track`**
+- **[settled]** `{ep, source_path}` (a file on this machine) or multipart `file`, as
+  `/refs/import`: over `MAX_UPLOAD` is 413, a `file` in a JSON body is 400. The recording
+  lands at `<ep>/audio/<name>`; a `source_path` already inside the episode is used where it
+  is (`copied: false`), anywhere in the episode, not only `audio/`.
+- **[settled]** The series config's `audio.track` (relative to the episode, forward slashes)
+  and `audio.mode: "source_track"` are written through the Phase 9a save path — a copy in
+  `<ep>/_history/`, an atomic write, the file's line endings and BOM kept — then the episode
+  is rebuilt and `h3pipe.episode` goes out.
+- **[added]** The answer is `{"track", "hash", "build", "path", "copied", "reformatted"}`:
+  `path` is the recording's path relative to the episode, `copied` whether it was copied in,
+  `reformatted` whether the whole series config was rewritten in the promote's format
+  (2-space indent, key order kept) because it wasn't in it. **[added]** An optional `pass`
+  (default `proxy`, as everywhere) picks which pass `track.aligned` counts.
+- **[added] The name** is the upload's (or the source file's) basename, with anything
+  outside `A-Za-z0-9 ._()-` turned into `_`, at most 120 characters, and the extension
+  lowercased: it must be one of `.wav .mp3 .flac .ogg .m4a .aac .opus`, else 400 ("not a
+  recording"). A missing file is 404. Nothing is written when the file is refused.
+- **[added] An existing name** is never clobbered: the same bytes (size and sha1) are reused
+  in place, other bytes go to `<stem>-2`, `-3`… So attaching the same file twice is a no-op,
+  and a second `take 1.wav` from another folder keeps both.
+- **[added] Clearing** (`{ep, track: null}`): `audio.track` goes, and the mode goes back to
+  the one the series config had when the editor attached the recording. That mode is
+  remembered in **overrides.json** (`{"audio": {"mode_before_track": "clone"}}`) — the
+  editor's own state file, so the authored one carries no bookkeeping — and is dropped once
+  it is used. With nothing remembered the mode becomes `generate`; a remembered `""` (the
+  series config had no `mode` at all) removes the key again. The recording itself stays on
+  disk.
+- **[settled]** A series config that isn't valid JSON is 400 and nothing is written (the 9a
+  rule).
+- **[added, worth knowing]** Attaching a recording to a script that has no `audio:` windows
+  yet makes the **final** build fail ("shot sh020: policy dub_keep_foley needs an `audio:
+  in-out` window…"): `source_track` turns every dialogue shot into a dub. That is expected —
+  aligning is the next step — so the route answers 200 with that `build` rather than
+  refusing, and the editor can show it as "align to finish".
+
+**`POST /h3pipe/align`**
+- **[settled]** `{ep, track?, model?, snap?: true, dry_run?: false}` runs `h3align` in a
+  subprocess (this Python, through `h3edit.RUN_SCRIPT`, with the episode as the working
+  directory). `track` is a path relative to the episode (`/h3pipe/file`'s rules: 400 for one
+  that climbs out or leads out through a link, 404 for a missing one); without it h3align
+  takes the series config's `audio.track`. `snap: false` passes `--no-snap`, `model` passes
+  `--model`. A non-boolean `snap` / `dry_run` or a non-string `model` is 400.
+- **[settled] 409** when a dependency is missing, before anything runs: `{"error",
+  "missing", "install", "python", "ffmpeg"}` (`GET /h3pipe/align/ready`'s fields).
+- **[differs] A Whisper is only needed when there is nothing to read.** When the recording
+  already has a transcript beside it (`<recording>.words.json`, newer than the recording),
+  h3align never transcribes, so the 409 leaves the whisper out of `missing` and the run
+  goes ahead; ffmpeg and numpy are still required. The body carries **[added] `words`**
+  (whether that cache was found), so the editor can say "re-aligning needs no download".
+  Re-aligning after a script edit is the common case, and on this machine — no Whisper
+  installed — it is the only one that can run.
+- **[settled] Progress** is `h3pipe.align` `{"ep", "stage", "pct", "text"}`, from h3align's
+  own `--progress` lines: `transcribe` (10) when it starts transcribing or reads the cache,
+  `match` (65) with the word and line counts, `write` (90) and `write` (100). A dry run's
+  last event is `write` 100, "dry run — nothing written".
+- **[added] The answer** is `{"ok", "dry_run", "report", "report_path", "changes", "notes",
+  "recording", "duration", "words", "script_hash", "series_hash", "track", "build", "log"}`.
+  `report` is align_report.md's **text** (a dry run has it too, though it writes no file);
+  `report_path` is `align_report.md`, or null on a dry run. `changes` is one entry per shot
+  in script order, `{"shot", "audio_in", "audio_out", "note"}`, with `audio_in` /
+  `audio_out` null for a shot that keeps its `dur:`, and `note` carrying the report's lines
+  about that shot (`keeps its dur:` when there is no other reason). `notes` is the report's
+  whole list, `log` everything h3align printed (progress lines removed).
+- **[settled]** `script_hash` / `series_hash` are the files' hashes after the write (what
+  `PUT /h3pipe/source` wants as `base_hash`), null on a dry run. A dry run rebuilds nothing
+  (`build: null`) and sends no `h3pipe.episode`; a real run does both.
+- **[added]** h3align failing is 500 with its own last `!!` line as the message and the full
+  `log` in the body. A run that outlives `h3track.ALIGN_TIMEOUT` (3600 s) is killed and says
+  so.
+
+**h3align itself**
+- **[settled] No more `.bak`.** The script and the series config are written through
+  `h3source` (`Source` / `write_source`): the old bytes go to
+  `<episode>/_history/<name>.<stamp>` (the newest 30), the write is atomic and keeps the
+  file's line endings and BOM — so a CRLF script stays CRLF, where the old write made it LF.
+  The series config is rewritten in the promote's format (2-space indent, key order and
+  non-ASCII kept), which is what it already did apart from the final newline. The console
+  lines name `_history/` instead of `.bak`.
+- **[added] `--progress`** prints one `##h3align {json}` line per stage and **[added]
+  `--json PATH`** writes the run as the route reads it. Everything else about the CLI is
+  unchanged: the same arguments, report, console output and exit codes, and `python h3.py
+  align <ep> …` still passes its flags straight through.
+- **[settled]** A cached `<recording>.words.json` newer than the recording is still used
+  instead of transcribing — which is what makes all of this testable without Whisper.
+
+**`GET /h3pipe/episode`: `track`**
+- **[settled] `words`** is whether a usable transcript sits beside the recording: the cache
+  exists **and** is newer than the recording, h3align's own rule, so a recording replaced
+  after its transcript reads false (h3align would transcribe it again). It is false for a
+  recording that isn't there.
+- **[settled] `aligned`** is how many of the pass's shots carry a dialogue window
+  (`audio_in`), counted from the build, so it stays 0 until the script has `audio:` lines
+  and the episode is rebuilt. `h3edit.track_info(ep, pass)` gives the same dict to the two
+  routes above without a full episode status.
+
+**Tests**
+- `tests/test_phase9c_track.py` (28): the readiness answers with a faked probe (and the real
+  probe against this interpreter), the track route (by path, upload, in place, the `-2`
+  rule, refusals, clearing and the remembered mode), the align route against a **stub
+  h3align** that speaks the `--progress` / `--json` protocol (events, dry run, 409, a
+  failure, a hang, the command line), and the real `h3align` driven by a **hand-made
+  `<recording>.words.json` beside a generated wav** — no Whisper anywhere, since none is
+  installed on this machine. The last group needs ffmpeg and numpy and skips without them.

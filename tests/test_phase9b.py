@@ -291,12 +291,15 @@ class StatusTest(Base):
         if os.path.exists(track):
             os.remove(track)
         data, shots = self.status()
+        # `words` and `aligned` came with 9c
         self.assertEqual(data["track"], {"path": "audio/ks01_mix.wav", "duration": None,
-                                         "rate": None, "exists": False})
+                                         "rate": None, "exists": False, "words": False,
+                                         "aligned": 4})
         steps_wav(os.path.join(self.ep, "audio", "ks01_mix.wav"), [1000, 2000], rate=16000)
         data, shots = self.status()
         self.assertEqual(data["track"], {"path": "audio/ks01_mix.wav", "duration": 1.0,
-                                         "rate": 16000, "exists": True})
+                                         "rate": 16000, "exists": True, "words": False,
+                                         "aligned": 4})
         self.assertEqual((shots["sh110"]["audio_in"], shots["sh110"]["audio_out"]), (1.0, 3.5))
         self.assertNotIn("audio_in", shots["sh010"])
         # the peaks route takes the track's path as it comes

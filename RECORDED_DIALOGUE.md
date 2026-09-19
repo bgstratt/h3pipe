@@ -25,8 +25,8 @@ Put the recording inside the episode folder (for example `ep05\audio\`) so the s
 
 ## What h3align changes
 
-- **Script:** adds `audio: in-out` to every shot and turns old `dur:` lines into comments. A backup is saved as `.bak`.
-- **Series config:** sets `audio.mode` to `source_track` and `audio.track` to your recording. A backup is saved as `.bak`.
+- **Script:** adds `audio: in-out` to every shot and turns old `dur:` lines into comments. The old copy is kept in `<episode>\_history\`.
+- **Series config:** sets `audio.mode` to `source_track` and `audio.track` to your recording. The old copy is kept in `<episode>\_history\` too (the same history the editor writes, so both show the same versions).
 - **Report:** writes `align_report.md` with every window and line, plus any problems it found.
 - **Transcript cache:** saves the transcript as `<recording>.words.json`, so re-running is instant. Use `--retranscribe` after you replace the recording.
 - **Cut points:** cuts land at the quietest point of each pause. Speaking shots are lengthened to H3's allowed frame counts when the pause has room.
