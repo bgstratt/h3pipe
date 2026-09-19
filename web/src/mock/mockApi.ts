@@ -20,6 +20,8 @@ import { keyframeWanted } from "../lib/keyframes";
 import { hasViews } from "../lib/refs";
 import fixturesRaw from "./fixtures.json?raw";
 import { FsError, browse as fsBrowse, fsExists } from "./mockFs";
+import { TRACK_RATE, makeTrack, slicePeaks, takePeaks, type MockWindow } from "./mockAudio";
+import { CutError, applyCut, checkEntries, copyEntries, materialize, resetEntries } from "./mockCut";
 import { RefError, createMockRefs } from "./mockRefs";
 import { svgImage, type KeyframeNeedSpec } from "./mockRefs";
 import {
@@ -243,24 +245,87 @@ export function createMockApi(emit: Emit, opts: MockOptions = {}): Api & { outsi
     return d;
   }
 
-  /** recompute the cut fields the way h3edit does (latest usable, or the pick) */
+  /** Each pass's script order (the build's; the fixture's shots come in it). */
+  const scriptOrder: Record<Pass, string[]> = {
+    final: (status.final?.shots ?? []).map((s) => s.shot),
+    proxy: (status.proxy?.shots ?? []).map((s) => s.shot),
+  };
+  const otherPass = (p: Pass): Pass => (p === "proxy" ? "final" : "proxy");
+
+  /** recompute the cut the way h3edit does: cut order (resolve_cut), each
+   * shot's take (latest usable, or the pick), trims, locks (Phase 9b) */
   function recut(pass: Pass) {
-    for (const s of st(pass).shots) {
-      const e = cut[pass].find((c) => c.shot === s.shot);
-      const usable = s.takes.filter((t) => t.status === "ok" && t.has_video);
-      if (e?.take != null) {
-        const t = s.takes.find((x) => x.take === e.take);
-        s.cut = { ...s.cut, take: e.take, picked: true, usable: !!t && t.status === "ok" && t.has_video };
-      } else {
-        const last = usable[usable.length - 1];
-        s.cut = { ...s.cut, take: last ? last.take : null, picked: false, usable: !!last };
+    const e = status[pass];
+    if (!e) return;
+    e.shots = applyCut(e.shots, cut[pass], pass, scriptOrder[pass], (shot) => status[otherPass(pass)]?.shots.find((x) => x.shot === shot)?.takes ?? []);
+  }
+
+  // ---- Phase 9b: the recorded dialogue track, dialogue windows, peaks ----
+  /** shots with no dialogue (no window on the track) */
+  const SILENT = new Set(["sh040", "sh100", "sh230", "sh330"]);
+  const TRACK_PATH = "audio/ep05_dialogue.wav";
+  /** windows laid end to end in script order from 1 s, as h3align would time them */
+  const windows: Record<string, MockWindow> = {};
+  let trackEnd = 1;
+  for (const sh of (status.proxy ?? status.final)!.shots) {
+    const secs = (sh.length ?? Math.round((sh.seconds ?? 3) * 24)) / 24;
+    if (!SILENT.has(sh.shot)) windows[sh.shot] = { shot: sh.shot, audioIn: round3(trackEnd), audioOut: round3(trackEnd + secs) };
+    trackEnd += secs;
+  }
+  const track = makeTrack(Object.values(windows), round3(trackEnd + 1.5));
+
+  function round3(n: number) {
+    return Math.round(n * 1000) / 1000;
+  }
+
+  /** Phase 9b fields on a status copy: the track, windows, take audio and frames. */
+  function with9b(e: EpisodeStatus): EpisodeStatus {
+    e.track = { path: TRACK_PATH, duration: track.duration, rate: TRACK_RATE };
+    for (const sh of e.shots) {
+      const w = windows[sh.shot];
+      if (w) {
+        sh.audio_in = w.audioIn;
+        sh.audio_out = w.audioOut;
+      }
+      for (const t of sh.takes) {
+        const ok = t.status === "ok" && t.has_video && !!t.mp4;
+        t.audio = ok ? t.mp4 : null;
+        if (ok && t.frames == null && sh.length) t.frames = sh.length;
+      }
+      if (sh.cut.usable && sh.cut.frames == null && !sh.cut.placeholder) {
+        sh.cut.frames = sh.takes.find((t) => t.take === sh.cut.take)?.frames ?? null;
       }
     }
+    return e;
+  }
+
+  /** The frames of the take a cut entry would use, and their rate (null: not known). */
+  function entryFrames(pass: Pass, entry: CutEntry): [number, number] | null {
+    const src = entry.pass ?? pass;
+    const sh = status[src]?.shots.find((x) => x.shot === entry.shot);
+    if (!sh) return null;
+    const usable = sh.takes.filter((t) => t.status === "ok" && t.has_video);
+    const t = entry.take != null ? sh.takes.find((x) => x.take === entry.take) : usable[usable.length - 1];
+    const frames = t && t.status === "ok" && t.has_video ? t.frames ?? sh.length : null;
+    return frames ? [frames, t?.fps || status[src]?.fps || 24] : null;
+  }
+
+  /** The files the peaks route knows: takes' audio and the track, with their length. */
+  function mediaSeconds(path: string): number | null {
+    if (path === TRACK_PATH) return track.duration;
+    for (const p of ["final", "proxy"] as Pass[]) {
+      for (const sh of status[p]?.shots ?? []) {
+        for (const t of sh.takes) if (t.mp4 === path) return (t.frames ?? sh.length ?? 72) / (t.fps || status[p]!.fps || 24);
+      }
+    }
+    return null;
   }
   // the smoke episode's cut.json picks sh020 t01 in proxy
   for (const pass of ["final", "proxy"] as Pass[]) {
     for (const s of status[pass]?.shots ?? []) if (s.cut.picked && s.cut.take != null) cut[pass].push({ shot: s.shot, take: s.cut.take });
   }
+  // Phase 9b: order, script_index, out_of_order from the start
+  for (const pass of ["final", "proxy"] as Pass[]) recut(pass);
 
   function effectiveOf(pass: Pass, shot: string): ShotDetail["effective"] {
     const d = det(pass, shot);
@@ -534,7 +599,7 @@ export function createMockApi(emit: Emit, opts: MockOptions = {}): Api & { outsi
     async episode(ep, pass) {
       await wait();
       need(ep);
-      return withMissing(clone(st(pass)));
+      return with9b(withMissing(clone(st(pass))));
     },
     async shot(ep, pass, shot) {
       await wait();
@@ -560,6 +625,8 @@ export function createMockApi(emit: Emit, opts: MockOptions = {}): Api & { outsi
     fileUrl(_ep, path) {
       const pic = refs.image(path); // a reference sheet a take kept
       if (pic) return pic;
+      // Phase 9b: the synthetic dialogue track (a real clip's sound outside a browser)
+      if (path === TRACK_PATH) return track.url() ?? media + "sh010_t01.mp4";
       const real = alias.get(path) ?? path;
       return media + real.split("/").pop();
     },
@@ -700,25 +767,42 @@ export function createMockApi(emit: Emit, opts: MockOptions = {}): Api & { outsi
       s.takes.splice(i, 1);
       const d = det(ref.pass, ref.shot);
       d.takes = d.takes.filter((x) => x.take !== ref.take);
-      const before = cut[ref.pass].length;
-      cut[ref.pass] = cut[ref.pass].filter((c) => !(c.shot === ref.shot && c.take === ref.take));
+      // a pick of that take goes (the entry stays where it is: back to the latest usable)
+      let changed = false;
+      cut[ref.pass] = cut[ref.pass].map((c) => {
+        if (c.shot !== ref.shot || c.take !== ref.take) return c;
+        changed = true;
+        const { take: _t, ...rest } = c;
+        return rest;
+      });
       recut(ref.pass);
       emit("h3pipe.episode", { ep: EP });
-      return { shot: ref.shot, take: ref.take, pass: ref.pass, moved, cut_changed: cut[ref.pass].length !== before };
+      return { shot: ref.shot, take: ref.take, pass: ref.pass, moved, cut_changed: changed };
     },
     async pick(req) {
       await wait();
       need(req.ep);
-      const s = shotSt(req.pass, req.shot);
-      const list = cut[req.pass].filter((c) => c.shot !== req.shot);
+      const from = req.from_pass ?? req.pass;
+      shotSt(req.pass, req.shot);
+      const s = shotSt(from, req.shot);
+      // h3takes.pick: the whole resolved order goes into the file, this entry's take changed
+      const list = materialize(cut[req.pass], req.pass, scriptOrder[req.pass]);
+      const entry = list.find((c) => c.shot === req.shot)!;
+      if (entry.locked && !req.force) {
+        throw new MockError(`${req.shot} is locked in the ${req.pass} cut: unlock it, or force the pick`, 409, { error: `${req.shot} is locked`, locked: true });
+      }
       if (req.take != null) {
         const t = s.takes.find((x) => x.take === req.take);
         if (!t) throw new MockError(`${req.shot} has no take ${req.take}`, 404);
         if (!(t.status === "ok" && t.has_video) && !req.force) {
           throw new MockError(`${req.shot} t${String(req.take).padStart(2, "0")} is ${t.status}${t.has_video ? "" : " with no mp4"}`, 409);
         }
-        list.push({ shot: req.shot, take: req.take });
+        entry.take = req.take;
+      } else {
+        delete entry.take;
       }
+      if (from !== req.pass) entry.pass = from;
+      else delete entry.pass;
       cut[req.pass] = list;
       recut(req.pass);
       emit("h3pipe.episode", { ep: EP });
@@ -727,10 +811,39 @@ export function createMockApi(emit: Emit, opts: MockOptions = {}): Api & { outsi
     async putCut(ep, pass, entries) {
       await wait();
       need(ep);
-      cut[pass] = entries;
+      cut[pass] = clone(checkEntries(entries, st(pass).fps || 24, (e) => entryFrames(pass, e)));
       recut(pass);
       emit("h3pipe.episode", { ep: EP });
-      return { cut: { episode: "ep05", ...cut } };
+      return { cut: { episode: "ep05", ...clone(cut) } };
+    },
+    async cutReset(ep, pass, what) {
+      await wait();
+      need(ep);
+      if (!["order", "trims", "all"].includes(what)) throw new MockError(`what must be order, trims or all`, 400);
+      st(pass);
+      cut[pass] = resetEntries(cut[pass], pass, scriptOrder[pass], what);
+      recut(pass);
+      emit("h3pipe.episode", { ep: EP });
+      return { cut: { episode: "ep05", ...clone(cut) } };
+    },
+    async cutCopy(ep, from, to, what) {
+      await wait();
+      need(ep);
+      if (from === to) throw new MockError("from and to are the same pass", 400);
+      if (!["order", "trims", "all"].includes(what)) throw new MockError(`what must be order, trims or all`, 400);
+      cut[to] = copyEntries(cut[from], from, st(from).fps || 24, cut[to], to, st(to).fps || 24, scriptOrder[to], what, (e) => entryFrames(to, e));
+      recut(to);
+      emit("h3pipe.episode", { ep: EP });
+      return { cut: { episode: "ep05", ...clone(cut) } };
+    },
+    async peaks(ep, path, bins, start, end) {
+      await wait(40);
+      need(ep);
+      if (/^([\\/]|[a-zA-Z]:)/.test(path) || path.split(/[\\/]/).includes("..")) throw new MockError(`${path} is outside the episode`, 400);
+      const secs = mediaSeconds(path);
+      if (secs == null) throw new MockError(`No such file: ${path}`, 404);
+      const full = path === TRACK_PATH ? track.peaks() : takePeaks(path, secs);
+      return slicePeaks(full, secs, bins, start, end);
     },
     async putOverride(req) {
       await wait();
@@ -1102,7 +1215,7 @@ export function createMockApi(emit: Emit, opts: MockOptions = {}): Api & { outsi
         return await fn(...a);
       } catch (e) {
         if (e instanceof MockError) throw new ApiError(e.message, e.status, `/mock/${k}`, e.data);
-        if (e instanceof FsError || e instanceof RefError) throw new ApiError(e.message, e.status, `/mock/${k}`);
+        if (e instanceof FsError || e instanceof RefError || e instanceof CutError) throw new ApiError(e.message, e.status, `/mock/${k}`);
         throw e;
       }
     };

@@ -293,6 +293,16 @@ export function setZoom(zoom: number) {
 
 const inflight = new Map<string, Promise<EpisodeStatus | undefined>>();
 
+/** Phase 9b: a status fetched while cut edits are still being saved would undo
+ * them on screen (and the next edit, written from it, would drop them): the
+ * cut's actions lay the edits in flight over each fetched status. */
+type StatusHook = (ep: string, pass: Pass, st: EpisodeStatus) => EpisodeStatus;
+let statusHook: StatusHook | null = null;
+
+export function setStatusHook(h: StatusHook | null) {
+  statusHook = h;
+}
+
 export function refreshEpisode(ep = get().ep, pass = get().pass): Promise<EpisodeStatus | undefined> {
   if (!ep) return Promise.resolve(undefined);
   const key = statusKey(ep, pass);
@@ -301,7 +311,9 @@ export function refreshEpisode(ep = get().ep, pass = get().pass): Promise<Episod
   const p = (async () => {
     set((s) => ({ statusLoading: { ...s.statusLoading, [key]: true } }));
     try {
-      const st = await api().episode(ep, pass);
+      const raw = await api().episode(ep, pass);
+      // Phase 9b: cut edits still on their way to the server stay applied
+      const st = statusHook ? statusHook(ep, pass, raw) : raw;
       set((s) => {
         const statusError = { ...s.statusError };
         delete statusError[key];
@@ -510,10 +522,21 @@ export async function pickTake(shot: string, take: number | null, fromPass: Pass
   const ep = s.ep;
   const pass = s.pass;
   const req = { ep, pass, shot, take, from_pass: fromPass && fromPass !== pass ? fromPass : null };
+  // Phase 9b: a locked clip keeps its take (the server answers 409 too)
+  if (s.status[statusKey(ep, pass)]?.shots.find((x) => x.shot === shot)?.cut?.locked) {
+    host().toast("warn", `${shot} is locked`, `A locked clip keeps its take. Unlock it from its menu to change it.`);
+    return;
+  }
   return withBusy(`pick|${shot}`, async () => {
     try {
       await api().pick(req);
     } catch (e) {
+      if (e instanceof ApiError && e.status === 409 && (e.data as { locked?: unknown } | undefined)?.locked === true) {
+        // Phase 9b: locked on the server (this view was out of date): the lock wins
+        host().toast("warn", `${shot} is locked`, `A locked clip keeps its take. Unlock it from its menu to change it.`);
+        void refreshEpisode(ep, pass);
+        return;
+      }
       if (e instanceof ApiError && e.status === 409 && take != null) {
         if (!confirm(`${errText(e)}\n\nPick ${shot} ${tn(take)} anyway?`)) return;
         try {
@@ -1043,8 +1066,11 @@ export function closeInspector() {
 let plCache: { a?: EpisodeStatus; b?: EpisodeStatus; items: PlayItem[] } = { items: [] };
 
 /** The current pass's cut as a playlist (memoised on the status objects). */
+const NO_ITEMS: PlayItem[] = [];
+
 export function currentPlaylist(s: AppState = get()): PlayItem[] {
-  if (!s.ep) return [];
+  // a stable empty list: components select it (useSyncExternalStore wants the same value back)
+  if (!s.ep) return NO_ITEMS;
   const st = s.status[statusKey(s.ep, s.pass)];
   const other = s.status[statusKey(s.ep, s.pass === "proxy" ? "final" : "proxy")];
   if (plCache.a !== st || plCache.b !== other) plCache = { a: st, b: other, items: buildPlaylist(st, other) };

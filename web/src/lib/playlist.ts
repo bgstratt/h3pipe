@@ -23,6 +23,15 @@ export interface PlayItem {
   /** seconds into the file where it starts and ends (trims applied) */
   inT: number;
   outT: number;
+  /** Phase 9b: the entry's trims (the cut's frames) */
+  trimIn: number;
+  trimOut: number;
+  /** Phase 9b: the clip's untrimmed length in the cut's frames (its dialogue
+   * window when it has one; fractional for a clip at another rate); null when unknown */
+  total: number | null;
+  /** Phase 9b: the shot's dialogue window on the episode's track (null: none) */
+  audioIn: number | null;
+  audioOut: number | null;
 }
 
 /** The take a timeline clip shows: the cut's take, from the other pass for a placeholder. */
@@ -70,6 +79,45 @@ export function framesOf(s: ShotStatus, fps: number, take?: TakeSummary): number
   return Math.max(1, Math.round((s.seconds ?? 1) * (fps || 24)));
 }
 
+/** A shot's dialogue window on the track, when it has a valid one. */
+export function windowOf(s: ShotStatus): { audioIn: number; audioOut: number } | null {
+  const a = s.audio_in;
+  const b = s.audio_out;
+  return typeof a === "number" && typeof b === "number" && Number.isFinite(a) && Number.isFinite(b) && b > a ? { audioIn: a, audioOut: b } : null;
+}
+
+/** The earliest dialogue window start (h3assemble's `base_in`), else 0. */
+export function baseIn(st: EpisodeStatus | undefined): number {
+  let m = Infinity;
+  for (const s of st?.shots ?? []) {
+    const w = windowOf(s);
+    if (w && w.audioIn < m) m = w.audioIn;
+  }
+  return Number.isFinite(m) ? m : 0;
+}
+
+/**
+ * The frames of a clip the cut can use, before its cut.json trims, as
+ * h3assemble counts them: a shot timed against recorded dialogue is its
+ * window (H3 renders it rounded up to its frame grid), at most what's on
+ * disk; else the whole take. `frames` at `rate`, the cut's clock at `fps`.
+ */
+export function spanOf(s: ShotStatus, fps: number, take: TakeSummary | undefined, base = 0): { frames: number; rate: number; total: number } {
+  const f = fps > 0 ? fps : 24;
+  const frames = framesOf(s, f, take);
+  const rate = fpsOf(s, f, take);
+  const onDisk = rate === f ? frames : (frames / rate) * f;
+  const w = windowOf(s);
+  if (w) {
+    const keep = Math.round((w.audioOut - base) * f) - Math.round((w.audioIn - base) * f);
+    if (keep > 0) {
+      const span = Math.min(keep, rate === f ? frames : Math.round(onDisk));
+      return { frames: span, rate: f, total: span };
+    }
+  }
+  return { frames, rate, total: onDisk };
+}
+
 /**
  * The cut in order. A shot without a usable take (or whose trims leave nothing)
  * becomes a missing card lasting the shot's duration. `other` is the other
@@ -78,24 +126,28 @@ export function framesOf(s: ShotStatus, fps: number, take?: TakeSummary): number
 export function buildPlaylist(st: EpisodeStatus | undefined, other?: EpisodeStatus): PlayItem[] {
   if (!st) return [];
   const fps = st.fps || 24;
+  const base = baseIn(st);
   const out: PlayItem[] = [];
   let t = 0;
   for (const s of st.shots) {
     if (s.orphan) continue;
     const take = clipTake(s, s.cut.placeholder ? other : undefined);
-    const frames = framesOf(s, fps, take);
-    const rate = fpsOf(s, fps, take);
+    const { frames, rate, total } = spanOf(s, fps, take, base);
     const usable = !!take && take.status === "ok" && take.has_video && !!take.mp4;
-    const win = trimWindow(frames, s.cut.trim_in, s.cut.trim_out, fps, rate);
+    const trimIn = Math.max(0, Math.floor(s.cut.trim_in || 0));
+    const trimOut = Math.max(0, Math.floor(s.cut.trim_out || 0));
+    const win = trimWindow(frames, trimIn, trimOut, fps, rate);
+    const w = windowOf(s);
+    const extra = { trimIn, trimOut, total, audioIn: w?.audioIn ?? null, audioOut: w?.audioOut ?? null };
     let item: Omit<PlayItem, "start" | "index">;
     if (usable && win) {
-      item = { shot: s.shot, pass: s.cut.placeholder ? s.cut.pass : st.pass, take: take!.take, mp4: take!.mp4, why: "", ...win };
+      item = { shot: s.shot, pass: s.cut.placeholder ? s.cut.pass : st.pass, take: take!.take, mp4: take!.mp4, why: "", ...win, ...extra };
     } else {
       const dur = win?.dur ?? frames / rate;
       const why = !take
         ? s.cut.take == null ? "no take" : `${s.cut.placeholder ? `${s.cut.pass} ` : ""}${tn(s.cut.take)} not found`
         : !usable ? `${tn(take.take)} ${take.status === "ok" ? "has no video" : take.status}` : "trimmed to nothing";
-      item = { shot: s.shot, pass: st.pass, take: take?.take ?? null, mp4: null, why, inT: 0, outT: dur, dur };
+      item = { shot: s.shot, pass: st.pass, take: take?.take ?? null, mp4: null, why, inT: 0, outT: dur, dur, ...extra };
     }
     out.push({ ...item, index: out.length, start: t });
     t += item.dur;

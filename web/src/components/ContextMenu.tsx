@@ -3,6 +3,7 @@ import {
   cancelTake, clearRef, closeMenu, copyText, discardTake, generateKeyframe, keyframeFromTake, loadRefs, openInspector, openRedo, openSidecar,
   openViewer, pickTake, playAll, requestRender, showInScript, showMissingRefs,
 } from "../actions";
+import { nudgeClip, setTrims, toggleLock } from "../cutActions";
 import { absPath, tn } from "../lib/format";
 import { cutNeighbour, keyframeNote, keyframeRefId } from "../lib/keyframes";
 import { missingOf } from "../lib/missingRefs";
@@ -65,6 +66,10 @@ export function ContextMenu() {
       videos.filter((t) => t.take !== menu.take).pop()
     : undefined;
   const usable = !!take && take.status === "ok" && take.has_video;
+  // Phase 9b: the clip in the current pass's cut
+  const locked = !!cutShot?.cut?.locked;
+  const trimmed = !!cutShot && ((cutShot.cut.trim_in ?? 0) > 0 || (cutShot.cut.trim_out ?? 0) > 0);
+  const cutIdx = cutSt?.shots.findIndex((x) => x.shot === menu.shot) ?? -1;
   const run = (fn: () => void) => () => {
     closeMenu();
     fn();
@@ -134,6 +139,25 @@ export function ContextMenu() {
       <button disabled={!inCut} title="Play the cut from this shot, in the viewer" onClick={run(() => playAll(menu.shot))}>
         <i className="pi pi-forward" /> Play from here
       </button>
+      <div className="h3-menu-sep" />
+      <button
+        disabled={!cutShot}
+        title={locked ? `Let ${menu.shot} be moved, trimmed and re-picked again in the ${curPass} cut` : `Keep ${menu.shot} where it is in the ${curPass} cut: no moves, trims or re-picks until unlocked`}
+        onClick={run(() => void toggleLock(menu.shot))}
+      >
+        <i className={locked ? "pi pi-lock-open" : "pi pi-lock"} /> {locked ? "Unlock in the cut" : "Lock in the cut"}
+      </button>
+      {trimmed && (
+        <button disabled={locked} title={locked ? `${menu.shot} is locked` : `Back to the whole take (${cutShot!.cut.trim_in || 0} + ${cutShot!.cut.trim_out || 0} frames trimmed)`} onClick={run(() => void setTrims(menu.shot, 0, 0, `Clear ${menu.shot} trims`))}>
+          <i className="pi pi-arrows-h" /> Clear trims
+        </button>
+      )}
+      <button disabled={locked || cutIdx <= 0} title="Alt+← in the timeline" onClick={run(() => void nudgeClip(menu.shot, -1))}>
+        <i className="pi pi-arrow-left" /> Move left in the cut
+      </button>
+      <button disabled={locked || cutIdx < 0 || cutIdx >= (cutSt?.shots.length ?? 0) - 1} title="Alt+→ in the timeline" onClick={run(() => void nudgeClip(menu.shot, 1))}>
+        <i className="pi pi-arrow-right" /> Move right in the cut
+      </button>
       {missing.length > 0 && (
         <button title={missing.map((m) => `${m.slot}: ${m.path}`).join("\n")} onClick={run(() => showMissingRefs(menu.shot))}>
           <i className="pi pi-exclamation-triangle" /> Show missing refs ({missing.length})
@@ -172,8 +196,8 @@ export function ContextMenu() {
             <i className="pi pi-clone" /> Compare with…
           </button>
           <button
-            disabled={!usable || isCut}
-            title={isCut ? "The cut already uses this take" : usable ? "" : "Only a finished take with video can go in the cut"}
+            disabled={!usable || isCut || locked}
+            title={isCut ? "The cut already uses this take" : locked ? `${menu.shot} is locked in the cut: unlock it to change its take` : usable ? "" : "Only a finished take with video can go in the cut"}
             onClick={run(() => void pickTake(menu.shot, take.take, menu.pass))}
           >
             <i className="pi pi-check" /> Use this take{isCut ? " (in the cut)" : ""}

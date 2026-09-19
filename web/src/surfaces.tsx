@@ -6,6 +6,7 @@ import { StrictMode, type ComponentType } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { dismissToast } from "./actions";
 import { ContextMenu } from "./components/ContextMenu";
+import { CutMenu } from "./components/CutMenu";
 import { RedoDialog, SidecarDialog } from "./components/Dialogs";
 import { BrowseDialog } from "./components/Browse";
 import { InspectorWindow } from "./components/Inspector";
@@ -131,6 +132,7 @@ function Overlay() {
       <MissingWindow />
       <SourceWindows />
       <ContextMenu />
+      <CutMenu />
       <RedoDialog />
       <RenderDialog />
       <BrowseDialog />
