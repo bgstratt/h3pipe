@@ -12,10 +12,13 @@ export type HostEvent =
   | "execution_error"
   | "execution_interrupted"
   | "h3pipe.take"
-  | "h3pipe.episode";
+  | "h3pipe.episode"
+  | "h3pipe.ref";
 
 export type Severity = "success" | "info" | "warn" | "error";
-export type Surface = "shots" | "inspector" | "queue" | "timeline";
+/** Docked surfaces (sidebar tabs and the bottom panel). The inspector and the
+ * viewer are floating windows in the overlay, opened through actions. */
+export type Surface = "shots" | "refs" | "timeline";
 
 export interface Host {
   /** Subscribe to a websocket event; the callback gets the event's `detail`. */

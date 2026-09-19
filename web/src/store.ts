@@ -2,8 +2,9 @@
 // root, but they all live in one bundle, so they all see this module.
 
 import { useSyncExternalStore } from "react";
+import type { RefFilter } from "./lib/refs";
 import type {
-  BuildResult, Config, EpisodeStatus, EpisodeSummary, Pass, ShotDetail, TakeRef,
+  BuildResult, Config, EpisodeStatus, EpisodeSummary, Pass, Ref, ShotDetail, TakeRef,
 } from "./types";
 
 // ---------------------------------------------------------------------------
@@ -55,7 +56,17 @@ export function useSelector<S, T>(store: Store<S>, sel: (s: S) => T): T {
 
 export type CompareMode = "single" | "side" | "wipe";
 
+/**
+ * The floating viewer shows one of:
+ *  - `takes`: one shot's takes, A/B compare (the take viewer);
+ *  - `cut`: Play all, the cut in order from its takes;
+ *  - `image`: a ref's candidates (stills), A/B side by side or wipe.
+ */
+export type ViewerKind = "takes" | "cut" | "image";
+
 export interface ViewerState {
+  kind: ViewerKind;
+  /** takes: the shot; cut: the shot playing now; image: unused ("") */
   shot: string;
   pass: Pass;
   a: number | null;
@@ -63,6 +74,43 @@ export interface ViewerState {
   mode: CompareMode;
   /** which slot a plain click in the strip loads */
   target: "a" | "b";
+  /** image mode: the ref and view whose candidates are compared (a/b are take numbers) */
+  ref?: string;
+  view?: string | null;
+}
+
+export interface CutPlayState {
+  /** wanted: the player follows it */
+  playing: boolean;
+  /** the playhead on the cut's clock, seconds (written by the player) */
+  pos: number;
+  /** a seek request; `n` changes on every request so the same time can be sought twice */
+  seek: { t: number; n: number } | null;
+}
+
+export type BrowsePurpose = "roots" | "import";
+
+export interface BrowseState {
+  purpose: BrowsePurpose;
+  /** import: which ref (and view) the file becomes a candidate of */
+  ref?: string;
+  view?: string | null;
+  /** import: images, or audio for a voice */
+  files?: "image" | "audio";
+}
+
+export interface RenderAsk {
+  shots: string[];
+  pass: Pass;
+  redo: boolean;
+  title: string;
+}
+
+export interface RefTakeRef {
+  ep: string;
+  ref: string;
+  view: string | null;
+  take: number;
 }
 
 export interface MenuState {
@@ -111,6 +159,23 @@ export interface AppState {
   pending: string[];
   progress: Record<string, { value: number; max: number }>;
   viewer: ViewerState | null;
+  /** the floating inspector is open (it follows `shot`) */
+  inspector: boolean;
+  cutPlay: CutPlayState;
+  browse: BrowseState | null;
+  /** the render confirmation (shots that will be skipped for missing refs) */
+  renderAsk: RenderAsk | null;
+  /** refs by episode (GET /h3pipe/refs) */
+  refs: Record<string, Ref[]>;
+  refsError: Record<string, string>;
+  refsLoading: Record<string, boolean>;
+  refsFilter: RefFilter;
+  /** expanded rows in the Refs tab, by ref id */
+  refOpen: Record<string, boolean>;
+  /** the selected candidate in the Refs tab */
+  refSel: { ref: string; view: string | null; take: number } | null;
+  /** ComfyUI prompt id -> the ref take it generates */
+  refPrompts: Record<string, RefTakeRef>;
   menu: MenuState | null;
   redo: RedoState | null;
   sidecar: { shot: string; pass: Pass; take: number } | null;
@@ -151,6 +216,17 @@ export function initialState(prefs: Prefs = {}): AppState {
     pending: [],
     progress: {},
     viewer: null,
+    inspector: false,
+    cutPlay: { playing: false, pos: 0, seek: null },
+    browse: null,
+    renderAsk: null,
+    refs: {},
+    refsError: {},
+    refsLoading: {},
+    refsFilter: "episode",
+    refOpen: {},
+    refSel: null,
+    refPrompts: {},
     menu: null,
     redo: null,
     sidecar: null,
@@ -270,4 +346,8 @@ export function useApp<T>(sel: (s: AppState) => T): T {
 
 export function currentStatus(s: AppState = store.get()): EpisodeStatus | undefined {
   return s.ep ? s.status[statusKey(s.ep, s.pass)] : undefined;
+}
+
+export function currentRefs(s: AppState = store.get()): Ref[] | undefined {
+  return s.ep ? s.refs[s.ep] : undefined;
 }

@@ -1,20 +1,39 @@
-import { memo, useEffect, useMemo, useRef } from "react";
-import { assemble, openMenu, openViewer, refreshEpisode, select, setZoom } from "../actions";
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as RKeyboardEvent } from "react";
+import {
+  assemble, currentPlaylist, openInspector, openMenu, openViewer, playAll, refreshEpisode, seekToShot, select,
+  setZoom, showMissingRefs, toggleCutPlay,
+} from "../actions";
 import { host } from "../host";
-import { cutTake, fmtSeconds, groupBySequence, shotBadges, tn } from "../lib/format";
+import { fmtClock, fmtSeconds, groupBySequence, shotBadges, tn } from "../lib/format";
+import { missingRefsSummary } from "../lib/missingRefs";
+import { clipTake, locate } from "../lib/playlist";
 import { ZOOM_MAX, ZOOM_MIN, renderingTakes, statusKey, useApp } from "../store";
-import type { EpisodeStatus, Pass, ShotStatus, TakeSummary } from "../types";
+import type { EpisodeStatus, Pass, ShotStatus } from "../types";
 import { aspectOf, useSize, useStatus } from "./hooks";
 import { PassToggle } from "./ShotsTab";
 import { Badges, Progress, mediaStyle, useScrub } from "./Thumb";
 
 const MIN_CLIP = 26;
 
-/** The take a clip shows: the cut's take, from the other pass for a placeholder. */
-function clipTake(s: ShotStatus, other: EpisodeStatus | undefined): TakeSummary | undefined {
-  if (!s.cut.placeholder) return cutTake(s);
-  if (s.cut.take == null) return undefined;
-  return other?.shots.find((x) => x.shot === s.shot)?.takes.find((t) => t.take === s.cut.take);
+/** The Play all playhead: a line over the clip playing, at its offset. */
+function Playhead({ trackRef, zoom }: { trackRef: React.RefObject<HTMLDivElement>; zoom: number }) {
+  const on = useApp((s) => s.viewer?.kind === "cut");
+  const pos = useApp((s) => s.cutPlay.pos);
+  const items = useApp((s) => currentPlaylist(s));
+  const [left, setLeft] = useState<number | null>(null);
+  useLayoutEffect(() => {
+    const track = trackRef.current;
+    if (!on || !track) return setLeft(null);
+    const { index, offset } = locate(items, pos);
+    const it = items[index];
+    const el = it ? track.querySelector<HTMLElement>(`[data-shot="${CSS.escape(it.shot)}"]`) : null;
+    if (!it || !el) return setLeft(null);
+    const tr = track.getBoundingClientRect();
+    const r = el.getBoundingClientRect();
+    setLeft(r.left - tr.left + (it.dur > 0 ? (offset / it.dur) * r.width : 0));
+  }, [on, pos, items, zoom, trackRef]);
+  if (left == null) return null;
+  return <div className="h3-playhead" style={{ left }} />;
 }
 
 const Clip = memo(function Clip({ ep, pass, s, other, zoom, height, aspect, selected, rendering, progress }: {
@@ -32,14 +51,18 @@ const Clip = memo(function Clip({ ep, pass, s, other, zoom, height, aspect, sele
     `${s.shot} · ${fmtSeconds(s.seconds)}${s.size ? ` · ${s.size}` : ""}`,
     take ? `${s.cut.placeholder ? `${s.cut.pass} ` : ""}${tn(take.take)} (${take.status})` : "no take in the cut",
     ...badges.map((b) => b.title),
-    "click: select · double-click: viewer · right-click: menu",
+    "click: select (jumps there while playing all) · double-click: viewer · right-click: menu",
   ].join("\n");
   return (
     <div
       className={cls}
       style={{ width }}
       title={title}
-      onClick={() => select(s.shot, take && !s.cut.placeholder ? take.take : null)}
+      onClick={() => {
+        // while Play all is open, a click jumps the player there
+        seekToShot(s.shot);
+        select(s.shot, take && !s.cut.placeholder ? take.take : null);
+      }}
       onDoubleClick={() => take?.mp4 && openViewer(s.shot, take.take, null, "single", takePass)}
       onContextMenu={(e) => {
         e.preventDefault();
@@ -78,6 +101,9 @@ export function Timeline() {
   const progress = useApp((s) => s.progress);
   const asm = useApp((s) => s.assemble);
   const err = useApp((s) => (s.ep ? s.statusError[statusKey(s.ep, s.pass)] : undefined));
+  const playing = useApp((s) => s.viewer?.kind === "cut" && s.cutPlay.playing);
+  const playerOpen = useApp((s) => s.viewer?.kind === "cut");
+  const pos = useApp((s) => (s.viewer?.kind === "cut" ? s.cutPlay.pos : null));
   const st = useStatus();
   const other = useStatus(pass === "proxy" ? "final" : "proxy");
   const [trackRef, size] = useSize<HTMLDivElement>();
@@ -87,6 +113,28 @@ export function Timeline() {
   const clipH = Math.max(24, (size.height || 150) - 6 - 16 - 2);
   const aspect = aspectOf(st);
   const total = st?.shots.reduce((n, s) => n + (s.seconds ?? 0), 0) ?? 0;
+  const missing = useMemo(() => missingRefsSummary(st?.shots ?? []), [st]);
+  const innerRef = useRef<HTMLDivElement>(null);
+
+  // follow the playhead: keep the playing clip in view
+  const playingShot = useApp((s) => (s.viewer?.kind === "cut" ? s.viewer.shot : null));
+  useEffect(() => {
+    if (!playingShot || !wrapRef.current) return;
+    const el = wrapRef.current.querySelector<HTMLElement>(`[data-shot="${CSS.escape(playingShot)}"]`);
+    el?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [playingShot]);
+
+  // space plays / pauses the cut while the timeline has focus (stopped here, so
+  // ComfyUI's canvas doesn't also take it)
+  const onKeyDown = (e: RKeyboardEvent<HTMLDivElement>) => {
+    const tag = (e.target as HTMLElement).tagName;
+    if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || tag === "BUTTON") return;
+    if (e.key === " ") {
+      e.preventDefault();
+      e.stopPropagation();
+      toggleCutPlay();
+    }
+  };
 
   // keep the selected clip in view
   useEffect(() => {
@@ -109,20 +157,35 @@ export function Timeline() {
   }, [zoom]);
 
   return (
-    <div className="h3-surface">
+    <div className="h3-surface" tabIndex={-1} onKeyDown={onKeyDown} style={{ outline: "none" }}>
       <div className="h3-bar">
         <span className="h3-title h3-ell" title={ep ?? ""}>{st ? `${st.episode}` : "Timeline"}</span>
         {st && <span className="h3-muted h3-small">{st.shots.length} shots · {fmtSeconds(total)}</span>}
+        <button
+          className={`h3-btn${playing ? " h3-on" : ""}`}
+          disabled={!st?.shots.length}
+          title="Play all: the cut in order from its takes, in the viewer (space: play / pause; click a clip to jump)"
+          onClick={() => (playerOpen ? toggleCutPlay() : playAll())}
+        >
+          <i className={playing ? "pi pi-pause" : "pi pi-play"} /> {playing ? "Pause" : playerOpen ? "Play" : "Play all"}
+        </button>
+        {pos != null && <span className="h3-mono h3-muted">{fmtClock(pos)}</span>}
         <PassToggle />
+        {missing.shots.length > 0 && (
+          <button className="h3-badge h3-b-missing-refs h3-badge-btn" title={`${missing.text}\n${missing.files.map((f) => f.path).join("\n")}\nClick: show them in the Refs tab`} onClick={() => showMissingRefs(null)}>
+            {missing.shots.length} missing refs
+          </button>
+        )}
         <span className="h3-row" title="Zoom (ctrl + wheel over the track)">
           <i className="pi pi-search-minus h3-muted" />
           <input type="range" min={ZOOM_MIN} max={ZOOM_MAX} value={zoom} onChange={(e) => setZoom(Number(e.target.value))} style={{ width: 90 }} />
           <i className="pi pi-search-plus h3-muted" />
         </span>
         <span className="h3-grow" />
-        <button className="h3-btn" disabled={!ep || asm.busy} title={`Assemble the ${pass} review cut (missing shots are skipped)`} onClick={() => void assemble(true)}>
-          <i className={asm.busy ? "pi pi-spin pi-spinner" : "pi pi-video"} /> {asm.busy ? "Assembling…" : "Assemble"}
+        <button className="h3-btn" disabled={!ep || asm.busy} title={`Export: assemble the ${pass} review cut into one mp4 with ffmpeg (missing shots are skipped). Not needed to watch the cut: use Play all.`} onClick={() => void assemble(true)}>
+          <i className={asm.busy ? "pi pi-spin pi-spinner" : "pi pi-download"} /> {asm.busy ? "Assembling…" : "Export"}
         </button>
+        <button className="h3-btn h3-icon" title="Inspect the selected shot" onClick={() => openInspector()}><i className="pi pi-sliders-h" /></button>
         <button className="h3-btn h3-icon" title="Open the Shots tab" onClick={() => host().show("shots")}><i className="pi pi-list" /></button>
         <button className="h3-btn h3-icon" title="Refresh" disabled={!ep} onClick={() => void refreshEpisode()}><i className="pi pi-refresh" /></button>
       </div>
@@ -131,7 +194,7 @@ export function Timeline() {
         {!ep && <div className="h3-empty-state">Pick an episode in the h3 Shots tab.</div>}
         {ep && err && !st && <div className="h3-pad"><div className="h3-note h3-note-err">{err}</div></div>}
         {ep && st && (
-          <div className="h3-track">
+          <div className="h3-track" ref={innerRef}>
             {groups.map((g) => (
               <div key={`${g.sequence}@${g.start}`} className="h3-tl-seq">
                 <div className="h3-tl-seq-label" title={`${g.sequence} · ${fmtSeconds(g.seconds)}`}>{g.sequence}</div>
@@ -159,6 +222,7 @@ export function Timeline() {
               </div>
             ))}
             {!st.shots.length && <div className="h3-empty-state">No shots.</div>}
+            <Playhead trackRef={innerRef} zoom={zoom} />
           </div>
         )}
       </div>
@@ -167,3 +231,4 @@ export function Timeline() {
 }
 
 const NO_TAKES: Set<number> = new Set();
+

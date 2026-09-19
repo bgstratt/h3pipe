@@ -1,16 +1,22 @@
 // A stateful in-memory implementation of `Api`, built from a real rendered episode
 // (fixtures.json, made by web/scripts/make_fixtures.py). Used only by the dev page.
 // Renders are simulated: queued -> progress events -> ok, reusing real media.
+// Round 2 / Phase 5: a fake folder tree for /browse (mockFs.ts) and stateful refs
+// from the kitchen_sink bible (mockRefs.ts), which also decide each shot's
+// `missing_refs`.
 
 import type { Api } from "../api";
 import { ApiError, parseJsonSeedSafe } from "../api";
 import type { HostEvent } from "../host";
+import { reachable } from "../lib/browse";
 import { promptText } from "../lib/format";
 import type {
   CutEntry, EpisodeStatus, EpisodeSummary, Lora, Override, Pass, RenderResult, ShotDetail,
   ShotStatus, TakeDetail, TakeSummary,
 } from "../types";
 import fixturesRaw from "./fixtures.json?raw";
+import { FsError, browse as fsBrowse, fsExists } from "./mockFs";
+import { RefError, createMockRefs } from "./mockRefs";
 
 interface Fixtures {
   ep: string;
@@ -53,7 +59,40 @@ export function createMockApi(emit: Emit, opts: MockOptions = {}): Api {
   let nextPrompt = 1;
   let chain: Promise<void> = Promise.resolve();
 
-  const wait = (ms = opts.latency ?? 120) => (ms > 0 ? new Promise((r) => setTimeout(r, ms)) : Promise.resolve());
+  const wait = (ms = opts.latency ?? 120) => (ms > 0 ? new Promise<void>((r) => setTimeout(r, ms)) : Promise.resolve());
+
+  const shotIds = (fx.status.proxy ?? fx.status.final)!.shots.map((s) => s.shot);
+  const refs = createMockRefs({
+    ep: EP,
+    emit,
+    shots: shotIds,
+    wait: (ms) => wait(ms),
+    enqueue: (job) => {
+      chain = chain.then(job);
+    },
+    nextPrompt: () => `mock-${nextPrompt++}-ref`,
+    onLiveChange: (ref) => markRefStale(ref),
+  });
+
+  /** A re-picked ref makes the finished takes of the shots using it ref-stale. */
+  function markRefStale(ref: string) {
+    const idx = new Set(refs.dependents(ref));
+    for (const pass of ["final", "proxy"] as Pass[]) {
+      const s = status[pass];
+      if (!s) continue;
+      s.shots.forEach((sh) => {
+        const i = shotIds.indexOf(sh.shot);
+        if (!idx.has(i)) return;
+        for (const t of sh.takes) if (t.status === "ok" && !t.stale.includes("ref")) t.stale = [...t.stale.filter((x) => x !== "unknown"), "ref"];
+        for (const t of detail[pass]?.[sh.shot]?.takes ?? []) if (t.status === "ok" && !t.stale.includes("ref")) t.stale = [...t.stale.filter((x) => x !== "unknown"), "ref"];
+      });
+    }
+  }
+
+  function withMissing(e: EpisodeStatus): EpisodeStatus {
+    for (const s of e.shots) s.missing_refs = s.orphan ? [] : refs.missingFor(s.shot, shotIds.indexOf(s.shot));
+    return e;
+  }
 
   function need(ep: string) {
     if (!roots.length) throw new MockError("No project roots are configured.", 403);
@@ -177,17 +216,19 @@ export function createMockApi(emit: Emit, opts: MockOptions = {}): Api {
     async putConfig(r) {
       await wait();
       if (r.some((x) => !x.trim())) throw new MockError("A root can't be empty.", 400);
+      const bad = r.find((x) => !fsExists(x));
+      if (bad) throw new MockError(`${bad} doesn't exist (the mock knows C:\\Shows, C:\\Users\\bgstr, D:\\Stock…).`, 400);
       roots = [...r];
       return { roots: [...roots], comfy: "http://127.0.0.1:8188", version: 1 };
     },
     async episodes() {
       await wait();
-      return roots.length ? [clone(fx.summary)] : [];
+      return reachable(EP, roots) ? [clone(fx.summary)] : [];
     },
     async episode(ep, pass) {
       await wait();
       need(ep);
-      return clone(st(pass));
+      return withMissing(clone(st(pass)));
     },
     async shot(ep, pass, shot) {
       await wait();
@@ -231,6 +272,15 @@ export function createMockApi(emit: Emit, opts: MockOptions = {}): Api {
           continue;
         }
         const d = det(req.pass, shot);
+        const missing = refs.missingFor(shot, shotIds.indexOf(shot));
+        if (missing.length && !req.allow_missing_refs) {
+          out.skipped.push({
+            shot,
+            reason: `missing refs: ${missing.map((m) => `${m.slot} (${m.path})`).join(", ")}; pass allow_missing_refs to render anyway`,
+            missing_refs: missing,
+          });
+          continue;
+        }
         if (!req.redo) {
           if (s.takes.some((t) => t.status === "queued")) { out.skipped.push({ shot, reason: "has a queued take" }); continue; }
           if (s.takes.some((t) => t.status === "ok" && t.has_video)) { out.skipped.push({ shot, reason: "has a usable take (pass redo: true)" }); continue; }
@@ -259,6 +309,7 @@ export function createMockApi(emit: Emit, opts: MockOptions = {}): Api {
             target: "minimax_h3_ref2va", status: "queued", queued: now, comfy_prompt_id: pid, seed, seed_source: src,
             model: req.model ?? eff.model, loras, steps: req.steps ?? eff.steps, overrides,
             parent_take: req.parent_take, note: req.note ?? "", shot, take, pass: req.pass,
+            ...(missing.length ? { missing_refs: missing.map((m) => m.slot) } : {}),
           },
           files: {},
         };
@@ -359,6 +410,47 @@ export function createMockApi(emit: Emit, opts: MockOptions = {}): Api {
       const n = st(pass).shots.filter((s) => s.cut.usable).length;
       return { ok: true, output: `${st(pass).folder}/ep05_${pass}.mp4`, report: `  ${n} shots, partial cut\n  wrote ${st(pass).folder}/ep05_${pass}.mp4\n` };
     },
+    async browse(path, files) {
+      await wait();
+      return fsBrowse(path, !!files);
+    },
+    async refs(ep) {
+      await wait();
+      need(ep);
+      return { refs: refs.list() };
+    },
+    refFileUrl(_ep, path) {
+      return refs.image(path) ?? media + path.split("/").pop();
+    },
+    async refsGenerate(req) {
+      await wait();
+      need(req.ep);
+      return refs.generate(req);
+    },
+    async refsPick(req) {
+      await wait();
+      need(req.ep);
+      const r = refs.pick(req);
+      emit("h3pipe.episode", { ep: EP });
+      return r;
+    },
+    async refsImport(req) {
+      await wait(300);
+      need(req.ep);
+      return refs.import(req);
+    },
+    async putRefOverride(req) {
+      await wait();
+      need(req.ep);
+      refs.putOverride(req.ref, req.fields);
+      return {};
+    },
+    async deleteRefOverride(ep, ref) {
+      await wait();
+      need(ep);
+      refs.deleteOverride(ref);
+      return {};
+    },
     async models() {
       await wait();
       return ["minimax_h3_ref2va_pruned_int8_convrot.safetensors", "minimax_h3_ref2va_bf16.safetensors", "wan2.2_t2v_14B_fp8.safetensors"];
@@ -380,11 +472,11 @@ export function createMockApi(emit: Emit, opts: MockOptions = {}): Api {
   // Errors from the mock look like the real client's ApiError (status + message)
   const wrapped = {} as Api;
   for (const [k, fn] of Object.entries(api) as [keyof Api, (...a: unknown[]) => unknown][]) {
-    (wrapped as unknown as Record<string, unknown>)[k] = k === "fileUrl" ? fn : async (...a: unknown[]) => {
+    (wrapped as unknown as Record<string, unknown>)[k] = k === "fileUrl" || k === "refFileUrl" ? fn : async (...a: unknown[]) => {
       try {
         return await fn(...a);
       } catch (e) {
-        if (e instanceof MockError) throw new ApiError(e.message, e.status, `/mock/${k}`);
+        if (e instanceof MockError || e instanceof FsError || e instanceof RefError) throw new ApiError(e.message, e.status, `/mock/${k}`);
         throw e;
       }
     };

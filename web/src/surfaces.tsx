@@ -7,8 +7,10 @@ import { createRoot, type Root } from "react-dom/client";
 import { dismissToast } from "./actions";
 import { ContextMenu } from "./components/ContextMenu";
 import { RedoDialog, SidecarDialog } from "./components/Dialogs";
-import { Inspector } from "./components/Inspector";
-import { QueueTab } from "./components/QueueTab";
+import { BrowseDialog } from "./components/Browse";
+import { InspectorWindow } from "./components/Inspector";
+import { RefsTab } from "./components/RefsTab";
+import { RenderDialog } from "./components/RenderDialog";
 import { ShotsTab } from "./components/ShotsTab";
 import { Timeline } from "./components/Timeline";
 import { Viewer } from "./components/Viewer";
@@ -18,8 +20,7 @@ import css from "./styles.css?inline";
 
 const SURFACES: Record<Surface, ComponentType> = {
   shots: ShotsTab,
-  inspector: Inspector,
-  queue: QueueTab,
+  refs: RefsTab,
   timeline: Timeline,
 };
 
@@ -108,9 +109,12 @@ function Toasts() {
 function Overlay({ toasts }: { toasts: boolean }) {
   return (
     <>
+      <InspectorWindow />
       <Viewer />
       <ContextMenu />
       <RedoDialog />
+      <RenderDialog />
+      <BrowseDialog />
       <SidecarDialog />
       {toasts && <Toasts />}
     </>
@@ -119,7 +123,7 @@ function Overlay({ toasts }: { toasts: boolean }) {
 
 let overlayRoot: Root | null = null;
 
-/** The floating layer (viewer, context menu, dialogs), on document.body. */
+/** The floating layer (inspector, viewer, context menu, dialogs), on document.body. */
 export function mountOverlay(opts: { toasts?: boolean } = {}) {
   if (overlayRoot) return;
   injectStyles();

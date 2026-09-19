@@ -1,7 +1,7 @@
 import { memo, useMemo, useState, type MouseEvent } from "react";
 import {
-  build, loadEpisodes, openMenu, openViewer, pickTake, refreshEpisode, renderShots, saveRoots,
-  select, selectEpisode, setPass, toggleExpanded, toggleSequence,
+  build, loadEpisodes, openBrowse, openInspector, openMenu, openViewer, pickTake, playAll, refreshEpisode,
+  requestRender, select, selectEpisode, setPass, toggleExpanded, toggleSequence,
 } from "../actions";
 import { host } from "../host";
 import {
@@ -10,7 +10,10 @@ import {
 import { renderingTakes, statusKey, store, useApp } from "../store";
 import type { Pass, ShotStatus, TakeSummary } from "../types";
 import { aspectOf, useStatus } from "./hooks";
+import { MissingRefsSummary } from "./MissingRefs";
 import { Badges, Progress, Thumb, statusClass } from "./Thumb";
+
+const BROWSE = "__browse__";
 
 export function PassToggle() {
   const pass = useApp((s) => s.pass);
@@ -25,44 +28,12 @@ export function PassToggle() {
   );
 }
 
-function RootsEditor({ onDone }: { onDone?: () => void }) {
-  const config = useApp((s) => s.config);
-  const busy = useApp((s) => !!s.busy.config);
-  const [text, setText] = useState(() => (config?.roots ?? []).join("\n"));
-  const roots = text.split(/\r?\n/).map((r) => r.trim()).filter(Boolean);
-  return (
-    <div className="h3-col">
-      <textarea
-        className="h3-in"
-        rows={3}
-        placeholder={"C:\\Users\\you\\Shows"}
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-      />
-      <div className="h3-row">
-        <span className="h3-muted h3-small h3-grow">One folder per line. Episodes are found up to two levels below.</span>
-        {onDone && <button className="h3-btn" onClick={onDone}>Cancel</button>}
-        <button
-          className="h3-btn h3-primary"
-          disabled={busy || !roots.length}
-          onClick={async () => {
-            if (await saveRoots(roots)) onDone?.();
-          }}
-        >
-          Save
-        </button>
-      </div>
-    </div>
-  );
-}
-
 function EpisodeHeader() {
   const episodes = useApp((s) => s.episodes);
   const episodesError = useApp((s) => s.episodesError);
   const config = useApp((s) => s.config);
   const configError = useApp((s) => s.configError);
   const ep = useApp((s) => s.ep);
-  const [editRoots, setEditRoots] = useState(false);
 
   if (configError && !config) {
     return (
@@ -78,9 +49,14 @@ function EpisodeHeader() {
         <div className="h3-title">Welcome to h3pipe</div>
         <div className="h3-muted">
           Tell the editor where your shows live: a folder that holds episode folders (each with a
-          <span className="h3-mono"> series.json</span> and a script).
+          <span className="h3-mono"> series.json</span> and a script). Browse to it and add it as a root, or
+          double-click an episode to open it straight away.
         </div>
-        <RootsEditor />
+        <div className="h3-row">
+          <button className="h3-btn h3-primary" onClick={() => openBrowse({ purpose: "roots" })}>
+            <i className="pi pi-folder-open" /> Browse for a folder…
+          </button>
+        </div>
       </div>
     );
   }
@@ -90,7 +66,7 @@ function EpisodeHeader() {
         <select
           className="h3-in h3-grow"
           value={ep ?? ""}
-          onChange={(e) => selectEpisode(e.target.value || null)}
+          onChange={(e) => (e.target.value === BROWSE ? openBrowse({ purpose: "roots" }) : selectEpisode(e.target.value || null))}
           title={ep ?? ""}
         >
           {!episodes?.length && <option value="">{episodes ? "No episodes found" : "Loading…"}</option>}
@@ -100,17 +76,17 @@ function EpisodeHeader() {
               {!e.built.proxy && !e.built.final ? " (not built)" : ""}
             </option>
           ))}
+          <option value={BROWSE}>Browse…</option>
         </select>
         <button className="h3-btn h3-icon" title="Rescan the project roots" onClick={() => void loadEpisodes()}>
           <i className="pi pi-refresh" />
         </button>
-        <button className={`h3-btn h3-icon${editRoots ? " h3-on" : ""}`} title="Project roots" onClick={() => setEditRoots(!editRoots)}>
+        <button className="h3-btn h3-icon" title="Project folders: browse, add or remove roots, open an episode" onClick={() => openBrowse({ purpose: "roots" })}>
           <i className="pi pi-folder" />
         </button>
       </div>
       {episodesError && <div className="h3-note h3-note-err">{episodesError}</div>}
-      {editRoots && <RootsEditor onDone={() => setEditRoots(false)} />}
-      {episodes && !episodes.length && !editRoots && (
+      {episodes && !episodes.length && (
         <div className="h3-muted h3-small">
           No episode folders under {config?.roots.join(", ")}. An episode needs a series.json (here or in its parent) and a script.
         </div>
@@ -140,14 +116,12 @@ function BuildBar() {
           className="h3-btn"
           disabled={!missing.length || renderBusy}
           title={missing.length ? `Queue a ${pass} take for each shot without one: ${missing.map((s) => s.shot).join(", ")}` : "Every shot has a take"}
-          onClick={() => {
-            if (missing.length > 8 && !confirm(`Queue ${missing.length} ${pass} renders?`)) return;
-            void renderShots(missing.map((s) => s.shot), false);
-          }}
+          onClick={() => requestRender(missing.map((s) => s.shot), false, "Render missing")}
         >
           <i className="pi pi-play" /> Render missing{missing.length ? ` (${missing.length})` : ""}
         </button>
       </div>
+      {st && <MissingRefsSummary shots={st.shots} />}
       {(b.result || b.error) && (
         <div className={`h3-note ${failed || b.error ? "h3-note-err" : "h3-note-info"}`}>
           <div className="h3-row">
@@ -279,7 +253,7 @@ function ShotRow({ ep, pass, s, aspect }: { ep: string; pass: Pass; s: ShotStatu
           {!s.takes.length && (
             <div className="h3-row h3-small">
               <span className="h3-muted h3-grow">No takes in {pass}.</span>
-              <button className="h3-btn" onClick={() => void renderShots([s.shot], false)}>Render</button>
+              <button className="h3-btn" onClick={() => requestRender([s.shot], false)}>Render</button>
             </div>
           )}
           {[...s.takes].reverse().map((t) => (
@@ -370,8 +344,10 @@ export function ShotsTab() {
         <span className="h3-title">Shots</span>
         {ep && (
           <span className="h3-row">
-            <button className="h3-btn h3-icon" title="Open the inspector" onClick={() => host().show("inspector")}><i className="pi pi-sliders-h" /></button>
+            <button className="h3-btn h3-icon" title="Inspect the selected shot" onClick={() => openInspector()}><i className="pi pi-sliders-h" /></button>
+            <button className="h3-btn h3-icon" title="Play all: the cut from its takes" onClick={() => playAll()}><i className="pi pi-play" /></button>
             <button className="h3-btn h3-icon" title="Open the timeline" onClick={() => host().show("timeline")}><i className="pi pi-images" /></button>
+            <button className="h3-btn h3-icon" title="Open the Refs tab" onClick={() => host().show("refs")}><i className="pi pi-palette" /></button>
             <button className="h3-btn h3-icon" title="Refresh" onClick={() => void refreshEpisode()}><i className="pi pi-refresh" /></button>
           </span>
         )}
