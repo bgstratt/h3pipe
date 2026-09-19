@@ -1,6 +1,6 @@
 # h3pipe — plan: a shot/take editor, then model-agnostic targets
 
-Status (2026-09-19): Phases 0–3 and 5–8 done; Phase 4 (evaluate) continues through use. Video targets:
+Status (2026-09-19): Phases 0–3, 5–8, 8.5 and 8.6 done; Phase 4 (evaluate) continues through use. Video targets:
 `minimax_h3_ref2va` (default), `minimax_h3_fl2va` (H3 from first/last keyframes; dub anchors the recording),
 `ltx2` (LTX-2.5; `dur: model` predicts length once the duration head is installed), `ltx2_ingredients`
 (LTX-2.3 + IC-LoRA reference sheet: identity), `wan22_i2v` / `wan22_ti2v` / `wan22_vace` (Wan 2.2, silent,
@@ -884,7 +884,29 @@ deviation)
 - **Left:** a keyframe framing hint stronger than the size word (Klein drew the close-up
   medium); Kontext's single reference could be a composed sheet (character + plate); the editor
   side of `PUT /h3pipe/refs/defaults` (the UI agent's); `--missing` from the editor as one
-  route, if the UI's keyframe-then-generate fallback proves clumsy.
+  route, if the UI's keyframe-then-generate fallback proves clumsy. (All four done in 8.6.)
+
+**Phase 8.6 — look-back** ✅ done 2026-09-19 (contract and as-built in `docs/API.md`,
+"Phase 8.6"). Loose ends from Phases 1–8, finished before Phase 9:
+- Discard a take or ref candidate (moved to `_trash/`, never deleted): routes, `h3.py discard`,
+  `kreagen --discard`, the take context menu and the Refs tab.
+- `POST /h3pipe/refs/generate-missing`: series refs and keyframes in one call (dry run first
+  in the editor).
+- Drag-and-drop / Upload… onto ref, view and keyframe slots (multipart import, `pick`).
+- Keyframes: stronger framing wording; Kontext gets one composed character+plate reference.
+- UI: 32 of 37 `TODO(contract)` notes resolved against the as-built routes; per-view
+  character overrides; image-target defaults saved per episode (`PUT /h3pipe/refs/defaults`).
+- `h3plan.py` deleted; README model-agnostic; `refs_todo` size hint renamed `size_hint`;
+  the script-writing skill is `h3pipe-episode-script` (`python tools/make_prompts.py` builds
+  `build/skill/h3pipe-episode-script.zip`).
+- Fixed: H3's proxy preset 480x272 → 512x288 (multiple of 32); `size:`/`dur:`/`pace:`/`audio:`
+  under a `#` header is a ScriptError.
+- **Left** (the remaining UI notes in `web/src/api.ts`): shot detail has no pre-override
+  model/LoRAs/steps; placeholder cut entries have no media for their pass; `GET /h3pipe/shot`
+  takes no `target` (the redo dialog can't size a one-off target); no per-target prompt
+  override; a character view's override values don't say which are the view's own, and views
+  have no `built_prompt`. Manual: a real `dur: model` render, FL2VA with a recording,
+  final-size looks on FL2VA/LTX/Wan, and voice generation (no voice target yet).
 
 **Phase 9 — later**
 - Script pane: `epNN.md` in a text editor with live `--check` errors beside the lines;
