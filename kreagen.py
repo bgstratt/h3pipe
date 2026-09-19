@@ -1,316 +1,134 @@
 #!/usr/bin/env python3
 """
-kreagen.py — generate every H3 reference image from refs_todo.json on a
-local ComfyUI, and write each result straight to the path h3build expects.
+kreagen.py — generate every missing H3 reference image on a local ComfyUI, as
+ref takes (h3refs.py), and put each one at the path the bible names.
 
     python3 kreagen.py --project-root .
     python3 kreagen.py --project-root . --only sam,core_wide --redo
+    python3 kreagen.py --project-root . --all            # every ref in the bible
     python3 kreagen.py --project-root . --list
     python3 kreagen.py --project-root . --dry-run
 
-Reads  <project_root>/refs_todo.json  and  <project_root>/series.json
-Writes <project_root>/refs/_bg/<location>.png          1344x768
-       <project_root>/refs/props/<name>.png            1024x1024
-       <project_root>/refs/<char>/<char>_sheet_4panel.png   4096x1024
+Reads  <project_root>/refs_todo.json (what this episode uses; --all: the whole
+       bible) and series.json (in the episode folder or its parent)
+Writes refs/_takes/<ref>/…_tNN.png + .json    every candidate, kept
+       refs/_bg/<location>.png          1344x768   }  the picked take, at the
+       refs/props/<name>.png            1024x1024  }  path the bible names
+       refs/<char>/<char>_sheet_4panel.png   4096x1024
+       refs/_picks.json                 which take is live
+
+A ref with no file yet gets its first successful take picked, so a plain run
+ends as it always did: every image at its bible path. --redo makes a new take
+of refs that already have a file, and leaves the live file alone unless you
+also pass --pick (pick in the editor's Refs tab otherwise). Nothing is ever
+overwritten: every take stays in refs/_takes.
 
 Character sheets are NOT generated as one 4:1 strip — a 4096x1024 canvas is
 far outside any diffusion model's training distribution and comes back as
 smeared repetition. Each of the four views is generated square and separately,
-then stitched by mksheet.py, which is exactly what mksheet was written for.
-The four views of one character share a seed so they stay on model.
+then stitched by mksheet.py when all four are picked. The four views of one
+character share a seed so they stay on model. The character is the bible
+subject whose `sheet` is the path, whatever the file is called.
 
-Voice samples in refs_todo.json are skipped; they are not images.
+Voice samples are skipped; they are not images.
 
-Graph is a krea2 turbo image graph in API form. When a LoRA is given, the text
-encoder reads the LoRA's CLIP rather than the raw CLIPLoader output, so
-strength_clip is not inert; --no-lora-clip reproduces the original wiring.
-The model file names are constants at the top of this file — point them at
-whatever image model you have, and pass --lora/--unet to override per run.
+The graph is krea2_refs_t2i.json (the copy saved in the running ComfyUI, else
+this repo's), or a built-in krea2 turbo graph. Its SaveImage is replaced by the
+node pack's H3SaveRefTake, which writes the take and closes its sidecar; on a
+ComfyUI whose node pack predates that node, SaveImage stays and kreagen fetches
+the image over HTTP. When a LoRA is given, the text encoder reads the LoRA's
+CLIP rather than the raw CLIPLoader output, so strength_clip is not inert;
+--no-lora-clip reproduces the original wiring of the built-in graph. The model
+file names are constants in h3refs.py — point them at whatever image model you
+have, and pass --lora/--unet to override per run.
 """
 from __future__ import annotations
 
-import argparse, hashlib, json, os, re, subprocess, sys, time, urllib.parse, urllib.request
+import argparse
+import json
+import os
+import sys
 
-# h3jobs already knows how to find a workflow (including the one saved in the
-# running ComfyUI) and turn a canvas save into an API graph; reuse it rather
-# than keeping a second converter in step with ComfyUI's format.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-try:
-    from h3jobs import resolve_workflow as _resolve_workflow
-except Exception:                                    # h3jobs missing or broken
-    _resolve_workflow = None
 
-REFS_WORKFLOW = "krea2_refs_t2i.json"
-
-# ---- the model stack: point these at your own krea2 turbo files -------------
-UNET    = "krea2_turbo_fp8_scaled.safetensors"
-CLIP    = "qwen3vl_4b_fp8_scaled.safetensors"
-CLIPTYPE= "krea2"
-VAE     = "wan_2.1_vae.safetensors"
-# No style LoRA by default: the reference sheets have to match whatever look
-# series.json asks for, and a realism LoRA fights a storybook one (and vice
-# versa). Pass --lora to add one, e.g. a Krea2 realism LoRA for live action.
-LORA    = ""
-LORA_M  = 1.0
-LORA_C  = 1.0
-STEPS   = 12
-CFG     = 1.0
-SAMPLER = "euler"
-SCHED   = "beta"
-
-PREFIX  = "h3refs/tmp"      # ComfyUI-side staging prefix; we fetch over HTTP
-
-VIEWS = [
-    ("01_threequarter", "a three-quarter view of the full figure from head to feet, "
-                        "turned slightly toward the viewer's left, standing straight "
-                        "with arms relaxed at the sides"),
-    ("02_side",         "a direct side profile of the full figure from head to feet, "
-                        "facing the viewer's right, standing straight with arms "
-                        "relaxed at the sides"),
-    ("03_back",         "the full figure seen from directly behind, head to feet, "
-                        "standing straight with arms relaxed at the sides"),
-    ("04_face",         "a head-and-shoulders close-up, facing the viewer, "
-                        "neutral expression"),
-]
-
-VIEW_TMPL = ("A single character reference view on a plain flat neutral background, "
-             "no scene and no props, the whole figure inside the frame with margin "
-             "on every side: {view}. {design}. Drawn as {look}. Output {w}x{h}.")
+import h3jobs as J  # noqa: E402
+import h3refs as R  # noqa: E402
+# The graph code and wording moved to h3refs; re-exported under the old names.
+from h3refs import (CFG, CLIP, CLIPTYPE, LORA, LORA_C, LORA_M, PREFIX,  # noqa: E402,F401
+                    REFS_WORKFLOW, SAMPLER, SCHED, STEPS, UNET, VAE, VIEW_TMPL, VIEWS,
+                    build_graph, parse_size, patch_workflow, seed_for)
 
 
-def seed_for(key: str) -> int:
-    return int(hashlib.sha1(key.encode()).hexdigest()[:12], 16)
+def _norm(p: str) -> str:
+    return os.path.normcase(os.path.normpath(p))
 
 
-def parse_size(target: str, default=(1024, 1024)) -> tuple[int, int]:
-    m = re.search(r"(\d+)\s*[x×]\s*(\d+)", target or "")
-    return (int(m.group(1)), int(m.group(2))) if m else default
-
-
-def _one(g: dict, *ctypes: str) -> str:
-    ids = [k for k, v in g.items() if v["class_type"] in ctypes]
-    if len(ids) != 1:
-        raise ValueError(f"the workflow needs exactly one {' / '.join(ctypes)} node "
-                         f"(found {len(ids)})")
-    return ids[0]
-
-
-def patch_workflow(base: dict, prompt: str, negative: str, w: int, h: int, seed: int,
-                   steps: int, cfg: float, prefix: str,
-                   unet: str = "", lora: str = "", lora_m: float = 1.0,
-                   lora_c: float = 1.0) -> dict:
-    """Set this job's values on a loaded workflow, leaving its wiring alone.
-
-    Positive and negative prompts are found by following the sampler's own
-    links, because the two CLIPTextEncode nodes are otherwise identical.
-    """
-    import copy
-    g = copy.deepcopy(base)
-    ks = _one(g, "KSampler", "KSamplerAdvanced")
-    ki = g[ks]["inputs"]
-    for key, val in (("seed", seed), ("noise_seed", seed), ("steps", steps),
-                     ("cfg", cfg), ("denoise", 1.0)):
-        if key in ki:
-            ki[key] = val
-
-    def text_node(slot: str) -> str | None:
-        link = ki.get(slot)
-        return link[0] if isinstance(link, list) else None
-
-    pos, neg = text_node("positive"), text_node("negative")
-    if pos and g[pos]["class_type"] == "CLIPTextEncode":
-        g[pos]["inputs"]["text"] = prompt
+def collect(s: R.Series, todo: list | None, only: set[str] | None) -> list[dict]:
+    """One entry per ref to consider, most-blocking first. `todo` is
+    refs_todo.json (None: every image ref in the bible)."""
+    refs = [r for r in R.series_refs(s) if not r.is_audio]
+    usage = R.used_by(s, refs)
+    by_path = {_norm(r.path): r for r in refs if r.path}
+    picked: list[tuple[R.Ref, int]] = []
+    if todo is None:
+        picked = [(r, len(usage[r.id]["final"])) for r in refs]
     else:
-        raise ValueError("the workflow's sampler has no CLIPTextEncode on `positive`")
-    # The negative side is left exactly as the workflow wires it — a krea2 turbo
-    # graph zeroes it, a guided model's graph carries its own text, and a NAG or
-    # negpip setup is untouched. Only an explicit --negative-file overrides that.
-    if neg and negative and cfg > 1.0:
-        g[neg] = {"class_type": "CLIPTextEncode",
-                  "inputs": {"clip": g[pos]["inputs"]["clip"], "text": negative}}
-
-    lat = _one(g, "EmptyLatentImage", "EmptySD3LatentImage")
-    g[lat]["inputs"]["width"], g[lat]["inputs"]["height"] = w, h
-    g[_one(g, "SaveImage")]["inputs"]["filename_prefix"] = prefix
-
-    if unet:
-        g[_one(g, "UNETLoader")]["inputs"]["unet_name"] = unet
-    if lora:
-        ids = [k for k, v in g.items() if v["class_type"] in ("LoraLoader",
-                                                              "LoraLoaderModelOnly")]
-        if len(ids) > 1:
-            raise ValueError(f"--lora needs one LoraLoader in the workflow (found {len(ids)})")
-        if ids:
-            gi = g[ids[0]]["inputs"]
-            gi["lora_name"] = lora
-            if "strength_model" in gi:
-                gi["strength_model"] = lora_m
-            if "strength_clip" in gi:
-                gi["strength_clip"] = lora_c
-        else:
-            # the workflow has no LoRA node: splice one in between the loaders
-            # and everything that reads them, so --lora works on any graph
-            lid = "kreagen_lora"
-            model_src, clip_src = ki["model"], g[pos]["inputs"]["clip"]
-            g[lid] = {"class_type": "LoraLoader",
-                      "inputs": {"model": model_src, "clip": clip_src,
-                                 "lora_name": lora, "strength_model": lora_m,
-                                 "strength_clip": lora_c}}
-            ki["model"] = [lid, 0]
-            for node in g.values():
-                if node["class_type"] == "CLIPTextEncode" and \
-                        node["inputs"].get("clip") == clip_src:
-                    node["inputs"]["clip"] = [lid, 1]
-    return g
-
-
-def build_graph(prompt: str, negative: str, w: int, h: int, seed: int,
-                steps: int, cfg: float, prefix: str, lora_clip: bool,
-                unet: str = "", lora: str = "", lora_m: float = LORA_M,
-                lora_c: float = LORA_C) -> dict:
-    lora = lora or LORA
-    model_src = ["4", 0] if lora else ["1", 0]
-    clip_src = (["4", 1] if lora_clip else ["2", 0]) if lora else ["2", 0]
-    g = {
-        "1": {"class_type": "UNETLoader",
-              "inputs": {"unet_name": unet or UNET, "weight_dtype": "default"}},
-        "2": {"class_type": "CLIPLoader",
-              "inputs": {"clip_name": CLIP, "type": CLIPTYPE, "device": "default"}},
-        "3": {"class_type": "VAELoader", "inputs": {"vae_name": VAE}},
-
-        "5": {"class_type": "CLIPTextEncode",
-              "inputs": {"clip": clip_src, "text": prompt}},
-        "7": {"class_type": "EmptyLatentImage",
-              "inputs": {"width": w, "height": h, "batch_size": 1}},
-        "8": {"class_type": "KSampler",
-              "inputs": {"model": model_src, "positive": ["5", 0], "negative": ["6", 0],
-                         "latent_image": ["7", 0], "seed": seed, "steps": steps,
-                         "cfg": cfg, "sampler_name": SAMPLER, "scheduler": SCHED,
-                         "denoise": 1.0}},
-        "9": {"class_type": "VAEDecode", "inputs": {"samples": ["8", 0], "vae": ["3", 0]}},
-        "10": {"class_type": "SaveImage",
-               "inputs": {"images": ["9", 0], "filename_prefix": prefix}},
-    }
-    if lora:
-        g["4"] = {"class_type": "LoraLoader",
-                  "inputs": {"model": ["1", 0], "clip": ["2", 0], "lora_name": lora,
-                             "strength_model": lora_m, "strength_clip": lora_c}}
-    # At cfg 1.0 there is no guidance, so a negative prompt is inert and
-    # ConditioningZeroOut is the cheap correct thing. Above 1.0 it bites.
-    if cfg > 1.0 and negative:
-        g["6"] = {"class_type": "CLIPTextEncode",
-                  "inputs": {"clip": clip_src, "text": negative}}
-    else:
-        g["6"] = {"class_type": "ConditioningZeroOut", "inputs": {"conditioning": ["5", 0]}}
-    return g
-
-
-class Comfy:
-    def __init__(self, base: str):
-        self.base = base.rstrip("/")
-
-    def _json(self, path: str, payload=None):
-        url = f"{self.base}{path}"
-        data = json.dumps(payload).encode() if payload is not None else None
-        req = urllib.request.Request(url, data=data,
-                                     headers={"Content-Type": "application/json"})
-        with urllib.request.urlopen(req, timeout=60) as r:
-            return json.loads(r.read())
-
-    def queue(self, graph: dict) -> str:
-        return self._json("/prompt", {"prompt": graph})["prompt_id"]
-
-    def wait(self, pid: str, timeout: int) -> dict:
-        t0 = time.time()
-        while time.time() - t0 < timeout:
-            hist = self._json(f"/history/{pid}")
-            if pid in hist:
-                st = hist[pid].get("status", {})
-                if st.get("status_str") == "error" or st.get("completed") is False:
-                    raise RuntimeError(json.dumps(st)[:400])
-                return hist[pid].get("outputs", {})
-            time.sleep(1.5)
-        raise TimeoutError(f"no result after {timeout}s")
-
-    def fetch(self, img: dict) -> bytes:
-        q = urllib.parse.urlencode({"filename": img["filename"],
-                                    "subfolder": img.get("subfolder", ""),
-                                    "type": img.get("type", "output")})
-        with urllib.request.urlopen(f"{self.base}/view?{q}", timeout=120) as r:
-            return r.read()
-
-
-def collect_jobs(todo, bible, root, view_size):
-    """One job per image to generate. A sheet fans out into four view jobs."""
-    look = bible.get("style", {}).get("look", "")
-    jobs = []
-    for item in todo:
-        kind, path = item["kind"], item["path"]
-        if kind == "voice sample":
-            continue
-        out = os.path.join(root, path)
-        if kind == "character sheet":
-            char = os.path.basename(path).split("_sheet")[0]
-            design = (bible.get("subjects", {}).get(char, {}) or {}).get("design")
-            if not design:
-                print(f"  ! no design in series.json for '{char}' — skipping {path}")
+        for item in todo:
+            if item["kind"] == "voice sample":
                 continue
-            vw, vh = view_size
-            views = []
-            for tag, desc in VIEWS:
-                views.append({
-                    "name": f"{char}:{tag}",
-                    "prompt": VIEW_TMPL.format(view=desc, design=design, look=look,
-                                               w=vw, h=vh),
-                    "w": vw, "h": vh,
-                    "seed": seed_for(char),          # shared across the four views
-                    "out": os.path.join(root, "views", char, f"{tag}.png"),
-                })
-            jobs.append({"kind": "sheet", "name": char, "out": out,
-                         "views": views, "blocks": len(item.get("blocks_shots", []))})
-        else:
-            w, h = parse_size(item["target"],
-                              (1024, 1024) if kind == "prop reference" else (1344, 768))
-            jobs.append({"kind": "single",
-                         "name": os.path.splitext(os.path.basename(path))[0],
-                         "out": out, "prompt": item["prompt"], "w": w, "h": h,
-                         "seed": seed_for(path),
-                         "blocks": len(item.get("blocks_shots", []))})
-    jobs.sort(key=lambda j: -j["blocks"])            # most-blocking first
-    return jobs
+            r = by_path.get(_norm(item["path"]))
+            if r is None:
+                print(f"  ! nothing in series.json names {item['path']} — skipping it")
+                continue
+            picked.append((r, len(item.get("blocks_shots", []))))
+    out = []
+    for r, blocks in picked:
+        why = R.can_generate(s, r)
+        if why:
+            if r.kind == "character":
+                print(f"  ! no design in series.json for '{r.subject}' — skipping {r.path}")
+            else:
+                print(f"  ! {why} — skipping {r.path or r.id}")
+            continue
+        name = r.subject if r.kind == "character" else \
+            os.path.splitext(os.path.basename(r.path))[0] if r.path else r.id
+        out.append({"ref": r, "name": name, "blocks": blocks})
+    out.sort(key=lambda j: -j["blocks"])            # most-blocking first
+    if only:
+        out = [j for j in out if j["name"] in only or j["ref"].id in only
+               or any(k in (j["ref"].path or "") for k in only)]
+    return out
 
 
-def run_one(comfy, spec, args, negative, base=None):
-    if base is not None:
-        graph = patch_workflow(base, spec["prompt"], negative, spec["w"], spec["h"],
-                               spec["seed"], args.steps, args.cfg, PREFIX,
-                               unet=args.unet, lora=args.lora,
-                               lora_m=args.lora_strength, lora_c=args.lora_strength)
-    else:
-        graph = build_graph(spec["prompt"], negative, spec["w"], spec["h"], spec["seed"],
-                            args.steps, args.cfg, PREFIX, not args.no_lora_clip,
-                            unet=args.unet, lora=args.lora,
-                            lora_m=args.lora_strength, lora_c=args.lora_strength)
-    pid = comfy.queue(graph)
-    outs = comfy.wait(pid, args.timeout)
-    imgs = [i for o in outs.values() for i in o.get("images", [])]
-    if not imgs:
-        raise RuntimeError("no image in outputs")
-    os.makedirs(os.path.dirname(os.path.abspath(spec["out"])) or ".", exist_ok=True)
-    with open(spec["out"], "wb") as f:
-        f.write(comfy.fetch(imgs[0]))
-    return spec["out"]
+def request(j: dict, args, negative: str) -> R.GenRequest:
+    loras = ([{"name": args.lora, "strength": args.lora_strength}] if args.lora else None)
+    return R.GenRequest(ref=j["ref"].id, model=args.unet or None, loras=loras,
+                        steps=args.steps, cfg=args.cfg, negative=negative,
+                        view_size=parse_size(args.view_size, R.VIEW_SIZE))
+
+
+def job_name(j: dict, job: R.GenJob) -> str:
+    return f"{j['name']}:{job.view}" if job.view else j["name"]
 
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--project-root", default=".",
-                    help="episode folder holding refs_todo.json and series.json")
+                    help="episode folder holding refs_todo.json (series.json here or "
+                         "in its parent)")
     ap.add_argument("--comfy", default="http://127.0.0.1:8188",
                     help="ComfyUI address (default %(default)s)")
-    ap.add_argument("--only", help="comma-separated asset name filter, e.g. sam,core_wide")
-    ap.add_argument("--redo", action="store_true", help="regenerate assets already on disk")
+    ap.add_argument("--only", help="comma-separated filter: asset names (sam, core_wide), "
+                                   "ref ids (subject:sam) or path fragments")
+    ap.add_argument("--all", action="store_true",
+                    help="every ref in the bible, not only what refs_todo.json lists "
+                         "(no build needed)")
+    ap.add_argument("--redo", action="store_true",
+                    help="make a new take of refs already on disk (the live file is "
+                         "kept unless --pick)")
+    ap.add_argument("--pick", action="store_true",
+                    help="put every new take live, even over an existing file")
     ap.add_argument("--workflow", help=f"reference-image workflow to drive "
                     f"(default: $KREA_WORKFLOW, else {REFS_WORKFLOW} as saved in the "
                     f"running ComfyUI, else this repo's copy, else the built-in graph)")
@@ -318,8 +136,9 @@ def main() -> int:
                     help="ignore any workflow file and use the built-in graph")
     ap.add_argument("--list", action="store_true", help="show the job list and exit")
     ap.add_argument("--dry-run", action="store_true", help="print prompts, queue nothing")
-    ap.add_argument("--steps", type=int, default=STEPS,
-                    help="sampler steps (default %(default)s; match a step-distilled LoRA)")
+    ap.add_argument("--steps", type=int, default=None,
+                    help=f"sampler steps (default: the ref's override, else {STEPS}; "
+                         f"match a step-distilled LoRA)")
     ap.add_argument("--cfg", type=float, default=CFG,
                     help="1.0 = turbo, no guidance (negative prompt inert). >1 enables it.")
     ap.add_argument("--negative-file",
@@ -342,18 +161,30 @@ def main() -> int:
     args = ap.parse_args()
 
     root = args.project_root
-    todo_p = os.path.join(root, "refs_todo.json")
-    bible_p = os.path.join(root, "series.json")
-    for p in (todo_p, bible_p):
-        if not os.path.isfile(p):
-            print(f"error: {p} not found. Run h3build first.", file=sys.stderr)
+    ep = os.path.abspath(root)
+    try:
+        s = R.load_series(ep)
+    except FileNotFoundError:
+        print(f"error: {os.path.join(root, 'series.json')} not found (nor in the parent "
+              f"folder).", file=sys.stderr)
+        return 1
+    except ValueError as e:
+        print(f"error: series.json: {e}", file=sys.stderr)
+        return 1
+    todo = None
+    if not args.all:
+        todo_p = os.path.join(root, "refs_todo.json")
+        if not os.path.isfile(todo_p):
+            print(f"error: {todo_p} not found. Run h3build first (or pass --all to work "
+                  f"from the bible alone).", file=sys.stderr)
             return 1
-    todo = json.load(open(todo_p, encoding="utf-8"))
-    bible = json.load(open(bible_p, encoding="utf-8"))
+        with open(todo_p, encoding="utf-8") as fh:
+            todo = json.load(fh)
 
     negative = ""
     if args.negative_file:
-        negative = open(args.negative_file, encoding="utf-8").read().strip()
+        with open(args.negative_file, encoding="utf-8") as fh:
+            negative = fh.read().strip()
         if args.cfg <= 1.0:
             print("  ! --negative-file given but cfg is 1.0, where there is no guidance\n"
                   "    branch to apply it to, so it does nothing. Turbo checkpoints want\n"
@@ -361,42 +192,35 @@ def main() -> int:
                   "    own workflow. Otherwise try --cfg 1.5 --steps 16 on a model that\n"
                   "    expects guidance, or fold the exclusions into the positive text.\n")
 
-    vw, vh = parse_size(args.view_size, (1024, 1024))
-    jobs = collect_jobs(todo, bible, root, (vw, vh))
-    if args.only:
-        keys = {k.strip() for k in args.only.split(",")}
-        jobs = [j for j in jobs if j["name"] in keys or
-                any(k in j["out"] for k in keys)]
-
-    mksheet = args.mksheet or os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                                           "mksheet.py")
+    vw, vh = parse_size(args.view_size, R.VIEW_SIZE)
+    only = {k.strip() for k in args.only.split(",")} if args.only else None
+    jobs = collect(s, todo, only)
 
     base, wf = None, ""
     if not args.no_workflow:
-        if _resolve_workflow is None:
-            print("  ! h3jobs.py is not importable — using the built-in graph")
-        else:
-            try:
-                # Same lookup as h3render: the copy saved in the running
-                # ComfyUI first, so the graph matches its node versions. Keep
-                # that copy LoRA-free (experiment under another name):
-                # references must follow series.json's look (see LORA above),
-                # and --lora is how a run adds one.
-                base, wf = _resolve_workflow(args.workflow, REFS_WORKFLOW, args.comfy,
-                                             env="KREA_WORKFLOW", required=False)
-            except Exception as e:
-                print(f"  ! {REFS_WORKFLOW} could not be read ({e}) — using the built-in graph")
-                base, wf = None, ""
+        try:
+            # Same lookup as h3render: the copy saved in the running ComfyUI
+            # first, so the graph matches its node versions. Keep that copy
+            # LoRA-free (experiment under another name): references must follow
+            # series.json's look, and --lora is how a run adds one.
+            base, wf = R.resolve_workflow(args.comfy, args.workflow)
+        except Exception as e:
+            print(f"  ! {REFS_WORKFLOW} could not be read ({e}) — using the built-in graph")
+            base, wf = None, ""
 
     print(f"\n  {len(jobs)} asset(s) · comfy {args.comfy} · "
-          f"{args.steps} steps · cfg {args.cfg}\n"
+          f"{args.steps or STEPS} steps · cfg {args.cfg}\n"
           f"  graph {wf if wf else 'built-in (' + UNET + ')'}\n"
           f"  {'-' * 62}")
     todo_now = []
     for j in jobs:
-        have = os.path.isfile(j["out"])
+        r = j["ref"]
+        j["out"] = os.path.join(root, os.path.relpath(r.file, ep)) if r.file else r.id
+        have = bool(r.file) and os.path.isfile(r.file)
+        j["had"] = have
         mark = "have" if have and not args.redo else ("redo" if have else " -- ")
-        size = f"{vw}x{vh} x4" if j["kind"] == "sheet" else f"{j['w']}x{j['h']}"
+        w, h = R.gen_size(r, (vw, vh))
+        size = f"{vw}x{vh} x4" if r.has_views else f"{w}x{h}"
         print(f"  [{mark}] {j['out']:<44} {size:>12}  blocks {j['blocks']}")
         if not have or args.redo:
             todo_now.append(j)
@@ -406,30 +230,57 @@ def main() -> int:
         return 0
     if args.dry_run:
         for j in todo_now:
-            for s in (j["views"] if j["kind"] == "sheet" else [j]):
-                print(f"--- {s.get('name', j['name'])}  seed {s['seed']}\n{s['prompt']}\n")
+            for job in R.plan_generate(s, request(j, args, negative)):
+                seed = (f"{job.seed}" if job.seed_source != "new"
+                        else "new (drawn when queued)")
+                print(f"--- {job_name(j, job)}  seed {seed}\n{job.prompt}\n")
         return 0
     if not todo_now:
-        print("  nothing to do — pass --redo to regenerate.\n")
+        print("  nothing to do — pass --redo to make new takes.\n")
         return 0
 
-    comfy, failed = Comfy(args.comfy), []
+    comfy = J.Comfy(args.comfy, client_id="kreagen")
+    try:
+        use_node = comfy.has_node(R.SAVER)
+    except Exception as e:
+        print(f"  !! can't reach ComfyUI at {args.comfy}: {e}\n")
+        return 1
+    if not use_node:
+        print(f"  ! this ComfyUI has no {R.SAVER} node (update the h3pipe node pack and\n"
+              f"    restart ComfyUI). Saving through SaveImage and fetching each image\n"
+              f"    over HTTP instead.\n")
+
+    failed = []
     for j in todo_now:
+        r = j["ref"]
         try:
-            if j["kind"] == "sheet":
-                for s in j["views"]:
-                    print(f"  .. {s['name']}")
-                    run_one(comfy, s, args, negative, base)
-                cmd = [sys.executable, mksheet] + [s["out"] for s in j["views"]] + \
-                      ["-o", j["out"], "--panel-height", str(args.panel_height)]
-                r = subprocess.run(cmd, capture_output=True, text=True)
-                sys.stdout.write(r.stdout)
-                if r.returncode != 0:
-                    raise RuntimeError(r.stderr.strip()[:300] or "mksheet failed")
-            else:
-                print(f"  .. {j['name']}")
-                run_one(comfy, j, args, negative, base)
-                print(f"  -> {j['out']}")
+            made = []
+            for job in R.plan_generate(s, request(j, args, negative)):
+                print(f"  .. {job_name(j, job)}")
+                take = R.start_gen(s, job)
+                try:
+                    pid = comfy.queue(R.graph_for(base, job, take, save_node=use_node,
+                                                  lora_clip=not args.no_lora_clip))
+                except Exception as e:
+                    R.mark_failed(take, str(e)[:800])
+                    raise
+                R.mark_queued(take, pid)
+                status = R.wait_take(comfy, take, pid, args.timeout)
+                if status != "ok":
+                    raise RuntimeError(f"t{take.take:02d} {status}: "
+                                       f"{(take.sidecar or {}).get('save_notes', '')}"[:400])
+                made.append((job, take))
+            if j["had"] and not args.pick:
+                print(f"  -> {len(made)} new take(s) in "
+                      f"{os.path.relpath(R.takes_dir(r), ep)} ({j['out']} kept; pick in "
+                      f"the editor, or pass --pick)")
+                continue
+            for job, take in made:
+                res = R.pick_take(s, r, job.view, take.take, panel_height=args.panel_height,
+                                  mksheet=args.mksheet)
+                if res.report:
+                    sys.stdout.write(res.report)
+            print(f"  -> {j['out']}")
         except Exception as e:
             print(f"  !! {j['name']}: {e}")
             failed.append(j["name"])

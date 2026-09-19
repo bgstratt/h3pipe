@@ -114,14 +114,20 @@ shot; it only ever shaped reference art.
   refs/_bg/<location>.png                    1344x768   13 plates
   refs/props/<name>.png                      1024x1024   2 props
   refs/<char>/<char>_sheet_4panel.png        4096x1024   3 sheets
-  views/<char>/01_threequarter.png                       per-view sources
-            02_side.png  03_back.png  04_face.png
+  refs/_takes/<ref>/<ref>[_<view>]_tNN.png   every candidate, with a .json sidecar
+  refs/_picks.json                           which take is live
 ```
 
+Each image is a take (h3refs.py). A ref with no file yet gets its first good
+take picked, which copies it to the path above (a character's sheet is stitched
+once all four views are picked). `--redo` adds a take without touching the live
+file; `--pick` puts it live.
+
 `kreagen.py` expects `mksheet.py` beside it — keep both in `h3pipe/`, or pass
-`--mksheet`. ComfyUI's own output folder is only staging: images are fetched
-over HTTP from `/view` and written to the project paths, so the
-`filename_prefix` never has to encode the real name.
+`--mksheet`. The graph's SaveImage is replaced by the node pack's
+`H3SaveRefTake`, which writes each take beside its sidecar. On a ComfyUI whose
+node pack predates that node, SaveImage stays: ComfyUI's output folder is then
+only staging, and images are fetched over HTTP from `/view`.
 
 ## After a run
 

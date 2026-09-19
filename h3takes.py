@@ -251,21 +251,39 @@ def reserve_take(root: str, pass_: str, shot_id: str, sidecar: dict,
         write_json(tp.sidecar, data)
         return Take(shot_id, take, pass_, tp, data)
     nums = take_numbers(root, pass_, shot_id, folder)
-    n = (nums[-1] + 1) if nums else 1
+    n, data = claim_number(
+        (nums[-1] + 1) if nums else 1,
+        lambda k: take_paths(root, pass_, shot_id, k, folder).sidecar,
+        lambda k: dict(sidecar, version=SIDECAR_VERSION, shot=shot_id, take=k,
+                       **{"pass": pass_}),
+        # a legacy take (mp4, no sidecar) owns its number
+        taken=lambda k: os.path.isfile(take_paths(root, pass_, shot_id, k, folder).mp4))
+    return Take(shot_id, n, pass_, take_paths(root, pass_, shot_id, n, folder), data)
+
+
+def claim_number(first: int, sidecar_of, data_for, taken=None) -> tuple[int, dict]:
+    """Reserve the first free number from `first` up by creating its sidecar.
+
+    `sidecar_of(n)` is number n's sidecar path, `data_for(n)` its content, and
+    `taken(n)` (optional) says a number is owned by something other than a
+    sidecar. The claim is an exclusive create, so concurrent callers each get
+    their own number; the content is then written atomically. Returns
+    (number, content). Used for video takes and ref takes alike.
+    """
+    n = first
     while True:
-        tp = take_paths(root, pass_, shot_id, n, folder)
-        data = dict(sidecar, version=SIDECAR_VERSION, shot=shot_id, take=n,
-                    **{"pass": pass_})
-        if os.path.isfile(tp.mp4):                 # a legacy take owns this number
+        path = sidecar_of(n)
+        if taken is not None and taken(n):
             n += 1
             continue
         try:
-            open(tp.sidecar, "x").close()          # the claim
+            open(path, "x").close()                # the claim
         except FileExistsError:
             n += 1
             continue
-        write_json(tp.sidecar, data)               # the content, atomically
-        return Take(shot_id, n, pass_, tp, data)
+        data = data_for(n)
+        write_json(path, data)                     # the content, atomically
+        return n, data
 
 
 def update_sidecar(path: str, **fields) -> dict:

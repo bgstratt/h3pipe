@@ -31,7 +31,7 @@ _BUILT = None                                            # one build, copied per
 def built_episode() -> str:
     """A built kitchen_sink episode (both passes), made once per run."""
     global _BUILT
-    if _BUILT is None:
+    if _BUILT is None or not os.path.isdir(_BUILT):   # another module may have cleaned up
         tmp = tempfile.mkdtemp(prefix="h3api_")
         ep = os.path.join(tmp, "ks01")
         os.makedirs(ep)
@@ -45,8 +45,10 @@ def built_episode() -> str:
 
 
 def tearDownModule():
+    global _BUILT
     if _BUILT:
         shutil.rmtree(os.path.dirname(_BUILT), ignore_errors=True)
+        _BUILT = None
 
 
 class ApiTest(unittest.TestCase):
