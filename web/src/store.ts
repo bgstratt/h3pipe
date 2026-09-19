@@ -5,8 +5,8 @@ import { useSyncExternalStore } from "react";
 import type { ToastAction } from "./host";
 import type { RefFilter } from "./lib/refs";
 import type {
-  BuildResult, Config, EpisodeStatus, EpisodeSummary, ModelList, Pass, Ref, RefDefaults, RefGenerateMissingResult, ShotDetail, TakeRef,
-  TargetList,
+  BuildResult, Config, EpisodeStatus, EpisodeSummary, ModelList, Pass, Ref, RefDefaults, RefGenerateMissingResult, ShotDetail, SourceFile,
+  TakeRef, TargetList,
 } from "./types";
 
 // ---------------------------------------------------------------------------
@@ -237,6 +237,17 @@ export interface AppState {
   assemble: { busy: boolean; output: string | null; report: string | null; error: string | null };
   /** in-flight actions, by a caller-chosen key, to disable buttons */
   busy: Record<string, boolean>;
+  /** Phase 9a: the Script / Series config windows are open */
+  sourceOpen: Record<SourceFile, boolean>;
+  /** Phase 9a: a window's buffer has unsaved edits (set by the window) */
+  sourceDirty: Record<SourceFile, boolean>;
+  /** Phase 9a: scroll the Script window to this shot (n changes on every request) */
+  scriptFocus: { shot: string; n: number } | null;
+  /** Phase 9a: bumped when the authored files changed through the editor (promote,
+   * a save in the other window): open windows check the disk again */
+  sourceN: number;
+  /** Phase 9a: the Promote dialog (shot null: the whole episode) */
+  promote: { shot: string | null } | null;
 }
 
 export const ZOOM_MIN = 8;
@@ -299,6 +310,11 @@ export function initialState(prefs: Prefs = {}): AppState {
     build: { busy: false, result: null, error: null },
     assemble: { busy: false, output: null, report: null, error: null },
     busy: {},
+    sourceOpen: { script: false, series: false },
+    sourceDirty: { script: false, series: false },
+    scriptFocus: null,
+    sourceN: 0,
+    promote: null,
   };
 }
 

@@ -160,6 +160,10 @@ export interface MockRefs {
   deleteOverride(ref: string, view?: string | null): Override & { stale: boolean };
   /** the dependents to mark ref-stale after a pick (shot indexes) */
   dependents(ref: string): number[];
+  /** Phase 9a: every ref override (and a character view's), for promote */
+  overrideList(): { ref: string; view: string | null; subject: string | null; kind: string; values: Override }[];
+  /** Phase 9a: drop some fields of a ref's (or a view's) override (promoted) */
+  dropOverrideFields(ref: string, view: string | null, fields: string[]): void;
 }
 
 export function createMockRefs(opts: {
@@ -711,6 +715,22 @@ export function createMockRefs(opts: {
         else (dst as Record<string, unknown>)[k] = k === "loras" ? (val as Lora[]) : val;
       }
       return { ...merged(r, v ?? null), stale: false };
+    },
+    overrideList() {
+      const out: ReturnType<MockRefs["overrideList"]> = [];
+      for (const r of refs) {
+        if (Object.keys(r.ov).length) out.push({ ref: r.id, view: null, subject: r.subject ?? null, kind: r.kind, values: { ...r.ov } });
+        for (const [v, o] of Object.entries(r.vov)) {
+          if (Object.keys(o).length) out.push({ ref: r.id, view: v, subject: r.subject ?? null, kind: r.kind, values: { ...o } });
+        }
+      }
+      return out;
+    },
+    dropOverrideFields(ref, v, fields) {
+      const r = refFor(ref);
+      const dst = v ? r.vov[v] : r.ov;
+      if (!dst) return;
+      for (const f of fields) delete (dst as Record<string, unknown>)[f];
     },
     deleteOverride(ref, v) {
       const r = refFor(ref);

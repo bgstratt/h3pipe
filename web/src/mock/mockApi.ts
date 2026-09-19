@@ -12,8 +12,10 @@ import { reachable } from "../lib/browse";
 import { promptText } from "../lib/format";
 import type {
   CutEntry, EpisodeStatus, EpisodeSummary, Lora, MissingRef, Override, OverrideResult, Pass, RefGenerateMissingResult, RefUsed,
-  RenderResult, ShotDetail, ShotStatus, ShotTargetSource, TakeDetail, TakeSummary,
+  RenderResult, ShotDetail, ShotStatus, ShotTargetSource, SourceCheck, SourceFile, TakeDetail, TakeSummary,
 } from "../types";
+import { localShotSpans } from "../lib/source";
+import { buildScript, buildSeries, checkScript, checkSeries, jsonErrorAt, mockHash, planPromote, type MockShotSource } from "./mockSource";
 import { keyframeWanted } from "../lib/keyframes";
 import { hasViews } from "../lib/refs";
 import fixturesRaw from "./fixtures.json?raw";
@@ -62,17 +64,24 @@ export interface MockOptions {
 }
 
 class MockError extends Error {
-  constructor(message: string, public status: number) {
+  constructor(message: string, public status: number, public data?: unknown) {
     super(message);
   }
 }
 
 const clone = <T>(x: T): T => JSON.parse(JSON.stringify(x));
 
-export function createMockApi(emit: Emit, opts: MockOptions = {}): Api {
+/** Phase 9a: the dev page's hook for "edited in another editor" (see dev.tsx). */
+export type OutsideEdit = (file: SourceFile, edit: (text: string) => string) => void;
+
+export function createMockApi(emit: Emit, opts: MockOptions = {}): Api & { outsideEdit: OutsideEdit } {
   // seeds must survive: parse with the seed-safe parser, like the real client
   const fx = parseJsonSeedSafe<Fixtures>(fixturesRaw);
   const EP = fx.ep;
+  /** the script's `target:` lines (Phase 9a: they follow the mock script's text) */
+  const scriptTargets: Record<string, string> = { ...SCRIPT_TARGETS };
+  /** series.json's `series.target` */
+  let seriesTarget = SERIES_TARGET;
   let roots: string[] = opts.firstRun ? [] : [EP.replace(/[\\/][^\\/]+[\\/][^\\/]+$/, "")];
   const status: Partial<Record<Pass, EpisodeStatus>> = clone(fx.status);
   const detail: Partial<Record<Pass, Record<string, ShotDetail>>> = clone(fx.detail);
@@ -311,7 +320,7 @@ export function createMockApi(emit: Emit, opts: MockOptions = {}): Api {
       const tg = shotTargetOf(shot, d.override);
       d.target = s.target = tg.target;
       d.target_source = s.target_source = tg.source;
-      d.built_target = s.built_target = SCRIPT_TARGETS[shot] ?? SERIES_TARGET;
+      d.built_target = s.built_target = scriptTargets[shot] ?? seriesTarget;
       s.profile = d.profile = null;
       for (const t of s.takes) {
         if (t.target === undefined) t.target = d.takes.find((x) => x.take === t.take)?.sidecar?.target as string | undefined ?? null;
@@ -325,18 +334,18 @@ export function createMockApi(emit: Emit, opts: MockOptions = {}): Api {
   /** The target a shot's next render uses, and where it comes from (no request here). */
   function shotTargetOf(shot: string, ov: Override): { target: string; source: ShotTargetSource } {
     if (ov.target) return { target: ov.target, source: "override" };
-    if (SCRIPT_TARGETS[shot]) return { target: SCRIPT_TARGETS[shot], source: "script" };
+    if (scriptTargets[shot]) return { target: scriptTargets[shot], source: "script" };
     // no target of its own: the editor's episode target, else series.json's
-    return { target: episodeTarget ?? SERIES_TARGET, source: episodeTarget ? "episode" : "series" };
+    return { target: episodeTarget ?? seriesTarget, source: episodeTarget ? "episode" : "series" };
   }
 
   function syncEpisodeTarget() {
     for (const pass of ["final", "proxy"] as Pass[]) {
       const s = status[pass];
       if (!s) continue;
-      s.target = episodeTarget ?? SERIES_TARGET;
+      s.target = episodeTarget ?? seriesTarget;
       s.target_source = episodeTarget ? "editor" : "series";
-      s.series_target = SERIES_TARGET;
+      s.series_target = seriesTarget;
     }
     for (const id of shotIds) syncOverrideSummary(id);
   }
@@ -428,6 +437,81 @@ export function createMockApi(emit: Emit, opts: MockOptions = {}): Api {
       emit("execution_success", { prompt_id: pid });
       emit("h3pipe.take", { ep: EP, pass, shot, take, status: "ok", thumb: files.thumb });
     });
+  }
+
+  // -------------------------------------------------------------------------
+  // Phase 9a: the authored files (mockSource.ts builds them from the fixtures)
+  // -------------------------------------------------------------------------
+
+  const epStatus = (status.proxy ?? status.final)!;
+  const sourceShots: MockShotSource[] = epStatus.shots.filter((s) => !s.orphan).map((s) => {
+    const d = detail.proxy?.[s.shot] ?? detail.final?.[s.shot];
+    const b = (d?.built ?? {}) as { prompt?: string | string[]; background?: string; voices?: string[] };
+    return {
+      shot: s.shot, sequence: s.sequence ?? "sq01", subjects: s.subjects, size: s.size ?? null, seconds: s.seconds ?? 0,
+      background: b.background ?? null, prompt: Array.isArray(b.prompt) ? b.prompt.join("\n\n") : b.prompt ?? d?.built_prompt ?? "",
+      voices: b.voices ?? [],
+    };
+  });
+  const scriptName = fx.summary.script ?? `${epStatus.episode}.md`;
+  const files: Record<SourceFile, { text: string; hash: string; mtime: number }> = {
+    script: { text: "", hash: "", mtime: 0 },
+    series: { text: "", hash: "", mtime: 0 },
+  };
+  const writeFile = (file: SourceFile, text: string) => {
+    files[file] = { text, hash: mockHash(text), mtime: Date.now() / 1000 };
+    if (file === "script") syncScriptTargets(text);
+  };
+  /** the script's `target:` lines decide the mock's script targets */
+  function syncScriptTargets(text: string) {
+    const lines = text.split("\n");
+    for (const k of Object.keys(scriptTargets)) delete scriptTargets[k];
+    for (const sp of localShotSpans(text)) {
+      for (let n = sp.line; n < sp.end_line; n++) {
+        const m = /^target:\s*(\S+)/.exec(lines[n]);
+        if (m) scriptTargets[sp.id] = m[1];
+      }
+    }
+  }
+  function seriesCfg(): { series?: { target?: string } } | null {
+    try {
+      return JSON.parse(files.series.text);
+    } catch {
+      return null;
+    }
+  }
+  writeFile("script", buildScript({ id: epStatus.episode, title: epStatus.title ?? fx.summary.title ?? "" }, sourceShots, {
+    targets: SCRIPT_TARGETS, keyframes: SCRIPT_KEYFRAMES, durModel: DUR_MODEL,
+  }));
+  writeFile("series", buildSeries(fx.summary.title ?? epStatus.title ?? "", sourceShots));
+  /** As built: the build stops at its first error, so `errors` has at most one. */
+  const check = (file: SourceFile, text: string): SourceCheck => {
+    const c = file === "script" ? checkScript(text, seriesCfg() ?? {}) : checkSeries(text, files.script.text);
+    return { ...c, errors: c.errors.slice(0, 1), shots: file === "series" ? [] : c.shots };
+  };
+  const sourcePath = (file: SourceFile) => (file === "script" ? scriptName : "series.json");
+  const conflict = (file: SourceFile) => new MockError("changed on disk", 409, { error: "changed on disk", file, hash: files[file].hash, text: files[file].text });
+
+  /** The dev page's stand-in for an edit in another editor: h3mockEdit("script", t => t.replace(…)). */
+  const outsideEdit: OutsideEdit = (file, edit) => {
+    writeFile(file, edit(files[file].text));
+  };
+
+  /** After a write: the series target and the shots' targets follow the files. */
+  function afterSourceWrite() {
+    seriesTarget = seriesCfg()?.series?.target ?? SERIES_TARGET;
+    syncEpisodeTarget();
+  }
+
+  /** the promote plan's inputs, now */
+  function promoteInput(only: string | null) {
+    const shots = shotIds.map((shot) => ({
+      shot, final: clone(detail.final?.[shot]?.override ?? {}), proxy: clone(detail.proxy?.[shot]?.override ?? {}),
+    })).filter((s) => Object.keys(s.final).length || Object.keys(s.proxy).length);
+    return {
+      script: files.script.text, series: files.series.text, scriptName, shots, episodeTarget,
+      refOverrides: refs.overrideList(), only,
+    };
   }
 
   const api: Api = {
@@ -924,6 +1008,86 @@ export function createMockApi(emit: Emit, opts: MockOptions = {}): Api {
       if (!r) throw new MockError(`${target} declares no model family for ${param}`, 400);
       return r;
     },
+    async source(ep, file) {
+      await wait();
+      need(ep);
+      const f = files[file];
+      const shots = file === "script" ? check("script", f.text).shots : [];
+      return { file, path: sourcePath(file), text: f.text, hash: f.hash, mtime: f.mtime, shots };
+    },
+    async sourceHash(ep, file) {
+      await wait(30);
+      need(ep);
+      return { file, hash: files[file].hash, mtime: files[file].mtime };
+    },
+    async checkSource(ep, file, text) {
+      await wait(150);
+      need(ep);
+      return check(file, text);
+    },
+    async putSource(req) {
+      await wait(300);
+      need(req.ep);
+      if (req.base_hash !== files[req.file].hash) throw conflict(req.file);
+      if (req.file === "series") {
+        try {
+          JSON.parse(req.text);
+        } catch (e) {
+          const at = jsonErrorAt(req.text, e);
+          throw new MockError(`series.json isn't valid JSON (line ${at.line}, column ${at.col}): ${at.message}`, 400, { error: at.message, line: at.line, col: at.col });
+        }
+      }
+      writeFile(req.file, req.text);
+      const c = check(req.file, req.text);
+      afterSourceWrite();
+      let build = null;
+      if (req.rebuild) {
+        if (c.ok) build = await api.build(req.ep);
+        else {
+          const first = c.errors[0];
+          const error = `${first.file === "series" ? "series.json" : scriptName}: line ${first.line}: ${first.message}`;
+          build = { ok: false, passes: { final: { ok: false, report: "", error }, proxy: { ok: false, report: "", error } } };
+          emit("h3pipe.episode", { ep: EP });
+        }
+      } else emit("h3pipe.episode", { ep: EP });
+      return { hash: files[req.file].hash, check: c, build };
+    },
+    async promotePlan(ep, shot) {
+      await wait(250);
+      need(ep);
+      const p = planPromote(promoteInput(shot ?? null));
+      return { items: p.items, left: p.left, diffs: p.diffs, hashes: { script: files.script.hash, series: files.series.hash } };
+    },
+    async promote(ep, items, hashes, shot) {
+      await wait(400);
+      need(ep);
+      for (const f of ["script", "series"] as SourceFile[]) if (hashes?.[f] !== files[f].hash) throw conflict(f);
+      const p = planPromote(promoteInput(shot ?? null));
+      const unknown = items === "all" ? [] : items.filter((id) => !p.items.some((i) => i.id === id));
+      if (unknown.length) throw new MockError(`${unknown.join(", ")} isn't in the plan: ask for the plan again`, 400);
+      const r = p.apply(items);
+      if (r.script !== files.script.text) writeFile("script", r.script);
+      if (r.series !== files.series.text) writeFile("series", r.series);
+      let refChanged = false;
+      for (const d of r.drops) {
+        if (d.scope === "shot" && d.shot) {
+          for (const pass of ["final", "proxy"] as Pass[]) {
+            const ov = detail[pass]?.[d.shot]?.override;
+            if (ov) delete (ov as Record<string, unknown>)[d.field];
+          }
+          syncOverrideSummary(d.shot);
+        } else if (d.scope === "episode" && d.field === "target") episodeTarget = null;
+        else if (d.scope === "ref" && d.ref) {
+          refs.dropOverrideFields(d.ref, d.view ?? null, [d.field]);
+          refChanged = true;
+        }
+      }
+      afterSourceWrite();
+      const build = await api.build(ep);
+      if (refChanged) emit("h3pipe.ref", { ep: EP });
+      const after = planPromote(promoteInput(null));
+      return { promoted: r.promoted, left: after.left, hashes: { script: files.script.hash, series: files.series.hash }, build };
+    },
     async comfyQueue() {
       await wait();
       return { running: [], pending: [] };
@@ -937,10 +1101,11 @@ export function createMockApi(emit: Emit, opts: MockOptions = {}): Api {
       try {
         return await fn(...a);
       } catch (e) {
-        if (e instanceof MockError || e instanceof FsError || e instanceof RefError) throw new ApiError(e.message, e.status, `/mock/${k}`);
+        if (e instanceof MockError) throw new ApiError(e.message, e.status, `/mock/${k}`, e.data);
+        if (e instanceof FsError || e instanceof RefError) throw new ApiError(e.message, e.status, `/mock/${k}`);
         throw e;
       }
     };
   }
-  return wrapped;
+  return Object.assign(wrapped, { outsideEdit });
 }

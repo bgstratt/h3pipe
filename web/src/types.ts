@@ -932,3 +932,127 @@ export interface TargetList {
   targets: Target[];
   default: Partial<Record<TargetKind, string>>;
 }
+
+// ---------------------------------------------------------------------------
+// Phase 9a: the script and series config windows, promote
+// ---------------------------------------------------------------------------
+
+/** Which authored file: the episode's epNN.md, or its series.json. */
+export type SourceFile = "script" | "series";
+
+/** A shot's line span in the script (1-based, inclusive). */
+export interface SourceShotSpan {
+  id: string;
+  line: number;
+  end_line: number;
+}
+
+/** GET /h3pipe/source */
+export interface SourceDoc {
+  file: SourceFile;
+  /** relative to the episode (`../series.json` for a parent-folder series config) */
+  path: string;
+  text: string;
+  /** sha1 of the bytes on disk */
+  hash: string;
+  mtime: number;
+  /** script only; empty if it doesn't parse */
+  shots: SourceShotSpan[];
+}
+
+/** GET /h3pipe/source?…&hash_only=1 */
+export interface SourceHash {
+  file: SourceFile;
+  hash: string;
+  mtime: number;
+}
+
+/** One error or warning of a check, 1-based line (and col) into the checked text.
+ * As built: `file` is "script" | "series"; `line` is null for a series config
+ * message that names no key; `col` only for a JSON syntax error. */
+export interface SourceMessage {
+  /** which file it's in (a check can report on the other file too) */
+  file: string;
+  line: number | null;
+  col?: number;
+  message: string;
+}
+
+/** POST /h3pipe/source/check (and `check` of PUT /h3pipe/source) */
+export interface SourceCheck {
+  ok: boolean;
+  errors: SourceMessage[];
+  warnings: SourceMessage[];
+  shots: SourceShotSpan[];
+}
+
+export interface SourceSaveRequest {
+  ep: string;
+  file: SourceFile;
+  text: string;
+  base_hash: string;
+  rebuild: boolean;
+}
+
+/** PUT /h3pipe/source */
+export interface SourceSaveResult {
+  hash: string;
+  check: SourceCheck;
+  build: BuildResult | null;
+}
+
+/** The body of a 409 from PUT /h3pipe/source or POST /h3pipe/promote. */
+export interface SourceConflictBody {
+  error: string;
+  /** as built: which file changed */
+  file?: SourceFile;
+  hash: string;
+  text: string;
+}
+
+export type PromoteScope = "shot" | "episode" | "ref";
+
+export interface PromoteItem {
+  id: string;
+  scope: PromoteScope;
+  shot?: string;
+  ref?: string;
+  view?: string | null;
+  field: string;
+  value: unknown;
+  dest: SourceFile;
+  line?: number;
+  summary: string;
+}
+
+export interface PromoteLeft {
+  scope: PromoteScope;
+  shot?: string;
+  ref?: string;
+  view?: string | null;
+  /** as built: a per-pass field left in one pass (a prompt, a negative, model_low) */
+  pass?: Pass | null;
+  field: string;
+  reason: string;
+}
+
+export interface PromoteHashes {
+  script: string;
+  series: string;
+}
+
+/** GET /h3pipe/promote */
+export interface PromotePlan {
+  items: PromoteItem[];
+  left: PromoteLeft[];
+  diffs: { script: string; series: string };
+  hashes: PromoteHashes;
+}
+
+/** POST /h3pipe/promote */
+export interface PromoteResult {
+  promoted: string[];
+  left: PromoteLeft[];
+  hashes: PromoteHashes;
+  build: BuildResult | null;
+}

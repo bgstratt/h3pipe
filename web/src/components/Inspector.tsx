@@ -3,8 +3,8 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  baseRender, clearRef, closeInspector, focusRef, keyframeFromTake, loadDetail, loadRefs, openRedo, openViewer, queueRender,
-  renderShots, revertOverride, saveOverride, setShotTarget,
+  baseRender, clearRef, closeInspector, focusRef, keyframeFromTake, loadDetail, loadRefs, openPromote, openRedo, openViewer, queueRender,
+  renderShots, revertOverride, saveOverride, setShotTarget, showInScript,
 } from "../actions";
 import { errText } from "../api";
 import { api, host } from "../host";
@@ -423,6 +423,21 @@ function OverrideEditor({ d, shot }: { d: ShotDetail; shot: string }) {
           onClick={() => confirm(`Remove all of ${shot}'s overrides (both passes, seed, note and target)?`) && void revertOverride(shot, null)}
         >
           Revert all
+        </button>
+      </div>
+      <div className="h3-row h3-wrap">
+        <button
+          className="h3-btn"
+          disabled={!hasOverride || busy}
+          title={hasOverride
+            ? `Move what the script or series config can express (e.g. ${shot}'s target, model, LoRAs, steps) into them; the rest stays an override`
+            : `${shot} has no override`}
+          onClick={() => openPromote(shot)}
+        >
+          <i className="pi pi-upload" /> Promote…
+        </button>
+        <button className="h3-btn" title={`Open the script at ${shot}'s lines`} onClick={() => showInScript(shot)}>
+          <i className="pi pi-file-edit" /> Show in script
         </button>
       </div>
       {dirty && <div className="h3-small h3-muted">Unsaved edits. Render and Redo use the saved override; the Redo dialog can save these for you.</div>}

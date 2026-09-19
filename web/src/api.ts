@@ -26,6 +26,7 @@ import type {
   PickRequest, Ref, RefDefaults, RefDiscardRequest, RefGenerateMissingRequest, RefGenerateMissingResult, RefGenerateRequest,
   RefGenerateResult, RefImportRequest, RefKeyframeRequest, RefList, RefOverrideInfo, RefOverrideRequest, RefPickRequest,
   RefTake, RefUploadRequest, RenderRequest, RenderResult, Seed, ShotDetail, TakeRef, TargetKind, TargetList,
+  PromoteHashes, PromotePlan, PromoteResult, SourceCheck, SourceDoc, SourceFile, SourceHash, SourceSaveRequest, SourceSaveResult,
 } from "./types";
 import { comboChoices } from "./lib/targets";
 
@@ -102,6 +103,20 @@ export interface Api {
   widgetChoices(classType: string, field: string): Promise<string[] | null>;
   /** GET /h3pipe/models: one model param's files, matching the target's family first. */
   modelFiles(target: string, param: string, ep?: string | null): Promise<ModelList>;
+  /** Phase 9a: GET /h3pipe/source: the script or the series config, with its hash. */
+  source(ep: string, file: SourceFile): Promise<SourceDoc>;
+  /** GET /h3pipe/source?…&hash_only=1: has the file changed on disk? */
+  sourceHash(ep: string, file: SourceFile): Promise<SourceHash>;
+  /** POST /h3pipe/source/check: parse and check `text` without writing it. */
+  checkSource(ep: string, file: SourceFile, text: string): Promise<SourceCheck>;
+  /** PUT /h3pipe/source: 409 (ApiError.data = {error, hash, text}) when the file
+   * changed since `base_hash`; 400 for a series config that isn't JSON. */
+  putSource(req: SourceSaveRequest): Promise<SourceSaveResult>;
+  /** GET /h3pipe/promote: what the authored files can take from the overrides. */
+  promotePlan(ep: string, shot?: string | null): Promise<PromotePlan>;
+  /** POST /h3pipe/promote: 409 when either file changed since the plan; 400 for
+   * an id the plan (for the same `shot`) doesn't offer. */
+  promote(ep: string, items: string[] | "all", hashes: PromoteHashes, shot?: string | null): Promise<PromoteResult>;
 }
 
 /** A ref override route's answer: the (effective) override values, plus `stale`. */
@@ -120,7 +135,8 @@ export function targetsQuery(opts?: TargetKind | TargetsQuery): TargetsQuery {
 }
 
 export class ApiError extends Error {
-  constructor(message: string, public status: number, public route: string) {
+  /** `data`: the error response's JSON body, when it had one (a 409's `{hash, text}`). */
+  constructor(message: string, public status: number, public route: string, public data?: unknown) {
     super(message);
     this.name = "ApiError";
   }
@@ -202,7 +218,7 @@ function answer<T>(method: string, route: string, status: number, statusText: st
         : status === 404 && route.startsWith("/h3pipe/") && data === undefined
           ? `${route} isn't there (HTTP 404). Is the h3pipe node pack loaded and up to date?`
           : `${method} ${route} failed: HTTP ${status} ${statusText}`.trim();
-    throw new ApiError(msg, status, route);
+    throw new ApiError(msg, status, route, data);
   }
   if (data === undefined && text) {
     throw new ApiError(`${method} ${route} answered with something that isn't JSON.`, status, route);
@@ -356,6 +372,12 @@ export function createHttpApi(t: Transport): Api {
         files: Array.isArray(r?.files) ? r.files : [],
       };
     },
+    source: (ep, file) => get(`/h3pipe/source?${qs({ ep, file })}`),
+    sourceHash: (ep, file) => get(`/h3pipe/source?${qs({ ep, file, hash_only: "1" })}`),
+    checkSource: (ep, file, text) => call("POST", "/h3pipe/source/check", { ep, file, text }),
+    putSource: (req) => call("PUT", "/h3pipe/source", req),
+    promotePlan: (ep, shot) => get(`/h3pipe/promote?${qs({ ep, shot: shot || undefined })}`),
+    promote: (ep, items, hashes, shot) => call("POST", "/h3pipe/promote", shot ? { ep, items, hashes, shot } : { ep, items, hashes }),
     comfyQueue: async () => {
       const q = await get<{ queue_running?: unknown[][]; queue_pending?: unknown[][] }>("/queue");
       const ids = (xs?: unknown[][]) => (xs ?? []).map((x) => String(x[1]));

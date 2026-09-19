@@ -1,6 +1,6 @@
 import { memo, useMemo, useState, type MouseEvent } from "react";
 import {
-  build, loadEpisodes, openBrowse, openInspector, openMenu, openViewer, pickTake, playAll, refreshEpisode,
+  build, loadEpisodes, openBrowse, openInspector, openMenu, openSource, openViewer, pickTake, playAll, refreshEpisode,
   requestRender, select, selectEpisode, setPass, toggleExpanded, toggleSequence,
 } from "../actions";
 import { host } from "../host";
@@ -361,6 +361,8 @@ export function ShotsTab() {
         <span className="h3-title">Shots</span>
         {ep && (
           <span className="h3-row">
+            <button className="h3-btn h3-icon" title="Edit the episode's script" onClick={() => openSource("script")}><i className="pi pi-file-edit" /></button>
+            <button className="h3-btn h3-icon" title="Edit the series config (series.json)" onClick={() => openSource("series")}><i className="pi pi-book" /></button>
             <button className="h3-btn h3-icon" title="Inspect the selected shot" onClick={() => openInspector()}><i className="pi pi-sliders-h" /></button>
             <button className="h3-btn h3-icon" title="Play all: the cut from its takes" onClick={() => playAll()}><i className="pi pi-play" /></button>
             <button className="h3-btn h3-icon" title="Open the timeline" onClick={() => host().show("timeline")}><i className="pi pi-images" /></button>
