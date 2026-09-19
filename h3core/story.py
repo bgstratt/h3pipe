@@ -198,6 +198,8 @@ def _parse(text: str, subject_ids: set[str],
                 if shot is not None:
                     raise ScriptError(n, line, "`continuous:` belongs under `# sequence`, not a shot")
                 seq["continuous"] = val.lower() in ("yes", "true", "1", "on")
+            elif key in ("size", "audio", "dur", "duration", "pace") and shot is None:
+                raise ScriptError(n, line, f"`{key}:` outside a `## shot`")
             elif key in ("who", "cast", "with", "props"):
                 if shot is None:
                     raise ScriptError(n, line, f"`{key}:` outside a `## shot`")

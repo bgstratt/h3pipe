@@ -1,0 +1,5 @@
+exit 1
+
+  error in size_under_header.md: line 3: `size:` outside a `## shot`
+    | size: close
+

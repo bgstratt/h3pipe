@@ -363,7 +363,7 @@ render command and the review cut treat the episode as one. What changes for an 
   then who is in frame and what they do, the lines with who says them and how, then the
   sound and music. Write `camera:` for a move you want; without it the camera stays still.
 - **Size** comes from the series config's pass blocks, snapped down to a multiple of 64 and
-  kept under 1 MP (1344×768 stays; H3's 480×272 proxy becomes 448×256). Its model, LoRA
+  kept under 1 MP (1344×768 stays; a 480×272 proxy becomes 448×256). Its model, LoRA
   and steps are the target's own: a series written for H3 doesn't hand them H3's.
 
 To try a shot on LTX without touching the script, retarget it from the editor or with
