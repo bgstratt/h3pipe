@@ -11,14 +11,16 @@
   },
 
   "models": {
-    "_note": "Glob patterns (case-insensitive) naming the files each model parameter of the binding takes, for the model identification that reads them; `family` is its id for the file header check (high vs low noise is decided by the name: the headers are identical).",
+    "_note": "Glob patterns (case-insensitive) naming the files each model parameter of the binding takes, for the model identification that reads them; `family` is its id for the file header check (high vs low noise is decided by the name: the headers are identical). Tiers (docs/API.md): all required; no accelerator, so no `base`.",
     "model": {"patterns": ["wan2.2_ti2v_5B*", "*wan2*2*ti2v*5b*"], "family": "wan2.2-ti2v-5b",
-             "class_type": "UNETLoader", "field": "unet_name"},
+             "class_type": "UNETLoader", "field": "unet_name", "tier": "required"},
     "text_encoder": {"patterns": ["umt5_xxl*", "*umt5*"], "family": "umt5-xxl",
-                    "class_type": "CLIPLoader", "field": "clip_name"},
+                    "class_type": "CLIPLoader", "field": "clip_name", "tier": "required"},
     "vae": {"patterns": ["wan2.2_vae*", "*wan2*2*vae*"], "family": "wan2.2-vae",
-           "class_type": "VAELoader", "field": "vae_name"}
+           "class_type": "VAELoader", "field": "vae_name", "tier": "required"}
   },
+
+  "nodes": ["LoadImage"],
 
   "template": {
     "_note": "Wan 2.2 5B (TI2V) renders 4k+1 frames at 24 fps (the user's saved workflow saves at 24; the model card's 121 frames = 5 s at 24 fps is what it was trained on, so a longer shot is a warning, and past 241 frames, 10 s, it must be split). Width and height are multiples of 32 (Wan22ImageToVideoLatent's step: the 5B VAE compresses 16x); sizes that aren't legal are snapped down, then shrunk under 1280x704 (the model's optimal size).",
@@ -95,5 +97,12 @@
       "text_encoder": "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
       "vae": "wan2.2_vae.safetensors"
     }
+  },
+
+  "downloads": {
+    "_note": "Where to get each file this target names (docs/API.md 'Downloads'). A url is only given when a trustworthy record has it: a ComfyUI template's or saved workflow's properties.models entry, or ComfyUI-Manager's model list; `source` says which. Otherwise url is null and source says what to search for. Never a guessed URL.",
+    "wan2.2_ti2v_5B_fp16.safetensors": {"folder": "diffusion_models", "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/diffusion_models/wan2.2_ti2v_5B_fp16.safetensors", "source": "ComfyUI template video_wan2_2_5B_ti2v.json (properties.models)"},
+    "umt5_xxl_fp8_e4m3fn_scaled.safetensors": {"folder": "text_encoders", "url": "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors", "source": "ComfyUI template video_wan2_2_5B_ti2v.json (properties.models)"},
+    "wan2.2_vae.safetensors": {"folder": "vae", "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/vae/wan2.2_vae.safetensors", "source": "ComfyUI template video_wan2_2_5B_ti2v.json (properties.models)"}
   }
 }

@@ -105,6 +105,13 @@ FAMILIES: dict[str, dict] = {
     "umt5-xxl": {"label": "UMT5-XXL (Wan's text encoder)"},
     # Krea 2
     "krea2": {"label": "Krea 2"},
+    "qwen3vl-4b": {"label": "Qwen3-VL 4B (Krea 2's text encoder)"},
+    # LoRAs and other add-ons: no header signature (a LoRA's tensors are the
+    # layers it patches, not a model), so only their names identify them
+    "minimax-h3-ref2v-turbo-lora": {"label": "MiniMax H3 Ref2V turbo LoRA"},
+    "minimax-h3-fl2v-turbo-lora": {"label": "MiniMax H3 FL2V turbo LoRA"},
+    "ltx2.3-ic-lora-ingredients": {"label": "LTX 2.3 ingredients IC-LoRA"},
+    "wan2.2-i2v-lightx2v-lora": {"label": "Wan 2.2 I2V lightx2v 4-step LoRA"},
 }
 
 # Signatures, first match wins (so a checkpoint, which carries VAEs too, is
@@ -229,6 +236,18 @@ def ancestors(fid: str) -> list[str]:
 
 def children(fid: str) -> list[str]:
     return [k for k, v in FAMILIES.items() if v.get("parent") == fid]
+
+
+def has_signature(fid: str) -> bool:
+    """True if a file's header can say it is `fid` (the family, one of its
+    parents, or a variant a signature tells apart). A family without one
+    (a LoRA) is only ever known by its name, so reading headers to find one
+    is pointless."""
+    fams = {fid, *ancestors(fid)}
+    for sig in SIGNATURES:
+        if sig["family"] in fams or any(v["family"] in fams for v in sig.get("variants") or []):
+            return True
+    return False
 
 
 def relation(found: str | None, wanted: str) -> str:

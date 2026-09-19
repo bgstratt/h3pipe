@@ -408,6 +408,31 @@ def set_shot_target(data: dict, shot_id: str, target: str | None) -> dict:
     return data
 
 
+def episode_target(data: dict) -> str | None:
+    """The episode's video target set in the editor (overrides.json's
+    top-level {"episode": {"target": "<id>"}}), or None. It is the default of
+    every shot the script gives no target of its own (h3jobs.target_choice).
+    An older file's "episode" is just the episode's name: no target."""
+    ep = data.get("episode")
+    t = ep.get("target") if isinstance(ep, dict) else None
+    return t if isinstance(t, str) and t else None
+
+
+def set_episode_target(data: dict, target: str | None, name: str = "") -> dict:
+    """Set (or with None clear) the episode target. The "episode" key held
+    the episode's name before; it is kept as "id" beside the target, and the
+    plain name comes back when the target is cleared."""
+    ep = data.get("episode")
+    ident = (ep.get("id") if isinstance(ep, dict) else ep) or name or ""
+    if target:
+        data["episode"] = {"id": ident, "target": target} if ident else {"target": target}
+    elif ident:
+        data["episode"] = ident
+    else:
+        data.pop("episode", None)
+    return data
+
+
 def set_override(data: dict, shot_id: str, pass_: str | None = None,
                  target: str = DEFAULT_TARGET, **fields) -> dict:
     """Set fields on one shot's override. Pass-level fields need `pass_`.

@@ -61,15 +61,20 @@
   },
 
   "models": {
-    "_note": "The family each model param must be (targets/modelid.py): names first, then the file's header. FL2VA and Ref2VA share every tensor, so a file named neither is accepted as H3 with a note, and one named Ref2VA is refused.",
-    "model": {"family": "minimax-h3-fl2va", "patterns": ["*h3*fl2v*", "*fl2va*"]},
-    "text_encoder": {"family": "qwen3vl-32b", "patterns": ["*qwen3*vl*32b*"]},
-    "video_vae": {"family": "minimax-h3-video-vae", "patterns": ["*h3*video*vae*"]},
-    "audio_vae": {"family": "minimax-h3-audio-vae", "patterns": ["*h3*audio*vae*"]}
+    "_note": "The family each model param must be (targets/modelid.py): names first, then the file's header. FL2VA and Ref2VA share every tensor, so a file named neither is accepted as H3 with a note, and one named Ref2VA is refused. Tiers (docs/API.md): the turbo LoRA is an accelerator (without it the pass renders its `base`), the rest are required. A substitute LoRA keeps the wanted one's step count and is never the SLA LoRA (it needs the block-sparse attention node).",
+    "model": {"family": "minimax-h3-fl2va", "patterns": ["*h3*fl2v*", "*fl2va*"], "tier": "required"},
+    "loras": {"family": "minimax-h3-fl2v-turbo-lora", "patterns": ["*h3*fl2v*turbo*", "*h3*fl2v*lightx2v*"],
+              "tier": "accelerator", "keep": ["(\\d+)[_-]?steps?"], "exclude": ["*sla*"],
+              "class_type": "LoraLoaderModelOnly", "field": "lora_name", "folder": "loras"},
+    "text_encoder": {"family": "qwen3vl-32b", "patterns": ["*qwen3*vl*32b*"], "tier": "required"},
+    "video_vae": {"family": "minimax-h3-video-vae", "patterns": ["*h3*video*vae*"], "tier": "required"},
+    "audio_vae": {"family": "minimax-h3-audio-vae", "patterns": ["*h3*audio*vae*"], "tier": "required"}
   },
 
+  "nodes": ["LoadImage", "LoadAudio", "MiniMaxH3AddGuide"],
+
   "presets": {
-    "_note": "Turbo LoRA per pass, as H3 Ref2VA: the final uses lightx2v's 8-step FL2V v1.0 with res_multistep (ComfyUI's H3 t2v template, lightning branch); the proxy the 4-step v0.1 with euler (the user's own 4-step H3 workflows). Not the SLA LoRA: it is co-distilled with block-sparse attention and needs that node. The series config's pass blocks override model, LoRA and steps only when this is the series target; otherwise only their size carries over.",
+    "_note": "Turbo LoRA per pass, as H3 Ref2VA: the final uses lightx2v's 8-step FL2V v1.0 with res_multistep (ComfyUI's H3 t2v template, lightning branch); the proxy the 4-step v0.1 with euler (the user's own 4-step H3 workflows). Not the SLA LoRA: it is co-distilled with block-sparse attention and needs that node. The series config's pass blocks override model, LoRA and steps only when this is the series target; otherwise only their size carries over. `base` (no turbo LoRA installed): no LoRA, 20 steps, res_multistep, no CFG: ComfyUI's H3 i2v / t2v templates' full branch (the subgraph's 'Int' 20 behind 'If/Else Switch (Steps)', KSamplerSelect res_multistep, BasicGuider), which is also this workflow's own BasicScheduler value.",
     "final": {
       "model": "minimax_h3_fl2va_pruned_int8_convrot.safetensors",
       "lora": "minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors",
@@ -77,7 +82,8 @@
       "sampler": "res_multistep",
       "text_encoder": "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
       "video_vae": "minimax_h3_video_vae_fp16.safetensors",
-      "audio_vae": "minimax_h3_audio_vae_fp32.safetensors"
+      "audio_vae": "minimax_h3_audio_vae_fp32.safetensors",
+      "base": {"loras": [], "steps": 20, "sampler": "res_multistep"}
     },
     "proxy": {
       "lora": "minimax_h3_fl2v_lightx2v_turbo_4step_v0.1_comfy.safetensors",
@@ -85,7 +91,18 @@
       "sampler": "euler",
       "text_encoder": "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
       "video_vae": "minimax_h3_video_vae_fp16.safetensors",
-      "audio_vae": "minimax_h3_audio_vae_fp32.safetensors"
+      "audio_vae": "minimax_h3_audio_vae_fp32.safetensors",
+      "base": {"loras": [], "steps": 20, "sampler": "res_multistep"}
     }
+  },
+
+  "downloads": {
+    "_note": "Where to get each file this target names (docs/API.md 'Downloads'). A url is only given when a trustworthy record has it: a ComfyUI template's or saved workflow's properties.models entry, or ComfyUI-Manager's model list; `source` says which. Otherwise url is null and source says what to search for. Never a guessed URL.",
+    "minimax_h3_audio_vae_fp32.safetensors": {"folder": "vae", "url": "https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/vae/minimax_h3_audio_vae_fp32.safetensors", "source": "ComfyUI template video_minimax_h3_i2v.json (properties.models)"},
+    "minimax_h3_fl2v_lightx2v_turbo_4step_v0.1_comfy.safetensors": {"folder": "loras", "url": null, "source": "no URL: no ComfyUI template, saved workflow or ComfyUI-Manager model list on this machine records this file. Search Hugging Face for its exact name (lightx2v's MiniMax H3 FL2V 4-step turbo LoRA v0.1, ComfyUI conversion)."},
+    "minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors": {"folder": "loras", "url": "https://huggingface.co/lightx2v/Minimax-h3-Turbo/resolve/main/minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors", "source": "ComfyUI template video_minimax_h3_i2v.json (properties.models)"},
+    "minimax_h3_fl2va_pruned_int8_convrot.safetensors": {"folder": "diffusion_models", "url": "https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/diffusion_models/minimax_h3_fl2va_pruned_int8_convrot.safetensors", "source": "ComfyUI template video_minimax_h3_i2v.json (properties.models)"},
+    "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors": {"folder": "text_encoders", "url": "https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/text_encoders/qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors", "source": "ComfyUI template video_minimax_h3_i2v.json (properties.models)"},
+    "minimax_h3_video_vae_fp16.safetensors": {"folder": "vae", "url": "https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/vae/minimax_h3_video_vae_fp16.safetensors", "source": "ComfyUI template video_minimax_h3_i2v.json (properties.models)"}
   }
 }

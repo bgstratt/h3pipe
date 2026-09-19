@@ -37,6 +37,16 @@ you have. Everything else in the pipeline is model-agnostic.
 
 ## Models
 
+**Models you need per target.** Each target lists the files it needs, and a download link
+for each one it has a trustworthy record of, in its `target.json` (`models`: what each file
+is and its tier, required / accelerator / optional; `downloads`: the folder and the link).
+With ComfyUI running, `python h3.py targets` checks the install: one line per target
+(`ready`, `degraded`, `not_ready`) and, under it, every missing file with its models folder
+and link. The editor's target picker shows the same. See **Which model? Readiness and
+downloads** in [docs/AUTHORING.md](docs/AUTHORING.md).
+
+The default target, H3 Ref2VA:
+
 | Role | File used here |
 |---|---|
 | H3 Ref2VA unet | `minimax_h3_ref2va_pruned_int8_convrot.safetensors` |

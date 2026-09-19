@@ -616,21 +616,12 @@ class Comfy:
         from urllib.parse import quote
         return ctype in (self._json(f"/object_info/{quote(ctype, safe='')}", timeout=30) or {})
 
-    def choices(self, ctype: str, field_name: str) -> list[str] | None:
+    def choices(self, ctype: str, field_name: str, strict: bool = False) -> list[str] | None:
         """The values a combo widget offers in the running ComfyUI (e.g. the
         files ModelPatchLoader can load), or None when the node isn't known."""
         from urllib.parse import quote
-        info = (self._json(f"/object_info/{quote(ctype, safe='')}", timeout=30) or {}).get(ctype)
-        if info is None:
-            return None
-        inputs = info.get("input") or {}
-        spec = (inputs.get("required") or {}).get(field_name) \
-            or (inputs.get("optional") or {}).get(field_name) or []
-        if spec and isinstance(spec[0], list):             # [[choices], {...}]
-            return [str(c) for c in spec[0]]
-        if len(spec) > 1 and isinstance(spec[1], dict):    # ["COMBO", {"options": [...]}]
-            return [str(c) for c in spec[1].get("options") or []]
-        return []
+        info = self._json(f"/object_info/{quote(ctype, safe='')}", timeout=30) or {}
+        return choices_in(info, ctype, field_name, strict)
 
     def view(self, img: dict) -> bytes:
         """The bytes of an output image, as /history lists it ({filename,
@@ -699,6 +690,26 @@ class Comfy:
             self._json("/interrupt", {"prompt_id": prompt_id} if prompt_id else {})
         except Exception:
             pass
+
+
+def choices_in(object_info: dict, ctype: str, field_name: str,
+               strict: bool = False) -> list[str] | None:
+    """The values a combo widget offers, from /object_info (all of it, or
+    /object_info/<ctype>'s answer); None when the node class isn't there
+    (`strict`: or has no such input, so nothing can be said about it)."""
+    info = (object_info or {}).get(ctype)
+    if info is None:
+        return None
+    inputs = info.get("input") or {}
+    spec = (inputs.get("required") or {}).get(field_name) \
+        or (inputs.get("optional") or {}).get(field_name) or []
+    if not spec and strict:
+        return None
+    if spec and isinstance(spec[0], list):             # [[choices], {...}]
+        return [str(c) for c in spec[0]]
+    if len(spec) > 1 and isinstance(spec[1], dict):    # ["COMBO", {"options": [...]}]
+        return [str(c) for c in spec[1].get("options") or []]
+    return []
 
 
 def execution_error(entry: dict | None) -> str | None:
@@ -915,7 +926,7 @@ class Job:
     shot: dict                         # the entry it renders (built, or retargeted)
     doc: dict                          # its shotlist (built, or the retarget's)
     folder: str | None
-    action: str                        # render | redo | retry | overwrite | skip | busy | blocked | error | mismatch
+    action: str                        # render | redo | retry | overwrite | skip | busy | blocked | error | mismatch | missing_files
     take: int                          # predicted; reserve_take has the final say
     seed: int
     seed_source: str                   # stable | new | same | override | typed
@@ -955,6 +966,17 @@ class Job:
     model_checks: list = field(default_factory=list)
     model_notes: list = field(default_factory=list)     # check_models' notes (replaced on a re-check)
     mismatch_from: str = ""            # the action a "mismatch" job had before the check
+    # resolve_models: the installed file each model param renders with
+    # ({param: {"want", "using", "how", "tier"}}; {} when not resolved),
+    # the required files that aren't installed (action "missing_files"),
+    # and values that replace the shotlist's in the graph (a substitute text
+    # encoder, the base preset's cfg / sampler)
+    resolved: dict = field(default_factory=dict)
+    missing_files: list = field(default_factory=list)
+    values: dict = field(default_factory=dict)
+    based: bool = False                # an accelerator is missing: the base preset renders
+    steps_set: bool = False            # steps came from the request or overrides.json
+    target_source: str = ""            # request | override | script | episode | series | default
 
     @property
     def id(self) -> str:
@@ -966,7 +988,12 @@ class Job:
 
     @property
     def runs(self) -> bool:
-        return self.action not in ("skip", "busy", "blocked", "error", "mismatch")
+        return self.action not in ("skip", "busy", "blocked", "error", "mismatch",
+                                   "missing_files")
+
+    def missing_files_note(self) -> str:
+        """Why resolve_models stopped the job ("" if it didn't)."""
+        return "; ".join(TG.missing_message(m) for m in self.missing_files)
 
     @property
     def retargeted(self) -> bool:
@@ -1014,10 +1041,103 @@ def check_video_target(target_id: str) -> str:
 
 
 def effective_target(overrides: dict | None, shot_id: str, built: str,
-                     requested: str | None = None) -> str:
-    """The video target a shot's next render uses: the request, then the
-    shot's `target` in overrides.json, then what the build compiled it for."""
-    return requested or T.shot_target(overrides or {}, shot_id) or built
+                     requested: str | None = None, root: str | None = None) -> str:
+    """The video target a shot's next render uses (target_choice)."""
+    return target_choice(overrides, shot_id, built, requested, root)[0]
+
+
+def target_choice(overrides: dict | None, shot_id: str, built: str,
+                  requested: str | None = None, root: str | None = None) -> tuple[str, str]:
+    """(the video target a shot's next render uses, where it comes from).
+
+    Precedence: the request ("request") -> the shot's `target` in
+    overrides.json ("override") -> the script's `target:` line or a profile's
+    target, on the shot or its sequence ("script") -> the episode target in
+    overrides.json ("episode") -> the series config's `series.target`
+    ("series"), else the default ("default"). A shot on neither of the last
+    two renders what its build compiled. Without `root` (the episode folder)
+    the episode target and the sources past "override" aren't known: the
+    build's target, source ""."""
+    if requested:
+        return requested, "request"
+    t = T.shot_target(overrides or {}, shot_id)
+    if t:
+        return t, "override"
+    if root is None:
+        return built, ""
+    series = series_target(root)
+    script = script_targets(root)
+    if script is not None and shot_id in script:
+        st = script[shot_id]
+    else:
+        # no current shots.json to ask: a build target other than the series
+        # config's can only have come from the script
+        st = built if built != (series or TG.DEFAULT_VIDEO_TARGET) else None
+    if st:
+        return st, "script"
+    ep = T.episode_target(overrides or {})
+    if ep:
+        return ep, "episode"
+    return built, ("series" if series else "default")
+
+
+def series_config(root: str) -> dict | None:
+    """The series config beside the episode (or in its parent), parsed
+    (None: none, or unreadable)."""
+    for d in (root, os.path.dirname(os.path.normpath(root))):
+        p = os.path.join(d, "series.json")
+        if os.path.isfile(p):
+            cfg = T.read_json(p)
+            return cfg if isinstance(cfg, dict) else None
+    return None
+
+
+def series_target(root: str) -> str | None:
+    """The series config's `series.target` (None: it sets none)."""
+    t = ((series_config(root) or {}).get("series") or {}).get("target")
+    return t if isinstance(t, str) and t else None
+
+
+_SCRIPT_TARGETS: dict = {}
+
+
+def script_targets(root: str) -> dict[str, str | None] | None:
+    """{shot id: the target the script gives it (a `target:` line or a
+    profile's target, on the shot or its sequence), or None} from
+    shotlist/shots.json and the series config's profiles; None when they
+    can't be read. Cached per file version."""
+    sj = os.path.join(root, "shotlist", "shots.json")
+    try:
+        key = (os.path.normcase(os.path.abspath(root)), os.stat(sj).st_mtime_ns)
+    except OSError:
+        return None
+    cfg_path = next((os.path.join(d, "series.json")
+                     for d in (root, os.path.dirname(os.path.normpath(root)))
+                     if os.path.isfile(os.path.join(d, "series.json"))), None)
+    try:
+        key += (os.stat(cfg_path).st_mtime_ns,) if cfg_path else (None,)
+    except OSError:
+        key += (None,)
+    if key in _SCRIPT_TARGETS:
+        return _SCRIPT_TARGETS[key]
+    out = None
+    try:
+        from h3core import ir
+        with open(sj, encoding="utf-8") as fh:
+            story = ir.Episode.loads(fh.read())
+        cfg = (T.read_json(cfg_path) or {}) if cfg_path else {}
+        profiles = TG.series_profiles(cfg)
+        out = {}
+        for sq in story.sequences:
+            seq = {"id": sq.id, "profile": sq.profile, "target": sq.target}
+            for s in sq.shots:
+                shot = {"id": s.id, "profile": s.profile, "target": s.target}
+                out[s.id] = TG.layered(TG.render_layers(cfg, seq, shot, profiles), "target")
+    except Exception:
+        out = None
+    _SCRIPT_TARGETS.clear()                      # one episode's worth is enough
+    _SCRIPT_TARGETS[key] = out
+    return out
 
 
 def plan_job(root: str, pass_: str, doc: dict, index: int, req: RenderRequest,
@@ -1026,7 +1146,7 @@ def plan_job(root: str, pass_: str, doc: dict, index: int, req: RenderRequest,
     built = doc["shots"][index]
     sid = built["id"]
     built_target = shotlist_target(doc)
-    target_id = effective_target(overrides, sid, built_target.id, req.target)
+    target_id, target_source = target_choice(overrides, sid, built_target.id, req.target, root)
     shot, sdoc, notes, error = built, doc, [], ""
     if target_id != built_target.id:
         # retarget: this shot's IR compiled for the other target, now
@@ -1058,14 +1178,16 @@ def plan_job(root: str, pass_: str, doc: dict, index: int, req: RenderRequest,
         take = last + 1
         action = "redo" if usable else ("retry" if here else "render")
 
-    overridden = []
+    overridden, explicit = [], set()
 
     def pick(name, built_value, from_req):
         """request beats override beats built"""
         if from_req is not None:
+            explicit.add(name)
             return from_req
         if name in ov:
             overridden.append(name)
+            explicit.add(name)
             return ov[name]
         return built_value
 
@@ -1141,7 +1263,8 @@ def plan_job(root: str, pass_: str, doc: dict, index: int, req: RenderRequest,
                missing=missing, allow_missing=req.allow_missing_refs, target=target.id,
                recompiled=recompiled, missing_mode=missing_mode, missing_why=missing_why,
                built_target=built_target.id, notes=notes, error=error,
-               length_source=length_source, allow_model_mismatch=req.allow_model_mismatch)
+               length_source=length_source, allow_model_mismatch=req.allow_model_mismatch,
+               steps_set="steps" in explicit, target_source=target_source)
 
 
 def estimate_seconds(doc: dict, shot: dict) -> str:
@@ -1256,6 +1379,8 @@ def frozen_shotlist(job: Job) -> dict:
     if job.loras is not None:
         shot["loras"] = copy.deepcopy(job.loras)
         shot.pop("lora", None)
+    # a substitute file, or the base preset's settings (resolve_models)
+    shot.update(copy.deepcopy(job.values))
     if job.missing and job.allow_missing:
         # the loader substitutes a blank image for a missing picture and drops
         # a missing audio reference, instead of failing
@@ -1324,6 +1449,9 @@ def sidecar_for(job: Job) -> dict:
         **({"built_target": job.built_target} if job.retargeted else {}),
         **({"inputs": dict(job.inputs)} if job.inputs else {}),
         **({"notes": list(job.notes)} if job.notes else {}),
+        # which installed file each model param used (resolve_models)
+        **({"resolved": copy.deepcopy(job.resolved)} if job.resolved else {}),
+        **({"base": True} if job.based else {}),
     }
 
 
@@ -1454,6 +1582,21 @@ def apply_loras(g: dict, loras: list[dict], spec: dict | None = None) -> None:
         g[k]["inputs"][name] = [prev, 0]
 
 
+def remove_loras(g: dict, spec: dict | None = None) -> None:
+    """Take the binding's LoRA loaders (class, and `title` when the spec has
+    one) out of the graph: whatever read a loader's output reads what fed its
+    `input` instead."""
+    spec = dict(DEFAULT_LORA_SPEC, **(spec or {}))
+    title, link = spec.get("title"), spec["input"]
+    ids = [k for k, v in g.items() if v["class_type"] == spec["class_type"]
+           and (not title or (v.get("_meta") or {}).get("title") == title)]
+    for nid in ids:
+        src = g[nid]["inputs"].get(link)
+        for k, name in _consumers(g, nid):
+            g[k]["inputs"][name] = list(src) if isinstance(src, list) else src
+        del g[nid]
+
+
 def lora_stage(lora: dict) -> str | None:
     """The sampling stage a LoRA belongs to in a two-stage graph: its own
     `stage`, else from its name (Wan 2.2 LoRAs come in `*high_noise*` /
@@ -1547,6 +1690,8 @@ def job_values(job: Job) -> dict:
     for name in job_target(job).binding.params:
         if name not in vals and name not in JOB_PARAMS:
             vals[name] = job.shot.get(name, d.get(name))
+    # resolve_models' substitutes and the base preset's settings win
+    vals.update({k: v for k, v in job.values.items() if k not in JOB_PARAMS})
     return vals
 
 
@@ -1616,7 +1761,13 @@ def graph_for(base: dict, job: Job, take: T.Take, *, panel_mode: str | None = No
     if job.loras is not None:
         # one chain per spec: a two-stage binding lists one per stage
         for spec in b.specs("loras") or [None]:
-            apply_loras(g, loras_for(job.loras, spec or {}), spec)
+            mine = loras_for(job.loras, spec or {})
+            if not mine and job.based:
+                # the base preset: the accelerator LoRA isn't installed, so
+                # its loader must go (at strength 0 it would still load it)
+                remove_loras(g, spec)
+            else:
+                apply_loras(g, mine, spec)
     patch_param(g, b, "steps", job.steps)
     patch_param(g, b, "seed", job.seed)
     for name, value in job_values(job).items():
@@ -1696,6 +1847,8 @@ DURATION_NODE = "LTXVDurationPredictor"
 
 def duration_head_file(job: Job) -> str:
     """The duration head a job's target preset names ("" if none)."""
+    if job.values.get("duration_head"):                 # another installed head (resolve_models)
+        return str(job.values["duration_head"])
     p = job_target(job).presets.get(job.pass_)
     return str(job.shot.get("duration_head") or (p.extra.get("duration_head") if p else "")
                or "")
@@ -1813,7 +1966,9 @@ def model_values(job: Job) -> dict[str, str]:
     preset = t.presets.get(job.pass_) or t.presets.get("final")
     final = t.presets.get("final")
     out = {}
-    for param in t.models:
+    for param, m in t.models.items():
+        if param == "loras":                            # a list: resolve_models reads job.loras
+            continue
         if param == "model":
             v = job.model
         elif param == "duration_head":
@@ -1823,9 +1978,91 @@ def model_values(job: Job) -> dict[str, str]:
             for p in (preset, final):
                 if not v and p is not None:
                     v = p.extra.get(param)
+            # the file the workflow loads on its own (H3 Ref2VA's text encoder)
+            v = v or m.get("default")
         if isinstance(v, str) and v:
             out[param] = v
     return out
+
+
+def model_lister(comfy=None, model_list=None):
+    """listing(spec) for resolve_models: the files ComfyUI offers for a models
+    spec, or None when that can't be known (then the param is left alone).
+    `model_list(folder, class_type, field)` (the routes: ComfyUI's
+    folder_paths) wins; else the loader's choices from `comfy`'s
+    /object_info/<class> (the CLI), asked once per class."""
+    asked: dict = {}
+
+    def listing(spec: dict):
+        if model_list is not None:
+            return model_list(spec.get("folder"), spec.get("class_type"), spec.get("field"))
+        if comfy is None or not hasattr(comfy, "choices"):
+            return None
+        key = (spec.get("class_type"), spec.get("field"))
+        if not all(key):
+            return None
+        if key not in asked:
+            try:
+                asked[key] = comfy.choices(*key, strict=True)
+            except Exception:
+                asked[key] = None
+        return asked[key]
+    return listing
+
+
+def resolve_models(job: Job, listing=None, resolve=DEFAULT, cache=DEFAULT,
+                   extra: dict | None = None) -> dict:
+    """Pick the installed file each model param of `job` renders with, before
+    its take is reserved (targets.resolve_models): the wanted file if
+    installed, else the best installed file of its family; an accelerator
+    (turbo LoRA) that isn't installed switches the pass to its `base` preset
+    (steps, cfg, sampler, no LoRA: the loader leaves the graph); a missing
+    optional file turns its feature off; a missing required file makes the
+    job "missing_files" (it doesn't run; job.missing_files says what to
+    download). `listing` is model_lister's (None: nothing is resolved, as
+    before). Records job.resolved (the sidecar's `resolved`) and notes.
+    Returns targets.resolve_models' answer ({} when not run)."""
+    if listing is None or not job.runs:
+        return {}
+    if resolve is DEFAULT:
+        resolve = model_resolver()
+    if cache is DEFAULT:
+        cache = TG.modelid.temp_cache()
+    if extra is None:
+        try:
+            extra = series_model_families(job.root)
+        except ValueError:
+            extra = {}
+    t = job_target(job)
+    wanted = dict(model_values(job))
+    if job.loras is not None:
+        wanted["loras"] = [dict(lo) for lo in job.loras]
+    slot = TG.lora_slot(t, job.pass_, None, job.doc.get("defaults") or {})
+    r = TG.resolve_models(t, job.pass_, wanted, listing, resolve, extra, cache, slot)
+    job.resolved = r["resolved"]
+    for param, using in r["files"].items():
+        if param == "model":
+            job.model = using
+        else:
+            job.values[param] = using
+    if r["loras"] is not None:
+        job.loras = r["loras"]
+    if r["base"] is not None:
+        job.based = True
+        base_steps = r["base"].get("steps")
+        if base_steps is not None:
+            if job.steps_set:
+                job.notes.append(f"steps {job.steps} kept (set for this shot), though the base "
+                                 f"preset says {base_steps}")
+            else:
+                job.steps = int(base_steps)
+        job.values.update({k: v for k, v in r["values"].items() if k != "steps"})
+    # the duration head's own note comes from plan_duration
+    job.notes.extend(n for n in r["notes"] if "duration_head" not in n)
+    if r["blocked"]:
+        job.missing_files = r["blocked"]
+        job.action = "missing_files"
+    return r
 
 
 def check_models(job: Job, resolve=DEFAULT, cache=DEFAULT,

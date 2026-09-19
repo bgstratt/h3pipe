@@ -432,7 +432,12 @@ def stage_inputs(target, job, comfy=None) -> dict:
         job.notes.append(f"no reference sheet: nothing to put on it, so {target.short} "
                          f"renders this shot text-only, without the IC-LoRA")
         return {}
-    if job.loras is not None and IC_LORA not in [lo.get("name") for lo in job.loras]:
+    # the IC-LoRA by name, or another installed file of its family that
+    # h3jobs.resolve_models put in its place
+    ic_pats = (target.models.get("loras") or {}).get("patterns") or []
+    if job.loras is not None and not any(
+            lo.get("name") == IC_LORA or TG.modelid.name_matches(lo.get("name") or "", ic_pats)
+            for lo in job.loras):
         # a script line or profile written for another model named the LoRAs
         # (`lora: none` included): the sheet means nothing without this one
         job.loras = [{"name": IC_LORA, "strength": 1.0}] + list(job.loras)
@@ -493,6 +498,8 @@ def patch_graph(target, g: dict, job, inputs: dict) -> None:
         _splice(g, k, {0: "positive", 1: "negative", 2: "latent"})
     for k in _of(g, "LTXVCropGuides"):
         _splice(g, k, {0: "positive", 1: "negative", 2: "latent"})
+    ic_pats = (target.models.get("loras") or {}).get("patterns") or []
     for k in _of(g, "LoraLoaderModelOnly"):
-        if g[k]["inputs"].get("lora_name") == IC_LORA:
+        name = g[k]["inputs"].get("lora_name")
+        if name == IC_LORA or (isinstance(name, str) and TG.modelid.name_matches(name, ic_pats)):
             _splice(g, k, {0: "model"})

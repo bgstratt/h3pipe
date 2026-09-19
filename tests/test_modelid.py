@@ -234,16 +234,25 @@ class CheckModelTest(unittest.TestCase):
         return TG.check_model(TG.load_target(tid), param, name, self.resolve, **kw)
 
     def test_targets_declare_their_families(self):
-        want = {"minimax_h3_ref2va": {"model": "minimax-h3-ref2va"},
-                "minimax_h3_fl2va": {"model": "minimax-h3-fl2va", "text_encoder": "qwen3vl-32b",
+        # (the turbo / IC LoRA families and the files a workflow loads on its
+        # own, `default`, were added with the requirement tiers)
+        want = {"minimax_h3_ref2va": {"model": "minimax-h3-ref2va",
+                                      "loras": "minimax-h3-ref2v-turbo-lora",
+                                      "text_encoder": "qwen3vl-32b",
+                                      "video_vae": "minimax-h3-video-vae",
+                                      "audio_vae": "minimax-h3-audio-vae"},
+                "minimax_h3_fl2va": {"model": "minimax-h3-fl2va",
+                                     "loras": "minimax-h3-fl2v-turbo-lora",
+                                     "text_encoder": "qwen3vl-32b",
                                      "video_vae": "minimax-h3-video-vae",
                                      "audio_vae": "minimax-h3-audio-vae"},
                 "ltx2": {"model": "ltx2.5", "text_encoder": "ltx2.5-text-encoder",
                          "video_vae": "ltx2.5-video-vae", "audio_vae": "ltx2.5-audio-vae",
                          "upscaler": "ltx2.5-latent-upscaler",
                          "duration_head": "ltx2.5-duration-head"},
-                "ltx2_ingredients": {"model": "ltx2.3", "text_encoder": "gemma3-12b"},
-                "krea2": {"model": "krea2"}}
+                "ltx2_ingredients": {"model": "ltx2.3", "loras": "ltx2.3-ic-lora-ingredients",
+                                     "text_encoder": "gemma3-12b"},
+                "krea2": {"model": "krea2", "text_encoder": "qwen3vl-4b", "vae": "wan2.1-vae"}}
         for tid, params in want.items():
             t = TG.load_target(tid)
             self.assertEqual({k: v["family"] for k, v in t.models.items()}, params, tid)

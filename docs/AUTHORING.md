@@ -125,6 +125,53 @@ config so the pipeline knows which one it is:
   the target's own patterns; they don't replace them.
 - A matching name is trusted without reading the file, so keep the patterns specific.
 
+### Which model? Readiness and downloads
+
+Run `python h3.py targets` (with ComfyUI running) before you pick a target. It prints one
+line per target, `ready`, `degraded`, `not_ready` or `unknown` (ComfyUI didn't answer),
+and under it every file that target is missing, with the models folder it goes in and
+where to download it:
+
+```
+  ltx2                 degraded   missing 1 optional
+      optional    duration_head ltx-2.5-duration-head-bf16.safetensors  [feature off: dur: model (duration head)]
+                  -> models/model_patches/   https://huggingface.co/Lightricks/LTX-2.5/...
+```
+
+Add an episode (`python h3.py targets Shows\ep05`) to use its series config (the pass
+blocks' model and LoRA, `model_families`) and mark the episode's target. `--json` prints
+the same as data.
+
+- **Required** files (the model, text encoder, VAEs): without one the target can't render.
+  Its shots are skipped when you queue them, and the message names the file, the folder
+  and the download link.
+- **Accelerators** (the turbo LoRAs, LTX 2.3's distilled checkpoint): without one the
+  shot still renders, on the pass's slower `base` settings (more steps, no turbo LoRA),
+  and the take says so.
+- **Optional** files (the LTX duration head): only their feature is off (`dur: model`
+  renders the estimate).
+
+A link is only given when ComfyUI's own templates, your saved workflows or
+ComfyUI-Manager's model list record it. Otherwise the line says to search for the exact
+file name. If you have a file of the same family under another name (another
+precision, a merge), it is used instead, and the take notes which file it was.
+
+**Which target a shot renders on**, most specific first:
+
+1. the render request (the redo dialog, `h3render --target`);
+2. the shot's override (the editor, or `h3.py override Shows\ep05 sh020 --target ltx2`);
+3. the script: a `target:` line, or a profile's target, on the shot or its sequence;
+4. the **episode target** set in the editor, or with
+   `python h3.py override Shows\ep05 --episode-target ltx2` (`built` clears it). It is
+   kept in the episode's `overrides.json`, not in `series.json`. While it is set, a shot
+   can be pinned to its built target from the editor (or `--target built`).
+5. `series.target` in `series.json`;
+6. `minimax_h3_ref2va`.
+
+A shot whose target is not the one it was built for is compiled for its new target when
+it is queued, so you don't need to rebuild. To make an episode target permanent, put
+`"target": "<id>"` in `series.json`'s `series` block and rebuild.
+
 ### Writing the `design` sentence
 
 This is the highest-leverage sentence in the pipeline. It is injected verbatim into every

@@ -11,16 +11,18 @@
   },
 
   "models": {
-    "_note": "Glob patterns (case-insensitive) naming the files each model parameter of the binding takes, for the model identification that reads them; `family` is its id for the file header check (high vs low noise is decided by the name: the headers are identical). `model` is the high noise (first stage) model, `model_low` the low noise one.",
+    "_note": "Glob patterns (case-insensitive) naming the files each model parameter of the binding takes, for the model identification that reads them; `family` is its id for the file header check (high vs low noise is decided by the name: the headers are identical). `model` is the high noise (first stage) model, `model_low` the low noise one. Tiers (docs/API.md): all required; its presets use no accelerator, so no `base`.",
     "model": {"patterns": ["wan2.2_fun_vace_high_noise*", "*wan2*2*vace*high*"], "family": "wan2.2-vace-14b-high",
-             "class_type": "UNETLoader", "field": "unet_name"},
+             "class_type": "UNETLoader", "field": "unet_name", "tier": "required"},
     "model_low": {"patterns": ["wan2.2_fun_vace_low_noise*", "*wan2*2*vace*low*"], "family": "wan2.2-vace-14b-low",
-                 "class_type": "UNETLoader", "field": "unet_name"},
+                 "class_type": "UNETLoader", "field": "unet_name", "tier": "required"},
     "text_encoder": {"patterns": ["umt5_xxl*", "*umt5*"], "family": "umt5-xxl",
-                    "class_type": "CLIPLoader", "field": "clip_name"},
+                    "class_type": "CLIPLoader", "field": "clip_name", "tier": "required"},
     "vae": {"patterns": ["wan_2.1_vae*", "*wan*2*1*vae*"], "family": "wan2.1-vae",
-           "class_type": "VAELoader", "field": "vae_name"}
+           "class_type": "VAELoader", "field": "vae_name", "tier": "required"}
   },
+
+  "nodes": ["LoadImage", "ImageScale", "EmptyImage", "ImageBatch", "ImageToMask"],
 
   "template": {
     "_note": "Wan 2.2 14B (Fun VACE is built on the A14B pair): 4k+1 frames at 16 fps, trained on 81 frames (5 s), so a longer shot is a warning, and past 161 frames (10 s) it must be split. Width and height are multiples of 16 (WanVaceToVideo's step; its masks need /8); sizes that aren't legal are snapped down, then shrunk under 720p.",
@@ -126,5 +128,13 @@
       "text_encoder": "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
       "vae": "wan_2.1_vae.safetensors"
     }
+  },
+
+  "downloads": {
+    "_note": "Where to get each file this target names (docs/API.md 'Downloads'). A url is only given when a trustworthy record has it: a ComfyUI template's or saved workflow's properties.models entry, or ComfyUI-Manager's model list; `source` says which. Otherwise url is null and source says what to search for. Never a guessed URL.",
+    "wan2.2_fun_vace_high_noise_14B_fp8_scaled.safetensors": {"folder": "diffusion_models", "url": null, "source": "no URL: no ComfyUI template, saved workflow or ComfyUI-Manager model list on this machine records this file. Search Hugging Face for its exact name (Wan 2.2 Fun VACE A14B high-noise expert, fp8 scaled ComfyUI repack)."},
+    "wan2.2_fun_vace_low_noise_14B_fp8_scaled.safetensors": {"folder": "diffusion_models", "url": null, "source": "no URL: no ComfyUI template, saved workflow or ComfyUI-Manager model list on this machine records this file. Search Hugging Face for its exact name (Wan 2.2 Fun VACE A14B low-noise expert, fp8 scaled ComfyUI repack)."},
+    "umt5_xxl_fp8_e4m3fn_scaled.safetensors": {"folder": "text_encoders", "url": "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors", "source": "ComfyUI template video_wan2_2_14B_i2v.json (properties.models)"},
+    "wan_2.1_vae.safetensors": {"folder": "vae", "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/vae/wan_2.1_vae.safetensors", "source": "ComfyUI template video_wan2_2_14B_i2v.json (properties.models)"}
   }
 }

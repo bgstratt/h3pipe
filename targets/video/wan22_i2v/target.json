@@ -11,16 +11,21 @@
   },
 
   "models": {
-    "_note": "Glob patterns (case-insensitive) naming the files each model parameter of the binding takes, for the model identification that reads them; `family` is its id for the file header check (high vs low noise is decided by the name: the headers are identical). `model` is the high noise (first stage) model, `model_low` the low noise one.",
+    "_note": "Glob patterns (case-insensitive) naming the files each model parameter of the binding takes, for the model identification that reads them; `family` is its id for the file header check (high vs low noise is decided by the name: the headers are identical). `model` is the high noise (first stage) model, `model_low` the low noise one. Tiers (docs/API.md): the lightx2v LoRA pair is an accelerator (without either one the pass renders its `base`: no LoRA, real steps and CFG); the rest are required. A substitute LoRA keeps the wanted one's step count and noise stage.",
     "model": {"patterns": ["wan2.2_i2v_high_noise*", "*wan2*2*i2v*high*"], "family": "wan2.2-i2v-14b-high",
-             "class_type": "UNETLoader", "field": "unet_name"},
+             "class_type": "UNETLoader", "field": "unet_name", "tier": "required", "exclude": ["*lora*"]},
     "model_low": {"patterns": ["wan2.2_i2v_low_noise*", "*wan2*2*i2v*low*"], "family": "wan2.2-i2v-14b-low",
-                 "class_type": "UNETLoader", "field": "unet_name"},
+                 "class_type": "UNETLoader", "field": "unet_name", "tier": "required", "exclude": ["*lora*"]},
+    "loras": {"patterns": ["*wan2*2*i2v*lightx2v*"], "family": "wan2.2-i2v-lightx2v-lora",
+              "class_type": "LoraLoaderModelOnly", "field": "lora_name", "folder": "loras",
+              "tier": "accelerator", "keep": ["(\\d+)[_-]?steps?", "(high|low)[_-]?noise"]},
     "text_encoder": {"patterns": ["umt5_xxl*", "*umt5*"], "family": "umt5-xxl",
-                    "class_type": "CLIPLoader", "field": "clip_name"},
+                    "class_type": "CLIPLoader", "field": "clip_name", "tier": "required"},
     "vae": {"patterns": ["wan_2.1_vae*", "*wan*2*1*vae*"], "family": "wan2.1-vae",
-           "class_type": "VAELoader", "field": "vae_name"}
+           "class_type": "VAELoader", "field": "vae_name", "tier": "required"}
   },
+
+  "nodes": ["LoadImage", "WanFirstLastFrameToVideo"],
 
   "template": {
     "_note": "Wan 2.2 14B renders 4k+1 frames at 16 fps (the template's CreateVideo, and its duration maths `floor(seconds * 16 + 1)`); trained on 81 frames (5 s), so a longer shot is a warning, and past 161 frames (10 s) it must be split. Width and height are multiples of 16 (WanImageToVideo's step); sizes that aren't legal are snapped down, then shrunk under 720p (1280 on the long side, 921600 pixels).",
@@ -90,7 +95,7 @@
   },
 
   "presets": {
-    "_note": "The 14B fp8 pair with lightx2v's 4-step LoRA pair (strength 1), 4 steps split 2/2, cfg 1, euler / simple, shift 5: the template's 4-step branch. Final 832x480 (Wan's 480p; the template itself says 640x640), proxy 640x352. Another target's series config block lends no size: Wan was trained at 480p/720p. The negative prompt is Wan's standard one from ComfyUI's Wan templates (it is ignored at cfg 1, used when a profile drops the LoRAs for cfg > 1).",
+    "_note": "The 14B fp8 pair with lightx2v's 4-step LoRA pair (strength 1), 4 steps split 2/2, cfg 1, euler / simple, shift 5: the template's 4-step branch. Final 832x480 (Wan's 480p; the template itself says 640x640), proxy 640x352. Another target's series config block lends no size: Wan was trained at 480p/720p. The negative prompt is Wan's standard one from ComfyUI's Wan templates (it is ignored at cfg 1, used when a profile drops the LoRAs for cfg > 1). `base` (the lightx2v pair not installed): no LoRA, 20 steps split 10 / 10 (high / low), cfg 3.5, euler / simple, shift 5: the non-LoRA branch of ComfyUI's Wan 2.2 14B i2v template (video_wan2_2_14B_i2v.json: 'Int (Steps)' 20, 'Int (split_step)' 10, 'Float (CFG)' 3.5 behind the 'Enable 4steps LoRA?' switches; both ModelSamplingSD3 at 5).",
     "final": {
       "model": "wan2.2_i2v_high_noise_14B_fp8_scaled.safetensors",
       "lora": null, "steps": 4, "width": 832, "height": 480,
@@ -100,7 +105,8 @@
       "cfg": 1.0, "sampler": "euler", "shift": 5.0, "split": 0.5,
       "negative": "色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走",
       "text_encoder": "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
-      "vae": "wan_2.1_vae.safetensors"
+      "vae": "wan_2.1_vae.safetensors",
+      "base": {"loras": [], "steps": 20, "cfg": 3.5, "split": 0.5}
     },
     "proxy": {
       "lora": null, "steps": 4, "width": 640, "height": 352,
@@ -110,7 +116,18 @@
       "cfg": 1.0, "sampler": "euler", "shift": 5.0, "split": 0.5,
       "negative": "色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走",
       "text_encoder": "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
-      "vae": "wan_2.1_vae.safetensors"
+      "vae": "wan_2.1_vae.safetensors",
+      "base": {"loras": [], "steps": 20, "cfg": 3.5, "split": 0.5}
     }
+  },
+
+  "downloads": {
+    "_note": "Where to get each file this target names (docs/API.md 'Downloads'). A url is only given when a trustworthy record has it: a ComfyUI template's or saved workflow's properties.models entry, or ComfyUI-Manager's model list; `source` says which. Otherwise url is null and source says what to search for. Never a guessed URL.",
+    "wan2.2_i2v_lightx2v_4steps_lora_v1_high_noise.safetensors": {"folder": "loras", "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/loras/wan2.2_i2v_lightx2v_4steps_lora_v1_high_noise.safetensors", "source": "ComfyUI template video_wan2_2_14B_i2v.json (properties.models)"},
+    "wan2.2_i2v_lightx2v_4steps_lora_v1_low_noise.safetensors": {"folder": "loras", "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/loras/wan2.2_i2v_lightx2v_4steps_lora_v1_low_noise.safetensors", "source": "ComfyUI template video_wan2_2_14B_i2v.json (properties.models)"},
+    "wan2.2_i2v_high_noise_14B_fp8_scaled.safetensors": {"folder": "diffusion_models", "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/diffusion_models/wan2.2_i2v_high_noise_14B_fp8_scaled.safetensors", "source": "ComfyUI template video_wan2_2_14B_i2v.json (properties.models)"},
+    "wan2.2_i2v_low_noise_14B_fp8_scaled.safetensors": {"folder": "diffusion_models", "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/diffusion_models/wan2.2_i2v_low_noise_14B_fp8_scaled.safetensors", "source": "ComfyUI template video_wan2_2_14B_i2v.json (properties.models)"},
+    "umt5_xxl_fp8_e4m3fn_scaled.safetensors": {"folder": "text_encoders", "url": "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors", "source": "ComfyUI template video_wan2_2_14B_i2v.json (properties.models)"},
+    "wan_2.1_vae.safetensors": {"folder": "vae", "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/vae/wan_2.1_vae.safetensors", "source": "ComfyUI template video_wan2_2_14B_i2v.json (properties.models)"}
   }
 }

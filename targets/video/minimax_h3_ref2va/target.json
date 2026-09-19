@@ -57,26 +57,51 @@
       "loras": {"class_type": "LoraLoaderModelOnly", "name": "lora_name",
                 "strength": "strength_model", "input": "model", "chain": true},
       "steps": {"via": "loader"},
-      "seed": {"via": "loader"}
+      "seed": {"via": "loader"},
+      "sampler": {"class_type": "KSamplerSelect", "field": "sampler_name"},
+      "text_encoder": {"class_type": "CLIPLoader", "field": "clip_name"},
+      "video_vae": {"class_type": "VAELoader", "field": "vae_name", "feeds": ["VAEDecode", "vae"]},
+      "audio_vae": {"class_type": "VAELoader", "field": "vae_name", "feeds": ["VAEDecodeAudio", "vae"]}
     },
     "review_nodes": ["SaveVideo", "CreateVideo"]
   },
 
   "models": {
-    "_note": "The family each model param must be (targets/modelid.py). Names are checked first (case-insensitive globs; a series config's model_families adds more), then the file's header. Ref2VA and FL2VA share every tensor, so a file named neither is accepted as H3 with a note, and one named FL2VA is refused.",
-    "model": {"family": "minimax-h3-ref2va", "patterns": ["*h3*ref2v*", "*ref2va*"]}
+    "_note": "The family each model param must be (targets/modelid.py). Names are checked first (case-insensitive globs; a series config's model_families adds more), then the file's header. Ref2VA and FL2VA share every tensor, so a file named neither is accepted as H3 with a note, and one named FL2VA is refused. Tiers (docs/API.md): the turbo LoRA is an accelerator (without it the pass renders its `base`); the rest are required. text_encoder / video_vae / audio_vae are the workflow's own files (`default`): patched only when another file of the family stands in. A substitute LoRA keeps the wanted one's step count (`keep`).",
+    "model": {"family": "minimax-h3-ref2va", "patterns": ["*h3*ref2v*", "*ref2va*"], "tier": "required"},
+    "loras": {"family": "minimax-h3-ref2v-turbo-lora", "patterns": ["*h3*ref2v*turbo*", "*h3*ref2v*lightx2v*"],
+              "tier": "accelerator", "keep": ["(\\d+)[_-]?steps?"], "exclude": ["*sla*"],
+              "class_type": "LoraLoaderModelOnly", "field": "lora_name", "folder": "loras"},
+    "text_encoder": {"family": "qwen3vl-32b", "patterns": ["*qwen3*vl*32b*"], "tier": "required",
+                     "default": "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors"},
+    "video_vae": {"family": "minimax-h3-video-vae", "patterns": ["*h3*video*vae*"], "tier": "required",
+                  "default": "minimax_h3_video_vae_fp16.safetensors"},
+    "audio_vae": {"family": "minimax-h3-audio-vae", "patterns": ["*h3*audio*vae*"], "tier": "required",
+                  "default": "minimax_h3_audio_vae_fp32.safetensors"}
   },
 
   "presets": {
-    "_note": "Turbo LoRA per pass. The final pass uses lightx2v's 8-step Ref2V v1.0, distilled at 768p for exactly 8 steps. The proxy keeps the 4-step v0.1: a distilled LoRA is trained on a fixed set of timesteps, so it does best at its own step count, and the proxy wants 4 steps for speed. The series config's `series` and `proxy` blocks override these.",
+    "_note": "Turbo LoRA per pass. The final pass uses lightx2v's 8-step Ref2V v1.0, distilled at 768p for exactly 8 steps. The proxy keeps the 4-step v0.1: a distilled LoRA is trained on a fixed set of timesteps, so it does best at its own step count, and the proxy wants 4 steps for speed. The series config's `series` and `proxy` blocks override these. `base` is what a pass renders with when its turbo LoRA isn't installed: no LoRA, 20 steps with res_multistep (ComfyUI's H3 templates, video_minimax_h3_r2v.json / _i2v / _t2v, full branch: 'Int (Full)' 20, KSamplerSelect res_multistep, BasicScheduler simple) and no CFG, as those templates guide with BasicGuider and so does this workflow ('Guider (CFG 1)').",
     "final": {
       "model": "minimax_h3_ref2va_pruned_int8_convrot.safetensors",
       "lora": "minimax_h3_ref2v_turbo_8step_v1.0_768p_comfyui_bf16.safetensors",
-      "steps": 8, "width": 1344, "height": 768
+      "steps": 8, "width": 1344, "height": 768,
+      "base": {"loras": [], "steps": 20, "sampler": "res_multistep"}
     },
     "proxy": {
       "lora": "minimax_h3_ref2v_lightx2v_turbo_4step_v0.1_resized_avg_rank_20_bf16.safetensors",
-      "steps": 4, "width": 480, "height": 272
+      "steps": 4, "width": 480, "height": 272,
+      "base": {"loras": [], "steps": 20, "sampler": "res_multistep"}
     }
+  },
+
+  "downloads": {
+    "_note": "Where to get each file this target names (docs/API.md 'Downloads'). A url is only given when a trustworthy record has it: a ComfyUI template's or saved workflow's properties.models entry, or ComfyUI-Manager's model list; `source` says which. Otherwise url is null and source says what to search for. Never a guessed URL.",
+    "minimax_h3_audio_vae_fp32.safetensors": {"folder": "vae", "url": "https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/vae/minimax_h3_audio_vae_fp32.safetensors", "source": "ComfyUI template video_minimax_h3_r2v.json (properties.models)"},
+    "minimax_h3_ref2v_lightx2v_turbo_4step_v0.1_resized_avg_rank_20_bf16.safetensors": {"folder": "loras", "url": "https://huggingface.co/Kijai/MiniMax-H3_comfy/resolve/main/loras/minimax_h3_ref2v_lightx2v_turbo_4step_v0.1_resized_avg_rank_20_bf16.safetensors", "source": "saved workflow H3_Ref2VA_Shotlist_v1.json (properties.models)"},
+    "minimax_h3_ref2v_turbo_8step_v1.0_768p_comfyui_bf16.safetensors": {"folder": "loras", "url": null, "source": "no URL: no ComfyUI template, saved workflow or ComfyUI-Manager model list on this machine records this file. Search Hugging Face for its exact name (lightx2v's MiniMax H3 Ref2V 8-step turbo LoRA v1.0, ComfyUI conversion)."},
+    "minimax_h3_ref2va_pruned_int8_convrot.safetensors": {"folder": "diffusion_models", "url": "https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/diffusion_models/minimax_h3_ref2va_pruned_int8_convrot.safetensors", "source": "ComfyUI template video_minimax_h3_r2v.json (properties.models)"},
+    "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors": {"folder": "text_encoders", "url": "https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/text_encoders/qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors", "source": "ComfyUI template video_minimax_h3_r2v.json (properties.models)"},
+    "minimax_h3_video_vae_fp16.safetensors": {"folder": "vae", "url": "https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/vae/minimax_h3_video_vae_fp16.safetensors", "source": "ComfyUI template video_minimax_h3_r2v.json (properties.models)"}
   }
 }

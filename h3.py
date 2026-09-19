@@ -22,7 +22,13 @@ your projects, with the pipeline scripts beside it (see the README).
     python h3.py keyframe Shows\\ep05 sh020 --from-prev
                                                     # sh020's first keyframe = the previous
                                                     # shot's last frame (continuity)
+    python h3.py override Shows\\ep05 --episode-target ltx2
+                                                    # every shot the script gives no target
+                                                    # renders on ltx2 (built: back to series.json's)
     (see h3edit.py for every takes/pick/override/keyframe flag)
+
+    python h3.py targets  [Shows\\ep05] [--json]     # which targets the running ComfyUI can
+                                                    # render, and what to download for the rest
 
 The episode can be a folder (any name) holding series.json and one script .md,
 or several folders at once, or a parent with --each:
@@ -43,6 +49,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 STAGES = ("align", "build", "check", "refs", "render", "assemble", "all")
 EDIT = ("takes", "pick", "override", "keyframe")          # in-process, see h3edit.py
+# `targets` (readiness) runs in-process too, with the episode optional
 
 
 def script(name: str) -> str:
@@ -122,6 +129,14 @@ def stage(name: str, ep: str, extra: list[str], skip_build: bool = False) -> int
 
 def main() -> int:
     argv = sys.argv[1:]
+    if argv and argv[0] == "targets":
+        # the episode is optional: it adds its series config (pass blocks,
+        # model_families) and marks its target
+        sys.path.insert(0, HERE)
+        import h3edit
+        rest = argv[1:]
+        ep = os.path.abspath(rest.pop(0)) if rest and not rest[0].startswith("-") else None
+        return h3edit.cmd_targets(ep, rest)
     if argv and argv[0] in EDIT:
         if len(argv) < 2 or argv[1].startswith("-"):
             sys.exit(f"  !! usage: python h3.py {argv[0]} <episode> ...")
