@@ -4,11 +4,11 @@
 // applied). Peaks come from GET /h3pipe/peaks at the zoom's resolution, through
 // a shared cache; a clip only asks once it scrolls into view.
 
-import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { memo, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import { peaksCache } from "../cutActions";
-import { binsFor, drawPeaks, type PeaksEntry, type PeaksQuery } from "../lib/peaks";
+import { binsFor, drawPeaks, peaksKey, type PeaksEntry, type PeaksQuery } from "../lib/peaks";
 import type { PlayItem } from "../lib/playlist";
-import { trackSlice } from "../lib/recording";
+import { trackSlice, trackState } from "../lib/recording";
 import { useApp } from "../store";
 import type { EpisodeStatus, ShotStatus, TakeSummary } from "../types";
 
@@ -18,11 +18,12 @@ export function waveSource(
 ): { q: PeaksQuery; kind: "take" | "recording"; label: string } | null {
   if (!item) return null;
   const fps = st.fps || 24;
-  if (recording && st.track?.path) {
+  const ts = trackState(st.track);
+  if (recording && ts && !ts.why) {
     const slice = trackSlice(item, fps);
     if (slice) {
       return {
-        q: { ep, path: st.track.path, bins: binsFor(slice.end - slice.start, zoom), start: slice.start, end: slice.end },
+        q: { ep, path: ts.path, bins: binsFor(slice.end - slice.start, zoom), start: slice.start, end: slice.end },
         kind: "recording",
         label: `recording ${slice.start.toFixed(2)}–${slice.end.toFixed(2)} s`,
       };
@@ -31,10 +32,40 @@ export function waveSource(
   const path = take?.audio;
   if (!path || !item.mp4) return null;
   return {
-    q: { ep, path, bins: binsFor(item.outT - item.inT, zoom), start: item.inT, end: item.outT },
+    q: { ep, path, bins: binsFor(item.outT - item.inT, zoom), start: item.inT, end: item.outT, version: take?.finished ?? null },
     kind: "take",
     label: `${path.split("/").pop()} ${item.inT.toFixed(2)}–${item.outT.toFixed(2)} s`,
   };
+}
+
+// ComfyUI switches palettes by changing classes and CSS variables on <html> /
+// <body>: a canvas has to redraw in the new colours, so lanes watch for that.
+let themeN = 0;
+const themeSubs = new Set<() => void>();
+let themeObserver: MutationObserver | null = null;
+
+function subscribeTheme(fn: () => void): () => void {
+  themeSubs.add(fn);
+  if (!themeObserver && typeof MutationObserver !== "undefined" && typeof document !== "undefined") {
+    themeObserver = new MutationObserver(() => {
+      themeN++;
+      themeSubs.forEach((f) => f());
+    });
+    const opts = { attributes: true, attributeFilter: ["class", "style", "data-theme"] };
+    themeObserver.observe(document.documentElement, opts);
+    if (document.body) themeObserver.observe(document.body, opts);
+  }
+  return () => {
+    themeSubs.delete(fn);
+    if (!themeSubs.size && themeObserver) {
+      themeObserver.disconnect();
+      themeObserver = null;
+    }
+  };
+}
+
+function useThemeN(): number {
+  return useSyncExternalStore(subscribeTheme, () => themeN, () => themeN);
 }
 
 /** Starts false; true once the element has been on screen (IntersectionObserver; always true without one). */
@@ -63,8 +94,9 @@ export const WaveLane = memo(function WaveLane({ ep, s, item, take, st, width, h
   const box = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
   const seen = useSeen(box);
+  const theme = useThemeN();
   const src = waveSource(ep, item, take, st, recording, zoom);
-  const key = src ? `${src.q.path}|${src.q.start}|${src.q.end}|${src.q.bins}` : "";
+  const key = src ? peaksKey(src.q) : "";
   const [entry, setEntry] = useState<PeaksEntry | undefined>(() => (src ? peaksCache.peek(src.q) : undefined));
 
   useEffect(() => {
@@ -96,7 +128,7 @@ export const WaveLane = memo(function WaveLane({ ep, s, item, take, st, width, h
     const peaks = entry?.ok ? entry.data.peaks : [];
     if (entry?.ok) drawPeaks(ctx, peaks, w, height, color, 1);
     else ctx.clearRect(0, 0, w, height);
-  }, [entry, width, height, src?.kind]);
+  }, [entry, width, height, src?.kind, theme]);
 
   const title = !src
     ? item ? (take ? `${s.shot}: no audio for this take` : `${s.shot}: no take`) : `${s.shot}: not in Play all`

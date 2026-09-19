@@ -239,9 +239,9 @@ export function withFields(entries: CutEntry[], shot: string, patch: Partial<Cut
   });
 }
 
-/** Every trim set to zero. */
+/** Every trim set to zero, except a locked entry's (the lock protects them, as the server's reset does). */
 export function clearTrims(entries: CutEntry[]): CutEntry[] {
-  return entries.reduce((list, e) => (e.trim_in || e.trim_out ? withFields(list, e.shot, { trim_in: 0, trim_out: 0 }) : list), entries);
+  return entries.reduce((list, e) => ((e.trim_in || e.trim_out) && !e.locked ? withFields(list, e.shot, { trim_in: 0, trim_out: 0 }) : list), entries);
 }
 
 // ---------------------------------------------------------------------------

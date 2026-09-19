@@ -4,7 +4,7 @@
 // (optimistic) and rolled back if the server refuses it.
 
 import { ApiError } from "./api";
-import { currentPlaylist, playAll, refreshEpisode, report, seekCut, setCutPlaying } from "./actions";
+import { currentPlaylist, playAll, refreshEpisode, report, seekCut, setCutPlaying, setStatusHook } from "./actions";
 import { api, host } from "./host";
 import {
   applyEntries, clampTrim, clearTrims, entriesOf, fieldsOf, moveTo, nudge, sameEntries, scriptOrder, withFields,
@@ -52,6 +52,14 @@ export function resetCutHistory() {
 
 let chain: Promise<unknown> = Promise.resolve();
 
+/** The latest entries being saved, by statusKey: laid over any status fetched meanwhile. */
+const inFlight = new Map<string, { entries: CutEntry[]; n: number }>();
+let seq = 0;
+setStatusHook((ep, pass, st) => {
+  const f = inFlight.get(statusKey(ep, pass));
+  return f ? applyEntries(st, f.entries) : st;
+});
+
 /** Resolves once every cut save started so far has finished (tests, and before a server-side edit). */
 export function cutSettled(): Promise<void> {
   return chain.then(() => undefined, () => undefined);
@@ -65,11 +73,18 @@ function save(ep: string, pass: Pass, prev: EpisodeStatus, entries: CutEntry[], 
   const key = statusKey(ep, pass);
   const optimistic = applyEntries(prev, entries);
   set((s) => ({ status: { ...s.status, [key]: optimistic } }));
+  const n = ++seq;
+  inFlight.set(key, { entries, n });
+  const done = () => {
+    if (inFlight.get(key)?.n === n) inFlight.delete(key);
+  };
   const run = chain.then(async () => {
     try {
       await api().putCut(ep, pass, entries);
+      done();
       return true;
     } catch (e) {
+      done();
       if (get().status[key] === optimistic) set((s) => ({ status: { ...s.status, [key]: prev } }));
       report(`Couldn't save the cut (${what})`, e);
       void refreshEpisode(ep, pass);

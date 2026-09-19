@@ -302,7 +302,10 @@ export function createHttpApi(t: Transport): Api {
         end: end != null && Number.isFinite(end) ? String(round6(end)) : undefined,
       })}`);
       const peaks = Array.isArray(r?.peaks) ? r.peaks.map((x) => (typeof x === "number" && Number.isFinite(x) ? x : 0)) : [];
-      return { duration: typeof r?.duration === "number" ? r.duration : 0, bins: peaks.length, peaks, silent: !!r?.silent };
+      return {
+        duration: typeof r?.duration === "number" ? r.duration : 0, bins: peaks.length, peaks, silent: !!r?.silent,
+        start: typeof r?.start === "number" ? r.start : null, end: typeof r?.end === "number" ? r.end : null,
+      };
     },
     putOverride: (req) => {
       const s = req.fields.seed;

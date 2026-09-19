@@ -788,7 +788,9 @@ export function createMockApi(emit: Emit, opts: MockOptions = {}): Api & { outsi
       // h3takes.pick: the whole resolved order goes into the file, this entry's take changed
       const list = materialize(cut[req.pass], req.pass, scriptOrder[req.pass]);
       const entry = list.find((c) => c.shot === req.shot)!;
-      if (entry.locked && !req.force) throw new MockError(`${req.shot} is locked in the ${req.pass} cut`, 409);
+      if (entry.locked && !req.force) {
+        throw new MockError(`${req.shot} is locked in the ${req.pass} cut: unlock it, or force the pick`, 409, { error: `${req.shot} is locked`, locked: true });
+      }
       if (req.take != null) {
         const t = s.takes.find((x) => x.take === req.take);
         if (!t) throw new MockError(`${req.shot} has no take ${req.take}`, 404);
@@ -829,7 +831,7 @@ export function createMockApi(emit: Emit, opts: MockOptions = {}): Api & { outsi
       need(ep);
       if (from === to) throw new MockError("from and to are the same pass", 400);
       if (!["order", "trims", "all"].includes(what)) throw new MockError(`what must be order, trims or all`, 400);
-      cut[to] = copyEntries(cut[from], from, st(from).fps || 24, cut[to], to, st(to).fps || 24, scriptOrder[to], what);
+      cut[to] = copyEntries(cut[from], from, st(from).fps || 24, cut[to], to, st(to).fps || 24, scriptOrder[to], what, (e) => entryFrames(to, e));
       recut(to);
       emit("h3pipe.episode", { ep: EP });
       return { cut: { episode: "ep05", ...clone(cut) } };

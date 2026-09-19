@@ -6,6 +6,9 @@ import { setApi, setHost, type Host, type HostEvent, type Surface } from "./host
 import { createMockApi } from "./mock/mockApi";
 import { installMock } from "./mock/mockTargets";
 import { mountOverlay, mountSurface } from "./surfaces";
+import * as actions from "./actions";
+import * as cut from "./cutActions";
+import { store } from "./store";
 
 const listeners = new Map<HostEvent, Set<(d: unknown) => void>>();
 
@@ -49,5 +52,8 @@ void start();
 // Phase 9a: an edit "in another editor", e.g. h3mockEdit("script", (t) => t.replace("size: wide", "size: close")):
 // an open Script window reloads it (clean buffer) or offers Reload / Keep mine (unsaved edits).
 (window as unknown as { h3mockEdit: typeof mock.outsideEdit }).h3mockEdit = mock.outsideEdit;
+
+// Phase 9b: the store and the cut's actions, for poking at the timeline from the console (and headless checks)
+(window as unknown as { h3dev: unknown }).h3dev = { store, cut, actions };
 
 document.getElementById("theme")?.addEventListener("click", () => document.documentElement.classList.toggle("light"));

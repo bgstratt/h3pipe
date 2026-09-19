@@ -6,7 +6,21 @@
 // trims, reordering or a changed length move a clip off its slice, the
 // recording drifts from there on, and the player says so.
 
+import type { Track } from "../types";
 import type { PlayItem } from "./playlist";
+
+/**
+ * Whether the episode's recording can be played and drawn: null for no track,
+ * else `why` is set when it can't (missing, or an absolute path on another
+ * drive, which /h3pipe/file and /h3pipe/peaks can't serve).
+ */
+export function trackState(track: Track | null | undefined): { path: string; why: string | null } | null {
+  if (!track || typeof track.path !== "string" || !track.path) return null;
+  const path = track.path;
+  if (track.exists === false) return { path, why: `the recording ${path} isn't there` };
+  if (/^([a-zA-Z]:|[\\/])/.test(path)) return { path, why: `the recording ${path} is outside the episode's folders (another drive)` };
+  return { path, why: null };
+}
 
 /** Where the recording starts under cut time 0. */
 export function masterStart(items: PlayItem[], fps: number, base = 0): number {

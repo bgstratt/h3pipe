@@ -1,8 +1,8 @@
 // Phase 9b: timeline editing. The cut's pure maths (reorder, trims, undo, the
 // recording under the cut, peaks), then the edits end to end on the mock API.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ApiError } from "../src/api";
-import { refreshEpisode } from "../src/actions";
+import { ApiError, createHttpApi, type Transport } from "../src/api";
+import { currentPlaylist, refreshEpisode } from "../src/actions";
 import {
   copyCut, cutKey, cutSettled, isTyping, lockedPickRefusal, moveClip, nudgeClip, redoCut, resetCut, resetCutHistory,
   seekCutAt, setTrims, shuttle, toggleLock, trimAtPlayhead, undoCut, undoStack,
@@ -16,7 +16,7 @@ import {
   MAX_BINS_PER_SECOND, PeaksCache, binsFor, binsPerSecond, drawPeaks, peakBars, peaksKey, resamplePeaks,
 } from "../src/lib/peaks";
 import { baseIn, buildPlaylist, spanOf, windowOf } from "../src/lib/playlist";
-import { expectedAt, masterStart, masterSync, needsResync, recordingAt, trackSlice } from "../src/lib/recording";
+import { expectedAt, masterStart, masterSync, needsResync, recordingAt, trackSlice, trackState } from "../src/lib/recording";
 import { UndoStack, applyEdit, diffEdit } from "../src/lib/undo";
 import { createMockApi } from "../src/mock/mockApi";
 import { checkEntries, copyEntries, materialize, resetEntries, resolveCut } from "../src/mock/mockCut";
@@ -371,9 +371,16 @@ describe("mock cut.json", () => {
   it("reset and copy", () => {
     const list: CutEntry[] = [{ shot: "c", trim_in: 4, locked: true }, { shot: "a", take: 3 }, { shot: "b", note: "n" }];
     expect(resetEntries(list, "proxy", script, "order")).toEqual([{ shot: "a", take: 3 }, { shot: "b", note: "n" }, { shot: "c", trim_in: 4, locked: true }, { shot: "d" }]);
-    expect(resetEntries(list, "proxy", script, "trims")[0]).toEqual({ shot: "c", locked: true });
+    // as built: a locked entry keeps its trims
+    expect(resetEntries(list, "proxy", script, "trims")[0]).toEqual({ shot: "c", trim_in: 4, locked: true });
+    expect(resetEntries([{ shot: "a", trim_out: 3 }], "proxy", script, "all")[0]).toEqual({ shot: "a" });
     const to = copyEntries(list, "final", 24, [{ shot: "a", take: 1 }], "proxy", 12, script, "all");
     expect(to).toEqual([{ shot: "c", trim_in: 2 }, { shot: "d" }, { shot: "a", take: 1 }, { shot: "b" }]);
+    // copied trims are cut down to leave a frame (trim_out first); a locked target keeps its own
+    const clamp = copyEntries([{ shot: "a", trim_in: 30, trim_out: 30 }], "final", 24, [{ shot: "a" }, { shot: "b", locked: true, trim_in: 1 }], "proxy", 24, script, "trims", () => [48, 24]);
+    expect(clamp.slice(0, 2)).toEqual([{ shot: "a", trim_in: 30, trim_out: 17 }, { shot: "b", locked: true, trim_in: 1 }]);
+    // the local fallback of Clear trims skips locked entries too
+    expect(clearTrims([{ shot: "a", trim_in: 2, locked: true }, { shot: "b", trim_out: 1 }])).toEqual([{ shot: "a", trim_in: 2, locked: true }, { shot: "b" }]);
   });
 });
 
@@ -483,6 +490,28 @@ describe("cut edits on the mock", () => {
     expect(ids((await api.episode(EP, "proxy")).shots).slice(0, 3)).toEqual(["sh030", "sh010", "sh020"]);
   });
 
+  it("a status fetched while a save is on its way keeps the edit (no lost update)", async () => {
+    const real = api.putCut.bind(api);
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    vi.spyOn(api, "putCut").mockImplementationOnce(async (...a) => {
+      await gate;
+      return real(...a);
+    });
+    const saving = moveClip("sh010", 3);
+    expect(order().slice(0, 3)).toEqual(["sh020", "sh030", "sh010"]);
+    // an h3pipe.episode refetch lands before the PUT: the server doesn't have it yet
+    await refreshEpisode(EP, "proxy");
+    expect(order().slice(0, 3)).toEqual(["sh020", "sh030", "sh010"]);
+    // a second edit made now is written on top of the first
+    const second = nudgeClip("sh050", -1);
+    release();
+    await saving;
+    await second;
+    const server = await api.episode(EP, "proxy");
+    expect(ids(server.shots).slice(0, 5)).toEqual(["sh020", "sh030", "sh010", "sh050", "sh040"]);
+  });
+
   it("a refused save rolls back and keeps nothing to undo", async () => {
     const before = cur();
     vi.spyOn(api, "putCut").mockRejectedValueOnce(Object.assign(new Error("nope"), { status: 400 }));
@@ -563,5 +592,53 @@ describe("keys", () => {
     // space plays at 1x again
     cutKey(k(" "));
     expect(store.get().cutPlay).toMatchObject({ playing: true, rate: 1 });
+  });
+});
+
+describe("the client and the as-built shapes", () => {
+  function http(answer: unknown) {
+    const calls: string[] = [];
+    const t: Transport = {
+      async fetch(path, init) {
+        calls.push(`${init?.method ?? "GET"} ${path}`);
+        return new Response(JSON.stringify(answer), { status: 200, headers: { "Content-Type": "application/json" } });
+      },
+      url: (x) => x,
+    };
+    return { api: createHttpApi(t), calls };
+  }
+  it("peaks: the query, a silent file (bins 0, peaks []), start / end", async () => {
+    const { api, calls } = http({ duration: 3.2, bins: 0, peaks: [], silent: true, start: 0.5, end: 2 });
+    const r = await api.peaks("E:\\ep", "renders_proxy/sh010/sh010_t01.mp4", 12.4, 0.5, 2.0000004);
+    expect(calls[0]).toBe("GET /h3pipe/peaks?ep=E%3A%5Cep&path=renders_proxy%2Fsh010%2Fsh010_t01.mp4&bins=12&start=0.5&end=2");
+    expect(r).toEqual({ duration: 3.2, bins: 0, peaks: [], silent: true, start: 0.5, end: 2 });
+    // junk from an older server is survivable
+    const junk = await http({ peaks: [1, "x", null, 300] }).api.peaks("E", "a.wav", 4);
+    expect(junk).toMatchObject({ duration: 0, bins: 4, peaks: [1, 0, 0, 300], silent: false });
+  });
+  it("reset and copy post what the contract says", async () => {
+    const { api, calls } = http({ cut: {} });
+    await api.cutReset("E", "proxy", "trims");
+    await api.cutCopy("E", "final", "proxy", "order");
+    expect(calls).toEqual(["POST /h3pipe/cut/reset", "POST /h3pipe/cut/copy"]);
+  });
+  it("trackState: missing, another drive, or playable", () => {
+    expect(trackState(null)).toBeNull();
+    expect(trackState({ path: "", duration: null })).toBeNull();
+    expect(trackState({ path: "audio/a.wav", duration: null, rate: null, exists: false })?.why).toMatch(/isn't there/);
+    expect(trackState({ path: "D:/rec/a.wav", duration: 3, exists: true })?.why).toMatch(/another drive/);
+    expect(trackState({ path: "../audio/a.wav", duration: 3, rate: 48000, exists: true })).toEqual({ path: "../audio/a.wav", why: null });
+    // a server from before `exists`
+    expect(trackState({ path: "audio/a.wav" })?.why).toBeNull();
+  });
+  it("the playlist of no episode is one stable empty list (components select it)", () => {
+    const s = initialState();
+    expect(currentPlaylist(s)).toBe(currentPlaylist({ ...s }));
+    expect(currentPlaylist(s)).toEqual([]);
+  });
+  it("a take re-rendered into the same number isn't served stale peaks", () => {
+    const a = peaksKey({ ep: "E", path: "p.mp4", bins: 10, version: "2026-09-19T10:00" });
+    const b = peaksKey({ ep: "E", path: "p.mp4", bins: 10, version: "2026-09-19T11:00" });
+    expect(a).not.toBe(b);
   });
 });

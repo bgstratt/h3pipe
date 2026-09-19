@@ -99,6 +99,9 @@ export interface PeaksQuery {
   bins: number;
   start?: number | null;
   end?: number | null;
+  /** part of the cache key only (not sent): a take re-rendered into the same
+   * number keeps its path, so its `finished` time tells the files apart */
+  version?: string | null;
 }
 
 export type PeaksEntry = { ok: true; data: PeaksResult } | { ok: false; error: string };
@@ -108,7 +111,7 @@ type Fetcher = (q: PeaksQuery) => Promise<PeaksResult>;
 /** Key of a peaks request: the file, the slice (to the millisecond) and the bins. */
 export function peaksKey(q: PeaksQuery): string {
   const r = (x: number | null | undefined) => (x == null || !Number.isFinite(x) ? "" : (Math.round(x * 1000) / 1000).toString());
-  return `${q.ep}|${q.path}|${r(q.start)}|${r(q.end)}|${Math.round(q.bins)}`;
+  return `${q.ep}|${q.path}|${r(q.start)}|${r(q.end)}|${Math.round(q.bins)}${q.version ? `|${q.version}` : ""}`;
 }
 
 /**

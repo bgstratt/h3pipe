@@ -168,6 +168,8 @@ export interface Track {
   duration?: number | null;
   /** sample rate (null when unknown) */
   rate?: number | null;
+  /** the file is there (as built: false for a missing file; `duration` / `rate` are then null) */
+  exists?: boolean;
 }
 
 /** Phase 9b: GET /h3pipe/peaks. */
@@ -177,8 +179,11 @@ export interface PeaksResult {
   bins: number;
   /** max absolute amplitude per bin, 0..255 */
   peaks: number[];
-  /** the file has no audio stream */
+  /** the file has no audio stream (then `bins` 0 and `peaks` []) */
   silent?: boolean;
+  /** as built: the range actually used, clamped to the file */
+  start?: number | null;
+  end?: number | null;
 }
 
 /** Phase 9b: what POST /h3pipe/cut/reset and /cut/copy touch. */

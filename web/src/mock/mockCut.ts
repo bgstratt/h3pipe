@@ -2,7 +2,7 @@
 // cut_entry_to_json), the PUT /h3pipe/cut checks, and /cut/reset and /cut/copy.
 // Pure; mockApi.ts holds the state.
 
-import { outOfOrder } from "../lib/cutEdit";
+import { applyOrder, outOfOrder } from "../lib/cutEdit";
 import { trimWindow } from "../lib/playlist";
 import type { CutEntry, CutWhat, Pass, ShotStatus } from "../types";
 
@@ -110,7 +110,8 @@ export function checkEntries(entries: unknown, fps: number, framesOf: (e: CutEnt
   return entries as CutEntry[];
 }
 
-/** POST /h3pipe/cut/reset: script order (orphans after) and/or zero trims; picks, locks and notes kept. */
+/** POST /h3pipe/cut/reset: script order (orphans after) and/or zero trims; picks, locks and notes
+ * kept, and a locked entry keeps its trims (API.md "Phase 9b as built"). */
 export function resetEntries(list: CutEntry[], pass: Pass, script: string[], what: CutWhat): CutEntry[] {
   let out = materialize(list, pass, script);
   if (what !== "trims") {
@@ -118,30 +119,45 @@ export function resetEntries(list: CutEntry[], pass: Pass, script: string[], wha
     const inScript = out.filter((e) => pos.has(e.shot)).sort((a, b) => pos.get(a.shot)! - pos.get(b.shot)!);
     out = [...inScript, ...out.filter((e) => !pos.has(e.shot))];
   }
-  if (what !== "order") out = out.map(({ trim_in: _a, trim_out: _b, ...rest }) => rest);
+  if (what !== "order") out = out.map((e) => (e.locked ? e : dropTrims(e)));
   return out;
 }
 
-/** POST /h3pipe/cut/copy: the other pass's order and/or trims (converted by frame rate); never picks. */
+function dropTrims(e: CutEntry): CutEntry {
+  const out = { ...e };
+  delete out.trim_in;
+  delete out.trim_out;
+  return out;
+}
+
+/** POST /h3pipe/cut/copy: the other pass's order and/or trims (converted by frame rate, cut down
+ * to leave a frame of a take whose length `framesOf` knows, `trim_out` first); never picks, and
+ * a locked entry keeps its own trims. */
 export function copyEntries(
   from: CutEntry[], fromPass: Pass, fromFps: number, to: CutEntry[], toPass: Pass, toFps: number, script: string[], what: CutWhat,
+  framesOf: (e: CutEntry) => [number, number] | null = () => null,
 ): CutEntry[] {
   const src = materialize(from, fromPass, script);
   let out = materialize(to, toPass, script);
   if (what !== "trims") {
-    const pos = new Map(src.map((e, i) => [e.shot, i]));
-    const known = out.filter((e) => pos.has(e.shot)).sort((a, b) => pos.get(a.shot)! - pos.get(b.shot)!);
-    out = [...known, ...out.filter((e) => !pos.has(e.shot))];
+    // a shot only the target has stays right after the entry it follows now
+    out = applyOrder(out, src.map((e) => e.shot));
   }
   if (what !== "order") {
     const k = fromFps > 0 && toFps > 0 ? toFps / fromFps : 1;
     const by = new Map(src.map((e) => [e.shot, e]));
     out = out.map((e) => {
+      if (e.locked) return e;
       const s = by.get(e.shot);
-      const { trim_in: _a, trim_out: _b, ...rest } = e;
-      const a = Math.round((s?.trim_in ?? 0) * k);
-      const b = Math.round((s?.trim_out ?? 0) * k);
-      return { ...rest, ...(a ? { trim_in: a } : {}), ...(b ? { trim_out: b } : {}) };
+      let a = Math.round((s?.trim_in ?? 0) * k);
+      let b = Math.round((s?.trim_out ?? 0) * k);
+      const known = framesOf(e);
+      if (known) {
+        const total = known[1] > 0 && known[1] !== toFps ? Math.round((known[0] * toFps) / known[1]) : known[0];
+        b = Math.max(0, Math.min(b, total - 1 - a));
+        a = Math.max(0, Math.min(a, total - 1 - b));
+      }
+      return { ...dropTrims(e), ...(a ? { trim_in: a } : {}), ...(b ? { trim_out: b } : {}) };
     });
   }
   return out;

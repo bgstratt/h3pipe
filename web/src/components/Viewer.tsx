@@ -16,7 +16,7 @@ import { frameAt } from "../lib/keyframes";
 import {
   atOutPoint, baseIn, clipOffset, cutTime, fileTime, locate, nextVideo, totalDuration, type PlayItem,
 } from "../lib/playlist";
-import { masterSync, needsResync, recordingAt } from "../lib/recording";
+import { masterSync, needsResync, recordingAt, trackState } from "../lib/recording";
 import { takesOf, viewLabel, viewOf } from "../lib/refs";
 import { shotTarget, takeTargetBadge, targetLabel } from "../lib/targets";
 import { store, useApp, type CompareMode, type ViewerState } from "../store";
@@ -424,7 +424,9 @@ function CutPlayer({ ep, v }: { ep: string; v: ViewerState }) {
   const cp = useApp((s) => s.cutPlay);
   const audioMode = useApp((s) => s.cutAudio);
   const fps = st?.fps || 24;
-  const track = st?.track?.path ? st.track : null;
+  // the recording, when there is one that can be played
+  const ts = trackState(st?.track);
+  const track = ts && !ts.why ? ts : null;
   const recording = audioMode === "recording" && !!track;
   const winRef = useRef<HTMLDivElement>(null);
   const v0 = useRef<HTMLVideoElement>(null);
@@ -730,10 +732,15 @@ function CutPlayer({ ep, v }: { ep: string; v: ViewerState }) {
         <button className="h3-btn h3-icon" title="Next shot (→)" onClick={() => jump(1)}><i className="pi pi-step-forward" /></button>
         <input type="range" min={0} max={total || 1} step={0.01} value={Math.min(cp.pos, total)} onChange={(e) => seekCut(Number(e.target.value))} />
         <span className="h3-mono h3-muted">{fmtClock(cp.pos)} / {fmtClock(total)}</span>
-        {track && (
-          <span className="h3-seg" title={`Audio: each clip's own sound, or the recorded dialogue (${track.path}) under the cut, as h3assemble --audio master lays it`}>
+        {ts && (
+          <span
+            className="h3-seg"
+            title={ts.why
+              ? `Audio: ${ts.why}, so Play all plays the clips' own sound`
+              : `Audio: each clip's own sound, or the recorded dialogue (${ts.path}) under the cut, as h3assemble --audio master lays it`}
+          >
             <button className={!recording ? "h3-on" : ""} onClick={() => setCutAudio("clips")}>clips</button>
-            <button className={recording ? "h3-on" : ""} onClick={() => setCutAudio("recording")}>recording</button>
+            <button className={recording ? "h3-on" : ""} disabled={!!ts.why} onClick={() => setCutAudio("recording")}>recording</button>
           </span>
         )}
         {recording && sync.warnings.length > 0 && (
