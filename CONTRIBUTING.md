@@ -10,4 +10,5 @@ Issues and pull requests are welcome.
   invalidates renders people may already have approved. Call that out in the PR.
 - Test a change with `python h3build.py examples/series_example.json examples/script_example.md --check`
   before opening a PR. If it touches rendering, say what you rendered to verify it.
-- `prompts/` is generated. Edit `docs/AUTHORING.md` and run `python tools/make_prompts.py`.
+- `prompts/` and the skill in `build/skill/` are generated. Edit `docs/AUTHORING.md` (and
+  `docs/BREAKDOWN.md`) and run `python tools/make_prompts.py`.

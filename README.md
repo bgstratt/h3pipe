@@ -1,54 +1,70 @@
-# h3pipe — script to finished episode with MiniMax H3
+# h3pipe — script to finished episode on a local ComfyUI
 
-Write an episode as a screenplay-flavoured markdown file plus a series config (`series.json`), and these
-scripts compile it into a shot list, generate every reference image it needs, render each
-shot on a local ComfyUI, and cut the results together.
+Write an episode as a screenplay-flavoured markdown file (`epNN.md`) plus a series config
+(`series.json`). h3pipe parses the script into a model-free **story IR**
+(`shotlist/shots.json`), compiles every shot for its **video target** (a model and its
+ComfyUI workflow), generates the reference images and keyframes the shots need through an
+**image target**, renders each shot on a local ComfyUI, and cuts the takes together.
 
-Built for MiniMax H3 Ref2VA on ComfyUI. One shot per queue: nothing chains, so a bad shot
-is re-rendered alone and the rest of the episode is untouched.
-
-Run the commands from the folder that holds your projects, with these scripts beside it.
-Each episode lives in its own folder, for example `Shows\ep05`.
-
-## Requirements
-
-- Python 3.10+ (standard library only for the pipeline scripts; the ComfyUI node uses torch,
-  which ComfyUI already provides)
-- A local [ComfyUI](https://github.com/comfyanonymous/ComfyUI) with the MiniMax H3 Ref2VA
-  model, its CLIP and both VAEs, and a turbo LoRA. See **Models**
-- `ffmpeg` and `ffprobe` on PATH for `h3assemble`
-- Optional: `pip install demucs` for the `dub_keep_foley` audio policy
-
-## Install
+You drive it from an editor inside ComfyUI (shots, takes, refs, the cut) or from one
+command, `h3.py`. One shot per queue: nothing chains, so a bad shot is re-rendered alone
+and the rest of the episode is untouched. Every take is kept with the exact settings that
+made it.
 
 ```
-git clone https://github.com/<you>/h3pipe.git
-cd h3pipe
+  you write                     generated                                  rendered
+  ─────────                     ─────────                                  ────────
+  series.json ─┐                shotlist/shots.json (story IR)
+  epNN.md     ─┼─ h3build ─▶    shotlist/shotlist[.<target>].json ─ render ─▶ renders/<shot>/<shot>_tNN.mp4
+  (recording) ─┘  (h3align)     refs_todo.json ─── refs / keyframes ─▶ refs/      │
+                                                                               assemble ─▶ epNN.mp4
 ```
 
-Copy `comfy_nodes/` into `ComfyUI/custom_nodes/ComfyUI-H3-Shotlist/` and restart ComfyUI,
-then load `targets/video/minimax_h3_ref2va/workflow.json` (save it in ComfyUI as `H3_Ref2VA_Shotlist_v1.json`). `h3render`
-finds that workflow in ComfyUI's saved workflows, else in the repo; set `H3_WORKFLOW` to
-override, or pass `--workflow`.
+## Targets
 
-`kreagen.py` generates reference images through an **image target** (`targets/image/<id>/`):
-`krea2` by default, or `z_image_turbo`, `flux2_klein`, `flux2_klein_edit` (FLUX.2 Klein 9B
-with reference images) or `flux_kontext`, chosen by the series config's `refs` block, the
-editor, or `--target`. Shot keyframes are generated the same way, by default with
-`flux2_klein_edit` when it is installed, which also reads the picked character views and
-the plate (`h3.py keyframe <ep> --missing`). `python h3.py targets --kind image` says which
-are installed and where to download the rest. Everything else in the pipeline is
-model-agnostic.
+A shot renders on MiniMax H3 Ref2VA unless the script (`target:`), a render profile, the
+episode (chosen in the editor) or the series config (`series.target`) names another. A shot
+retargeted in the editor or with `h3.py override` is compiled for its new target when it is
+queued; no rebuild. The format and how to choose are in
+[docs/AUTHORING.md](docs/AUTHORING.md).
+
+| Video target | Label |
+|---|---|
+| `minimax_h3_ref2va` (default) | MiniMax H3 Ref2VA |
+| `minimax_h3_fl2va` | MiniMax H3 FL2VA (first/last frames) |
+| `ltx2` | LTX-2.5 distilled (text / keyframes to video + audio) |
+| `ltx2_ingredients` | LTX-2.3 ingredients (character/plate refs) |
+| `wan22_i2v` | Wan 2.2 14B I2V |
+| `wan22_ti2v` | Wan 2.2 5B TI2V |
+| `wan22_vace` | Wan 2.2 14B VACE (refs) |
+
+| Image target | Label |
+|---|---|
+| `krea2` (default for refs) | Krea 2 turbo (text to image) |
+| `z_image_turbo` | Z-Image Turbo (fast text to image) |
+| `flux2_klein` | FLUX.2 Klein 9B (text to image) |
+| `flux2_klein_edit` (default for keyframes, when installed) | FLUX.2 Klein 9B edit (uses reference images) |
+| `flux_kontext` | FLUX.1 Kontext dev (edit, one reference) |
+
+Each target lives in `targets/<kind>/<id>/`: `target.json` (presets, the model files it
+needs with their tier and download links, the workflow binding), its code (the prompt writer, the
+compile), and `workflow.json`. The image target for refs and keyframes comes from the series config's
+`refs` block, the editor, or `--target`.
+
+**What's installed?** With ComfyUI running, `python h3.py targets` prints one line per
+target (`ready`, `degraded`, `not_ready`, `unknown`) and, under it, every missing file with
+its models folder and download link. `--kind video|image` narrows it, an episode folder
+adds its series config (`python h3.py targets Shows\ep05`), `--json` prints data. A
+missing required file skips the shot with its link; a missing accelerator (a turbo LoRA)
+renders the slower base preset; the take says which. The editor's target picker and its
+**What's missing** window show the same.
 
 ## Models
 
-**Models you need per target.** Each target lists the files it needs, and a download link
-for each one it has a trustworthy record of, in its `target.json` (`models`: what each file
-is and its tier, required / accelerator / optional; `downloads`: the folder and the link).
-With ComfyUI running, `python h3.py targets` checks the install: one line per target
-(`ready`, `degraded`, `not_ready`) and, under it, every missing file with its models folder
-and link. The editor's target picker shows the same. See **Which model? Readiness and
-downloads** in [docs/AUTHORING.md](docs/AUTHORING.md).
+Each target's `target.json` lists the files it needs (`models`: what each file is and its
+tier, required / accelerator / optional) and a download link for each one it has a
+trustworthy record of (`downloads`). `python h3.py targets` checks them against your
+ComfyUI. See **Which model? Readiness and downloads** in [docs/AUTHORING.md](docs/AUTHORING.md).
 
 The default target, H3 Ref2VA:
 
@@ -62,12 +78,10 @@ The default target, H3 Ref2VA:
 
 Models come from [Comfy-Org/MiniMax-H3](https://huggingface.co/Comfy-Org/MiniMax-H3) and the
 turbo LoRAs from [lightx2v/Minimax-h3-Turbo](https://huggingface.co/lightx2v/Minimax-h3-Turbo).
-Swap any of them per pass or per shot — see **Steps, model and LoRA**.
+Swap any of them per pass or per shot; see **Steps, model and LoRA**.
 
-**LTX-2 (the `ltx2` target, optional).** Shots or sequences can render on LTX-2.5 instead
-(`target: ltx2`, or retarget one from the editor / `h3.py override --target ltx2`). It needs
-ComfyUI's LTX-2.5 nodes (core ComfyUI) and these files, from
-[Lightricks/LTX-2.5](https://huggingface.co/Lightricks/LTX-2.5) and
+LTX-2.5 (`ltx2`), for example, needs ComfyUI's LTX-2.5 nodes (core ComfyUI) and these files,
+from [Lightricks/LTX-2.5](https://huggingface.co/Lightricks/LTX-2.5) and
 [Comfy-Org/gemma-4](https://huggingface.co/Comfy-Org/gemma-4):
 
 | Role | File used here |
@@ -77,76 +91,146 @@ ComfyUI's LTX-2.5 nodes (core ComfyUI) and these files, from
 | Video / audio VAE | `ltx-2.5-video-vae-bf16.safetensors` / `ltx-2.5-audio-vae-bf16.safetensors` |
 | Latent upscaler (x2, second stage) | `ltx-2.5-latent-spatial-upscaler-x2-bf16-1.0.safetensors` |
 
-The file names are the target's presets (`targets/video/ltx2/target.json`). The workflow is
-ComfyUI's LTX-2.5 image-to-video template, run text-to-video unless the shot has keyframes.
-No h3pipe loader node is involved, so an LTX shot renders on any ComfyUI that has
-`H3SaveShot`.
+The other targets' files are in their `target.json`, and `h3.py targets` prints what is
+missing with links.
+
+## Requirements
+
+- Python 3.10+ (the pipeline is standard library only; the ComfyUI nodes use torch, which
+  ComfyUI provides)
+- A local [ComfyUI](https://github.com/comfyanonymous/ComfyUI), frontend 1.3 or later for
+  the editor, with the model files of the targets you use (`python h3.py targets`; the
+  default H3 files are listed under **Models**)
+- `ffmpeg` and `ffprobe` on PATH for `assemble`
+- Optional: `pip install demucs` for the `dub_keep_foley` audio policy, `pip install
+  faster-whisper` for `align`
+
+## Install
 
 ```
-  you write                  generated                      rendered
-  ─────────                  ─────────                      ────────
-  series.json  ─┐
-  epNN.md      ─┼─ h3build ─▶ shotlist/shotlist.json ─ h3render ─▶ renders/shNNN/*.mp4 ─ h3assemble ─▶ epNN.mp4
-  (recording) ──┘  (h3align)  refs_todo.json ────────── kreagen ──▶ refs/  (images H3 needs)
+git clone https://github.com/<you>/h3pipe.git
 ```
 
-## Quick start
+Link `comfy_nodes/` into ComfyUI's `custom_nodes` and restart ComfyUI. A link (a junction on
+Windows) lets the editor find the pipeline beside it:
 
 ```
-cd <your projects folder>
+mklink /J C:\path\to\ComfyUI\custom_nodes\ComfyUI-H3-Shotlist C:\path\to\h3pipe\comfy_nodes
+```
 
-python h3.py build    Shows\ep05             # shotlists + reference work orders
-python h3.py check    Shows\ep05             # validate and check dialogue pacing
-python h3.py refs     Shows\ep05             # generate character sheets, props, plates
+If you copy the folder instead, set `H3PIPE_HOME` to the repo for ComfyUI. The node pack
+brings the loader and save nodes, the editor's routes (`docs/API.md`) and the editor
+itself (`comfy_nodes/web/h3pipe-editor.js`).
+
+Each target's workflow is looked up among ComfyUI's saved workflows by the name its
+`target.json` binding gives (H3 Ref2VA: `H3_Ref2VA_Shotlist_v1.json`), else the repo's
+`targets/<kind>/<id>/workflow.json`; `--workflow` overrides it for a run. Saving the
+repo's workflow in ComfyUI under that name keeps it in step with your node versions.
+
+Run `python h3.py` from the repo (or by its path from anywhere; it finds the scripts beside
+it). Each episode lives in its own folder (`Shows\ep05`) holding its script and
+`series.json`.
+
+## The editor
+
+Open ComfyUI after installing the node pack:
+
+- **h3 Shots** (sidebar): pick the project folders (roots) and the episode, the pass
+  (final / proxy) and the episode's model; build; every shot with its takes, status and
+  stale marks; render, redo, pick the take the cut uses.
+- **h3 Refs** (sidebar): every character view, prop, plate, voice and shot keyframe the
+  series config and script call for, with candidates (takes) to generate, import, compare
+  and pick, and each ref's prompt override and image target.
+- **h3 Timeline** (bottom panel): the cut in order, with Play all and assemble.
+- **Viewer** (floating): a shot's takes with A/B compare (side by side or wipe), Play all,
+  and a ref's candidates.
+- **Inspector** (floating): the selected shot: target, overrides (prompt, seed, model,
+  LoRAs, steps, per pass), refs used, missing refs.
+- **What's missing** (floating): which model files a target lacks, with folders and links.
+
+The project roots are kept in ComfyUI's user folder (`user/default/h3pipe/config.json`),
+else read from `H3PIPE_ROOTS`. Everything the editor does is a file in the episode folder
+(`overrides.json`, `cut.json`, take sidecars), and the commands below do the same.
+
+## Quick start (command line)
+
+```
+python h3.py build    Shows\ep05             # story IR, shotlists, reference work orders
+python h3.py check    Shows\ep05             # validate and check dialogue pacing (writes nothing)
+python h3.py targets  Shows\ep05             # which targets this ComfyUI can render
+python h3.py refs     Shows\ep05             # character views, props, plates
+python h3.py keyframe Shows\ep05 --missing   # keyframes the shots' targets need
 python h3.py render   Shows\ep05 --proxy     # low-res animatic
 python h3.py assemble Shows\ep05 --proxy     # join it into one mp4
 python h3.py render   Shows\ep05             # full-res
 python h3.py assemble Shows\ep05
 ```
 
-Several episodes at once: list the folders (`Shows\ep06 Shows\ep07`) or use
-`--each` with a parent folder (`python h3.py build Shows --each`).
-Every flag after the episode goes straight through to the underlying script, and every
-script has `--help` with the full list — `python h3render.py --help`, and so on.
-`python h3.py all <episode> --proxy` runs build, refs, render and assemble in one go;
-add `--skip-build` to leave the shotlists on disk alone (see **Steps, model and LoRA**).
-ComfyUI must be running for `refs` and `render`.
+Several episodes at once: list the folders (`Shows\ep06 Shows\ep07`) or use `--each` with a
+parent folder (`python h3.py build Shows --each`). Every flag after the episode goes
+straight through to the underlying script, and every script has `--help` with the full
+list (`python h3render.py --help`, and so on). `python h3.py all <episode> --proxy` runs
+build, refs, render and assemble in one go; add `--skip-build` to leave the shotlists on
+disk alone. ComfyUI must be running for `targets`, `refs`, `keyframe --generate` /
+`--missing` and `render`.
+
+| Command | What it does |
+|---|---|
+| `h3.py build` / `check` | `h3build.py`: script + series config → story IR → each target's shotlist, `refs_todo.md/.json`; `check` runs `--check` and `--pace` |
+| `h3.py refs` | `kreagen.py`: generates missing reference images as takes and picks them |
+| `h3.py keyframe` | a shot's first/last keyframe: from the previous shot's take (continuity), `--generate`, `--missing`, `--clear` |
+| `h3.py render` | `h3render.py`: queues shots through their targets, one take each |
+| `h3.py assemble` | `h3assemble.py`: the review cut, in `cut.json` order |
+| `h3.py align` | `h3align.py`: times the script against a dialogue recording |
+| `h3.py takes` / `pick` / `override` | takes and why they're stale; the take the cut uses; per-shot tweaks and retargeting (`h3edit.py`) |
+| `h3.py targets` | readiness and downloads per target |
 
 ## The scripts
 
 | Script | What it does | Reads | Writes |
 |---|---|---|---|
-| `h3.py` | One command for every step below; passes any extra flags through | an episode folder | — |
-| `h3build.py` | Compiles the series config and script into shots: H3 prompts, frame counts, seeds, reference slots, audio settings. Checks pacing | `series.json`, `epNN.md` | `shotlist/shotlist.json`, `shotlist_proxy.json`, `refs_todo.md/.json` |
-| `kreagen.py` | Generates every missing reference image with krea2 on ComfyUI and saves it where h3build expects it | `refs_todo.json`, `series.json` | `refs/…` (takes in `refs/_takes/`) |
+| `h3.py` | One command for every step; passes any extra flags through | an episode folder | — |
+| `h3build.py` | Parses the script into the story IR, picks each shot's target and compiles it: prompts, frame counts, seeds, reference slots, audio settings. Checks pacing | `series.json`, `epNN.md` | `shotlist/shots.json`, `shotlist.json`, `shotlist.<target>.json`, `_proxy` twins, `refs_todo.md/.json` |
+| `kreagen.py` | Generates every missing reference image through the image target and saves it where the series config names | `refs_todo.json`, `series.json` | `refs/…` (takes in `refs/_takes/`) |
 | `mksheet.py` | Joins four character views into one 4096×1024 sheet (kreagen calls it) | 4 images | `refs/<char>/<char>_sheet_4panel.png` |
-| `h3render.py` | Queues each shot on ComfyUI through `H3_Ref2VA_Shotlist_v1.json`, waits, skips finished shots | `shotlist*.json`, the workflow | `renders/` or `renders_proxy/` |
+| `h3render.py` | Queues each shot on ComfyUI through its target's workflow, waits, skips finished shots | `shotlist*.json`, `overrides.json`, the workflows | `renders/` or `renders_proxy/` |
+| `h3edit.py` | `takes`, `pick`, `override`, `keyframe`, `targets` (through `h3.py`) | the episode | `cut.json`, `overrides.json`, `refs/shots/` |
 | `h3align.py` | Times the script against a dialogue recording and writes the `audio:` windows | recording, `epNN.md`, `series.json` | updated script and series config, `align_report.md` |
 | `h3assemble.py` | Joins the rendered shots in cut order (`cut.json`, else script order), trimming timed shots to their windows | `shotlist*.json`, renders | `renders/epNN.mp4`, `epNN_shots.txt` |
-| `h3plan.py` | Legacy: chained-plan compiler for the looping Contex-Loop graph (see the end of this file) | an episode plan JSON (format documented in that file) | `build/` |
+
+`h3core/` (parser, story IR, series config, speech pacing), `h3jobs.py`, `h3takes.py` and
+`h3refs.py` are the library the commands and the editor's routes share.
 
 ### What you write
 
-- **`series.json`** — the series config: style, characters and props (with a `design` sentence each),
-  locations (one entry per camera angle, with the light), voices, and audio mode. See
-  `examples/series_example.json`.
+- **`series.json`** — the series config: style, characters and props (with a `design`
+  sentence each), locations (one entry per camera angle, with the light), voices, audio
+  mode, and optionally the series target, render profiles, the `refs` image targets and a
+  `negative` prompt. See `examples/series_example.json`.
 - **`epNN.md`** — the script: `# sq` sequences, `## sh` shots with `who:`, `with:`, `size:`,
-  `dur:` or `audio:`, `plate:`, `camera:`, `sound:`, `music:`, action prose and `NAME:` lines.
-  See `examples/script_example.md`.
+  `dur:` or `audio:`, `plate:`, `camera:`, `sound:`, `music:`, optionally `target:`,
+  `first:` / `last:`, action prose and `NAME:` lines. See `examples/script_example.md`.
+- **`negative.txt`** (optional, beside the script): the episode's negative prompt, for the
+  targets that take one.
 
-**[docs/AUTHORING.md](docs/AUTHORING.md) is the full format**: every field, the frame grid, the
-syllable budget, the camera vocabulary, how to break a scene into shots, and the reference-slot
-rules. Read it once before writing an episode.
+**[docs/AUTHORING.md](docs/AUTHORING.md) is the full format**: every field, choosing a
+target, keyframes, the frame grids, the syllable budget, the camera vocabulary, how to
+break a scene into shots, and the reference-slot rules. Read it once before writing an
+episode.
 
-Drafting with an AI assistant: `prompts/` holds the same guide packaged as a Claude skill
-(`prompts/SKILL.md`, copy into `.claude/skills/h3-episode-script/`) and as plain instructions
-for Cursor, Copilot or any system prompt (`prompts/h3-script.instructions.md`). Both are
-generated from the authoring guide by `python tools/make_prompts.py`, so edit the guide, not
-the copies. Whatever writes the script, `--check` and `--pace` are what say it is correct.
+Drafting with an AI assistant: `python tools/make_prompts.py` packages the guide as a skill,
+`h3pipe-episode-script`. `build/skill/h3pipe-episode-script/` is the whole skill (the
+guide, a worked scene breakdown from `docs/BREAKDOWN.md`, and a copy of `h3build` to
+validate with): copy the folder into `.claude/skills/` for Claude Code, or upload
+`build/skill/h3pipe-episode-script.zip` on claude.ai. `prompts/SKILL.md` is the skill's
+text alone, and `prompts/h3-script.instructions.md` the same guide for Cursor, Copilot or
+any system prompt. Edit the docs, not the copies. Whatever writes the script, `--check`
+and `--pace` are what say it is correct.
 
-Change the series config or script and run `build` again rather than editing the generated files —
-`steps:`, `model:` and `lora:` are script fields now, so experiments survive a rebuild.
-If you do hand-edit a shotlist, `all --skip-build` and the individual stages leave it alone.
+Change the series config or script and run `build` again rather than editing the generated
+files: `steps:`, `model:`, `lora:`, `profile:` and `target:` are script fields, so
+experiments survive a rebuild, and `overrides.json` holds the editor's tweaks. If you do
+hand-edit a shotlist, `all --skip-build` and the individual stages leave it alone.
 
 ### h3build
 
@@ -155,7 +239,8 @@ python h3.py build Shows\ep05           # final + proxy
 python h3.py check Shows\ep05           # --check and --pace, writes nothing
 ```
 
-- Snaps every shot to H3's legal lengths (17k+5 frames at 24fps: 2.33, 3.04, 3.75, 4.46, 5.17s…).
+- Snaps every shot to its target's legal lengths (H3: 17k+5 frames at 24fps, so 2.33, 3.04,
+  3.75, 4.46, 5.17s…; LTX: 8k+1; Wan: 4k+1).
 - `dur: auto` sizes a shot from its dialogue. `--pace` flags lines crammed into too short a shot.
 - Seeds come from the episode, sequence and shot IDs, so untouched shots render identically after edits.
 - `refs_todo.md` lists every image and voice sample still missing, with the prompt to make it.
@@ -165,7 +250,9 @@ python h3.py check Shows\ep05           # --check and --pace, writes nothing
 #### Steps, model and LoRA
 
 Each pass has its own sampling setup, and the render stage applies it per shot, in memory —
-the workflow file on disk is never rewritten.
+the workflow file on disk is never rewritten. The table is H3 Ref2VA's; every target has
+its own presets in its `target.json`, and a series written for H3 doesn't hand another
+target H3's model, LoRA or steps.
 
 | | final | proxy |
 |---|---|---|
@@ -228,7 +315,7 @@ python h3.py refs Shows\ep05               # everything missing, most-needed fir
 - No style LoRA by default. `--lora <file> --lora-strength 0.7` adds one, `--unet` swaps the
   image model. Match the LoRA to the look in `series.json`: a realism LoRA helps live action
   and hurts a flat 2D show.
-- **Drives your own ComfyUI workflow when it finds one.** Save a text-to-image graph as
+- **With krea2, drives your own ComfyUI workflow when it finds one.** Save a text-to-image graph as
   `krea2_refs_t2i.json` among ComfyUI's workflows (or set `$KREA_WORKFLOW`, or pass `--workflow`), and
   kreagen sets the prompt, size, seed, steps and cfg on it per image instead of using its
   built-in graph. That is the no-Python way to change the model, LoRA, sampler or scheduler
@@ -252,8 +339,9 @@ python h3.py render Shows\ep05 --only sh040,sh050 --redo
 python h3.py render Shows --each --proxy               # every episode
 ```
 
-- Runs the same graph as the canvas: points Shot List Loader and Save Shot at each take and
-  queues it.
+- Runs each shot through its target's workflow: for H3, the same graph as the canvas, with
+  Shot List Loader and Save Shot pointed at the take; for the others, every value patched
+  into the target's graph. One queue per take.
 - Must run on the ComfyUI PC. It checks the render folders to skip finished shots, so Ctrl-C
   and re-running resumes where it stopped.
 - Every take gets a sidecar, `<shot>_tNN.json`, holding its seed, model, LoRAs, steps, the refs
@@ -280,8 +368,9 @@ python h3.py render Shows --each --proxy               # every episode
 - Failed shots are reported and skipped; `--stop-on-error` halts instead.
 - Other flags: `--panel-mode`, `--save-frames` / `--no-frames`, `--no-review-copy`, `--comfy URL`,
   `--workflow`, `--dry-run` (writes the API job to `h3render_graph.json`).
-- The workflow comes from the running ComfyUI's saved workflows
-  (`H3_Ref2VA_Shotlist_v1.json`; `kreagen` uses `krea2_refs_t2i.json`), so it always matches
+- Each target's workflow comes from the running ComfyUI's saved workflows (the name in its
+  `target.json` binding: `H3_Ref2VA_Shotlist_v1.json` for H3; `kreagen` uses
+  `krea2_refs_t2i.json`), so it always matches
   your ComfyUI's node versions. Failing that, `$COMFYUI_PATH`, then the copy in this repo
   (`targets/video/minimax_h3_ref2va/workflow.json`, `targets/image/krea2/workflow.json`). `--workflow` or `$H3_WORKFLOW` / `$KREA_WORKFLOW` beat all of those. Keep the
   saved `krea2_refs_t2i.json` free of style LoRAs (experiment under another name), since the
@@ -378,14 +467,20 @@ the series config). `clone` and `generate` shots don't use it.
 <episode>/
   series.json                  series config (you write)
   epNN.md                      script (you write)
-  shotlist/shotlist.json       generated
-  shotlist/shotlist_proxy.json generated
+  negative.txt                 negative prompt for targets that take one (optional)
+  shotlist/shots.json          generated: the story IR (model-free)
+  shotlist/shotlist.json       generated: the series target's shots
+  shotlist/shotlist.<target>.json   generated: shots on another target
+  shotlist/*_proxy.json        generated: the same for the proxy pass
   refs_todo.md / .json         generated work order
+  overrides.json               editor / `h3.py override`: per-shot tweaks, retargets, episode target
+  cut.json                     editor / `h3.py pick`: order and the take each shot uses
   refs/<char>/<char>_sheet_4panel.png   horizontal 4-panel strip
   refs/props/<name>.png                 single clean object image
   refs/_bg/<location>.png               background plate -> <Picture 4>
   refs/_takes/<ref>/…_tNN.png/.json     every ref candidate (h3refs)
-  refs/_picks.json, _overrides.json     which take is live; ref prompt/seed tweaks
+  refs/_picks.json, _overrides.json     which take is live; ref prompt/seed/target tweaks
+  refs/shots/<shot>/first.png, last.png a shot's keyframes
   audio/voices/<char>_sample.wav        clone mode
   audio/<episode>_dialogue.wav          recorded dialogue (h3align)
   renders/<shot_id>/
@@ -401,7 +496,10 @@ the series config). `clone` and `generate` shots don't use it.
 
 ---
 
-# Reference
+# Reference: the H3 Ref2VA target
+
+How the default target works. The other targets are described in
+[docs/AUTHORING.md](docs/AUTHORING.md) and their own `targets/video/<id>/` code.
 
 ## The Ref2VA ComfyUI workflow (`H3_Ref2VA_Shotlist_v1.json`)
 
@@ -413,12 +511,12 @@ h3render drives this graph for you. To run it by hand on the canvas:
 
 Re-render one shot: set the index, switch to `fixed`, bump **take**, queue.
 
-### Install
+### The nodes
 
-Copy `comfy_nodes/` into `ComfyUI/custom_nodes/ComfyUI-H3-Shotlist/`, restart,
-then load `targets/video/minimax_h3_ref2va/workflow.json`. Optional: `pip install demucs` for the
-`dub_keep_foley` policy. When `comfy_nodes/h3_shotlist.py`
-changes, copy it over again and restart ComfyUI.
+Installed with the node pack (see **Install**); load
+`targets/video/minimax_h3_ref2va/workflow.json` to see the graph. When
+`comfy_nodes/h3_shotlist.py` changes, restart ComfyUI (copy it over again first if you
+copied the folder rather than linking it).
 
 No audio dependencies. The nodes read and write PCM wav with the Python
 standard library and fall back to ffmpeg for mp3/m4a/flac. In particular they
@@ -516,8 +614,9 @@ errors above that rather than silently dropping one.
 
 ## Audio policies
 
-Set per shot in `shotlist.json`. H3 emits **one mixed track** — there are no
-stems — which is what these policies work around.
+Set per shot with `policy:` in the script, else from the series config's `audio.mode`.
+H3 emits **one mixed track** — there are no stems — which is what these policies work
+around.
 
 | Policy | Reference fed | mp4 audio | Use for |
 |---|---|---|---|
@@ -588,52 +687,9 @@ line, never raised, so it can't cost you the mp4.
 
 ---
 
-# Legacy: `h3plan.py`
-
-`h3plan.py` compiles an episode plan JSON — script, cast and dialogue-track timings in one file,
-in the format its own docstring describes — into `MiniMaxH3ChainPlan` payloads for the looping
-Contex-Loop graph (`Looping MiniMax H3 Seamless Chain V2`). The shot-list pipeline above replaced
-it for cut coverage; use it only for genuinely continuous chained takes. No example ships with the
-repo, and it does not read `series.json` or the script format the rest of the pipeline uses.
-
-```
-python h3plan.py episode.json --report-only
-python h3plan.py episode.json -o build/
-python h3plan.py episode.json -o build_proxy/ --proxy
-```
-
-Each `build/plans/*.json` holds the plan string, the node's widget values, the scheduled reference
-table and per-shot seeds and frame counts.
-
-### What h3plan enforces
-
-**Chain within a beat, cut between beats.** `continuous: true` on a sequence
-compiles to one chained plan carrying motion context. `continuous: false` —
-the default for cut coverage — compiles to one independent single-shot plan per
-shot: zero overlap cost, renders in any order, re-render one shot alone.
-
-**The 17k+5 frame grid.** Every length snaps up to a legal H3 value
-(5, 22, 39, 56, 73, 90 … 3592). Grid-native durations at 24fps are 2.33s,
-3.04s, 3.75s, 4.46s, 5.17s. Anything over 149.67s is rejected, not silently
-emitted for H3 to refuse.
-
-**Audio-first.** Shots with `audio_in` / `audio_out` take their duration from
-the locked dialogue track. `duration` is the fallback for shots without speech.
-
-**Reference budget.** H3 degrades past ~4 active picture references per scene.
-Slots are allocated by shot size: a close-up on one character gets face sheet +
-turnaround; everything else gets one turnaround per character. The prompt text
-and the scheduled reference table are generated together, so they cannot drift.
-
-**Deterministic seeds.** Derived from `episode/sequence/shot` IDs. Recompiling
-after a script change leaves untouched shots bit-identical, so their chain
-checkpoints stay valid.
-
----
-
 ## License
 
 MIT — see [LICENSE](LICENSE).
 
-MiniMax H3, the turbo LoRAs and any image model you point `kreagen.py` at come with their
-own licenses; this repository only contains the tooling around them.
+The models the targets load (MiniMax H3, LTX, Wan, the turbo LoRAs, the image models) come
+with their own licenses; this repository only contains the tooling around them.
