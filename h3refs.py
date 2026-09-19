@@ -1406,6 +1406,10 @@ def ref_json(s: Series, ref: Ref, usage: dict | None = None,
         out["effective"] = effective(s, ref, None, ov_data, view_size)
         if out["effective"]:
             out["prompt"] = out["effective"]["prompt"]
+    # flat aliases the editor reads (docs/API.md): the override's values, and
+    # the bible's prompt before any override, for the prompt diff
+    out["override_values"] = out["override"]["values"]
+    out["built_prompt"] = built_prompt(s, ref, None, view_size)
     return out
 
 

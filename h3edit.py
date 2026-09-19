@@ -93,9 +93,11 @@ def find_episodes(roots: list[str], depth: int = 2) -> list[dict]:
 
 
 BROWSE_LIMIT = 1000
+BROWSE_EXTS = {"image": (".png", ".jpg", ".jpeg", ".webp"),
+               "audio": (".wav", ".mp3", ".flac", ".ogg", ".m4a")}
 
 
-def browse(path: str | None) -> dict:
+def browse(path: str | None, files: str | None = None) -> dict:
     """Folders for a folder picker: the subfolders of `path`, each flagged when
     it is an episode (a bible and a script) or holds a bible. No `path`: the
     starting points (drives on Windows, and the home folder)."""
@@ -113,7 +115,9 @@ def browse(path: str | None) -> dict:
     path = os.path.abspath(path)
     if not os.path.isdir(path):
         raise FileNotFoundError(f"{path} is not a folder")
-    dirs = []
+    if files is not None and files not in BROWSE_EXTS:
+        raise ValueError(f"files must be one of {', '.join(BROWSE_EXTS)}")
+    dirs, found = [], []
     try:
         names = sorted(os.listdir(path), key=str.lower)
     except PermissionError as e:
@@ -124,6 +128,11 @@ def browse(path: str | None) -> dict:
             continue
         p = os.path.join(path, n)
         if not os.path.isdir(p):
+            if files and n.lower().endswith(BROWSE_EXTS[files]) and len(found) < BROWSE_LIMIT:
+                try:
+                    found.append({"name": n, "path": p, "size": os.path.getsize(p)})
+                except OSError:
+                    pass
             continue
         bible = os.path.isfile(os.path.join(p, "series.json"))
         episode = False
@@ -139,7 +148,8 @@ def browse(path: str | None) -> dict:
     return {"path": path, "parent": parent if parent != path else "",
             "episode": os.path.isfile(os.path.join(path, "series.json"))
             and episode_script(path) is not None,
-            "dirs": dirs, "truncated": len(dirs) >= BROWSE_LIMIT}
+            "dirs": dirs, "truncated": len(dirs) >= BROWSE_LIMIT,
+            **({"files": found} if files else {})}
 
 
 def episode_summary(root: str, script: str | None = None) -> dict:

@@ -373,3 +373,15 @@ Same shape as the shot override routes, keyed by `ref` (and `view`).
   - Pick accepts `force: true`.
 - **Import:** images png/jpg/jpeg/webp, audio wav/mp3/flac/ogg/m4a. The take keeps its
   extension, and picking copies the bytes to the bible's path.
+
+### Round 2 contract fixes (after merging the Refs tab)
+- **`GET /h3pipe/browse?path=…&files=image|audio`** also lists matching files as
+  `files: [{name, path, size}]`, for import. `files` is absent without the parameter;
+  an unknown type answers 400.
+- **Each ref in `GET /h3pipe/refs`** also carries `override_values` (the same as
+  `override.values`) and `built_prompt` (the bible's prompt before any override). The
+  UI reads these flat names.
+- **Already served, which the UI can use once its TODOs are cleared:** `comfy_prompt_id`
+  on ref takes and episode takes, `effective` on refs and on each character view, and
+  per-view `prompt`/`override`/`effective`. Ref files beside a parent-folder bible
+  come through `/h3pipe/file` as `../refs/…` paths.

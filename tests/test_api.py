@@ -603,3 +603,17 @@ class MissingRefsAndBrowseTest(ApiTest):
         self.assertEqual(os.path.normcase(res["parent"]), os.path.normcase(self.tmp))
         self.assertTrue(self.ok(A.get_browse(self.ctx, {"path": self.ep}))["episode"])
         self.err(A.get_browse(self.ctx, {"path": os.path.join(self.tmp, "nope")}), 404)
+
+
+class BrowseFilesTest(ApiTest):
+    build = False
+
+    def test_files_mode(self):
+        open(os.path.join(self.ep, "a.PNG"), "wb").close()
+        open(os.path.join(self.ep, "b.wav"), "wb").close()
+        res = self.ok(A.get_browse(self.ctx, {"path": self.ep, "files": "image"}))
+        self.assertEqual([f["name"] for f in res["files"]], ["a.PNG"])
+        res = self.ok(A.get_browse(self.ctx, {"path": self.ep, "files": "audio"}))
+        self.assertEqual([f["name"] for f in res["files"]], ["b.wav"])
+        self.assertNotIn("files", self.ok(A.get_browse(self.ctx, {"path": self.ep})))
+        self.err(A.get_browse(self.ctx, {"path": self.ep, "files": "video"}), 400)

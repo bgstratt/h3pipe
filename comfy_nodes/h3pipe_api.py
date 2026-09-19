@@ -314,7 +314,9 @@ def get_browse(ctx: Context, query: dict):
     """Folder picker. Not limited to the roots: it is how roots are chosen.
     Lists folder names only, never file contents."""
     try:
-        return 200, E.browse(query.get("path") or None)
+        return 200, E.browse(query.get("path") or None, query.get("files") or None)
+    except ValueError as e:
+        raise ApiError(400, str(e))
     except FileNotFoundError as e:
         raise ApiError(404, str(e))
     except PermissionError as e:
