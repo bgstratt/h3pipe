@@ -333,6 +333,9 @@
 .h3-view-head { font-size: 10px; text-transform: uppercase; letter-spacing: 0.03em; color: var(--h3-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .h3-cand-col { display: flex; flex-direction: column; gap: 3px; max-height: 260px; overflow-y: auto; }
 .h3-cand-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(72px, 1fr)); gap: 4px; }
+/* one image per ref (props, vehicles, locations): big enough to review */
+.h3-cand-single { grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 6px; }
+.h3-cand-single.h3-cand-wide { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); }
 .h3-cand { display: flex; flex-direction: column; gap: 1px; cursor: pointer; border-radius: 4px; }
 .h3-cand-img { width: 100%; aspect-ratio: 1; height: auto; border: 2px solid transparent; }
 .h3-cand.h3-live .h3-cand-img { border-color: var(--h3-ok); }

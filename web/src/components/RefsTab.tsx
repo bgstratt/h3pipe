@@ -12,7 +12,7 @@ import { api } from "../host";
 import { shortName, tn } from "../lib/format";
 import { formFromDetail, isDirty, overrideFields, type OverrideForm, type OverrideSource } from "../lib/overrideForm";
 import {
-  VIEWS, blockedShots, canGenerate, groupRefs, isAudioRef, pickedTake, refCounts, takesOf, unpickedViews, usedBy,
+  VIEWS, blockedShots, canGenerate, groupRefs, hasViews, isAudioRef, pickedTake, refCounts, takesOf, unpickedViews, usedBy,
   viewLabel, viewOf, type RefFilter,
 } from "../lib/refs";
 import { store, useApp } from "../store";
@@ -119,7 +119,12 @@ const Candidate = memo(function Candidate({ ep, r, view, t, live, selected }: {
     >
       <div
         className={`h3-cand-img h3-thumb${url && t.status === "ok" ? "" : " h3-empty"}`}
-        style={url && t.status === "ok" ? { backgroundImage: `url("${url}")` } : undefined}
+        style={{
+          ...(url && t.status === "ok" ? { backgroundImage: `url("${url}")` } : {}),
+          // a single-image ref shows each candidate whole, at its own shape
+          // (a 16:9 plate isn't cropped to a square); the view columns stay square
+          ...(!view ? { aspectRatio: t.width && t.height ? `${t.width} / ${t.height}` : r.kind === "location" ? "16 / 9" : "1", backgroundSize: "contain" } : {}),
+        }}
       >
         {!(url && t.status === "ok") && <span className={t.status === "failed" ? "h3-err" : ""}>{t.status}</span>}
         <span className="h3-thumb-label">{tn(t.take)}{t.source === "imported" ? " ⤓" : ""}</span>
@@ -140,7 +145,7 @@ function CandidateGrid({ ep, r, view, cols }: { ep: string; r: Ref; view: string
   const takes = takesOf(r, view);
   const picked = pickedOf(r, view);
   return (
-    <div className={cols ? "h3-cand-col" : isAudioRef(r) ? "h3-col" : "h3-cand-grid"}>
+    <div className={cols ? "h3-cand-col" : isAudioRef(r) ? "h3-col" : `h3-cand-grid h3-cand-single${r.kind === "location" ? " h3-cand-wide" : ""}`}>
       {[...takes].reverse().map((t) => (
         <Candidate
           key={t.take}
@@ -204,7 +209,7 @@ function Selection({ r }: { r: Ref }) {
 
 function GenerateBar({ r }: { r: Ref }) {
   const busy = useApp((s) => !!s.busy[`refgen|${r.id}`] || !!s.busy[`refimport|${r.id}`]);
-  const isChar = !!r.views;
+  const isChar = hasViews(r);
   const [view, setView] = useState<string>(isChar ? "" : "");
   const [count, setCount] = useState(1);
   const [seedMode, setSeedMode] = useState<SeedMode>("auto");
@@ -339,7 +344,7 @@ function RefDetail({ ep, r }: { ep: string; r: Ref }) {
         <div className="h3-small h3-err">Blocks {blocked.length} shot{blocked.length > 1 ? "s" : ""}: {blocked.slice(0, 12).join(", ")}{blocked.length > 12 ? "…" : ""}</div>
       )}
       {used.length > 0 && !blocked.length && <div className="h3-small h3-muted">Used by {used.slice(0, 12).join(", ")}{used.length > 12 ? "…" : ""}</div>}
-      {r.views ? (
+      {hasViews(r) ? (
         <>
           {missingViews.length > 0 && missingViews.length < 4 && (
             <div className="h3-small h3-muted">The sheet is stitched when every view has a pick: {missingViews.map(viewLabel).join(", ")} still to pick.</div>
@@ -384,10 +389,10 @@ function RefRow({ ep, r }: { ep: string; r: Ref }) {
   const st = useStatus();
   const blocked = blockedShots(r, st, pass);
   const used = usedBy(r, pass);
-  const all = r.views ? r.views.flatMap((v) => v.takes) : r.takes;
+  const all = hasViews(r) ? r.views!.flatMap((v) => v.takes) : r.takes;
   const queued = all.filter((t) => t.status === "queued").length;
-  const live = r.views ? null : r.picked;
-  const picks = r.views ? r.views.filter((v) => v.picked != null).length : null;
+  const live = hasViews(r) ? null : r.picked;
+  const picks = hasViews(r) ? r.views!.filter((v) => v.picked != null).length : null;
   return (
     <div className={`h3-ref${open ? " h3-open" : ""}`}>
       <div className="h3-ref-row" onClick={() => toggleRefOpen(r.id)}>

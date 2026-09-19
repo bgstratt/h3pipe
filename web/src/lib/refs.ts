@@ -93,8 +93,8 @@ export function takesOf(r: Ref, view: string | null | undefined): RefTake[] {
 
 /** Views of a character with no pick yet (the sheet is stitched when none are left). */
 export function unpickedViews(r: Ref): string[] {
-  if (!r.views) return [];
-  const have = new Map(r.views.map((v) => [v.view, v.picked]));
+  if (!hasViews(r)) return [];
+  const have = new Map(r.views!.map((v) => [v.view, v.picked]));
   return VIEWS.map((v) => v.view).filter((v) => have.get(v) == null);
 }
 
@@ -123,4 +123,10 @@ export function refCounts(refs: Ref[], st: EpisodeStatus | undefined, pass: Pass
     b.forEach((s) => blocked.add(s));
   }
   return { missing, blocking, shots: blocked.size };
+}
+
+/** A character with per-view candidates. The server sends `views: []` for every
+ * other ref, so test the length, never just the field. */
+export function hasViews(r: Pick<Ref, "views">): boolean {
+  return !!r.views && r.views.length > 0;
 }

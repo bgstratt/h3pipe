@@ -4,7 +4,7 @@ import { renderReport } from "../src/actions";
 import { crumbs, depthBelow, reachable } from "../src/lib/browse";
 import { shotBadges } from "../src/lib/format";
 import { missingRefsSummary, missingRefsTitle, splitByMissingRefs } from "../src/lib/missingRefs";
-import { blockedShots, canGenerate, groupOf, groupRefs, refCounts, unpickedViews, usedBy } from "../src/lib/refs";
+import { blockedShots, canGenerate, groupOf, groupRefs, hasViews, refCounts, unpickedViews, usedBy } from "../src/lib/refs";
 import type { EpisodeStatus, MissingRef, Ref, ShotStatus } from "../src/types";
 
 function ref(id: string, kind: Ref["kind"], over: Partial<Ref> = {}): Ref {
@@ -163,5 +163,24 @@ describe("a ref whose bible entry names no file", () => {
   it("can't be generated when the server says so", () => {
     expect(canGenerate(narrator)).toBe(false);
     expect(canGenerate(ref("subject:ada", "character"))).toBe(true);
+  });
+});
+
+// Regression: the server sends `views: []` for every ref that isn't a character.
+// Testing `!!r.views` treated props and locations as four-view characters (a
+// view dropdown and no candidate grid).
+describe("single-image refs as the server sends them", () => {
+  const plate = ref("location:castle_garden", "location", { views: [] });
+  const bumble = ref("subject:bumble", "character", {
+    views: ["01_threequarter", "02_side", "03_back", "04_face"].map((view) => ({ view, picked: null, takes: [] })) as any,
+  });
+  it("has no views", () => {
+    expect(hasViews(plate)).toBe(false);
+    expect(hasViews(ref("subject:van", "vehicle"))).toBe(false);   // field absent
+    expect(hasViews(bumble)).toBe(true);
+  });
+  it("never reports views to pick for a single-image ref", () => {
+    expect(unpickedViews(plate)).toEqual([]);
+    expect(unpickedViews(bumble)).toHaveLength(4);
   });
 });

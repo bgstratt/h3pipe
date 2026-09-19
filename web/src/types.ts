@@ -354,6 +354,9 @@ export interface RefTake {
   finished?: string | null;
   save_notes?: string;
   comfy_prompt_id?: string;
+  /** image size, once the saver or the import has written it */
+  width?: number | null;
+  height?: number | null;
 }
 
 export interface RefView {
