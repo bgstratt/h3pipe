@@ -5,11 +5,13 @@
 import { useEffect, useState } from "react";
 import { closeRenderAsk, loadDetail, renderShots } from "../actions";
 import { splitByMissingRefs } from "../lib/missingRefs";
+import { readinessOf } from "../lib/readiness";
 import { findTarget, runSize, shotTarget, targetLabel } from "../lib/targets";
 import { useApp } from "../store";
 import { Dialog } from "./Dialogs";
 import { useDetail, useStatus } from "./hooks";
 import { MissingRefsNote } from "./MissingRefs";
+import { TargetReadinessNote } from "./Readiness";
 import { TargetSelect, useTargets } from "./Targets";
 
 export function RenderDialog() {
@@ -35,7 +37,17 @@ function RenderBody() {
   const own = one ? shotTarget(d ?? oneStatus, seriesDefault) : null;
   const run = target || own || "";
   const { ready, blocked } = splitByMissingRefs(st?.shots ?? [], ask.shots);
-  const n = allow ? ask.shots.length : ready.length;
+  // the targets this run renders on: the chosen one, else each shot's own
+  const runTargets = target
+    ? [target]
+    : one
+      ? (run ? [run] : [])
+      : [...new Set(ask.shots.map((id) => shotTarget(st?.shots.find((x) => x.shot === id), seriesDefault)))];
+  // shots whose run target isn't ready: the server skips them (a required file is missing)
+  const runOf = (id: string) => target || (one ? run : shotTarget(st?.shots.find((x) => x.shot === id), seriesDefault));
+  const unready = new Set(ask.shots.filter((id) => readinessOf(list, runOf(id))?.status === "not_ready"));
+  const n = (allow ? ask.shots : ready).filter((id) => !unready.has(id)).length;
+  const readyNow = ready.filter((id) => !unready.has(id));
   const submit = async () => {
     setBusy(true);
     try {
@@ -61,7 +73,7 @@ function RenderBody() {
       footer={
         <>
           <span className="h3-muted h3-small h3-grow">
-            {ready.length} ready{blocked.length ? ` · ${blocked.length} missing refs` : ""}{run ? ` · ${targetLabel(list, run)}` : ""}
+            {readyNow.length} ready{blocked.length ? ` · ${blocked.length} missing refs` : ""}{unready.size ? ` · ${unready.size} on a target that isn't ready` : ""}{run ? ` · ${targetLabel(list, run)}` : ""}
           </span>
           <button className="h3-btn" onClick={closeRenderAsk}>Cancel</button>
           <button className="h3-btn h3-primary" disabled={busy || n === 0} onClick={() => void submit()}>
@@ -84,12 +96,13 @@ function RenderBody() {
             />
           </div>
           <span className="h3-small h3-muted">{size}</span>
+          {runTargets.map((id) => <TargetReadinessNote key={id} id={id} list={list} />)}
         </div>
       )}
-      {ready.length > 0 && (
+      {readyNow.length > 0 && (
         <div className="h3-small">
           <span className="h3-muted">Will queue: </span>
-          {ready.join(", ")}
+          {readyNow.join(", ")}
         </div>
       )}
       <MissingRefsNote blocked={blocked} allow={allow} setAllow={setAllow} />

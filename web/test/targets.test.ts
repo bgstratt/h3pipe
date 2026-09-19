@@ -18,7 +18,7 @@ const list: TargetList = MOCK_TARGETS;
 
 describe("target list", () => {
   it("lists video targets only, and finds the series default", () => {
-    expect(videoTargets(list).map((t) => t.id)).toEqual([H3, LTX]);
+    expect(videoTargets(list).map((t) => t.id)).toEqual([H3, LTX, "ltx2_ingredients", "wan22_i2v", "wan22_vace"]);
     expect(seriesDefaultTarget(list)).toBe(H3);
     expect(seriesDefaultTarget(list, { target: LTX })).toBe(LTX);
     expect(seriesDefaultTarget(null)).toBe(H3);
@@ -254,7 +254,7 @@ describe("mock: retargeting", () => {
     const api = createMockApi(() => {}, { latency: 0 });
     const ep = (await api.episodes())[0].ep;
     const t = await api.targets();
-    expect(videoTargets(t).map((x) => x.id)).toEqual([H3, LTX]);
+    expect(videoTargets(t).map((x) => x.id)).toEqual([H3, LTX, "ltx2_ingredients", "wan22_i2v", "wan22_vace"]);
     expect(t.default.video).toBe(H3);
     const st = await api.episode(ep, "proxy");
     expect(st.target).toBe(H3);

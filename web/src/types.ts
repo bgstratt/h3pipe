@@ -97,7 +97,17 @@ export interface ShotStatus {
   built_target?: string | null;
   /** Phase 7: the render profile the shot was built with, or null. */
   profile?: string | null;
+  /** Where `target` comes from: the render request, a shot override, the script
+   * (a shot/sequence line or a profile), or the episode default. Absent from
+   * older servers. */
+  target_source?: ShotTargetSource | null;
 }
+
+export type ShotTargetSource = "request" | "override" | "script" | "episode";
+/** Where the episode's default target comes from: set in the editor
+ * (overrides.json `episode.target`), the series config's `series.target`, or
+ * the built-in default. */
+export type EpisodeTargetSource = "editor" | "series" | "default";
 
 export interface MissingRef {
   /** the loader slot, e.g. "Picture 4" or "Audio 1" */
@@ -121,8 +131,21 @@ export interface EpisodeStatus {
   height: number | null;
   folder: string;
   shots: ShotStatus[];
-  /** Phase 7: the episode's video target (the series config's `series.target`). */
+  /** The episode's default video target now in force (the editor's episode
+   * target, else the series config's `series.target`, else the built-in default). */
   target?: string | null;
+  /** Where `target` comes from (absent from older servers). */
+  target_source?: EpisodeTargetSource | null;
+  /** The series config's `series.target` (null when it names none). */
+  series_target?: string | null;
+}
+
+/** PUT /h3pipe/episode-target: "the episode's target info" (TODO(contract): shape). */
+export interface EpisodeTargetResult {
+  target?: string | null;
+  target_source?: EpisodeTargetSource | null;
+  series_target?: string | null;
+  [key: string]: unknown;
 }
 
 export interface Lora {
@@ -143,6 +166,8 @@ export interface Sidecar {
   parent_take?: number | null;
   comfy_prompt_id?: string;
   note?: string;
+  /** How each model param resolved to an installed file when the take was queued. */
+  resolved?: Record<string, Resolution> | null;
   [key: string]: unknown;
 }
 
@@ -239,6 +264,13 @@ export interface RenderSkip {
   reason: string;
   take?: number;
   missing_refs?: MissingRef[];
+  /** TODO(contract): the files that stopped a shot whose target isn't ready
+   * ("blocked before a take is reserved, naming the file and where to get
+   * it"). Read as `missing_files` or `missing` (entries like readiness's). */
+  missing_files?: MissingFile[];
+  missing?: MissingFile[];
+  /** the shot's target, when the server names it */
+  target?: string;
   /** the model checks that stopped the shot (h3jobs.check_models) */
   model_mismatch?: { param: string; file: string; family: string; label: string; message: string }[];
   warnings?: RenderWarningRaw[];
@@ -592,7 +624,50 @@ export interface Target {
   };
   template?: { fps?: number; frames?: { step?: number; base?: number; max?: number }; size_multiple?: number };
   /** The family each model param must be (target.json `models`), by param. */
-  models?: Record<string, { family: string; label?: string; patterns?: string[]; folder?: string | null }>;
+  models?: Record<string, { family: string; label?: string; patterns?: string[]; folder?: string | null; tier?: RequirementTier }>;
+  /** Only with `?ready=1`: what's installed, what's missing and where to get it. */
+  readiness?: Readiness | null;
+}
+
+// ---------------------------------------------------------------------------
+// readiness (API.md "Readiness, requirement tiers, and the episode target")
+// ---------------------------------------------------------------------------
+
+/** required: the target can't render without it; accelerator: renders fall back
+ * to the slower `base` preset; optional: one feature is off. */
+export type RequirementTier = "required" | "accelerator" | "optional";
+
+export type ReadinessStatus = "ready" | "degraded" | "not_ready" | "unknown";
+
+export interface MissingFile {
+  param: string;
+  tier: RequirementTier;
+  /** the file the preset names */
+  want: string;
+  family?: string | null;
+  /** the ComfyUI models folder it belongs in, e.g. "loras" */
+  folder?: string | null;
+  /** only from a trustworthy record; never guessed */
+  url?: string | null;
+  /** what to search for when there's no URL */
+  source?: string | null;
+  /** TODO(contract): for an optional file, the feature it enables. Not in the
+   * contract; read if sent, else the param's label is used. */
+  feature?: string | null;
+}
+
+export interface Resolution {
+  want?: string | null;
+  using?: string | null;
+  how: "exact" | "family" | "base" | "off" | string;
+}
+
+export interface Readiness {
+  status: ReadinessStatus;
+  missing: MissingFile[];
+  resolved: Record<string, Resolution>;
+  features_off: string[];
+  nodes_missing: string[];
 }
 
 /** One file of GET /h3pipe/models: how it stands against the param's family. */

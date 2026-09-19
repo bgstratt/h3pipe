@@ -9,6 +9,7 @@ import { ContextMenu } from "./components/ContextMenu";
 import { RedoDialog, SidecarDialog } from "./components/Dialogs";
 import { BrowseDialog } from "./components/Browse";
 import { InspectorWindow } from "./components/Inspector";
+import { MissingWindow } from "./components/Readiness";
 import { RefsTab } from "./components/RefsTab";
 import { RenderDialog } from "./components/RenderDialog";
 import { ShotsTab } from "./components/ShotsTab";
@@ -100,31 +101,51 @@ function Toasts() {
         <div key={t.id} className={`h3-toast h3-t-${t.severity}`} onClick={() => dismissToast(t.id)} title="Click to dismiss">
           <div><b>{t.summary}</b></div>
           {t.detail && <div className="h3-small h3-muted" style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{t.detail}</div>}
+          {t.action && (
+            <div className="h3-row" style={{ marginTop: 4, justifyContent: "flex-end" }}>
+              <button
+                className="h3-btn"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  dismissToast(t.id);
+                  t.action!.run();
+                }}
+              >
+                {t.action.label}
+              </button>
+            </div>
+          )}
         </div>
       ))}
     </div>
   );
 }
 
-function Overlay({ toasts }: { toasts: boolean }) {
+function Overlay() {
   return (
     <>
       <InspectorWindow />
       <Viewer />
+      <MissingWindow />
       <ContextMenu />
       <RedoDialog />
       <RenderDialog />
       <BrowseDialog />
       <SidecarDialog />
-      {toasts && <Toasts />}
+      <Toasts />
     </>
   );
 }
 
 let overlayRoot: Root | null = null;
 
-/** The floating layer (inspector, viewer, context menu, dialogs), on document.body. */
-export function mountOverlay(opts: { toasts?: boolean } = {}) {
+/**
+ * The floating layer (inspector, viewer, What's missing, context menu,
+ * dialogs), on document.body. Its toasts are the editor's own: every toast on
+ * the dev page, and in ComfyUI only those with a button (the rest use
+ * ComfyUI's toasts).
+ */
+export function mountOverlay() {
   if (overlayRoot) return;
   injectStyles();
   const el = document.createElement("div");
@@ -134,7 +155,7 @@ export function mountOverlay(opts: { toasts?: boolean } = {}) {
   overlayRoot = createRoot(el);
   overlayRoot.render(
     <StrictMode>
-      <Overlay toasts={!!opts.toasts} />
+      <Overlay />
     </StrictMode>,
   );
 }

@@ -6,6 +6,7 @@ import { loadModelFiles, loadTargets, loadWidgetChoices } from "../actions";
 import {
   findTarget, listDefaultTarget, pickerChoices, pickerSpec, seriesDefaultTarget, videoTargets, widgetKey, type WidgetSpec,
 } from "../lib/targets";
+import { targetOptionText } from "../lib/readiness";
 import { useApp } from "../store";
 import type { ModelList, Target, TargetList } from "../types";
 import { useStatus } from "./hooks";
@@ -84,7 +85,7 @@ export function TargetSelect({ value, onChange, list, video, disabled, title, ex
       {!known && <option value={value}>{value} (unknown target)</option>}
       {video.map((t) => (
         <option key={t.id} value={t.id} title={t.id}>
-          {t.label || t.id}{t.id === def ? " (default)" : ""}
+          {targetOptionText(t, t.id === def)}
         </option>
       ))}
     </select>

@@ -73,10 +73,34 @@
 // Continuity keyframes:
 //  - TODO(contract): there is no route to unpick or delete a ref take, so the
 //    inspector's Keyframes section has no "Clear".
+//
+// Readiness and the episode target (API.md, 2026-09-19), built against the
+// contract before the backend:
+//  - TODO(contract): `PUT /h3pipe/episode-target` "returns the episode's target
+//    info": typed as `{target, target_source, series_target}`. The UI refetches
+//    `/h3pipe/episode` anyway (the h3pipe.episode event, and a direct refetch).
+//  - TODO(contract): a render skipped because the target isn't ready ("blocked
+//    before a take is reserved, naming the file and where to get it") has no
+//    pinned shape. Read as `missing_files` or `missing` (readiness entries) on
+//    the skip, plus an optional `target`; else spotted from `reason`
+//    (lib/readiness.ts isMissingFileSkip).
+//  - TODO(contract): an optional file's missing entry doesn't say which feature
+//    it enables ("enables <feature>"). Read as an optional `feature`, else the
+//    param's `models` label, else the param name ("duration head").
+//  - TODO(contract): `features_off` isn't tied to the missing entry that turned
+//    it off; the panel lists both.
+//  - TODO(contract): with an episode target set, `PUT /h3pipe/override`'s rule
+//    "setting the shot's built target clears the retarget" means a shot can't
+//    be pinned to its built target when the episode target differs. The UI
+//    sends the built target explicitly in that case (not null) and says so.
+//  - TODO(contract): does `?ready=1` compose with `kind=`? The client sends
+//    both when asked; the editor asks for all targets with `ready=1`.
+//  - TODO(contract): whether `GET /h3pipe/shot` carries `target_source` too;
+//    the UI reads it from the episode status.
 
 import type {
   AssembleResult, BrowseFiles, BrowseResult, BuildResult, CancelResult, ComfyQueue, Config, CutEntry,
-  CutFile, EpisodeStatus, EpisodeSummary, ModelList, OverrideRequest, OverrideResult, Pass, PickRequest, Ref,
+  CutFile, EpisodeStatus, EpisodeSummary, EpisodeTargetResult, ModelList, OverrideRequest, OverrideResult, Pass, PickRequest, Ref,
   RefGenerateRequest, RefGenerateResult, RefImportRequest, RefKeyframeRequest, RefList, RefOverrideRequest,
   RefPickRequest,
   RefTake, RenderRequest, RenderResult, Seed, ShotDetail, TakeRef, TargetKind, TargetList,
@@ -119,13 +143,29 @@ export interface Api {
   models(): Promise<string[]>;
   loras(): Promise<string[]>;
   comfyQueue(): Promise<ComfyQueue>;
-  /** Phase 7: every target (video and image), for the target picker. */
-  targets(kind?: TargetKind): Promise<TargetList>;
+  /** Phase 7: every target (video and image), for the target picker. A kind
+   * filters; `ready: true` asks for each target's `readiness` (`?ready=1`). */
+  targets(opts?: TargetKind | TargetsQuery): Promise<TargetList>;
+  /** PUT /h3pipe/episode-target: the episode's default target; null clears it
+   * (back to series.json's). */
+  putEpisodeTarget(ep: string, target: string | null): Promise<EpisodeTargetResult>;
   /** ComfyUI's choices for one combo widget (`/object_info/<class_type>`), or
    * null when the node or widget isn't there. */
   widgetChoices(classType: string, field: string): Promise<string[] | null>;
   /** GET /h3pipe/models: one model param's files, matching the target's family first. */
   modelFiles(target: string, param: string, ep?: string | null): Promise<ModelList>;
+}
+
+export interface TargetsQuery {
+  kind?: TargetKind;
+  /** ask for readiness (`?ready=1`) */
+  ready?: boolean;
+}
+
+/** `targets("video")` and `targets({kind, ready})` both work. */
+export function targetsQuery(opts?: TargetKind | TargetsQuery): TargetsQuery {
+  if (!opts) return {};
+  return typeof opts === "string" ? { kind: opts } : opts;
 }
 
 export class ApiError extends Error {
@@ -278,9 +318,17 @@ export function createHttpApi(t: Transport): Api {
       return get<string[]>("/models/unet");
     },
     loras: () => get("/models/loras"),
-    targets: async (kind) => {
-      const r = await get<Partial<TargetList>>(`/h3pipe/targets?${qs({ kind })}`);
+    targets: async (opts) => {
+      const { kind, ready } = targetsQuery(opts);
+      const r = await get<Partial<TargetList>>(`/h3pipe/targets?${qs({ kind, ready: ready ? "1" : undefined })}`);
       return { targets: Array.isArray(r?.targets) ? r.targets : [], default: r?.default ?? {} };
+    },
+    putEpisodeTarget: async (ep, target) => {
+      if (target !== null && (typeof target !== "string" || !target)) {
+        return Promise.reject(new Error(`An episode target is a target id or null, got ${String(target)}`));
+      }
+      const r = await call<EpisodeTargetResult | undefined>("PUT", "/h3pipe/episode-target", { ep, target });
+      return r ?? {};
     },
     widgetChoices: async (classType, field) => {
       const info = await get<unknown>(`/object_info/${encodeURIComponent(classType)}`);

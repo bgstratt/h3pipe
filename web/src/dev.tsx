@@ -4,6 +4,7 @@
 import { pushToast, start } from "./actions";
 import { setApi, setHost, type Host, type HostEvent, type Surface } from "./host";
 import { createMockApi } from "./mock/mockApi";
+import { installMock } from "./mock/mockTargets";
 import { mountOverlay, mountSurface } from "./surfaces";
 
 const listeners = new Map<HostEvent, Set<(d: unknown) => void>>();
@@ -19,8 +20,8 @@ const devHost: Host = {
     listeners.get(event)!.add(cb);
     return () => listeners.get(event)?.delete(cb);
   },
-  toast(severity, summary, detail) {
-    pushToast({ severity, summary, detail });
+  toast(severity, summary, detail, action) {
+    pushToast({ severity, summary, detail, action }, action ? 12000 : undefined);
   },
   show(surface: Surface) {
     const el = document.getElementById(`p-${surface}`);
@@ -38,7 +39,11 @@ setApi(createMockApi(emit, { firstRun: params.has("firstrun") }));
 for (const s of ["shots", "refs", "timeline"] as Surface[]) {
   mountSurface(s, document.getElementById(s)!);
 }
-mountOverlay({ toasts: true });
+mountOverlay();
 void start();
+
+// Try the What's missing panel's Refresh: `h3mockInstall("ltx-2.3-22b-ic-lora-ingredients-0.9.safetensors")`
+// in the console "downloads" a file; Refresh then shows it installed.
+(window as unknown as { h3mockInstall: typeof installMock }).h3mockInstall = installMock;
 
 document.getElementById("theme")?.addEventListener("click", () => document.documentElement.classList.toggle("light"));

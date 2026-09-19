@@ -6,18 +6,25 @@
 // `missing_refs`.
 
 import type { Api } from "../api";
-import { ApiError, parseJsonSeedSafe } from "../api";
+import { ApiError, parseJsonSeedSafe, targetsQuery } from "../api";
 import type { HostEvent } from "../host";
 import { reachable } from "../lib/browse";
 import { promptText } from "../lib/format";
 import type {
   CutEntry, EpisodeStatus, EpisodeSummary, Lora, Override, Pass, RenderResult, ShotDetail,
-  ShotStatus, TakeDetail, TakeSummary,
+  ShotStatus, ShotTargetSource, TakeDetail, TakeSummary,
 } from "../types";
 import fixturesRaw from "./fixtures.json?raw";
 import { FsError, browse as fsBrowse, fsExists } from "./mockFs";
 import { RefError, createMockRefs } from "./mockRefs";
-import { H3, LTX, MOCK_TARGETS, MOCK_WIDGET_CHOICES, ltxPrompt, mockModelFiles, preset, targetLength } from "./mockTargets";
+import {
+  H3, LTX, MOCK_TARGETS, MOCK_WIDGET_CHOICES, ltxPrompt, mockModelFiles, mockReadiness, mockTakeResolved, preset, targetLength,
+} from "./mockTargets";
+
+/** series.json's `series.target` in the mock */
+const SERIES_TARGET = H3;
+/** shots whose script names a target (`target:` on the shot line) */
+const SCRIPT_TARGETS: Record<string, string> = { sh040: H3 };
 
 interface Fixtures {
   ep: string;
@@ -142,7 +149,7 @@ export function createMockApi(emit: Emit, opts: MockOptions = {}): Api {
     const ov = d.override;
     const b = d.built as { seed?: string; model?: string; steps?: number };
     const base = fx.detail[pass]?.[shot]?.effective;
-    const target = ov.target ?? H3;
+    const target = shotTargetOf(shot, ov).target;
     const frames = Number((d.built as { length?: number }).length ?? 0);
     const seed = ov.seed ?? (b.seed as string) ?? "0";
     const seed_source = ov.seed != null ? "override" : "stable";
@@ -173,8 +180,10 @@ export function createMockApi(emit: Emit, opts: MockOptions = {}): Api {
       s.override = { fields: Object.keys(d.override).sort(), stale: d.override_stale && !!d.override.prompt };
       d.effective = effectiveOf(pass, shot);
       // Phase 8: the target the next render uses, and the one the build compiled for
-      d.target = s.target = d.override.target ?? H3;
-      d.built_target = s.built_target = H3;
+      const tg = shotTargetOf(shot, d.override);
+      d.target = s.target = tg.target;
+      s.target_source = tg.source;
+      d.built_target = s.built_target = SCRIPT_TARGETS[shot] ?? SERIES_TARGET;
       s.profile = d.profile = null;
       for (const t of s.takes) {
         if (t.target === undefined) t.target = d.takes.find((x) => x.take === t.take)?.sidecar?.target as string | undefined ?? null;
@@ -182,17 +191,48 @@ export function createMockApi(emit: Emit, opts: MockOptions = {}): Api {
     }
   }
 
+  /** The episode's default target: the editor's, else series.json's. */
+  let episodeTarget: string | null = null;
+
+  /** The target a shot's next render uses, and where it comes from (no request here). */
+  function shotTargetOf(shot: string, ov: Override): { target: string; source: ShotTargetSource } {
+    if (ov.target) return { target: ov.target, source: "override" };
+    if (SCRIPT_TARGETS[shot]) return { target: SCRIPT_TARGETS[shot], source: "script" };
+    return { target: episodeTarget ?? SERIES_TARGET, source: "episode" };
+  }
+
+  function syncEpisodeTarget() {
+    for (const pass of ["final", "proxy"] as Pass[]) {
+      const s = status[pass];
+      if (!s) continue;
+      s.target = episodeTarget ?? SERIES_TARGET;
+      s.target_source = episodeTarget ? "editor" : "series";
+      s.series_target = SERIES_TARGET;
+    }
+    for (const id of shotIds) syncOverrideSummary(id);
+  }
+
   // Fixtures for Phase 8: sh030 is retargeted to LTX-2 (its H3 takes now render
   // on another target than the shot), and sh020's t02 was a one-off LTX-2 run,
-  // so its takes mix targets.
+  // so its takes mix targets. Readiness: sh020's t02 ran without LTX's duration
+  // head, and its t01 before the H3 turbo LoRA was installed.
   for (const pass of ["final", "proxy"] as Pass[]) {
     const d = detail[pass]?.sh030;
     if (d) d.override.target = LTX;
     const t2 = detail[pass]?.sh020?.takes.find((t) => t.take === 2);
-    if (t2?.sidecar) t2.sidecar.target = LTX;
-    if (status[pass]) status[pass]!.target = H3;
+    if (t2?.sidecar) {
+      t2.sidecar.target = LTX;
+      t2.sidecar.resolved = { duration_head: { want: "ltx-2.5-duration-head-bf16.safetensors", using: null, how: "off" } };
+    }
+    const t1 = detail[pass]?.sh020?.takes.find((t) => t.take === 1);
+    if (t1?.sidecar) {
+      t1.sidecar.resolved = {
+        model: { want: "minimax_h3_ref2va_pruned_int8_convrot.safetensors", using: "minimax_h3_ref2va_pruned_int8_convrot.safetensors", how: "exact" },
+        loras: { want: "minimax_h3_ref2v_lightx2v_turbo_4step_v0.1_resized_avg_rank_20_bf16.safetensors", using: null, how: "base" },
+      };
+    }
   }
-  for (const id of shotIds) syncOverrideSummary(id);
+  syncEpisodeTarget();
 
   function randomSeed(): string {
     // new seeds stay below 2^53 (PLAN.md)
@@ -305,6 +345,18 @@ export function createMockApi(emit: Emit, opts: MockOptions = {}): Api {
           continue;
         }
         const d = det(req.pass, shot);
+        // a target that isn't ready blocks the shot before a take is reserved
+        const runOn = req.target || shotTargetOf(shot, d.override).target;
+        const blockers = mockReadiness(runOn).missing.filter((m) => m.tier === "required");
+        if (blockers.length) {
+          out.skipped.push({
+            shot,
+            target: runOn,
+            reason: `required file missing for ${runOn}: ${blockers.map((m) => `${m.want} (models/${m.folder})`).join(", ")}`,
+            missing_files: blockers,
+          });
+          continue;
+        }
         const missing = refs.missingFor(shot, shotIds.indexOf(shot));
         if (missing.length && !req.allow_missing_refs) {
           out.skipped.push({
@@ -366,6 +418,7 @@ export function createMockApi(emit: Emit, opts: MockOptions = {}): Api {
             model: req.model ?? eff.model, loras, steps: req.steps ?? eff.steps, overrides,
             parent_take: req.parent_take, note: req.note ?? "", shot, take, pass: req.pass,
             ...(missing.length ? { missing_refs: missing.map((m) => m.slot) } : {}),
+            resolved: mockTakeResolved(target),
           },
           files: {},
         };
@@ -432,7 +485,8 @@ export function createMockApi(emit: Emit, opts: MockOptions = {}): Api {
         for (const [k, v] of Object.entries(req.fields) as [keyof Override, unknown][]) {
           const shared = k === "seed" || k === "note" || k === "target";
           if (!shared && !passes.includes(pass)) continue;
-          if (v === null) delete ov[k];
+          // the target the shot would have anyway (script, else episode) clears the retarget
+          if (v === null || (k === "target" && v === shotTargetOf(req.shot, {}).target)) delete ov[k];
           else (ov as Record<string, unknown>)[k] = v;
           if (k === "prompt" && passes.includes(pass)) d.override_stale = false;
         }
@@ -558,10 +612,24 @@ export function createMockApi(emit: Emit, opts: MockOptions = {}): Api {
         "film_grain_subtle.safetensors",
       ];
     },
-    async targets(kind) {
-      await wait();
+    async targets(o) {
+      const { kind, ready } = targetsQuery(o);
+      await wait(ready ? 300 : undefined);
       const all = clone(MOCK_TARGETS);
+      if (ready) for (const t of all.targets) if (t.kind === "video") t.readiness = mockReadiness(t.id);
       return kind ? { ...all, targets: all.targets.filter((t) => t.kind === kind) } : all;
+    },
+    async putEpisodeTarget(ep, target) {
+      await wait();
+      need(ep);
+      if (target !== null && !MOCK_TARGETS.targets.some((t) => t.id === target && t.kind === "video")) {
+        throw new MockError(`${String(target)} isn't a video target (GET /h3pipe/targets?kind=video)`, 400);
+      }
+      episodeTarget = target;
+      syncEpisodeTarget();
+      emit("h3pipe.episode", { ep: EP });
+      const s = st("proxy");
+      return { target: s.target, target_source: s.target_source, series_target: s.series_target };
     },
     async widgetChoices(classType, field) {
       await wait();
