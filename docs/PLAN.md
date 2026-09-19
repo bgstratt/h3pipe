@@ -1,7 +1,7 @@
 # h3pipe — plan: a shot/take editor, then model-agnostic targets
 
-Status (2026-09-18): Phases 0, 1, 2, 3 (v1) and 6 done; Phase 4 first look done; Phase 5
-backend merged and its UI in progress; then Phase 7 (targets) and 8 (a second model).
+Status (2026-09-18): Phases 0, 1, 2, 3, 5 and 6 done and in use; Phase 4 (evaluate) is
+ongoing through use. Next: Phase 7 (targets) with Phase 8 (a second model) proving it.
 This is the working plan for the next round of development. `CLAUDE.md` points here.
 
 ## Goals
