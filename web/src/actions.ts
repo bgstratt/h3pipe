@@ -7,6 +7,7 @@ import { absPath, promptText, sameEp, tn } from "./lib/format";
 import { normPath, splitByMissingRefs } from "./lib/missingRefs";
 import { buildPlaylist, startOf, totalDuration, type PlayItem } from "./lib/playlist";
 import { hasViews, missingPlan, viewLabel, type RefFilter } from "./lib/refs";
+import { renderWarnings } from "./lib/targets";
 import {
   detailKey, persistPrefs, statusKey, store, type AppState, type BrowseState, type CompareMode,
   type RefTakeRef,
@@ -54,7 +55,84 @@ export async function start() {
   persistPrefs(store);
   wireEvents();
   await loadConfig();
+  void loadTargets();
   await loadEpisodes();
+}
+
+// ---------------------------------------------------------------------------
+// targets (Phase 7/8)
+// ---------------------------------------------------------------------------
+
+let targetsLoading: Promise<void> | null = null;
+
+/** GET /h3pipe/targets once. A server without it leaves `targets` null, and the
+ * UI keeps its pre-target behaviour (no picker, unfiltered model lists). */
+export function loadTargets(force = false): Promise<void> {
+  if (!force && (get().targets || targetsLoading)) return targetsLoading ?? Promise.resolve();
+  targetsLoading = (async () => {
+    try {
+      const targets = await api().targets();
+      set({ targets, targetsError: null });
+    } catch (e) {
+      set({ targetsError: errText(e) });
+    } finally {
+      targetsLoading = null;
+    }
+  })();
+  return targetsLoading;
+}
+
+const choicesLoading = new Map<string, Promise<void>>();
+
+/** ComfyUI's choices for a combo widget a target binds (cached; failures are
+ * quiet: the picker falls back to the generic list). */
+export function loadWidgetChoices(classType: string, field: string): Promise<void> {
+  const key = `${classType}|${field}`;
+  if (get().widgetChoices[key]) return Promise.resolve();
+  const running = choicesLoading.get(key);
+  if (running) return running;
+  const p = (async () => {
+    try {
+      const c = await api().widgetChoices(classType, field);
+      if (c) set((s) => ({ widgetChoices: { ...s.widgetChoices, [key]: c } }));
+    } catch {
+      /* fall back to the generic list */
+    } finally {
+      choicesLoading.delete(key);
+    }
+  })();
+  choicesLoading.set(key, p);
+  return p;
+}
+
+/**
+ * Retarget a shot: the override's `target`, shared by both passes. `null` (or
+ * the built target) goes back to the target the build compiled it for.
+ */
+export async function setShotTarget(shot: string, target: string | null, builtTarget?: string | null): Promise<boolean> {
+  const ep = get().ep;
+  if (!ep) return false;
+  const value = target && target !== builtTarget ? target : null;
+  return withBusy(`override|${shot}`, async () => {
+    try {
+      await api().putOverride({ ep, pass: get().pass, shot, both: true, fields: { target: value } });
+      // shared by both passes: refetch both
+      await Promise.all((["final", "proxy"] as Pass[]).flatMap((p) => [
+        loadDetail(shot, p, true, ep),
+        get().status[statusKey(ep, p)] ? refreshEpisode(ep, p) : Promise.resolve(undefined),
+      ]));
+      const label = (id: string | null | undefined) => get().targets?.targets.find((t) => t.id === id)?.label ?? id ?? "";
+      host().toast(
+        "success",
+        value ? `${shot} now renders on ${label(value)}` : `${shot} is back on ${label(builtTarget) || "its built target"}`,
+        value ? "Both passes. Its prompt, model, LoRAs and steps come from the new target; a per-pass prompt override is ignored." : undefined,
+      );
+      return true;
+    } catch (e) {
+      report(`Couldn't change ${shot}'s target`, e);
+      return false;
+    }
+  });
 }
 
 export async function loadConfig() {
@@ -391,13 +469,15 @@ function firstError(r: { passes: Partial<Record<Pass, { ok: boolean; error: stri
   return "";
 }
 
-export function baseRender(ep: string, pass: Pass, shots: string[], allowMissingRefs = false): RenderRequest {
+export function baseRender(ep: string, pass: Pass, shots: string[], allowMissingRefs = false, target: string | null = null): RenderRequest {
   const r: RenderRequest = {
     ep, pass, shots, redo: false, seed_mode: "auto", seed: null, model: null, loras: null,
     steps: null, prompt: null, parent_take: null, note: "",
   };
   // only sent when set: false is the server's default, and older servers don't know it
   if (allowMissingRefs) r.allow_missing_refs = true;
+  // the same for a one-off target (Phase 8)
+  if (target) r.target = target;
   return r;
 }
 
@@ -407,8 +487,9 @@ export function renderReport(r: RenderResult): { severity: "success" | "info" | 
   if (r.queued.length) {
     out.push({ severity: "success", summary: `Queued ${r.queued.length} take${r.queued.length > 1 ? "s" : ""}`, detail: r.queued.map((q) => `${q.shot} ${tn(q.take)}`).join(", ") });
   }
-  const missing = r.skipped.filter((x) => x.missing_refs?.length);
-  const other = r.skipped.filter((x) => !x.missing_refs?.length);
+  const skipped = r.skipped ?? [];
+  const missing = skipped.filter((x) => x.missing_refs?.length);
+  const other = skipped.filter((x) => !x.missing_refs?.length);
   if (missing.length) {
     out.push({
       severity: "warn",
@@ -424,7 +505,7 @@ export function renderReport(r: RenderResult): { severity: "success" | "info" | 
       detail: other.map((x) => `${x.shot}: ${x.reason}`).join("\n"),
     });
   }
-  if (!out.length && !r.errors.length) out.push({ severity: "info", summary: "Nothing to queue", detail: "" });
+  if (!out.length && !r.errors?.length) out.push({ severity: "info", summary: "Nothing to queue", detail: "" });
   return out;
 }
 
@@ -438,7 +519,15 @@ export async function queueRender(req: RenderRequest): Promise<RenderResult | un
       for (const q of r.queued) learned[q.prompt_id] = { ep: req.ep, pass: req.pass, shot: q.shot, take: q.take };
       set((s) => ({ prompts: { ...s.prompts, ...learned } }));
       for (const t of renderReport(r)) host().toast(t.severity, t.summary, t.detail || undefined);
-      for (const x of r.errors) host().toast("error", `${x.shot} didn't queue`, x.error);
+      for (const x of r.errors ?? []) host().toast("error", `${x.shot} didn't queue`, x.error);
+      const warnings = renderWarnings(r);
+      if (warnings.length) {
+        host().toast(
+          "warn",
+          warnings.length === 1 ? `${warnings[0].shot ? `${warnings[0].shot}: ` : ""}render warning` : `${warnings.length} render warnings`,
+          warnings.map((w) => (w.shot && !w.text.startsWith(w.shot) ? `${w.shot}: ${w.text}` : w.text)).join("\n"),
+        );
+      }
       scheduleRefresh(0);
       return r;
     } catch (e) {
@@ -448,10 +537,10 @@ export async function queueRender(req: RenderRequest): Promise<RenderResult | un
   });
 }
 
-export function renderShots(shots: string[], redo = false, allowMissingRefs = false) {
+export function renderShots(shots: string[], redo = false, allowMissingRefs = false, target: string | null = null) {
   const s = get();
   if (!s.ep || !shots.length) return Promise.resolve(undefined);
-  return queueRender({ ...baseRender(s.ep, s.pass, shots, allowMissingRefs), redo });
+  return queueRender({ ...baseRender(s.ep, s.pass, shots, allowMissingRefs, target), redo });
 }
 
 /**
@@ -556,17 +645,26 @@ export interface RedoPlan {
   prompt: string;
   note: string;
   saveAsOverride: boolean;
+  /** Phase 8: the target for this run (sent as `target`); null/absent = the shot's own */
+  target?: string | null;
+  /** The prompt isn't the user's to set: the shot is retargeted, or this run is on
+   * another target (its prompt is compiled at queue time). Sent as null, never saved. */
+  lockPrompt?: boolean;
 }
 
 /** What to send for a redo: the override to write first (if any) and the render. */
 export function planRedo(p: RedoPlan, ep: string, d: ShotDetail): { override: OverrideFields | null; render: RenderRequest } {
   const seedMode: SeedMode = p.seed.mode === "new" ? "new" : "auto";
   const seed: Seed | null = p.seed.mode === "new" ? null : p.seed.seed;
-  const base = { ...baseRender(ep, p.pass, [p.shot], !!p.allowMissingRefs), redo: true, parent_take: p.parent, note: p.note, seed_mode: seedMode, seed };
-  if (!p.saveAsOverride) {
+  const current = d.target || d.built_target || null;
+  const target = p.target && p.target !== current ? p.target : null;
+  const base = { ...baseRender(ep, p.pass, [p.shot], !!p.allowMissingRefs, target), redo: true, parent_take: p.parent, note: p.note, seed_mode: seedMode, seed };
+  const prompt = p.lockPrompt ? null : p.prompt;
+  // a one-off run on another target isn't saved: the override is the shot's own target's
+  if (!p.saveAsOverride || target) {
     return {
       override: null,
-      render: { ...base, model: p.model || null, loras: p.loras, steps: p.steps, prompt: p.prompt },
+      render: { ...base, model: p.model || null, loras: p.loras, steps: p.steps, prompt },
     };
   }
   // The override then carries the settings, so the take records them as overrides.
@@ -574,7 +672,7 @@ export function planRedo(p: RedoPlan, ep: string, d: ShotDetail): { override: Ov
   // its base_hash and silently clear an "override stale" warning.
   const f: OverrideFields = {};
   const eff = d.effective;
-  if (p.prompt !== eff.prompt) f.prompt = p.prompt === d.built_prompt ? null : p.prompt;
+  if (!p.lockPrompt && p.prompt !== eff.prompt) f.prompt = p.prompt === d.built_prompt ? null : p.prompt;
   if (p.model !== eff.model) f.model = p.model || null;
   if (!sameLoras(p.loras, eff.loras)) f.loras = p.loras;
   if (p.steps !== eff.steps) f.steps = p.steps;

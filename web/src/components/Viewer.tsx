@@ -14,10 +14,12 @@ import {
   atOutPoint, clipOffset, cutTime, locate, nextVideo, totalDuration, type PlayItem,
 } from "../lib/playlist";
 import { takesOf, viewLabel, viewOf } from "../lib/refs";
+import { shotTarget, takeTargetBadge, targetLabel } from "../lib/targets";
 import { store, useApp, type CompareMode, type ViewerState } from "../store";
 import type { RefTake, TakeSummary } from "../types";
 import { FloatingWindow, defaultViewerRect } from "./FloatingWindow";
 import { aspectOf, useShotStatus, useStatus } from "./hooks";
+import { useTargets } from "./Targets";
 import { Thumb } from "./Thumb";
 
 // v2: round 2 moved the default place so the viewer and the inspector sit side by side
@@ -204,6 +206,8 @@ function TakesView({ ep, v }: { ep: string; v: ViewerState }) {
   const [aEl, setAEl] = useState<HTMLVideoElement | null>(null);
   const [bEl, setBEl] = useState<HTMLVideoElement | null>(null);
   const winRef = useRef<HTMLDivElement>(null);
+  const { list: targets, seriesDefault } = useTargets();
+  const shotCurrent = shotTarget(shot, seriesDefault);
 
   const mode = v.mode;
   const takeA = shot?.takes.find((t) => t.take === v.a);
@@ -244,6 +248,10 @@ function TakesView({ ep, v }: { ep: string; v: ViewerState }) {
     <div className="h3-pane" style={style}>
       <span className="h3-pane-label">
         <span className={`h3-ab h3-${which}`}>{which.toUpperCase()}</span> {t ? tn(t.take) : "—"}
+        {t?.target && (
+          // each side says which target made it: a shot's takes can mix targets
+          <> · <span className={t.target !== shotCurrent ? "h3-b-target" : ""}>{targetLabel(targets, t.target)}</span></>
+        )}
         {t && isCutTake(t.take) ? " · cut" : ""}
         {t?.seed ? ` · ${t.seed}` : ""}
       </span>
@@ -269,7 +277,7 @@ function TakesView({ ep, v }: { ep: string; v: ViewerState }) {
   const head = (
     <>
       <b>{v.shot}</b>
-      <span className="h3-muted h3-small">{v.pass}{shot?.seconds ? ` · ${shot.seconds}s` : ""}</span>
+      <span className="h3-muted h3-small" title="The shot's current target">{v.pass}{shot?.seconds ? ` · ${shot.seconds}s` : ""}{targets ? ` · ${targetLabel(targets, shotCurrent)}` : ""}</span>
       <ModeButtons v={v} />
       {mode !== "single" && takeB && (
         <button className="h3-btn h3-icon" title="Swap A and B" onClick={() => updateViewer({ a: v.b, b: v.a })}>⇄</button>
@@ -295,6 +303,7 @@ function TakesView({ ep, v }: { ep: string; v: ViewerState }) {
           const isA = t.take === v.a;
           const isB = !!takeB && t.take === v.b;
           const stale = realStale(t);
+          const tb = takeTargetBadge(t, shotCurrent, targets);
           return (
             <div key={t.take} className={`h3-vtake${isA ? " h3-a" : ""}${isB ? " h3-b" : ""}`}>
               <Thumb
@@ -316,6 +325,7 @@ function TakesView({ ep, v }: { ep: string; v: ViewerState }) {
                 {isB && <span className="h3-ab h3-b">B</span>}
                 <span className={t.status === "ok" ? "h3-muted" : t.status === "failed" ? "h3-err" : ""}>{t.status}</span>
                 {stale.length > 0 && <span className="h3-badge h3-b-stale" title={stale.join(", ")}>stale</span>}
+                {tb && <span className="h3-badge h3-b-target" title={tb.title}>{tb.label}</span>}
               </span>
             </div>
           );

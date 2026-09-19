@@ -4,11 +4,13 @@ import { errText, parseSeed } from "../api";
 import { absPath, shortName, tn } from "../lib/format";
 import { missingOf } from "../lib/missingRefs";
 import { loraRow, parseLoras, parseSteps, type LoraRow } from "../lib/overrideForm";
+import { findTarget, isRetargeted, runSize, shotTarget, targetLabel } from "../lib/targets";
 import { useApp } from "../store";
-import type { Pass, ShotDetail, TakeDetail } from "../types";
+import type { Pass, ShotDetail, TakeDetail, TargetList } from "../types";
 import { DiffView, LoraEditor, ModelSelect } from "./Fields";
 import { useDetail, useDetailError, useShotStatus } from "./hooks";
 import { MissingRefsNote } from "./MissingRefs";
+import { TargetSelect, useTargetPickers, useTargets } from "./Targets";
 
 export function Dialog({ title, onClose, children, footer, wide }: { title: ReactNode; onClose: () => void; children: ReactNode; footer?: ReactNode; wide?: boolean }) {
   useEffect(() => {
@@ -50,19 +52,38 @@ interface RedoForm {
   source: PromptSource;
   prompt: string;
   save: boolean;
+  /** Phase 8: the target for this run; "" = the shot's own */
+  target: string;
 }
 
-function initForm(d: ShotDetail, parent: TakeDetail | undefined, pass: Pass): RedoForm {
-  const sc = parent?.sidecar ?? null;
-  const loras = sc?.loras !== undefined ? sc.loras : d.effective.loras;
+/** The settings a run on another target starts from: that target's preset for the pass. */
+function presetForm(list: TargetList | null, target: string, pass: Pass): Pick<RedoForm, "model" | "loras" | "lorasOn" | "steps"> {
+  const p = findTarget(list, target)?.presets?.[pass] ?? findTarget(list, target)?.presets?.final;
+  const loras = p?.loras ?? (p?.lora ? [{ name: p.lora, strength: 1 }] : null);
   return {
+    model: p?.model ?? "",
+    loras: (loras ?? []).map(loraRow),
+    lorasOn: loras != null,
+    steps: p?.steps != null ? String(p.steps) : "",
+  };
+}
+
+/** `current`: the shot's own target. A parent take rendered on another target
+ * lends its seed, not its model/LoRAs/steps (they belong to that model). */
+function initForm(d: ShotDetail, parent: TakeDetail | undefined, pass: Pass, current: string | null = null): RedoForm {
+  const sc = parent?.sidecar ?? null;
+  const scTarget = typeof sc?.target === "string" ? sc.target : null;
+  const settings = sc && (!scTarget || !current || scTarget === current) ? sc : null;
+  const loras = settings?.loras !== undefined ? settings.loras : d.effective.loras;
+  return {
+    target: "",
     parent: parent?.take ?? null,
     seedChoice: "new",
     typedSeed: sc?.seed ?? d.effective.seed ?? "",
-    model: sc?.model ?? d.effective.model ?? "",
+    model: settings?.model ?? d.effective.model ?? "",
     loras: (loras ?? []).map(loraRow),
     lorasOn: loras != null,
-    steps: String(sc?.steps ?? d.effective.steps ?? ""),
+    steps: String(settings?.steps ?? d.effective.steps ?? ""),
     pass,
     note: "",
     source: "current",
@@ -88,7 +109,15 @@ export function RedoDialog() {
 
 function RedoBody({ d, shot, openPass, parent }: { d: ShotDetail; shot: string; openPass: Pass; parent: number | null }) {
   const parentTake = d.takes.find((t) => t.take === parent);
-  const [f, setF] = useState<RedoForm>(() => initForm(d, parentTake, openPass));
+  const { list, video, seriesDefault } = useTargets();
+  // the shot's own target, and the one this run uses ("" in the form = the shot's own)
+  const current = list || d.target || d.built_target ? shotTarget(d, seriesDefault) : null;
+  const [f, setF] = useState<RedoForm>(() => initForm(d, parentTake, openPass, current));
+  const runTarget = f.target || current || "";
+  const oneOff = !!f.target && f.target !== current;
+  const pickers = useTargetPickers(runTarget || null);
+  // the prompt is the target's when the shot is retargeted or this run is on another target
+  const lockPrompt = oneOff || isRetargeted(d);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [parentPrompt, setParentPrompt] = useState<{ take: number; text: string | null; error?: string } | null>(null);
@@ -128,12 +157,24 @@ function RedoBody({ d, shot, openPass, parent }: { d: ShotDetail; shot: string; 
 
   const chooseParent = (n: number | null) => {
     const t = d.takes.find((x) => x.take === n);
-    const init = initForm(d, t, f.pass);
+    const init = initForm(d, t, f.pass, current);
     set({
-      parent: n, model: init.model, loras: init.loras, lorasOn: init.lorasOn, steps: init.steps, typedSeed: init.typedSeed,
+      parent: n, typedSeed: init.typedSeed,
+      // on another target, keep that target's settings
+      ...(oneOff ? {} : { model: init.model, loras: init.loras, lorasOn: init.lorasOn, steps: init.steps }),
       ...(f.source === "parent" ? { prompt: "" } : {}),
     });
     setParentPrompt(null);
+  };
+
+  const chooseTarget = (id: string) => {
+    if (!id || id === current) {
+      // back to the shot's own target: its current settings
+      const init = initForm(d, pt, f.pass, current);
+      set({ target: "", model: init.model, loras: init.loras, lorasOn: init.lorasOn, steps: init.steps, prompt: (targetD ?? d).effective.prompt, source: "current" });
+    } else {
+      set({ target: id, ...presetForm(list, id, f.pass), source: "current", save: false });
+    }
   };
 
   const submit = async () => {
@@ -147,8 +188,8 @@ function RedoBody({ d, shot, openPass, parent }: { d: ShotDetail; shot: string; 
         seed = { mode: "same", seed: parentSeed };
       } else seed = { mode: "typed", seed: parseSeed(f.typedSeed) };
       steps = parseSteps(f.steps);
-      loras = f.lorasOn ? parseLoras(f.loras) : null;
-      if (!f.prompt.trim()) throw new Error("The prompt is empty.");
+      loras = f.lorasOn && pickers.loras !== null ? parseLoras(f.loras) : null;
+      if (!lockPrompt && !f.prompt.trim()) throw new Error("The prompt is empty.");
     } catch (e) {
       setErr(errText(e));
       return;
@@ -156,8 +197,9 @@ function RedoBody({ d, shot, openPass, parent }: { d: ShotDetail; shot: string; 
     setBusy(true);
     try {
       const ok = await runRedo({
-        shot, pass: f.pass, parent: f.parent, seed, model: f.model, loras, steps, prompt: f.prompt, note: f.note.trim(),
-        saveAsOverride: f.save, allowMissingRefs: allowMissing,
+        shot, pass: f.pass, parent: f.parent, seed, model: pickers.models === null ? "" : f.model, loras, steps, prompt: f.prompt, note: f.note.trim(),
+        saveAsOverride: f.save && !oneOff, allowMissingRefs: allowMissing,
+        target: oneOff ? f.target : null, lockPrompt,
       });
       if (ok) closeRedo();
     } finally {
@@ -166,15 +208,34 @@ function RedoBody({ d, shot, openPass, parent }: { d: ShotDetail; shot: string; 
   };
 
   const builtPrompt = targetD?.built_prompt ?? d.built_prompt;
+  const size = runSize(targetD, runTarget, seriesDefault, list);
+  const runLabel = targetLabel(list, runTarget);
   return (
     <>
       <div className="h3-field" style={{ gridTemplateColumns: "76px minmax(0,1fr)" }}>
+        {list && current && (
+          <>
+            <label title="Target for this run">Target</label>
+            <div className="h3-col" style={{ gap: 2 }}>
+              <TargetSelect
+                value={runTarget}
+                list={list}
+                video={video}
+                title="Target for this run only (sent with the render). The shot's own target is changed in the inspector."
+                onChange={chooseTarget}
+              />
+              <span className="h3-small h3-muted">
+                for this run{oneOff ? ` (the shot stays on ${targetLabel(list, current)})` : ""} · {size.text}
+              </span>
+            </div>
+          </>
+        )}
         <label>From take</label>
         <select className="h3-in" value={f.parent ?? ""} onChange={(e) => chooseParent(e.target.value === "" ? null : Number(e.target.value))}>
           <option value="">(none: the shot's current settings)</option>
           {d.takes.map((t) => (
             <option key={t.take} value={t.take}>
-              {tn(t.take)} · {t.status}{t.sidecar?.seed ? ` · seed ${t.sidecar.seed}` : " · no sidecar"}
+              {tn(t.take)} · {t.status}{t.sidecar?.seed ? ` · seed ${t.sidecar.seed}` : " · no sidecar"}{typeof t.sidecar?.target === "string" && current && t.sidecar.target !== current ? ` · on ${targetLabel(list, t.sidecar.target)}` : ""}
             </option>
           ))}
         </select>
@@ -194,26 +255,44 @@ function RedoBody({ d, shot, openPass, parent }: { d: ShotDetail; shot: string; 
           )}
         </div>
         <label>Model</label>
-        <ModelSelect value={f.model} onChange={(model) => set({ model })} placeholder="(the workflow's model)" />
-        <label>LoRAs</label>
-        <div className="h3-col" style={{ gap: 3 }}>
-          <label className="h3-check h3-small">
-            <input type="checkbox" checked={f.lorasOn} onChange={(e) => set({ lorasOn: e.target.checked })} />
-            set LoRAs {f.lorasOn ? "" : "(off: the workflow's own LoRA)"}
-          </label>
-          {f.lorasOn && <LoraEditor rows={f.loras} onChange={(loras) => set({ loras })} />}
-        </div>
+        {pickers.models === null ? (
+          <span className="h3-muted h3-small">set by the target (it has no model widget)</span>
+        ) : (
+          <ModelSelect value={f.model} onChange={(model) => set({ model })} placeholder="(the workflow's model)" choices={pickers.models} />
+        )}
+        {pickers.loras !== null && (
+          <>
+            <label>LoRAs</label>
+            <div className="h3-col" style={{ gap: 3 }}>
+              <label className="h3-check h3-small">
+                <input type="checkbox" checked={f.lorasOn} onChange={(e) => set({ lorasOn: e.target.checked })} />
+                set LoRAs {f.lorasOn ? "" : "(off: the workflow's own LoRA)"}
+              </label>
+              {f.lorasOn && <LoraEditor rows={f.loras} onChange={(loras) => set({ loras })} choices={pickers.loras} />}
+            </div>
+          </>
+        )}
         <label>Steps</label>
         <input className="h3-in" style={{ width: 80 }} inputMode="numeric" value={f.steps} onChange={(e) => set({ steps: e.target.value.replace(/[^\d]/g, "") })} />
         <label>Pass</label>
         <span className="h3-seg">
           {(["proxy", "final"] as Pass[]).map((p) => (
-            <button key={p} className={f.pass === p ? "h3-on" : ""} onClick={() => set({ pass: p })}>{p}</button>
+            <button key={p} className={f.pass === p ? "h3-on" : ""} onClick={() => set({ pass: p, ...(oneOff ? presetForm(list, f.target, p) : {}) })}>{p}</button>
           ))}
         </span>
         <label>Note</label>
         <input className="h3-in" placeholder="what this take tries (kept in its sidecar)" value={f.note} onChange={(e) => set({ note: e.target.value })} />
         <label>Prompt</label>
+        {lockPrompt ? (
+          <div className="h3-col" style={{ gap: 3 }}>
+            <div className="h3-note h3-note-info h3-small">
+              {oneOff
+                ? <>{runLabel} writes its own prompt for this shot when the run is queued; a prompt written for {targetLabel(list, current)} doesn't apply.</>
+                : <>This shot is retargeted to {runLabel}: per-pass prompt overrides are ignored, and this is the prompt {runLabel} writes for it (read-only).</>}
+            </div>
+            {!oneOff && <pre className="h3-pre" style={{ maxHeight: 220 }}>{(targetD ?? d).effective.prompt}</pre>}
+          </div>
+        ) : (
         <div className="h3-col" style={{ gap: 3 }}>
           <div className="h3-row h3-wrap">
             <label className="h3-check">
@@ -235,16 +314,22 @@ function RedoBody({ d, shot, openPass, parent }: { d: ShotDetail; shot: string; 
             <textarea className="h3-in" rows={10} value={f.prompt} spellCheck={false} onChange={(e) => set({ prompt: e.target.value })} />
           )}
         </div>
+        )}
       </div>
-      <label className="h3-check" title="Writes the prompt, model, LoRAs, steps (and a typed/same seed) to overrides.json first, so later renders keep them">
-        <input type="checkbox" checked={f.save} onChange={(e) => set({ save: e.target.checked })} />
-        Save these as the shot's {f.pass} override
+      <label
+        className="h3-check"
+        title={oneOff
+          ? `A run on another target isn't saved: the override belongs to ${targetLabel(list, current)}. To keep ${runLabel}, change the shot's target in the inspector.`
+          : "Writes the prompt, model, LoRAs, steps (and a typed/same seed) to overrides.json first, so later renders keep them"}
+      >
+        <input type="checkbox" disabled={oneOff} checked={f.save && !oneOff} onChange={(e) => set({ save: e.target.checked })} />
+        Save these as the shot's {f.pass} override{oneOff ? " (not for a one-off target)" : ""}
       </label>
       <MissingRefsNote blocked={missing.length ? [{ shot, refs: missing }] : []} allow={allowMissing} setAllow={setAllowMissing} />
       {err && <div className="h3-note h3-note-err">{err}</div>}
       <div className="h3-row" style={{ justifyContent: "flex-end" }}>
         <span className="h3-muted h3-small h3-grow">
-          {f.model ? shortName(f.model, 40) : ""} · {f.steps} steps · seed {f.seedChoice === "new" ? "new" : f.seedChoice === "same" ? parentSeed : f.typedSeed || "?"}
+          {runLabel ? `${runLabel} · ` : ""}{f.model ? shortName(f.model, 40) : ""} · {f.steps} steps · seed {f.seedChoice === "new" ? "new" : f.seedChoice === "same" ? parentSeed : f.typedSeed || "?"}
         </span>
         <button className="h3-btn" onClick={closeRedo}>Cancel</button>
         <button className="h3-btn h3-primary" disabled={busy} onClick={() => void submit()}>

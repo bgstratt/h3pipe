@@ -7,10 +7,12 @@ import { host } from "../host";
 import {
   cutTake, fmtSeconds, fmtWhen, groupBySequence, realStale, shotBadges, staleTitle, tn,
 } from "../lib/format";
+import { shotTarget, takeTargetBadge, targetBadges } from "../lib/targets";
 import { renderingTakes, statusKey, store, useApp } from "../store";
-import type { Pass, ShotStatus, TakeSummary } from "../types";
+import type { Pass, ShotStatus, TakeSummary, TargetList } from "../types";
 import { aspectOf, useStatus } from "./hooks";
 import { MissingRefsSummary } from "./MissingRefs";
+import { useTargets } from "./Targets";
 import { Badges, Progress, Thumb, statusClass } from "./Thumb";
 
 const BROWSE = "__browse__";
@@ -147,10 +149,12 @@ function BuildBar() {
   );
 }
 
-const TakeRow = memo(function TakeRow({ ep, pass, s, t, aspect, selected, rendering, progress }: {
+const TakeRow = memo(function TakeRow({ ep, pass, s, t, aspect, selected, rendering, progress, targets, shotCurrent }: {
   ep: string; pass: Pass; s: ShotStatus; t: TakeSummary; aspect: number; selected: boolean; rendering: boolean;
   progress?: { value: number; max: number };
+  targets: TargetList | null; shotCurrent: string;
 }) {
+  const tb = takeTargetBadge(t, shotCurrent, targets);
   const isCut = !s.cut.placeholder && s.cut.take === t.take;
   const stale = realStale(t);
   const usable = t.status === "ok" && t.has_video;
@@ -173,6 +177,7 @@ const TakeRow = memo(function TakeRow({ ep, pass, s, t, aspect, selected, render
           <b>{tn(t.take)}</b>
           <span className="h3-muted">{rendering ? "rendering" : t.status}</span>
           {isCut && <span className="h3-badge h3-b-cut" title={s.cut.picked ? "Picked in cut.json" : "The latest usable take"}>{s.cut.picked ? "cut (picked)" : "cut"}</span>}
+          {tb && <span className="h3-badge h3-b-target" title={tb.title}>{tb.label}</span>}
           <span className="h3-grow" />
           {usable && !isCut && (
             <button className="h3-btn" disabled={pickBusy} title="Use this take in the cut" onClick={(e) => { e.stopPropagation(); void pickTake(s.shot, t.take); }}>
@@ -200,7 +205,9 @@ const TakeRow = memo(function TakeRow({ ep, pass, s, t, aspect, selected, render
   );
 });
 
-function ShotRow({ ep, pass, s, aspect }: { ep: string; pass: Pass; s: ShotStatus; aspect: number }) {
+function ShotRow({ ep, pass, s, aspect, targets, seriesDefault }: {
+  ep: string; pass: Pass; s: ShotStatus; aspect: number; targets: TargetList | null; seriesDefault: string;
+}) {
   const selected = useApp((st) => st.shot === s.shot);
   const selTake = useApp((st) => (st.shot === s.shot ? st.take : null));
   const expanded = useApp((st) => !!st.expanded[s.shot]);
@@ -208,8 +215,12 @@ function ShotRow({ ep, pass, s, aspect }: { ep: string; pass: Pass; s: ShotStatu
   const prompts = useApp((st) => st.prompts);
   const progress = useApp((st) => st.progress);
   const rendering = useMemo(() => renderingTakes({ running, prompts }, ep, pass, s.shot), [running, prompts, ep, pass, s.shot]);
-  const badges = useMemo(() => shotBadges(s, rendering), [s, rendering]);
   const ct = cutTake(s);
+  const badges = useMemo(
+    () => [...targetBadges(s, targets, seriesDefault, ct), ...shotBadges(s, rendering)],
+    [s, rendering, targets, seriesDefault, ct],
+  );
+  const shotCurrent = shotTarget(s, seriesDefault);
   const runPid = running && prompts[running]?.shot === s.shot && prompts[running]?.pass === pass ? running : null;
   const prog = runPid ? progress[runPid] : undefined;
   const n = s.takes.length;
@@ -267,6 +278,8 @@ function ShotRow({ ep, pass, s, aspect }: { ep: string; pass: Pass; s: ShotStatu
               selected={selected && selTake === t.take}
               rendering={rendering.has(t.take)}
               progress={runPid ? progress[runPid] : undefined}
+              targets={targets}
+              shotCurrent={shotCurrent}
             />
           ))}
         </div>
@@ -284,6 +297,7 @@ function ShotBin() {
   const collapsed = useApp((s) => s.collapsedSeq);
   const [filter, setFilter] = useState("");
   const groups = useMemo(() => groupBySequence(st?.shots ?? []), [st]);
+  const { list: targets, seriesDefault } = useTargets();
   if (!ep) return null;
   if (err && !st) {
     return (
@@ -326,7 +340,7 @@ function ShotBin() {
                 <b>{g.sequence}</b>
                 <span className="h3-muted h3-small">{g.shots.length} shot{g.shots.length > 1 ? "s" : ""} · {fmtSeconds(g.seconds)}</span>
               </div>
-              {!isCollapsed && shots.map((s) => <ShotRow key={s.shot} ep={ep} pass={pass} s={s} aspect={aspect} />)}
+              {!isCollapsed && shots.map((s) => <ShotRow key={s.shot} ep={ep} pass={pass} s={s} aspect={aspect} targets={targets} seriesDefault={seriesDefault} />)}
             </div>
           );
         })}

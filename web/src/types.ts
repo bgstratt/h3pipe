@@ -44,6 +44,9 @@ export interface TakeSummary {
   save_notes: string;
   /** Not in the contract yet (see TODO in api.ts); read if a server sends it. */
   comfy_prompt_id?: string;
+  /** Phase 7: the video target the take rendered with, from its sidecar
+   * (null for a take from before sidecars; absent from older servers). */
+  target?: string | null;
 }
 
 export interface CutInfo {
@@ -74,6 +77,13 @@ export interface ShotStatus {
   /** References its render needs that aren't on disk (API.md "Missing references").
    * Optional: a server from before round 2 doesn't send it. Empty = ready. */
   missing_refs?: MissingRef[];
+  /** Phase 7/8: the video target the shot's next render uses (request, then
+   * override, then script, then series config). Absent from older servers. */
+  target?: string | null;
+  /** Phase 8: the target the build compiled the shot for. */
+  built_target?: string | null;
+  /** Phase 7: the render profile the shot was built with, or null. */
+  profile?: string | null;
 }
 
 export interface MissingRef {
@@ -94,6 +104,8 @@ export interface EpisodeStatus {
   height: number | null;
   folder: string;
   shots: ShotStatus[];
+  /** Phase 7: the episode's video target (the series config's `series.target`). */
+  target?: string | null;
 }
 
 export interface Lora {
@@ -136,6 +148,8 @@ export interface Override {
   loras?: Lora[] | null;
   steps?: number | null;
   note?: string | null;
+  /** Phase 8: the shot's video target, shared by both passes. */
+  target?: string | null;
 }
 
 export interface Effective {
@@ -145,6 +159,11 @@ export interface Effective {
   model: string;
   loras: Lora[] | null;
   steps: number;
+  /** Phase 8: the target a render would use, and its size and length. */
+  target?: string | null;
+  width?: number | null;
+  height?: number | null;
+  length?: number | null;
 }
 
 export interface ShotDetail {
@@ -157,6 +176,10 @@ export interface ShotDetail {
   override_stale: boolean;
   effective: Effective;
   takes: TakeDetail[];
+  /** Phase 7/8 (see ShotStatus) */
+  target?: string | null;
+  built_target?: string | null;
+  profile?: string | null;
 }
 
 export interface BuildPassResult {
@@ -187,6 +210,9 @@ export interface RenderRequest {
   note: string;
   /** Queue shots with missing refs anyway (flat grey pictures, no audio ref). */
   allow_missing_refs?: boolean;
+  /** Phase 8: the video target for this run only, beating the override. Only
+   * sent when set. */
+  target?: string | null;
 }
 
 export interface RenderSkip {
@@ -194,12 +220,19 @@ export interface RenderSkip {
   reason: string;
   take?: number;
   missing_refs?: MissingRef[];
+  warnings?: RenderWarningRaw[];
 }
 
+/** A render warning. The contract doesn't give a shape (see api.ts): read as a
+ * string or an object with `shot` and `warning`/`message`/`text`. */
+export type RenderWarningRaw = string | { shot?: string; warning?: string; message?: string; text?: string };
+
 export interface RenderResult {
-  queued: { shot: string; take: number; prompt_id: string; seed: Seed; seed_source: string }[];
+  queued: { shot: string; take: number; prompt_id: string; seed: Seed; seed_source: string; target?: string; warnings?: RenderWarningRaw[] }[];
   skipped: RenderSkip[];
-  errors: { shot: string; error: string; take?: number }[];
+  errors: { shot: string; error: string; take?: number; warnings?: RenderWarningRaw[] }[];
+  /** e.g. audio downgraded to generate for a target with no voice reference */
+  warnings?: RenderWarningRaw[];
 }
 
 export interface TakeRef {
@@ -244,6 +277,8 @@ export interface OverrideFields {
   loras?: Lora[] | null;
   steps?: number | null;
   note?: string | null;
+  /** Phase 8: the shot's video target, shared by both passes; null = the built one. */
+  target?: string | null;
 }
 
 export interface OverrideRequest {
@@ -452,4 +487,52 @@ export interface RefEvent {
   view: string | null;
   take: number;
   status: TakeStatus;
+}
+
+// ---------------------------------------------------------------------------
+// targets (API.md "Targets (Phase 7)", "Phase 8 additions")
+// ---------------------------------------------------------------------------
+
+export type TargetKind = "video" | "image";
+
+/** One binding entry: a graph widget (`class_type` + `field`, or for LoRAs
+ * `name`/`strength`/`input`/`chain`), or `{"via": "loader"}`. */
+export type TargetWidget =
+  | { class_type: string; field?: string; name?: string; strength?: string; input?: string; chain?: boolean }
+  | { via: string };
+
+export interface TargetPreset {
+  model?: string | null;
+  lora?: string | null;
+  loras?: Lora[] | null;
+  steps?: number | null;
+  width?: number | null;
+  height?: number | null;
+  [key: string]: unknown;
+}
+
+export interface Target {
+  id: string;
+  kind: TargetKind;
+  label: string;
+  default?: boolean;
+  presets?: Partial<Record<Pass, TargetPreset>>;
+  widgets?: {
+    model?: TargetWidget;
+    loras?: TargetWidget;
+    /** tolerated alias */
+    lora?: TargetWidget;
+    steps?: TargetWidget;
+    seed?: TargetWidget;
+    [key: string]: TargetWidget | undefined;
+  };
+  workflow?: string;
+  loader?: string;
+  saver?: string;
+  template?: { fps?: number; frames?: { step?: number; base?: number; max?: number }; size_multiple?: number };
+}
+
+export interface TargetList {
+  targets: Target[];
+  default: Partial<Record<TargetKind, string>>;
 }

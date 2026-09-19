@@ -44,13 +44,39 @@
 //    a RefTake (plus `view`).
 //  - TODO(contract): a render's `skipped[].reason` for missing refs is free text;
 //    the UI groups by the presence of `missing_refs` instead.
+//
+// Phase 8 (retargeting) gaps, found while building the target picker:
+//  - TODO(contract): `GET /h3pipe/shot` takes no `target`, so the redo/render
+//    dialogs can't show the size and length a one-off run on *another* target
+//    would use. They show `effective.width/height/length` for the shot's own
+//    target and "size set by the target" (plus the target's preset size) for
+//    any other. A `target=` parameter on /h3pipe/shot would settle it.
+//  - TODO(contract): render warnings (e.g. audio downgraded to generate for a
+//    target with no voice reference) have no documented place or shape. The UI
+//    reads a top-level `warnings`, and `warning`/`warnings` on queued, skipped
+//    and errored entries, each a string or `{shot, warning|message|text}`.
+//  - TODO(contract): the per-pass prompt override is ignored for a retargeted
+//    shot, and there's no prompt override per target yet. The inspector shows
+//    `effective.prompt` read-only for a retargeted shot until there is.
+//  - TODO(contract): does `DELETE /h3pipe/override?pass=` keep `target` (shared,
+//    like `seed`)? The UI assumes so: "Revert <pass>" leaves the target and
+//    "Revert all" clears it; the picker has its own revert (`target: null`).
+//  - TODO(contract): the episode's top-level `target` is read as the series
+//    default for the "not the default" badge; the list's `default.video` is the
+//    fallback. Say which one is the series default once episodes mix targets.
+//  - TODO(contract): whether `GET /h3pipe/targets?kind=video` or the unfiltered
+//    list is canonical for the picker; the client asks for all and filters.
+//  - TODO(contract): the model/LoRA pickers read choices from ComfyUI's own
+//    `/object_info/<class_type>` for a `{class_type, field}` widget (as API.md
+//    suggests); a LoRA widget names its file field `name`, not `field`.
 
 import type {
   AssembleResult, BrowseFiles, BrowseResult, BuildResult, CancelResult, ComfyQueue, Config, CutEntry,
   CutFile, EpisodeStatus, EpisodeSummary, OverrideRequest, OverrideResult, Pass, PickRequest, Ref,
   RefGenerateRequest, RefGenerateResult, RefImportRequest, RefList, RefOverrideRequest, RefPickRequest,
-  RefTake, RenderRequest, RenderResult, Seed, ShotDetail, TakeRef,
+  RefTake, RenderRequest, RenderResult, Seed, ShotDetail, TakeRef, TargetKind, TargetList,
 } from "./types";
+import { comboChoices } from "./lib/targets";
 
 export interface Api {
   getConfig(): Promise<Config>;
@@ -85,6 +111,11 @@ export interface Api {
   models(): Promise<string[]>;
   loras(): Promise<string[]>;
   comfyQueue(): Promise<ComfyQueue>;
+  /** Phase 7: every target (video and image), for the target picker. */
+  targets(kind?: TargetKind): Promise<TargetList>;
+  /** ComfyUI's choices for one combo widget (`/object_info/<class_type>`), or
+   * null when the node or widget isn't there. */
+  widgetChoices(classType: string, field: string): Promise<string[] | null>;
 }
 
 export class ApiError extends Error {
@@ -236,6 +267,14 @@ export function createHttpApi(t: Transport): Api {
       return get<string[]>("/models/unet");
     },
     loras: () => get("/models/loras"),
+    targets: async (kind) => {
+      const r = await get<Partial<TargetList>>(`/h3pipe/targets?${qs({ kind })}`);
+      return { targets: Array.isArray(r?.targets) ? r.targets : [], default: r?.default ?? {} };
+    },
+    widgetChoices: async (classType, field) => {
+      const info = await get<unknown>(`/object_info/${encodeURIComponent(classType)}`);
+      return comboChoices(info, classType, field);
+    },
     comfyQueue: async () => {
       const q = await get<{ queue_running?: unknown[][]; queue_pending?: unknown[][] }>("/queue");
       const ids = (xs?: unknown[][]) => (xs ?? []).map((x) => String(x[1]));

@@ -84,8 +84,8 @@ export function Badges({ badges, max }: { badges: Badge[]; max?: number }) {
   if (!badges.length) return null;
   return (
     <span className="h3-badges">
-      {shown.map((b) => (
-        <span key={b.kind} className={`h3-badge h3-b-${b.kind}`} title={b.title}>
+      {shown.map((b, i) => (
+        <span key={`${b.kind}|${i}`} className={`h3-badge h3-b-${b.kind}`} title={b.title}>
           {b.label}
         </span>
       ))}

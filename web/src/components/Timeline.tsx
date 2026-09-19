@@ -7,10 +7,12 @@ import { host } from "../host";
 import { fmtClock, fmtSeconds, groupBySequence, shotBadges, tn } from "../lib/format";
 import { missingRefsSummary } from "../lib/missingRefs";
 import { clipTake, locate } from "../lib/playlist";
+import { targetBadges } from "../lib/targets";
 import { ZOOM_MAX, ZOOM_MIN, renderingTakes, statusKey, useApp } from "../store";
-import type { EpisodeStatus, Pass, ShotStatus } from "../types";
+import type { EpisodeStatus, Pass, ShotStatus, TargetList } from "../types";
 import { aspectOf, useSize, useStatus } from "./hooks";
 import { PassToggle } from "./ShotsTab";
+import { useTargets } from "./Targets";
 import { Badges, Progress, mediaStyle, useScrub } from "./Thumb";
 
 const MIN_CLIP = 26;
@@ -36,16 +38,21 @@ function Playhead({ trackRef, zoom }: { trackRef: React.RefObject<HTMLDivElement
   return <div className="h3-playhead" style={{ left }} />;
 }
 
-const Clip = memo(function Clip({ ep, pass, s, other, zoom, height, aspect, selected, rendering, progress }: {
+const Clip = memo(function Clip({ ep, pass, s, other, zoom, height, aspect, selected, rendering, progress, targets, seriesDefault }: {
   ep: string; pass: Pass; s: ShotStatus; other: EpisodeStatus | undefined; zoom: number; height: number;
   aspect: number; selected: boolean; rendering: Set<number>; progress?: { value: number; max: number };
+  targets: TargetList | null; seriesDefault: string;
 }) {
   const [cell, scrub] = useScrub();
   const take = clipTake(s, other);
   const takePass: Pass = s.cut.placeholder ? s.cut.pass : pass;
   const width = Math.max(MIN_CLIP, Math.round((s.seconds ?? 1) * zoom));
   const mediaW = Math.min(width, Math.round(height * aspect));
-  const badges = useMemo(() => shotBadges(s, rendering), [s, rendering]);
+  // a placeholder's take is the other pass's: its target is compared all the same
+  const badges = useMemo(
+    () => [...targetBadges(s, targets, seriesDefault, take), ...shotBadges(s, rendering)],
+    [s, rendering, targets, seriesDefault, take],
+  );
   const cls = ["h3-clip", selected && "h3-sel", s.cut.placeholder && "h3-placeholder", s.orphan && "h3-orphan"].filter(Boolean).join(" ");
   const title = [
     `${s.shot} · ${fmtSeconds(s.seconds)}${s.size ? ` · ${s.size}` : ""}`,
@@ -109,6 +116,7 @@ export function Timeline() {
   const [trackRef, size] = useSize<HTMLDivElement>();
   const wrapRef = useRef<HTMLDivElement>(null);
   const groups = useMemo(() => groupBySequence(st?.shots ?? []), [st]);
+  const { list: targets, seriesDefault } = useTargets();
   // clip height: the track minus padding and the sequence label
   const clipH = Math.max(24, (size.height || 150) - 6 - 16 - 2);
   const aspect = aspectOf(st);
@@ -214,6 +222,8 @@ export function Timeline() {
                           selected={shot === s.shot}
                           rendering={r.size ? r : NO_TAKES}
                           progress={r.size && running ? progress[running] : undefined}
+                          targets={targets}
+                          seriesDefault={seriesDefault}
                         />
                       </div>
                     );
