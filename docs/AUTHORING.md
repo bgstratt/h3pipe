@@ -62,9 +62,10 @@ shot 93. So:
   not. 1344×768 is H3's native canvas.
 - `steps`, `lora` and `model` are optional per pass; see the README's **Steps, model and LoRA**.
 - `series.target` names the video model the episode renders on: `minimax_h3_ref2va`
-  (MiniMax H3, the default: leave it out), `ltx2` (LTX-2.5 distilled) or `ltx2_ingredients`
-  (LTX-2.3 with your character sheets and plates). Single shots or sequences can render on
-  another one; see **Rendering a shot on LTX-2** below.
+  (MiniMax H3, the default: leave it out), `ltx2` (LTX-2.5 distilled), `ltx2_ingredients`
+  (LTX-2.3 with your character sheets and plates) or `minimax_h3_fl2va` (MiniMax H3 from
+  first/last keyframes). Single shots or sequences can render on another one; see
+  **Rendering a shot on LTX-2** and **Rendering a shot on H3 from keyframes** below.
 
 ### Render profiles
 
@@ -170,7 +171,7 @@ sound: running footsteps on grass, fabric movement
 | `extras: …` | other people in frame, described; see **Crowds and extras** |
 | `model:`, `lora:`, `steps:` | per-shot render overrides; also valid under a `#` header |
 | `profile: dialogue_close` | a render profile from the series config; also valid under a `#` header |
-| `target: ltx2` | the video model for this shot or sequence (`minimax_h3_ref2va`, `ltx2` or `ltx2_ingredients`); see below |
+| `target: ltx2` | the video model for this shot or sequence (`minimax_h3_ref2va`, `ltx2`, `ltx2_ingredients` or `minimax_h3_fl2va`); see below |
 | `NAME: line` | dialogue from someone on screen |
 | `NAME (V.O.): line` | voiceover: speaks, is not drawn, costs no reference slot |
 | `NAME (O.S.): line` | off-screen: in the space, outside the frame |
@@ -235,6 +236,41 @@ plate). Everything above about LTX-2 holds (generated sound, `camera:`, retarget
   sheet is only named.
 - A `lora:` line or profile written for another model doesn't remove the IC-LoRA: it is
   put back first in the list, and the take says so.
+
+### Rendering a shot on H3 from keyframes: `target: minimax_h3_fl2va`
+
+`target: minimax_h3_fl2va` renders on MiniMax H3's first/last-frame model. It is H3 (same
+grid, same sizes, same turbo-LoRA presets and speaker tags), but it takes **no reference
+pictures**: what pins the look is the shot's keyframes. What changes for such a shot:
+
+- **Keyframes instead of sheets.** `refs/shots/<shot>/first.png` is the first frame and
+  `last.png` the last. Both are optional; with neither the shot is text-to-video. They come
+  from **continuity** (`python h3.py keyframe <ep> <shot>`: the previous shot's last frame
+  as this one's first, or `--last` for the next shot's first frame as this one's last; the
+  editor's Refs tab does the same) or from an **import** in the Refs tab. The render adds
+  the model's alignment line for whichever it has, so there is nothing to write for them.
+- **Subjects in words.** No `<Picture N>` slots: everyone in `who:` / `with:` is described
+  from their `design`, and the place from the location's `description` (all of it on a
+  wide, what is behind them on a medium, a shallow slice on a close-up). A keyframe wins
+  where it and the words differ.
+- **The H3 prompt, without the picture sections.** Written for you in H3's three fields:
+  `integrated_multimodal_description` (the look, the framing, who is in frame, the action,
+  `camera:`, then each line as `<d>[English] …</d>` with a speaker id), then
+  `overall_soundscape` (`sound:`) and `non_diegetic_music` (`music:`).
+- **Sound:** `generate` as usual. `dub` and `dub_keep_foley` work: the shot's `audio:` window
+  of the recording (`audio.track`) is cut and anchored at the start of the shot, so the
+  mouths follow your recording; `dub` makes it the whole soundtrack, `dub_keep_foley` lays
+  `sound:` under it. `retention:` has no effect here. `clone` has no voice-sample slot on
+  this model: those shots render with `generate` (each speaker's `voice` line shapes the
+  voice), and the build and the take say so.
+- **Length:** H3's `17k + 5` grid. The model is trained on about 5 to 15 seconds (124 to
+  362 frames); longer shots render with a warning. No `continuous: yes` chaining: continue
+  a shot from the one before with its first keyframe instead.
+- **Size** comes from the series config's pass blocks (multiples of 32). Model, LoRA and
+  steps are the target's own unless it is the series target.
+
+To try a shot this way without touching the script, retarget it from the editor or with
+`h3.py override <ep> sh040 --target minimax_h3_fl2va`.
 
 ## Durations land on a grid
 

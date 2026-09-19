@@ -1,0 +1,435 @@
+{
+  "doc": {
+    "episode": "ks01",
+    "title": "Kitchen Sink",
+    "target": "minimax_h3_fl2va",
+    "defaults": {
+      "width": 1344,
+      "height": 768,
+      "fps": 24.0,
+      "steps": 8,
+      "model": "minimax_h3_fl2va_pruned_int8_convrot.safetensors",
+      "lora": "minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors",
+      "audio_policy": "generate",
+      "master_track": "audio/ks01_mix.wav",
+      "sampler": "res_multistep",
+      "text_encoder": "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
+      "video_vae": "minimax_h3_video_vae_fp16.safetensors",
+      "audio_vae": "minimax_h3_audio_vae_fp32.safetensors"
+    },
+    "subjects": {
+      "ada": {
+        "kind": "character",
+        "sheet": "refs/ada/ada_sheet_4panel.png",
+        "voice_sample": "audio/voices/ada_sample.wav"
+      },
+      "bo": {
+        "kind": "character",
+        "sheet": "refs/bo/bo_sheet_4panel.png",
+        "voice_sample": "audio/voices/bo_sample.wav"
+      },
+      "cy": {
+        "kind": "character",
+        "sheet": "refs/cy/cy_sheet_4panel.png",
+        "voice_sample": "audio/voices/cy_sample.wav"
+      },
+      "rex": {
+        "kind": "character",
+        "sheet": "refs/rex/rex_sheet_4panel.png",
+        "voice_sample": ""
+      },
+      "narrator": {
+        "kind": "character",
+        "sheet": "refs/narrator/narrator_sheet_4panel.png",
+        "voice_sample": "audio/voices/narrator_sample.wav"
+      },
+      "kettle": {
+        "kind": "prop",
+        "sheet": "refs/props/kettle.png",
+        "voice_sample": ""
+      },
+      "van": {
+        "kind": "vehicle",
+        "sheet": "refs/props/van.png",
+        "voice_sample": ""
+      }
+    },
+    "shots": [
+      {
+        "id": "sh010",
+        "sequence": "sq01",
+        "subjects": [
+          "ada"
+        ],
+        "background": "refs/_bg/kitchen.png",
+        "size": "ws",
+        "length": 73,
+        "seed": 8828384270954910346,
+        "steps": 8,
+        "audio_policy": "generate",
+        "prompt": "integrated_multimodal_description: [Shot 1] A flat vector cartoon with thick even outlines and a limited pastel palette, a wide shot takes in a cramped diner kitchen with steel counters, a hanging ticket rail and cold fluorescent light from overhead, with Ada in it. Ada is a tall woman in her thirties with a short grey bob, a mustard apron over a striped shirt, and round red glasses. Ada slams the walk-in door shut and turns to face the kitchen. The camera pushes in on Ada with small amplitude at slow speed. Visible on-screen text reads \"OPEN 24 HOURS\".\n\noverall_soundscape: The compressor hum of the walk-in, a door latch clanking.\n\nnon_diegetic_music: A plucky ukulele sting.",
+        "keyframes": {
+          "first": "refs/shots/sh010/first.png",
+          "last": "refs/shots/sh010/last.png"
+        },
+        "duration": 2.5
+      },
+      {
+        "id": "sh020",
+        "sequence": "sq01",
+        "subjects": [
+          "ada",
+          "bo",
+          "kettle"
+        ],
+        "background": "refs/_bg/kitchen.png",
+        "size": "ms",
+        "length": 90,
+        "seed": 2769191069994745345,
+        "steps": 8,
+        "audio_policy": "generate",
+        "prompt": "integrated_multimodal_description: [Shot 1] A flat vector cartoon with thick even outlines and a limited pastel palette, a medium shot frames Ada, Bo, and the diner kettle against a cramped diner kitchen with steel counters, a hanging ticket rail and cold fluorescent light from overhead. Ada is a tall woman in her thirties with a short grey bob, a mustard apron over a striped shirt, and round red glasses. Bo is a stocky teenage boy with a shaved head, an oversized green bomber jacket and orange high-tops. The diner kettle is a dented chrome kettle with a black bakelite handle and a whistle cap on a chain. Also in frame are two customers at the counter seen through the window, backs to camera: unnamed background figures who look nothing like Ada and Bo and are never duplicates of them. Bo sets the kettle down on the burner and flicks the gas on. The camera holds a static shot with fixed composition. Ada, with a voice that is dry, quick and precise, (S1) says, warmly: <d>[English] You know that one whistles.</d> Bo, with a voice that is slow and cracking, (S2) says: <d>[English] I know.</d> Bo (S2) says, whispering: <d>[English] That's the point.</d>\n\noverall_soundscape: Continuous room tone and environmental ambience with synchronized physical action sounds.\n\nnon_diegetic_music: N/A",
+        "keyframes": {
+          "first": "refs/shots/sh020/first.png",
+          "last": "refs/shots/sh020/last.png"
+        },
+        "audio_intent": "clone",
+        "audio_note": "audio clone renders as generate on H3 FL2V: H3 FL2VA takes no voice sample (it anchors a recording, but has no voice-reference slot)",
+        "duration": 3.6
+      },
+      {
+        "id": "sh030",
+        "sequence": "sq01",
+        "subjects": [
+          "ada"
+        ],
+        "background": "refs/_bg/kitchen.png",
+        "size": "cu",
+        "length": 39,
+        "seed": 9049780455082391214,
+        "steps": 8,
+        "audio_policy": "generate",
+        "prompt": "integrated_multimodal_description: [Shot 1] A flat vector cartoon with thick even outlines and a limited pastel palette, a close-up frames Ada against a shallow, out-of-focus slice of a cramped diner kitchen with steel counters, a hanging ticket rail and cold fluorescent light from overhead. Ada is a tall woman in her thirties with a short grey bob, a mustard apron over a striped shirt, and round red glasses. Ada's eyes narrow at the kettle. The camera holds a static shot with fixed composition. Ada, with a voice that is dry, quick and precise, (S1) says in an off-screen voiceover: <d>[English] Not today.</d> while her lips remain completely closed.\n\noverall_soundscape: Continuous room tone and environmental ambience with synchronized physical action sounds.\n\nnon_diegetic_music: N/A",
+        "keyframes": {
+          "first": "refs/shots/sh030/first.png",
+          "last": "refs/shots/sh030/last.png"
+        },
+        "audio_intent": "clone",
+        "audio_note": "audio clone renders as generate on H3 FL2V: H3 FL2VA takes no voice sample (it anchors a recording, but has no voice-reference slot)",
+        "duration": 1.62
+      },
+      {
+        "id": "sh040",
+        "sequence": "sq01",
+        "subjects": [
+          "bo",
+          "van",
+          "kettle"
+        ],
+        "background": "refs/_bg/kitchen.png",
+        "size": "close",
+        "length": 73,
+        "seed": 2765843861826537092,
+        "steps": 10,
+        "audio_policy": "generate",
+        "prompt": "integrated_multimodal_description: [Shot 1] A flat vector cartoon with thick even outlines and a limited pastel palette, a close-up frames Bo, the delivery van, and the diner kettle against a shallow, out-of-focus slice of a cramped diner kitchen with steel counters, a hanging ticket rail and cold fluorescent light from overhead. Bo is a stocky teenage boy with a shaved head, an oversized green bomber jacket and orange high-tops. The delivery van is a boxy white delivery van with a sky-blue stripe and a cracked left headlight. The diner kettle is a dented chrome kettle with a black bakelite handle and a whistle cap on a chain. Bo leans out of the back door as the van reverses toward it, kettle in hand. The camera holds a static shot with fixed composition. Bo, with a voice that is slow and cracking, (S1) says from off-screen, outside the frame: <d>[English] Left! Left!</d> An off-screen voice that is warm, older, unhurried (S2) says in an off-screen voiceover, into phone: <d>[English] Nobody ever goes left.</d>\n\noverall_soundscape: Continuous room tone and environmental ambience with synchronized physical action sounds.\n\nnon_diegetic_music: N/A",
+        "keyframes": {
+          "first": "refs/shots/sh040/first.png",
+          "last": "refs/shots/sh040/last.png"
+        },
+        "model": "shot_model.safetensors",
+        "lora": "none",
+        "duration": 3.04
+      },
+      {
+        "id": "sh050",
+        "sequence": "sq01",
+        "subjects": [
+          "cy",
+          "rex"
+        ],
+        "background": "refs/_bg/kitchen.png",
+        "size": "medium",
+        "length": 39,
+        "seed": 4412217473130868673,
+        "steps": 8,
+        "audio_policy": "generate",
+        "prompt": "integrated_multimodal_description: [Shot 1] A flat vector cartoon with thick even outlines and a limited pastel palette, a medium shot frames Cy and Rex against a cramped diner kitchen with steel counters, a hanging ticket rail and cold fluorescent light from overhead. Cy is a small girl with two puffball pigtails, a purple raincoat and yellow rubber boots. Rex is a scruffy brown terrier with one white ear and a red collar. Cy bursts in from the back with Rex at her heels. The camera holds a static shot with fixed composition. Cy (S1) says: <d>[English] Absolutely everybody in this entire neighbourhood is waiting outside for breakfast!</d> Rex, with a voice that is a gravelly bark of a voice, (S2) says: <d>[English] Woof.</d>\n\noverall_soundscape: Continuous room tone and environmental ambience with synchronized physical action sounds.\n\nnon_diegetic_music: N/A",
+        "keyframes": {
+          "first": "refs/shots/sh050/first.png",
+          "last": "refs/shots/sh050/last.png"
+        },
+        "audio_intent": "clone",
+        "audio_note": "audio clone renders as generate on H3 FL2V: H3 FL2VA takes no voice sample (it anchors a recording, but has no voice-reference slot)",
+        "duration": 1.62
+      },
+      {
+        "id": "sh060",
+        "sequence": "sq01",
+        "subjects": [
+          "bo"
+        ],
+        "background": "refs/_bg/kitchen.png",
+        "size": "medium",
+        "length": 73,
+        "seed": 7624922143456421625,
+        "steps": 8,
+        "audio_policy": "generate",
+        "prompt": "integrated_multimodal_description: [Shot 1] A flat vector cartoon with thick even outlines and a limited pastel palette, a medium shot frames Bo against a cramped diner kitchen with steel counters, a hanging ticket rail and cold fluorescent light from overhead. Bo is a stocky teenage boy with a shaved head, an oversized green bomber jacket and orange high-tops. Bo stares at the ticket rail as it fills with orders. The camera holds a static shot with fixed composition. Bo, with a voice that is slow and cracking, (S1) says in an off-screen voiceover: <d>[English] Here we go again, then, everybody.</d> while their lips remain completely closed. The off-screen voice of Cy (S2) says from off-screen, outside the frame: <d>[English] Bo!</d>\n\noverall_soundscape: Continuous room tone and environmental ambience with synchronized physical action sounds.\n\nnon_diegetic_music: N/A",
+        "keyframes": {
+          "first": "refs/shots/sh060/first.png",
+          "last": "refs/shots/sh060/last.png"
+        },
+        "audio_intent": "clone",
+        "audio_note": "audio clone renders as generate on H3 FL2V: H3 FL2VA takes no voice sample (it anchors a recording, but has no voice-reference slot)",
+        "duration": 3.04
+      },
+      {
+        "id": "sh110",
+        "sequence": "sq02",
+        "subjects": [
+          "ada",
+          "bo",
+          "cy"
+        ],
+        "background": "refs/_bg/street.png",
+        "size": "wide",
+        "length": 73,
+        "seed": 3054841815674432230,
+        "steps": 12,
+        "audio_policy": "dub",
+        "prompt": "integrated_multimodal_description: [Shot 1] A flat vector cartoon with thick even outlines and a limited pastel palette, a wide shot takes in a wet night street outside the diner, neon sign reflected in the puddles, light from the left, with Ada, Bo, and Cy in it. Ada is a tall woman in her thirties with a short grey bob, a mustard apron over a striped shirt, and round red glasses. Bo is a stocky teenage boy with a shaved head, an oversized green bomber jacket and orange high-tops. Cy is a small girl with two puffball pigtails, a purple raincoat and yellow rubber boots. Ada, Bo and Cy spill out of the diner door into the rain. The camera holds a static shot with fixed composition. Ada, with a voice that is dry, quick and precise, (S1) says, in the recorded voice: <d>[English] Van.</d> Bo, with a voice that is slow and cracking, (S2) says, in the recorded voice: <d>[English] Where?</d> Cy (S3) says, in the recorded voice: <d>[English] There!</d>\n\noverall_soundscape: The only audio is the recorded dialogue anchored from the start of the video; no ambience, effects or music are added.\n\nnon_diegetic_music: N/A",
+        "keyframes": {
+          "first": "refs/shots/sh110/first.png",
+          "last": "refs/shots/sh110/last.png"
+        },
+        "model": "seq_model.safetensors",
+        "audio_in": 1.0,
+        "audio_out": 3.5
+      },
+      {
+        "id": "sh120",
+        "sequence": "sq02",
+        "subjects": [
+          "ada"
+        ],
+        "background": "refs/_bg/street.png",
+        "size": "medium",
+        "length": 39,
+        "seed": 985161046565145751,
+        "steps": 12,
+        "audio_policy": "dub_keep_foley",
+        "prompt": "integrated_multimodal_description: [Shot 1] A flat vector cartoon with thick even outlines and a limited pastel palette, a medium shot frames Ada against a wet night street outside the diner, neon sign reflected in the puddles, light from the left. Ada is a tall woman in her thirties with a short grey bob, a mustard apron over a striped shirt, and round red glasses. Ada sprints along the kerb after the van. The camera holds a static shot with fixed composition. Ada, with a voice that is dry, quick and precise, (S1) says, in the recorded voice: <d>[English] Stop!</d>\n\noverall_soundscape: Running footsteps splashing through puddles, laid under the recorded dialogue.\n\nnon_diegetic_music: N/A",
+        "keyframes": {
+          "first": "refs/shots/sh120/first.png",
+          "last": "refs/shots/sh120/last.png"
+        },
+        "model": "seq_model.safetensors",
+        "audio_in": 3.5,
+        "audio_out": 5.0
+      },
+      {
+        "id": "sh130",
+        "sequence": "sq02",
+        "subjects": [
+          "bo"
+        ],
+        "background": "refs/_bg/kitchen_window.png",
+        "size": "medium",
+        "length": 56,
+        "seed": 1964752148325355590,
+        "steps": 12,
+        "audio_policy": "dub_keep_foley",
+        "prompt": "integrated_multimodal_description: [Shot 1] A flat vector cartoon with thick even outlines and a limited pastel palette, a medium shot frames Bo against the diner's pass-through window looking out to the counter, warm tungsten light spilling in from the dining room. Bo is a stocky teenage boy with a shaved head, an oversized green bomber jacket and orange high-tops. Bo ducks back inside and leans through the pass-through window. The camera holds a static shot with fixed composition. Bo, with a voice that is slow and cracking, (S1) says from off-screen, outside the frame, in the recorded voice: <d>[English] She's never catching that.</d>\n\noverall_soundscape: Rain drumming on the awning, laid under the recorded dialogue.\n\nnon_diegetic_music: N/A",
+        "keyframes": {
+          "first": "refs/shots/sh130/first.png",
+          "last": "refs/shots/sh130/last.png"
+        },
+        "model": "seq_model.safetensors",
+        "audio_in": 5.0,
+        "audio_out": 7.2
+      },
+      {
+        "id": "sh140",
+        "sequence": "sq02",
+        "subjects": [],
+        "background": "refs/_bg/street.png",
+        "size": "medium",
+        "length": 56,
+        "seed": 5738520875936942780,
+        "steps": 12,
+        "audio_policy": "dub",
+        "prompt": "integrated_multimodal_description: [Shot 1] A flat vector cartoon with thick even outlines and a limited pastel palette, a medium shot frames a wet night street outside the diner, neon sign reflected in the puddles, light from the left. The street empties; the neon sign flickers once and goes dark. The camera holds a static shot with fixed composition. An off-screen voice that is warm, older, unhurried (S1) says in an off-screen voiceover, in the recorded voice: <d>[English] And that was the last anyone saw of the kettle.</d>\n\noverall_soundscape: The only audio is the recorded dialogue anchored from the start of the video; no ambience, effects or music are added.\n\nnon_diegetic_music: N/A",
+        "keyframes": {
+          "first": "refs/shots/sh140/first.png",
+          "last": "refs/shots/sh140/last.png"
+        },
+        "model": "seq_model.safetensors",
+        "audio_in": 7.2,
+        "audio_out": 9.0
+      },
+      {
+        "id": "sh150",
+        "sequence": "sq02",
+        "subjects": [
+          "ada"
+        ],
+        "background": "refs/_bg/street.png",
+        "size": "medium",
+        "length": 39,
+        "seed": 5193023516762493768,
+        "steps": 12,
+        "audio_policy": "generate",
+        "prompt": "integrated_multimodal_description: [Shot 1] A flat vector cartoon with thick even outlines and a limited pastel palette, a medium shot frames Ada against a wet night street outside the diner, neon sign reflected in the puddles, light from the left. Ada is a tall woman in her thirties with a short grey bob, a mustard apron over a striped shirt, and round red glasses. Ada stops dead in the middle of the road, soaked, and starts to laugh. The camera holds a static shot with fixed composition.\n\noverall_soundscape: Continuous room tone and environmental ambience with synchronized physical action sounds.\n\nnon_diegetic_music: N/A",
+        "keyframes": {
+          "first": "refs/shots/sh150/first.png",
+          "last": "refs/shots/sh150/last.png"
+        },
+        "model": "seq_model.safetensors",
+        "duration": 1.0
+      },
+      {
+        "id": "sh210",
+        "sequence": "sq03",
+        "subjects": [
+          "ada",
+          "bo"
+        ],
+        "background": "refs/_bg/kitchen_window.png",
+        "size": "medium",
+        "length": 90,
+        "seed": 1998322879969458948,
+        "steps": 8,
+        "audio_policy": "generate",
+        "prompt": "integrated_multimodal_description: [Shot 1] A flat vector cartoon with thick even outlines and a limited pastel palette, a medium shot frames Ada and Bo against the diner's pass-through window looking out to the counter, warm tungsten light spilling in from the dining room. Ada is a tall woman in her thirties with a short grey bob, a mustard apron over a striped shirt, and round red glasses. Bo is a stocky teenage boy with a shaved head, an oversized green bomber jacket and orange high-tops. Ada and Bo lean on the counter, dripping, as the kettle finally whistles. The camera holds a static shot with fixed composition. Ada, with a voice that is dry, quick and precise, (S1) says: <d>[English] Well.</d> Bo, with a voice that is slow and cracking, (S2) says: <d>[English] Well what?</d> Ada (S1) says: <d>[English] Put the tea on.</d> An off-screen voice that is warm, older, unhurried (S3) says in an off-screen voiceover: <d>[English] They did.</d>\n\noverall_soundscape: Continuous room tone and environmental ambience with synchronized physical action sounds.\n\nnon_diegetic_music: N/A",
+        "keyframes": {
+          "first": "refs/shots/sh210/first.png",
+          "last": "refs/shots/sh210/last.png"
+        },
+        "audio_intent": "clone",
+        "audio_note": "audio clone renders as generate on H3 FL2V: H3 FL2VA takes no voice sample (it anchors a recording, but has no voice-reference slot)",
+        "lora": "seq_lora.safetensors",
+        "duration": 3.595
+      },
+      {
+        "id": "sh310",
+        "sequence": "sq04",
+        "subjects": [
+          "cy"
+        ],
+        "background": "refs/_bg/kitchen.png",
+        "size": "medium",
+        "length": 56,
+        "seed": 6151578644003521749,
+        "steps": 5,
+        "audio_policy": "generate",
+        "prompt": "integrated_multimodal_description: [Shot 1] A flat vector cartoon with thick even outlines and a limited pastel palette, a medium shot frames Cy against a cramped diner kitchen with steel counters, a hanging ticket rail and cold fluorescent light from overhead. Cy is a small girl with two puffball pigtails, a purple raincoat and yellow rubber boots. Cy climbs onto a stool and peers into the steaming kettle. The camera holds a static shot with fixed composition.\n\noverall_soundscape: Continuous room tone and environmental ambience with synchronized physical action sounds.\n\nnon_diegetic_music: N/A",
+        "keyframes": {
+          "first": "refs/shots/sh310/first.png",
+          "last": "refs/shots/sh310/last.png"
+        },
+        "profile": "quick",
+        "duration": 2.33
+      },
+      {
+        "id": "sh320",
+        "sequence": "sq04",
+        "subjects": [
+          "ada"
+        ],
+        "background": "refs/_bg/kitchen.png",
+        "size": "close",
+        "length": 39,
+        "seed": 5660381186064488857,
+        "steps": 7,
+        "audio_policy": "generate",
+        "prompt": "integrated_multimodal_description: [Shot 1] A flat vector cartoon with thick even outlines and a limited pastel palette, a close-up frames Ada against a shallow, out-of-focus slice of a cramped diner kitchen with steel counters, a hanging ticket rail and cold fluorescent light from overhead. Ada is a tall woman in her thirties with a short grey bob, a mustard apron over a striped shirt, and round red glasses. Ada points a wooden spoon at the kettle. The camera holds a static shot with fixed composition. Ada, with a voice that is dry, quick and precise, (S1) says: <d>[English] Don't you dare.</d>\n\noverall_soundscape: Continuous room tone and environmental ambience with synchronized physical action sounds.\n\nnon_diegetic_music: N/A",
+        "keyframes": {
+          "first": "refs/shots/sh320/first.png",
+          "last": "refs/shots/sh320/last.png"
+        },
+        "audio_intent": "clone",
+        "audio_note": "audio clone renders as generate on H3 FL2V: H3 FL2VA takes no voice sample (it anchors a recording, but has no voice-reference slot)",
+        "model": "profile_model.safetensors",
+        "loras": [
+          {
+            "name": "profile_turbo_8step.safetensors",
+            "strength": 1.0
+          },
+          {
+            "name": "profile_style.safetensors",
+            "strength": 0.6
+          }
+        ],
+        "profile": "dialogue_close",
+        "duration": 1.332
+      },
+      {
+        "id": "sh330",
+        "sequence": "sq04",
+        "subjects": [
+          "bo"
+        ],
+        "background": "refs/_bg/kitchen.png",
+        "size": "medium",
+        "length": 39,
+        "seed": 5114629555451768005,
+        "steps": 9,
+        "audio_policy": "generate",
+        "prompt": "integrated_multimodal_description: [Shot 1] A flat vector cartoon with thick even outlines and a limited pastel palette, a medium shot frames Bo against a cramped diner kitchen with steel counters, a hanging ticket rail and cold fluorescent light from overhead. Bo is a stocky teenage boy with a shaved head, an oversized green bomber jacket and orange high-tops. Bo lifts the kettle off the burner with a grin. The camera holds a static shot with fixed composition. Bo, with a voice that is slow and cracking, (S1) says: <d>[English] Too late.</d>\n\noverall_soundscape: Continuous room tone and environmental ambience with synchronized physical action sounds.\n\nnon_diegetic_music: N/A",
+        "keyframes": {
+          "first": "refs/shots/sh330/first.png",
+          "last": "refs/shots/sh330/last.png"
+        },
+        "audio_intent": "clone",
+        "audio_note": "audio clone renders as generate on H3 FL2V: H3 FL2VA takes no voice sample (it anchors a recording, but has no voice-reference slot)",
+        "model": "profile_model.safetensors",
+        "lora": "shot_lora.safetensors",
+        "profile": "dialogue_close",
+        "duration": 1.105
+      }
+    ]
+  },
+  "report": {
+    "episode": "ks01",
+    "title": "Kitchen Sink",
+    "mode": "final",
+    "resolution": "1344x768",
+    "steps": 8,
+    "model": "minimax_h3_fl2va_pruned_int8_convrot.safetensors",
+    "lora": "minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors",
+    "fps": 24.0,
+    "shots": 15,
+    "sequences": 4,
+    "target_s": 32.791666666666664,
+    "delivered_s": 36.416666666666664,
+    "pad_frames": 87,
+    "policies": {
+      "dub": 2,
+      "dub_keep_foley": 2,
+      "generate": 11
+    },
+    "needed": {},
+    "blocked_shots": {},
+    "warnings": [
+      "sh050: CRAMMED — 26 syllables in 1.62s forces 38.5 syl/s (ceiling 5.8). `dur: 5.88` gives it room.",
+      "sh140: CRAMMED — 12 syllables in 2.33s forces 7.1 syl/s (ceiling 5.8). `dur: 3.75` gives it room.",
+      "7 shot(s) ask for audio clone, which H3 FL2V can't render (H3 FL2VA takes no voice sample (it anchors a recording, but has no voice-reference slot)): they render with generate: sh020, sh030, sh050, sh060, sh210, sh320, sh330",
+      "sh040 overrides model: shot_model.safetensors",
+      "sh040 overrides lora: none",
+      "sh110 overrides model: seq_model.safetensors",
+      "sh120 overrides model: seq_model.safetensors",
+      "sh130 overrides model: seq_model.safetensors",
+      "sh140 overrides model: seq_model.safetensors",
+      "sh150 overrides model: seq_model.safetensors",
+      "sh210 overrides lora: seq_lora.safetensors",
+      "sh320 overrides model: profile_model.safetensors",
+      "sh330 overrides model: profile_model.safetensors",
+      "sh330 overrides lora: shot_lora.safetensors"
+    ],
+    "target": "minimax_h3_fl2va",
+    "size_hints": {
+      "keyframe": "the render size (any size works: the first frame is stretched to the canvas, the last is cover-cropped)"
+    }
+  }
+}
