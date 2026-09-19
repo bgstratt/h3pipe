@@ -100,7 +100,7 @@ export function RedoDialog() {
   const derr = useDetailError(r?.shot, r?.pass);
   if (!r || !ep) return null;
   return (
-    <Dialog title={<>Redo {r.shot}{r.parent != null ? ` from ${tn(r.parent)}` : ""}</>} onClose={closeRedo} wide>
+    <Dialog title={<>New take of {r.shot}{r.parent != null ? ` (like ${tn(r.parent)})` : ""}</>} onClose={closeRedo} wide>
       {!d && !derr && <div className="h3-muted">Loading {r.shot}…</div>}
       {derr && !d && <div className="h3-note h3-note-err">{derr}</div>}
       {d && <RedoBody key={`${r.shot}|${r.pass}|${r.parent}`} d={d} shot={r.shot} openPass={r.pass} parent={r.parent} />}
@@ -346,7 +346,7 @@ function RedoBody({ d, shot, openPass, parent }: { d: ShotDetail; shot: string; 
         </span>
         <button className="h3-btn" onClick={closeRedo}>Cancel</button>
         <button className="h3-btn h3-primary" disabled={busy} onClick={() => void submit()}>
-          <i className={busy ? "pi pi-spin pi-spinner" : "pi pi-refresh"} /> Queue {f.pass} redo
+          <i className={busy ? "pi pi-spin pi-spinner" : "pi pi-refresh"} /> Queue new {f.pass} take
         </button>
       </div>
     </>

@@ -203,7 +203,7 @@ export function ContextMenu() {
             <i className="pi pi-check" /> Use this take{isCut ? " (in the cut)" : ""}
           </button>
           <button onClick={run(() => openRedo(menu.shot, take.take, menu.pass))}>
-            <i className="pi pi-refresh" /> Redo from this take…
+            <i className="pi pi-refresh" /> New take like this one…
           </button>
           <button onClick={run(() => openSidecar(menu.shot, take.take, menu.pass))}>
             <i className="pi pi-info-circle" /> Show details

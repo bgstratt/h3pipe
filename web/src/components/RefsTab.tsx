@@ -428,7 +428,7 @@ function GenerateBar({ r }: { r: Ref }) {
               prompt: null, model: null, loras: null, steps: null, note: "",
             })}
           >
-            <i className={busy ? "pi pi-spin pi-spinner" : "pi pi-sparkles"} /> Generate {count > 1 ? `${count} more` : "1 more"}
+            <i className={busy ? "pi pi-spin pi-spinner" : "pi pi-sparkles"} /> Generate {count > 1 ? `${count} takes` : "a take"}
           </button>
         </>
       )}
