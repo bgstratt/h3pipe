@@ -107,17 +107,30 @@ export interface SequenceGroup {
   start: number;
 }
 
-/** Consecutive runs of one sequence, in cut order (the cut can reorder shots). */
-export function groupBySequence(shots: ShotStatus[]): SequenceGroup[] {
+/**
+ * How long a shot lasts in the cut: its cut take's real frame count at the
+ * episode's fps when the server sends one (a `dur: model` take's length is the
+ * model's), else the build's `seconds`. Null when neither is known.
+ */
+export function shotSeconds(s: ShotStatus, fps: number | undefined): number | null {
+  const f = s.cut?.frames;
+  if (f != null && f > 0) return f / (fps && fps > 0 ? fps : 24);
+  return s.seconds;
+}
+
+/** Consecutive runs of one sequence, in cut order (the cut can reorder shots).
+ * `fps` (the episode's) lets a shot count at its cut take's real length. */
+export function groupBySequence(shots: ShotStatus[], fps?: number): SequenceGroup[] {
   const out: SequenceGroup[] = [];
   shots.forEach((s, i) => {
     const seq = s.sequence ?? (s.orphan ? "orphans" : "—");
+    const secs = (fps ? shotSeconds(s, fps) : s.seconds) ?? 0;
     const last = out[out.length - 1];
     if (last && last.sequence === seq) {
       last.shots.push(s);
-      last.seconds += s.seconds ?? 0;
+      last.seconds += secs;
     } else {
-      out.push({ sequence: seq, shots: [s], seconds: s.seconds ?? 0, start: i });
+      out.push({ sequence: seq, shots: [s], seconds: secs, start: i });
     }
   });
   return out;

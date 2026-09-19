@@ -139,12 +139,14 @@ class TargetTest(unittest.TestCase):
         self.t = TG.load_target(ING, "video")
         self.cfg, self.story = kitchen_sink()
 
-    def test_template_is_the_bucket(self):
+    def test_template_is_the_shot_length(self):
+        # the shot's own length on the 8k+1 grid, 2 s to 20 s at 24 fps
         tp = self.t.template
-        self.assertEqual([tp.snap(n) for n in (1, 60, 120, 121)], [121] * 4)
-        self.assertEqual((121 - 1) % 8, 0)                       # on the 8k+1 grid
+        self.assertEqual([tp.snap(n) for n in (1, 49, 60, 72, 73, 120, 121, 481)],
+                         [49, 49, 65, 73, 73, 121, 121, 481])
+        self.assertEqual({(tp.snap(n) - 1) % 8 for n in range(1, 482)}, {0})
         with self.assertRaises(ValueError):
-            tp.snap(122)
+            tp.snap(482)
         self.assertEqual(tp.fps_for({"series": {"fps": 25}}), 24.0)
         self.assertEqual(tp.fit_size(768, 448), (768, 448))
 
@@ -173,15 +175,24 @@ class TargetTest(unittest.TestCase):
         self.assertFalse(TG.load_target("ltx2").describe()["capabilities"]["reference_sheet"])
         self.assertEqual(self.t.audio_policy("clone")[0], "generate")
 
-    def test_too_long_is_an_error(self):
+    def test_length_warning_and_too_long(self):
         sq = self.story.sequences[0]
         shot = sq.shots[0]
         old = shot.timing
         try:
-            shot.timing = {"seconds": 6.0}
+            shot.timing = {"seconds": 6.0}                      # renders, softly warned
+            doc, report = self.t.compile_episode(self.story, self.cfg, "final", only={shot.id})
+            self.assertEqual(doc["shots"][0]["length"], 145)
+            self.assertIn(f"trained at 121 frames; identity may weaken at other lengths "
+                          f"(1 shot, frames): {shot.id} 145", " ".join(report["warnings"]))
+            shot.timing = {"seconds": 5.0}                      # the bucket: no warning
+            _, report = self.t.compile_episode(self.story, self.cfg, "final", only={shot.id})
+            self.assertNotIn("trained at", " ".join(report["warnings"]))
+            shot.timing = {"seconds": 20.5}                     # past 481 frames
             with self.assertRaises(ValueError) as cm:
                 self.t.compile_episode(self.story, self.cfg, "final", only={shot.id})
-            self.assertIn("bucket of 121 frames", str(cm.exception))
+            self.assertIn("maximum of 481 frames", str(cm.exception))
+            self.assertIn("Split the shot", str(cm.exception))
         finally:
             shot.timing = old
 
@@ -449,7 +460,7 @@ class RenderTest(unittest.TestCase):
         self.assertEqual((job.action, job.missing), ("render", []))
         self.assertEqual(job.loras, [{"name": IC, "strength": 1.0}])
         self.assertTrue(job.prompt.startswith("Reference sheet: Ada"))
-        self.assertEqual(job.frames, 121)
+        self.assertEqual(job.frames, 89)                      # its own length, not the 121 bucket
         with self.assertRaises(ValueError):                  # never silently text-only
             self.graph(job)
         # a dry run composes nothing and writes nothing
@@ -475,6 +486,7 @@ class RenderTest(unittest.TestCase):
         self.assertEqual(refs["reference sheet"]["sha1"], T.file_sha1(sheet))
         self.assertTrue(all(r["sha1"] for r in sc["refs"]))
         self.assertEqual(len(sc["refs"]), 5)                     # 4 panels + the sheet
+        self.assertEqual((sc["length"], sc["length_source"]), (89, "script"))
 
         g = self.graph(job, take)
         self.assertEqual(J.check_graph(g, OBJECT_INFO), [])
@@ -483,14 +495,14 @@ class RenderTest(unittest.TestCase):
                      "GetImageSize"):
             self.assertFalse(of(g, gone), gone)
         self.assertEqual(g[J.node_of(g, "LoadImage")]["inputs"]["image"], got["sheet"])
-        self.assertEqual(g[J.node_of(g, "RepeatImageBatch")]["inputs"]["amount"], 121)
+        self.assertEqual(g[J.node_of(g, "RepeatImageBatch")]["inputs"]["amount"], 89)
         pad = g[J.node_of(g, "ResizeAndPadImage")]["inputs"]
         self.assertEqual((pad["target_width"], pad["target_height"], pad["padding_color"]),
                          (512, 288, "black"))
         lat = g[J.node_of(g, "EmptyLTXVLatentVideo")]["inputs"]
-        self.assertEqual((lat["width"], lat["height"], lat["length"]), (512, 288, 121))
+        self.assertEqual((lat["width"], lat["height"], lat["length"]), (512, 288, 89))
         au = g[J.node_of(g, "LTXVEmptyLatentAudio")]["inputs"]
-        self.assertEqual((au["frames_number"], au["frame_rate"]), (121, 24.0))
+        self.assertEqual((au["frames_number"], au["frame_rate"]), (89, 24.0))
         ks = g[J.node_of(g, "KSampler")]["inputs"]
         self.assertEqual((ks["seed"], ks["steps"]), (job.seed, 8))
         lo = g[J.node_of(g, "LoraLoaderModelOnly")]["inputs"]

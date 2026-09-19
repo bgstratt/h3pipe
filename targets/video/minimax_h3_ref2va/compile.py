@@ -94,6 +94,8 @@ def legacy_shot(s: ir.Shot) -> dict:
     t = s.timing or {}
     if "audio_in" in t:
         sh["audio_in"], sh["audio_out"] = t["audio_in"], t["audio_out"]
+    elif t.get("model"):
+        sh["duration_model"] = {k: t[k] for k in ("min", "max") if k in t}
     elif t.get("auto"):
         sh["duration_auto"] = True
     elif "seconds" in t:
@@ -332,6 +334,11 @@ def _compile_shot(ctx: Ctx, seq: dict, i: int, shot: dict, seq_loc: dict) -> dic
             raise ValueError(
                 f"shot {shot['id']}: uses an `audio:` window but series.json has no "
                 f"audio.track set.")
+    elif shot.get("duration_model") is not None:
+        # H3 can't predict a length: the estimate renders, and the build says so
+        dur, _, note = TG.duration_estimate(ctx.target, {"model": True, **shot["duration_model"]},
+                                            ctx.preset, need_sec if shot["dialogue"] else None)
+        warnings.append(f"{shot['id']}: {note}")
     elif shot.get("duration_auto"):
         if not shot["dialogue"]:
             raise ValueError(
@@ -432,7 +439,7 @@ def _compile_shot(ctx: Ctx, seq: dict, i: int, shot: dict, seq_loc: dict) -> dic
             warnings.append(w)
     pad = raw - req
     if ("audio_in" not in shot and not shot.get("duration_auto")
-            and pad / raw > 0.15):
+            and shot.get("duration_model") is None and pad / raw > 0.15):
         warnings.append(
             f"{shot['id']}: dur {dur:.2f}s snaps up to {raw / fps:.2f}s, wasting "
             f"{pad} frames. Writing it as {raw / fps:.2f}s costs the same render.")
@@ -487,6 +494,8 @@ def _compile_shot(ctx: Ctx, seq: dict, i: int, shot: dict, seq_loc: dict) -> dic
         entry["audio_in"], entry["audio_out"] = shot["audio_in"], shot["audio_out"]
     else:
         entry["duration"] = round(dur, 3)
+    if shot.get("duration_model") is not None:
+        entry["length_estimated"] = True
     return entry
 
 

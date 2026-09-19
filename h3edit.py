@@ -252,6 +252,13 @@ def cut_neighbour(root: str, pass_: str, shot_id: str, step: int) -> T.CutEntry 
     return entries[j] if 0 <= j < len(entries) else None
 
 
+def take_frames(t: T.Take | None) -> int | None:
+    """A take's real frame count: what the saver wrote in its sidecar
+    (`frames`), else None (not rendered, or a saver from before it)."""
+    n = ((t.sidecar or {}) if t else {}).get("frames")
+    return int(n) if isinstance(n, (int, float)) and not isinstance(n, bool) and n > 0 else None
+
+
 def episode_status(root: str, pass_: str, folder: str | None = None) -> dict:
     """Every shot in cut order with its takes, the take the cut uses, and its
     override. Plain data, ready to serve as JSON. Shots come from every
@@ -298,7 +305,10 @@ def episode_status(root: str, pass_: str, folder: str | None = None) -> dict:
             "cut": {"take": chosen_take, "picked": e.take is not None, "pass": e.pass_,
                     "placeholder": e.placeholder, "usable": chosen_ok,
                     "trim_in": e.trim_in, "trim_out": e.trim_out, "locked": e.locked,
-                    "note": e.note, "in_cut_file": e.in_cut_file},
+                    "note": e.note, "in_cut_file": e.in_cut_file,
+                    # the cut take's real length (its sidecar's saved frame
+                    # count; a `dur: model` take's is the model's), or None
+                    "frames": take_frames(chosen) if chosen_ok else None},
             "override": {"fields": sorted([k for k in o if k != "base_hash"]
                                           + (["target"] if T.shot_target(ov, e.shot) else [])),
                          "stale": bool(o.get("base_hash"))
@@ -306,6 +316,7 @@ def episode_status(root: str, pass_: str, folder: str | None = None) -> dict:
             "takes": [{
                 "take": t.take, "status": t.status, "has_video": t.has_video,
                 "seed": (t.sidecar or {}).get("seed"),
+                "frames": take_frames(t),
                 "seed_source": (t.sidecar or {}).get("seed_source"),
                 "target": (t.sidecar or {}).get("target"),
                 "note": (t.sidecar or {}).get("note", ""),

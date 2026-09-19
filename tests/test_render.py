@@ -278,6 +278,8 @@ class FakeComfy:
     def __init__(self):
         self.mode = "node"
         self.nodes = {"H3SaveRefTake", "H3SaveShot", "H3ShotListLoader", "SaveImage"}
+        self.info: dict[str, dict] = {}           # /object_info/<class> in full, when set
+        self.predicted_frames = 199               # what a duration predictor "chooses"
         self.files: dict[str, bytes] = {}         # /view filename -> bytes
         self.userdata: dict[str, dict] = {}       # "workflows/x.json" -> saved workflow
         self.graphs: list[dict] = []
@@ -316,7 +318,8 @@ class FakeComfy:
                 elif self.path.startswith("/object_info/"):
                     from urllib.parse import unquote
                     ct = unquote(self.path[len("/object_info/"):])
-                    self._send({ct: {"input": {}}} if ct in fake.nodes else {})
+                    self._send({ct: fake.info.get(ct, {"input": {}})}
+                               if ct in fake.nodes or ct in fake.info else {})
                 elif self.path.startswith("/view?"):
                     from urllib.parse import parse_qs, urlparse
                     name = parse_qs(urlparse(self.path).query)["filename"][0]
@@ -386,6 +389,9 @@ class FakeComfy:
             lat = next(v["inputs"] for v in graph.values()
                        if v["class_type"] == "EmptyLTXVLatentVideo")
             shot = {"id": si["shot_id"], "length": lat["length"]}
+            if isinstance(lat["length"], list):
+                # linked to LTXVDurationPredictor (`dur: model`): the model's choice
+                shot["length"] = self.predicted_frames
         stem = f"{T.safe_id(shot['id'])}_t{si['take']:02d}"
         d = os.path.join(root, si["subfolder"], T.safe_id(shot["id"]))
         open(os.path.join(d, stem + ".mp4"), "wb").close()

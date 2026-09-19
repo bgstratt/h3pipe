@@ -337,7 +337,11 @@ def main() -> int:
         n = frame_count(t.paths.mp4)
         # a take rendered on another target (retargeted) has that target's
         # length, which its sidecar records
-        want = int((t.sidecar or {}).get("length") or s["length"])
+        sc = t.sidecar or {}
+        want = int(sc.get("length") or s["length"])
+        if sc.get("length_source") == "predicted":
+            # the model chose the length (`dur: model`): the saver's count is it
+            want = int(sc.get("frames") or n or want)
         if n > 0 and n != want:
             bad.append(f"{e.shot}: {n} frames on disk, shotlist says {want}")
         on_disk = n if n > 0 else want

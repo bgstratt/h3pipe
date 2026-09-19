@@ -5,6 +5,11 @@
   "short": "LTX-2",
   "code": "compile.py",
 
+  "capabilities": {
+    "_note": "duration: predict. LTX 2.4+ has a duration head: `dur: model` shots get ComfyUI's ModelPatchLoader (the preset's duration_head file, from models/model_patches) + LTXVDurationPredictor, whose num_frames (8k+1) drives every length input of the graph. The build writes an estimate (the dialogue's `dur: auto` length, else the preset's default_seconds); without the weights installed the take renders that estimate and says so.",
+    "duration": "predict"
+  },
+
   "template": {
     "_note": "LTX-2 renders 8k+1 frames (9, 17, ..., 97, ...). This workflow is two-stage: a base pass at half size, then the x2 latent upsampler and a refine pass, so the output must be a multiple of 64 (the base latent needs 32). Sizes that aren't legal are snapped down, then shrunk under 1 MP / 1536 on the long side. The frame rate is the series config's. LTX-2 handles about 20 s per shot.",
     "fps": "series",
@@ -62,11 +67,16 @@
       "audio_vae": {"class_type": "VAELoader", "field": "vae_name", "feeds": ["LTXVAudioVAEDecode", "audio_vae"]},
       "upscaler": {"class_type": "LatentUpscaleModelLoader", "field": "model_name"}
     },
+    "duration_predictor": {
+      "_note": "For `dur: model` (capabilities.duration): h3jobs.graph_for adds ModelPatchLoader + LTXVDurationPredictor, reading the model and positive conditioning that feed these inputs, and links its num_frames into every `length` widget above.",
+      "model": {"class_type": "LTXVDualCFGGuider", "input": "model"},
+      "positive": {"class_type": "LTXVConditioning", "input": "positive"}
+    },
     "review_nodes": []
   },
 
   "presets": {
-    "_note": "LTX-2.5 22B distilled (int8): a fixed 8-step base schedule plus a 3-step refine (the workflow's ManualSigmas; `steps` is recorded, not patched). The final is the workflow's 768x512 unless the series config sets a size; the proxy is 448x256. Both use the same model: the distilled model is already fast. The negative prompt is the IC-LoRA model card's suggestion plus the artefacts a review cut can't use; the template's own ('pc game, ..., cartoon, childish') would fight a cartoon series' look.",
+    "_note": "LTX-2.5 22B distilled (int8): a fixed 8-step base schedule plus a 3-step refine (the workflow's ManualSigmas; `steps` is recorded, not patched). The final is the workflow's 768x512 unless the series config sets a size; the proxy is 448x256. Both use the same model: the distilled model is already fast. The negative prompt is the IC-LoRA model card's suggestion plus the artefacts a review cut can't use; the template's own ('pc game, ..., cartoon, childish') would fight a cartoon series' look. For `dur: model` (capabilities): duration_head is the LTX-2.5 duration head in models/model_patches (not in the shotlist's defaults; checked at queue time), default_seconds the estimate of a silent shot, min_seconds/max_seconds the predictor's range when the script gives none.",
     "final": {
       "model": "ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors",
       "lora": null, "steps": 8, "width": 768, "height": 512,
@@ -74,7 +84,9 @@
       "text_encoder": "gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors",
       "video_vae": "ltx-2.5-video-vae-bf16.safetensors",
       "audio_vae": "ltx-2.5-audio-vae-bf16.safetensors",
-      "upscaler": "ltx-2.5-latent-spatial-upscaler-x2-bf16-1.0.safetensors"
+      "upscaler": "ltx-2.5-latent-spatial-upscaler-x2-bf16-1.0.safetensors",
+      "duration_head": "ltx-2.5-duration-head-bf16.safetensors",
+      "default_seconds": 5.0, "min_seconds": 1.0, "max_seconds": 20.0
     },
     "proxy": {
       "lora": null, "steps": 8, "width": 448, "height": 256,
@@ -82,7 +94,9 @@
       "text_encoder": "gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors",
       "video_vae": "ltx-2.5-video-vae-bf16.safetensors",
       "audio_vae": "ltx-2.5-audio-vae-bf16.safetensors",
-      "upscaler": "ltx-2.5-latent-spatial-upscaler-x2-bf16-1.0.safetensors"
+      "upscaler": "ltx-2.5-latent-spatial-upscaler-x2-bf16-1.0.safetensors",
+      "duration_head": "ltx-2.5-duration-head-bf16.safetensors",
+      "default_seconds": 5.0, "min_seconds": 1.0, "max_seconds": 20.0
     }
   }
 }

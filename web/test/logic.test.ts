@@ -1,7 +1,7 @@
 // Badges, grouping, paths, the override form and redo planning.
 import { describe, expect, it } from "vitest";
 import { planRedo } from "../src/actions";
-import { absPath, groupBySequence, sameEp, shotBadges } from "../src/lib/format";
+import { absPath, groupBySequence, sameEp, shotBadges, shotSeconds } from "../src/lib/format";
 import { formFromDetail, overrideFields } from "../src/lib/overrideForm";
 import type { ShotDetail, ShotStatus, TakeSummary } from "../src/types";
 
@@ -64,6 +64,15 @@ describe("groupBySequence", () => {
     expect(g.map((x) => [x.sequence, x.shots.map((s) => s.shot).join(""), x.seconds, x.start])).toEqual([
       ["sq01", "ab", 3, 0], ["sq02", "c", 3, 2], ["sq01", "d", 4, 3],
     ]);
+  });
+  it("with the fps, a shot counts at its cut take's real frames (the timeline)", () => {
+    const cut = { ...shot().cut, frames: 199 };
+    const shots = [shot({ shot: "a", seconds: 5.042, cut }), shot({ shot: "b", seconds: 2 })];
+    expect(groupBySequence(shots, 24)[0].seconds).toBeCloseTo(199 / 24 + 2);
+    expect(groupBySequence(shots)[0].seconds).toBeCloseTo(7.042);        // no fps: the build's
+    expect(shotSeconds(shots[0], 24)).toBeCloseTo(8.2917, 4);           // a predicted 8.3 s take
+    expect(shotSeconds(shots[1], 24)).toBe(2);
+    expect(shotSeconds(shot({ cut: { ...cut, frames: null } }), 24)).toBe(4.458);
   });
 });
 

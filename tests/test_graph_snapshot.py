@@ -83,6 +83,11 @@ class GraphSnapshotTest(unittest.TestCase):
                     frozen = got[ps][sid]["shotlist"]
                     if "target" not in w["shotlist"]:
                         self.assertEqual(frozen.pop("target", None), "minimax_h3_ref2va")
+                    # and the sidecar's length_source (`dur: model`): a
+                    # script-timed shot's is "script"
+                    if "length_source" not in w["sidecar"]:
+                        self.assertEqual(got[ps][sid]["sidecar"].pop("length_source", None),
+                                         "script")
                     for part in ("graph", "shotlist", "sidecar"):
                         self.assertEqual(got[ps][sid][part], w[part], f"{ps} {sid} {part}")
 

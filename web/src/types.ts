@@ -47,6 +47,9 @@ export interface TakeSummary {
   /** Phase 7: the video target the take rendered with, from its sidecar
    * (null for a take from before sidecars; absent from older servers). */
   target?: string | null;
+  /** The take's real frame count, as the saver wrote it (null: not rendered;
+   * absent from older servers). A `dur: model` take's is the model's choice. */
+  frames?: number | null;
 }
 
 export interface CutInfo {
@@ -60,6 +63,10 @@ export interface CutInfo {
   locked: boolean;
   note: string;
   in_cut_file: boolean;
+  /** The cut take's real frame count (its sidecar's), or null. The shot's
+   * `seconds` is the build's (for `dur: model`, an estimate); the timeline and
+   * Play all use this when present. Absent from older servers. */
+  frames?: number | null;
 }
 
 export interface ShotStatus {

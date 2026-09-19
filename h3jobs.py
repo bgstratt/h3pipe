@@ -609,6 +609,22 @@ class Comfy:
         from urllib.parse import quote
         return ctype in (self._json(f"/object_info/{quote(ctype, safe='')}", timeout=30) or {})
 
+    def choices(self, ctype: str, field_name: str) -> list[str] | None:
+        """The values a combo widget offers in the running ComfyUI (e.g. the
+        files ModelPatchLoader can load), or None when the node isn't known."""
+        from urllib.parse import quote
+        info = (self._json(f"/object_info/{quote(ctype, safe='')}", timeout=30) or {}).get(ctype)
+        if info is None:
+            return None
+        inputs = info.get("input") or {}
+        spec = (inputs.get("required") or {}).get(field_name) \
+            or (inputs.get("optional") or {}).get(field_name) or []
+        if spec and isinstance(spec[0], list):             # [[choices], {...}]
+            return [str(c) for c in spec[0]]
+        if len(spec) > 1 and isinstance(spec[1], dict):    # ["COMBO", {"options": [...]}]
+            return [str(c) for c in spec[1].get("options") or []]
+        return []
+
     def view(self, img: dict) -> bytes:
         """The bytes of an output image, as /history lists it ({filename,
         subfolder, type})."""
@@ -913,6 +929,12 @@ class Job:
     # reference sheet), waiting for start_job to move them into the take:
     # [{"tmp", "suffix", "slot", "kind", "role"}]
     staged: list = field(default_factory=list)
+    # how the take's length is decided: "script" (the shotlist's), "estimate"
+    # (`dur: model` rendered at the build's estimate) or "predicted" (the
+    # model's duration head, `duration_head` the file ModelPatchLoader loads)
+    length_source: str = "script"
+    duration_head: str = ""
+    duration_note: str = ""            # plan_duration's note (replaced on a re-plan)
 
     @property
     def id(self) -> str:
@@ -1041,6 +1063,10 @@ def plan_job(root: str, pass_: str, doc: dict, index: int, req: RenderRequest,
     prompt = pick("prompt", source.get("prompt", ""), req.prompt)
     if shot.get("audio_note"):
         notes.append(shot["audio_note"])
+    length_source = "estimate" if shot.get("length_estimated") else "script"
+    if shot.get("length_estimated") and not shot.get("duration_predict"):
+        notes.append(f"`dur: model` rendered at the estimate, {estimate_seconds(sdoc, shot)} s: "
+                     f"{target.short} can't predict a shot's length")
 
     # seed: typed > pinned in overrides > (same | new | first take: built)
     built_seed = int(shot.get("seed", 0))
@@ -1070,7 +1096,14 @@ def plan_job(root: str, pass_: str, doc: dict, index: int, req: RenderRequest,
                shot_hash=shot_hash, parent_take=req.parent_take, note=req.note,
                missing=missing, allow_missing=req.allow_missing_refs, target=target.id,
                recompiled=recompiled, missing_mode=missing_mode, missing_why=missing_why,
-               built_target=built_target.id, notes=notes, error=error)
+               built_target=built_target.id, notes=notes, error=error,
+               length_source=length_source)
+
+
+def estimate_seconds(doc: dict, shot: dict) -> str:
+    """A shot's built length in seconds, as notes print it ("5.04")."""
+    fps = float(shot.get("fps", doc.get("defaults", {}).get("fps", 24)) or 24)
+    return f"{int(shot.get('length', 0)) / fps:.2f}"
 
 
 def episode_story(root: str):
@@ -1229,6 +1262,8 @@ def sidecar_for(job: Job) -> dict:
         "width": int(job.shot.get("width", d.get("width", 0))),
         "height": int(job.shot.get("height", d.get("height", 0))),
         "length": job.frames,
+        # predicted: `length` is the build's estimate, the saver's `frames` the truth
+        "length_source": job.length_source,
         "shot_hash": job.shot_hash,
         "preset_hash": preset_hash(job.doc, job.shot),
         "overrides": job.overridden, "override_stale": job.override_stale,
@@ -1526,6 +1561,8 @@ def graph_for(base: dict, job: Job, take: T.Take, *, panel_mode: str | None = No
             del g[k]
     if t.supports("patch_graph"):
         t.patch_graph(g, job, dict(job.inputs if inputs is None else inputs))
+    if job.duration_head:
+        add_duration_predictor(g, t, job)
     if b.prune:
         prune(g, saver)
     if strip_meta:
@@ -1534,9 +1571,106 @@ def graph_for(base: dict, job: Job, take: T.Take, *, panel_mode: str | None = No
     return g
 
 
+def add_duration_predictor(g: dict, target: "TG.Target", job: Job) -> None:
+    """`dur: model` with the duration head installed (plan_duration): add
+    ModelPatchLoader (job.duration_head) and LTXVDurationPredictor, fed the
+    model and positive conditioning the workflow already has (the binding's
+    `duration_predictor`: {"model"|"positive": {"class_type", "input"}}, what
+    feeds that input of that node), and link its num_frames into every widget
+    the binding's `length` param names, in place of the estimate."""
+    spec = (target.spec.get("binding") or {}).get("duration_predictor") or {}
+    if not (spec.get("model") and spec.get("positive")):
+        raise ValueError(f"{target.id}'s binding has no duration_predictor (model, positive)")
+
+    def source(s: dict) -> list:
+        ids = sorted(k for k, v in g.items() if v["class_type"] == s["class_type"]
+                     and isinstance(v["inputs"].get(s["input"]), list))
+        if not ids:
+            raise ValueError(f"the {target.id} workflow has no {s['class_type']} with a "
+                             f"linked {s['input']} for the duration predictor")
+        return list(g[ids[0]]["inputs"][s["input"]])
+
+    rng = job.shot.get("duration_predict") or {}
+    lo, hi = TG.PREDICT_RANGE
+    g["h3_duration_head"] = {"class_type": "ModelPatchLoader",
+                             "inputs": {"name": job.duration_head},
+                             "_meta": {"title": "duration head (h3pipe)"}}
+    g["h3_duration"] = {"class_type": "LTXVDurationPredictor",
+                        "inputs": {"model": source(spec["model"]),
+                                   "positive": source(spec["positive"]),
+                                   "duration_head": ["h3_duration_head", 0],
+                                   "frame_rate": float(job.fps),
+                                   "min_seconds": float(rng.get("min_seconds", lo)),
+                                   "max_seconds": float(rng.get("max_seconds", hi))},
+                        "_meta": {"title": "duration predictor (h3pipe)"}}
+    lengths = target.binding.specs("length")
+    if not lengths:
+        raise ValueError(f"{target.id}'s binding names no length widget to drive")
+    for s in lengths:
+        for nid in select_nodes(g, s):
+            g[nid]["inputs"][s["field"]] = ["h3_duration", 0]
+
+
 # ---------------------------------------------------------------------------
 # inputs: images a render loads through ComfyUI's input folder
 # ---------------------------------------------------------------------------
+
+DURATION_LOADER = ("ModelPatchLoader", "name")
+DURATION_NODE = "LTXVDurationPredictor"
+
+
+def duration_head_file(job: Job) -> str:
+    """The duration head a job's target preset names ("" if none)."""
+    p = job_target(job).presets.get(job.pass_)
+    return str(job.shot.get("duration_head") or (p.extra.get("duration_head") if p else "")
+               or "")
+
+
+def plan_duration(job: Job, comfy=None) -> None:
+    """`dur: model` on a target that predicts (the entry's `duration_predict`):
+    ask ComfyUI whether the preset's duration head is installed (the choices
+    of ModelPatchLoader, /object_info) and the predictor node known. Yes:
+    job.duration_head is set, graph_for adds the predictor, and the take's
+    length_source is "predicted". No (or no ComfyUI to ask): the take renders
+    the build's estimate, with a note saying why. Never fails."""
+    job.duration_head = ""
+    old = job.duration_note
+    if old in job.notes:
+        job.notes.remove(old)
+    job.duration_note = ""
+    if not job.shot.get("duration_predict"):
+        return
+    t = job_target(job)
+    est = estimate_seconds(job.doc, job.shot)
+    head = duration_head_file(job)
+    job.length_source = "estimate"
+    why = ""
+    if not head:
+        why = f"{t.id}'s {job.pass_} preset names no duration_head"
+    elif comfy is None:
+        why = "the duration head wasn't checked (no ComfyUI to ask)"
+    else:
+        try:
+            have = comfy.choices(*DURATION_LOADER)
+            node = have is not None and comfy.has_node(DURATION_NODE)
+        except Exception as e:
+            have, node, why = None, False, f"couldn't ask ComfyUI for the duration head ({e})"
+        if why:
+            pass
+        elif have is None or not node:
+            why = (f"this ComfyUI has no {DURATION_LOADER[0] if have is None else DURATION_NODE} "
+                   f"node (update ComfyUI)")
+        elif head not in have:
+            why = f"{t.short} duration head not installed (models/model_patches: {head})"
+    if why:
+        note = f"{why}; used the estimate {est} s"
+    else:
+        job.duration_head, job.length_source = head, "predicted"
+        rng = job.shot["duration_predict"]
+        note = (f"length predicted by {head} ({rng['min_seconds']:g}-{rng['max_seconds']:g} s); "
+                f"the build's estimate was {est} s")
+    job.notes.append(note)
+    job.duration_note = note
 
 INPUT_SUBFOLDER = "h3pipe"
 
@@ -1549,7 +1683,7 @@ def input_name(path: str) -> str:
     return f"{INPUT_SUBFOLDER}/{T.file_sha1(path)[:20]}{ext}"
 
 
-def stage_inputs(job: Job, comfy=None) -> dict:
+def stage_inputs(job: Job, comfy=None, probe=None) -> dict:
     """Copy the images a job conditions on (a target's `role` ref slots that
     exist on disk: LTX's first / last keyframes) into ComfyUI's input folder
     and record their names in job.inputs ({role: "h3pipe/<sha1>.png"}).
@@ -1558,7 +1692,12 @@ def stage_inputs(job: Job, comfy=None) -> dict:
     worked out. A target that makes an input of its own (ltx2_ingredients
     composes the shot's reference sheet) does it here too, in its
     `stage_inputs`; a file it keeps for the take waits in job.staged until
-    start_job moves it into the take."""
+    start_job moves it into the take.
+
+    `dur: model` is decided here too (plan_duration): `comfy`, or for a dry
+    run `probe` (asked, never written to), says whether the duration head is
+    installed."""
+    plan_duration(job, comfy or probe)
     out = {}
     for r in ref_slots(job.doc, job.shot):
         role, p = r.get("role"), r.get("path")

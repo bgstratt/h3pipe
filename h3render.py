@@ -310,7 +310,11 @@ def main() -> int:
             for j in (j for j in jobs if j.runs):
                 take = T.Take(j.id, j.take, pass_,
                               T.take_paths(root, pass_, j.id, j.take, folder))
-                J.stage_inputs(j)
+                # --check-nodes: ComfyUI is asked (not written to) whether a
+                # `dur: model` shot's duration head is installed
+                J.stage_inputs(j, probe=comfy if args.check_nodes else None)
+                if j.duration_note:
+                    print(f"    ~ {j.id}: {j.duration_note}")
                 g = graph_for(base_for(j.target)[0], j, take, **gkw)
                 out = os.path.join(os.getcwd(), "h3render_graph.json")
                 with open(out, "w", encoding="utf-8") as fh:
@@ -364,8 +368,11 @@ def main() -> int:
                     continue
                 current = take = start_job(j)
                 label = f"{ep}/{j.id} t{take.take:02d}"
-                print(f"  .. {label}  ({j.frames}f, {j.target}, {j.shot.get('audio_policy', '')}, "
+                frames = "predicted" if j.length_source == "predicted" else f"{j.frames}f"
+                print(f"  .. {label}  ({frames}, {j.target}, {j.shot.get('audio_policy', '')}, "
                       f"seed {j.seed} {j.seed_source})", flush=True)
+                if j.duration_note:
+                    print(f"     {j.duration_note}", flush=True)
                 try:
                     pid = comfy.queue(graph_for(base_for(j.target)[0], j, take, **gkw))
                     mark_queued(take, pid)

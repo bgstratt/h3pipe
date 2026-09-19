@@ -19,6 +19,13 @@ when the script asked for a policy LTX can't render, and `panels`: the sheet,
 in order, each {"subject", "kind", "path", "view"?} or {"location", "kind":
 "plate", "path"}. Paths are the series config's (the picked, live files).
 
+Lengths: the shot's own, on the 8k+1 grid from 49 to 481 frames (2-20 s);
+the sheet loops to exactly that many frames (RepeatImageBatch), since
+LTXVAddGuide only asks that a guide be no longer than the output. The
+IC-LoRA was trained at 121 frames (recipe.trained_frames): other lengths get
+one soft warning listing them. `dur: model` renders the estimate (LTX-2.3 has
+no duration head), with a warning and a note in the take.
+
 The sheet itself is made at queue time (stage_inputs), from the files on disk
 then: sheet.py runs comfy_nodes/h3_refsheet.py (PIL) with the running Python,
 the PNG is uploaded to ComfyUI's input folder, and h3jobs.start_job moves it
@@ -48,7 +55,8 @@ import targets as TG
 from h3core import ir
 from h3core.ir import stable_seed
 from h3core.speech import RATE_CEILING, SPEECH_RATE, forced_rate, pacing, speech_seconds
-from targets.video.ltx2.compile import _consumers, _duration, _lines, _of
+from targets.video.ltx2.compile import (_consumers, _duration, _lines, _of,
+                                        put_model_duration, shotlist_extra)
 
 from . import sheet as S
 from .prompt import build_prompt
@@ -59,6 +67,7 @@ RECIPE = TARGET.recipe
 SHEET = RECIPE["reference_sheet"]
 IC_LORA = RECIPE["ic_lora"]
 PLATE = "plate"                      # the absent-set name of the plate
+BUCKET = int(RECIPE["trained_frames"])   # the IC-LoRA's training length
 
 
 def _hint(kind: str) -> str:
@@ -103,6 +112,7 @@ class Ctx:
             self.warnings.append(f"{pass_} size {w}x{h} is not legal on {target.short}; "
                                  f"rendering {self.width}x{self.height}")
         self.total_req = self.total_raw = 0
+        self.off_bucket: list[str] = []          # "<shot> <frames>" not at BUCKET
         self.fallbacks: dict[str, list[str]] = {}
         self.profiles = TG.series_profiles(series_cfg)
         self.recording = series_cfg.get("audio", {}).get("track", "")
@@ -181,9 +191,9 @@ def _compile(ctx: Ctx, sq: ir.Sequence, shot: ir.Shot, ep_id: str) -> dict:
         raw = template.snap(req)
     except ValueError:
         raise ValueError(f"shot {shot.id}: {dur:.2f}s is longer than {ctx.target.short}'s "
-                         f"bucket of {template.max} frames ({template.max / fps:.2f}s at "
-                         f"{fps:g} fps), the only length its IC-LoRA was trained on. "
-                         f"Split the shot, or render it on another target.") from None
+                         f"maximum of {template.max} frames ({template.max / fps:.2f}s at "
+                         f"{fps:g} fps). Split the shot, or render it on another "
+                         f"target.") from None
     if shot.dialogue:
         held = raw / fps
         rate = forced_rate(_lines(shot), held)
@@ -191,9 +201,8 @@ def _compile(ctx: Ctx, sq: ir.Sequence, shot: ir.Shot, ep_id: str) -> dict:
         if rate > RATE_CEILING:
             ctx.warnings.append(f"{shot.id}: CRAMMED — {syl} syllables in {held:.2f}s forces "
                                 f"{rate:.1f} syl/s (ceiling {RATE_CEILING}). Split the shot.")
-    if not windowed and (raw - req) / raw > 0.15 and not (shot.timing or {}).get("auto"):
-        ctx.warnings.append(f"{shot.id}: {dur:.2f}s renders {ctx.target.short}'s whole "
-                            f"{raw}-frame bucket ({raw / fps:.2f}s); trim it in the cut.")
+    if raw != BUCKET:
+        ctx.off_bucket.append(f"{shot.id} {raw}")
     ctx.total_req += req
     ctx.total_raw += raw
 
@@ -243,6 +252,7 @@ def _compile(ctx: Ctx, sq: ir.Sequence, shot: ir.Shot, ep_id: str) -> dict:
         entry["audio_in"], entry["audio_out"] = t["audio_in"], t["audio_out"]
     else:
         entry["duration"] = round(dur, 3)
+    put_model_duration(ctx, shot, pace, entry)
     return entry
 
 
@@ -257,7 +267,7 @@ def _episode(target, story: ir.Episode, series_cfg: dict, pass_: str,
         for s in mine:
             shots_out.append(_compile(ctx, sq, s, story.id))
     p = ctx.preset
-    extra = {k: v for k, v in p.extra.items() if not k.startswith("_")}
+    extra = shotlist_extra(p)
     doc = {
         "episode": story.id,
         "title": story.title,
@@ -282,6 +292,11 @@ def _episode(target, story: ir.Episode, series_cfg: dict, pass_: str,
         if len(sh["panels"]) > 5:
             ctx.warnings.append(f"{sh['id']}: {len(sh['panels'])} panels on one reference "
                                 f"sheet; small panels carry over worse")
+    if ctx.off_bucket:
+        n = len(ctx.off_bucket)
+        ctx.warnings.append(f"the IC-LoRA was trained at {BUCKET} frames; identity may weaken "
+                            f"at other lengths ({n} shot{'s' if n > 1 else ''}, frames): "
+                            + ", ".join(ctx.off_bucket[:12]) + (" …" if n > 12 else ""))
     fps = ctx.fps
     report = {
         "episode": story.id, "title": story.title,

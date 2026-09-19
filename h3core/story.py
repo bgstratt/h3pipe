@@ -220,15 +220,18 @@ def _parse(text: str, subject_ids: set[str],
                     raise ScriptError(n, line, f"audio window ends ({b}) before it starts ({a})")
                 shot["audio_in"], shot["audio_out"] = a, b
             elif key in ("dur", "duration"):
-                if val.strip().lower() == "auto":
+                v = val.strip().lower()
+                if v == "auto":
                     shot["duration_auto"] = True
+                elif v == "model" or v.startswith("model "):
+                    shot["duration_model"] = _model_clamp(v[len("model"):].strip(), n, line)
                 else:
                     try:
                         shot["duration"] = float(val)
                     except ValueError:
                         raise ScriptError(
                             n, line,
-                            f"duration '{val}' is not a number or `auto`")
+                            f"duration '{val}' is not a number, `auto` or `model`")
             elif key == "pace":
                 if val.strip().lower() not in SPEECH_RATE:
                     raise ScriptError(n, line,
@@ -252,6 +255,20 @@ def _parse(text: str, subject_ids: set[str],
     if not ep["sequences"]:
         raise ScriptError(1, "", "script has no sequences")
     return ep, seq_lines, spans
+
+
+def _model_clamp(spec: str, n: int, line: str) -> dict:
+    """`dur: model`'s optional clamp, `3-8` (seconds): {"min", "max"}, or {}."""
+    if not spec:
+        return {}
+    m = re.match(r"^(\d+(?:\.\d+)?)\s*-\s*(\d+(?:\.\d+)?)$", spec)
+    if not m:
+        raise ScriptError(n, line, f"`dur: model {spec}`: the clamp must look like "
+                                   f"`dur: model 3-8` (min-max seconds)")
+    lo, hi = float(m.group(1)), float(m.group(2))
+    if lo <= 0 or hi <= lo:
+        raise ScriptError(n, line, f"`dur: model {spec}`: needs 0 < min < max seconds")
+    return {"min": lo, "max": hi}
 
 
 def parse_script(text: str, subject_ids: set[str], character_ids: set[str]) -> dict:
@@ -280,6 +297,8 @@ def _shot_ir(ep_id: str, seq: dict, sh: dict, span: tuple[int, int]) -> Shot:
     unparsed: dict = {}
     if "audio_in" in sh:
         timing = {"audio_in": sh["audio_in"], "audio_out": sh["audio_out"]}
+    elif sh.get("duration_model") is not None:
+        timing = {"model": True, **sh["duration_model"]}
     elif sh.get("duration_auto"):
         timing = {"auto": True}
     elif "duration" in sh:

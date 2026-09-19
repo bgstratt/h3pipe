@@ -4,7 +4,7 @@ import {
   setZoom, showMissingRefs, toggleCutPlay,
 } from "../actions";
 import { host } from "../host";
-import { fmtClock, fmtSeconds, groupBySequence, shotBadges, tn } from "../lib/format";
+import { fmtClock, fmtSeconds, groupBySequence, shotBadges, shotSeconds, tn } from "../lib/format";
 import { missingRefsSummary } from "../lib/missingRefs";
 import { clipTake, locate } from "../lib/playlist";
 import { targetBadges } from "../lib/targets";
@@ -38,15 +38,17 @@ function Playhead({ trackRef, zoom }: { trackRef: React.RefObject<HTMLDivElement
   return <div className="h3-playhead" style={{ left }} />;
 }
 
-const Clip = memo(function Clip({ ep, pass, s, other, zoom, height, aspect, selected, rendering, progress, targets, seriesDefault }: {
+const Clip = memo(function Clip({ ep, pass, s, other, zoom, height, aspect, selected, rendering, progress, targets, seriesDefault, fps }: {
   ep: string; pass: Pass; s: ShotStatus; other: EpisodeStatus | undefined; zoom: number; height: number;
   aspect: number; selected: boolean; rendering: Set<number>; progress?: { value: number; max: number };
-  targets: TargetList | null; seriesDefault: string;
+  targets: TargetList | null; seriesDefault: string; fps: number;
 }) {
   const [cell, scrub] = useScrub();
   const take = clipTake(s, other);
   const takePass: Pass = s.cut.placeholder ? s.cut.pass : pass;
-  const width = Math.max(MIN_CLIP, Math.round((s.seconds ?? 1) * zoom));
+  // the cut take's real length when known (a `dur: model` take's is the model's)
+  const secs = shotSeconds(s, fps);
+  const width = Math.max(MIN_CLIP, Math.round((secs ?? 1) * zoom));
   const mediaW = Math.min(width, Math.round(height * aspect));
   // a placeholder's take is the other pass's: its target is compared all the same
   const badges = useMemo(
@@ -55,7 +57,7 @@ const Clip = memo(function Clip({ ep, pass, s, other, zoom, height, aspect, sele
   );
   const cls = ["h3-clip", selected && "h3-sel", s.cut.placeholder && "h3-placeholder", s.orphan && "h3-orphan"].filter(Boolean).join(" ");
   const title = [
-    `${s.shot} · ${fmtSeconds(s.seconds)}${s.size ? ` · ${s.size}` : ""}`,
+    `${s.shot} · ${fmtSeconds(secs)}${s.size ? ` · ${s.size}` : ""}`,
     take ? `${s.cut.placeholder ? `${s.cut.pass} ` : ""}${tn(take.take)} (${take.status})` : "no take in the cut",
     ...badges.map((b) => b.title),
     "click: select (jumps there while playing all) · double-click: viewer · right-click: menu",
@@ -115,12 +117,12 @@ export function Timeline() {
   const other = useStatus(pass === "proxy" ? "final" : "proxy");
   const [trackRef, size] = useSize<HTMLDivElement>();
   const wrapRef = useRef<HTMLDivElement>(null);
-  const groups = useMemo(() => groupBySequence(st?.shots ?? []), [st]);
+  const groups = useMemo(() => groupBySequence(st?.shots ?? [], st?.fps), [st]);
   const { list: targets, seriesDefault } = useTargets();
   // clip height: the track minus padding and the sequence label
   const clipH = Math.max(24, (size.height || 150) - 6 - 16 - 2);
   const aspect = aspectOf(st);
-  const total = st?.shots.reduce((n, s) => n + (s.seconds ?? 0), 0) ?? 0;
+  const total = st?.shots.reduce((n, s) => n + (shotSeconds(s, st.fps) ?? 0), 0) ?? 0;
   const missing = useMemo(() => missingRefsSummary(st?.shots ?? []), [st]);
   const innerRef = useRef<HTMLDivElement>(null);
 
@@ -224,6 +226,7 @@ export function Timeline() {
                           progress={r.size && running ? progress[running] : undefined}
                           targets={targets}
                           seriesDefault={seriesDefault}
+                          fps={st.fps}
                         />
                       </div>
                     );

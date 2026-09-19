@@ -6,9 +6,9 @@
   "code": "compile.py",
 
   "template": {
-    "_note": "The IC-LoRA was trained on one bucket: 768x448, 121 frames, 24 fps (model card, and the workflow's notes). Its reference video must be at least 121 frames and no longer than the output (LTXVAddGuide asserts it), so every shot renders exactly 121 frames (8k+1): a shorter shot is padded up to the bucket (a dialogue window is trimmed back in assemble; trim others in the cut) and a longer one must be split. Sizes are multiples of 32 (one sampling stage, no upscaler).",
+    "_note": "The IC-LoRA was trained on one bucket: 768x448, 121 frames, 24 fps (model card, and the workflow's notes). A shot renders its own length on the 8k+1 grid, from 49 frames (2 s) to 481 (20 s): the reference video is the sheet looped (RepeatImageBatch) to exactly the shot's frame count, and the only hard rule, in ComfyUI's LTXVAddGuide, is that a guide is no longer than the output. Lengths other than 121 are outside the IC-LoRA's training, so the build warns (identity may weaken) but renders them; a shot longer than 20 s must be split. Sizes are multiples of 32 (one sampling stage, no upscaler).",
     "fps": 24,
-    "frames": {"step": 8, "base": 121, "max": 121},
+    "frames": {"step": 8, "base": 49, "max": 481},
     "size_multiple": 32,
     "size_fit": "snap",
     "max_size": {"long_side": 1536, "pixels": 1048576}
@@ -25,6 +25,7 @@
       "face_sizes": ["close", "cu"]
     },
     "ic_lora": "ltx-2.3-22b-ic-lora-ingredients-0.9.safetensors",
+    "trained_frames": 121,
     "policies": ["generate"],
     "policy_fallback": {"to": "generate", "why": "LTX-2 generates sound with the picture and takes no voice sample or recording"},
     "prompt": "reference sheet + prose",

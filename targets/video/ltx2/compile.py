@@ -13,7 +13,10 @@ A shotlist entry carries the same neutral keys as H3's (the editor's shot bin
 reads them): id, sequence, subjects, background, size, length, seed, steps,
 audio_policy, prompt, plus duration / audio_in-audio_out. LTX's own: negative,
 keyframes {first, last} (the conventional paths; optional), audio_intent and
-audio_note when the script asked for a policy LTX can't render. `background`
+audio_note when the script asked for a policy LTX can't render, and for
+`dur: model` `length_estimated` (its `duration`/`length` are the build's
+estimate) plus `duration_predict` {min_seconds, max_seconds} (the duration
+head's range, used at queue time by h3jobs when the head is installed). `background`
 is the plate the script names; LTX never reads it (the location is described
 in words), it is there so every target's entries look alike.
 
@@ -66,11 +69,50 @@ class Ctx:
         self.recording = audio_cfg.get("track", "")
 
 
+def model_duration(ctx, shot: ir.Shot, pace: str) -> tuple[float, dict | None, str]:
+    """`dur: model`: (the estimate, the predictor's range or None, a warning
+    or ""); see targets.duration_estimate. The range never passes the
+    template's longest shot."""
+    speech = speech_seconds(_lines(shot), pace) if shot.dialogue else None
+    est, predict, note = TG.duration_estimate(ctx.target, shot.timing or {}, ctx.preset, speech)
+    if predict:
+        top = round(ctx.target.template.max / ctx.fps, 2)
+        predict["max_seconds"] = min(predict["max_seconds"], top)
+        # LTXVDurationPredictor takes 0.5 s at least
+        predict["min_seconds"] = max(0.5, min(predict["min_seconds"], predict["max_seconds"]))
+        est = min(max(est, predict["min_seconds"]), predict["max_seconds"])
+    return est, predict, note
+
+
+def put_model_duration(ctx, shot: ir.Shot, pace: str, entry: dict) -> None:
+    """A `dur: model` entry's own keys: `length_estimated` (its length is the
+    build's estimate) and, on a target that predicts, `duration_predict`
+    {"min_seconds", "max_seconds"}; elsewhere a warning that the estimate is
+    what renders."""
+    if not (shot.timing or {}).get("model"):
+        return
+    _, predict, note = model_duration(ctx, shot, pace)
+    entry["length_estimated"] = True
+    if predict:
+        entry["duration_predict"] = predict
+    if note:
+        ctx.warnings.append(f"{shot.id}: {note}")
+
+
+def shotlist_extra(preset) -> dict:
+    """The preset values a shotlist's `defaults` carries (not the `dur: model`
+    ones, which h3jobs reads from the target)."""
+    return {k: v for k, v in preset.extra.items()
+            if not k.startswith("_") and k not in TG.DURATION_PRESET_KEYS}
+
+
 def _duration(ctx: Ctx, shot: ir.Shot, pace: str) -> tuple[float, bool]:
     """(seconds, from a recording window) as the script asks."""
     t = shot.timing or {}
     if "audio_in" in t:
         return t["audio_out"] - t["audio_in"], True
+    if t.get("model"):
+        return model_duration(ctx, shot, pace)[0], False
     if t.get("auto"):
         if not shot.dialogue:
             raise ValueError(f"shot {shot.id}: `dur: auto` needs dialogue to measure. "
@@ -158,6 +200,7 @@ def _compile(ctx: Ctx, sq: ir.Sequence, shot: ir.Shot, ep_id: str) -> dict:
         entry["audio_in"], entry["audio_out"] = t["audio_in"], t["audio_out"]
     else:
         entry["duration"] = round(dur, 3)
+    put_model_duration(ctx, shot, pace, entry)
     return entry
 
 
@@ -172,7 +215,7 @@ def compile_episode(target, story: ir.Episode, series_cfg: dict, pass_: str,
         for s in mine:
             shots_out.append(_compile(ctx, sq, s, story.id))
     p = ctx.preset
-    extra = {k: v for k, v in p.extra.items() if not k.startswith("_")}
+    extra = shotlist_extra(p)
     doc = {
         "episode": story.id,
         "title": story.title,
