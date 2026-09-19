@@ -446,8 +446,8 @@ python h3.py assemble Shows\ep05 --proxy --audio master          # picture over 
 
 - h3align transcribes the recording with word timings, matches it to the script, and cuts it
   into one continuous run of windows with cuts at the quietest point of each pause.
-- It writes `audio: in-out` on every shot, points the series config at the recording, backs both files
-  up as `.bak`, and writes `align_report.md`.
+- It writes `audio: in-out` on every shot, points the series config at the recording, keeps the
+  old copy of each in `<episode>\_history\` (the editor's history), and writes `align_report.md`.
 - Speaking shots then default to `dub_keep_foley`: H3 lip-syncs to your line and keeps its own
   sound effects as `_foley.wav`.
 - The `retention` setting controls how much of your line H3 copies:

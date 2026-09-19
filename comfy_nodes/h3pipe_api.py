@@ -52,9 +52,10 @@ try:
     import h3promote as P  # noqa: E402
     import h3refs as R  # noqa: E402
     import h3takes as T  # noqa: E402
+    import h3track as K  # noqa: E402
     import targets as TG  # noqa: E402
 except Exception as exc:                                  # pragma: no cover
-    E = J = P = PK = R = T = TG = None
+    E = J = K = P = PK = R = T = TG = None
     IMPORT_ERROR = (f"h3pipe: can't import the pipeline from {HOME} "
                     f"({exc.__class__.__name__}: {exc}); set H3PIPE_HOME to the repo")
 
@@ -1605,6 +1606,90 @@ def post_promote(ctx: Context, body):
     return 200, seeds_out(result)
 
 
+# ---------------------------------------------------------------------------
+# the dialogue recording: attaching one, and aligning to it (Phase 9c A)
+# ---------------------------------------------------------------------------
+
+@handler
+def get_align_ready(ctx: Context, query: dict):
+    """What h3align needs (ffmpeg, numpy, a Whisper), checked against the
+    Python that would run it, with the pip line for whatever is missing."""
+    return 200, K.align_ready()
+
+
+@handler
+def post_track(ctx: Context, body):
+    """Attach a dialogue recording: `source_path` (a file on this machine) or
+    `file` (multipart, as /refs/import). It lands in <ep>/audio/, the series
+    config's `audio.track` and `audio.mode` are written through the Phase 9a
+    save path, and the episode is rebuilt. `track: null` clears it."""
+    body = body_dict(body)
+    ep = check_ep(ctx, body.get("ep"))
+    pass_ = check_pass(body.get("pass"))
+    up = body.get("file")
+    src = body.get("source_path")
+    if isinstance(up, Upload):
+        if up.size > MAX_UPLOAD:
+            raise ApiError(413, f"the file is over {MAX_UPLOAD // (1024 * 1024)} MB")
+        res = K.attach_track(ep, up.path, up.filename or "")
+    elif up is not None:
+        raise ApiError(400, "file must be sent as multipart/form-data")
+    elif isinstance(src, str) and src.strip():
+        res = K.attach_track(ep, src.strip())
+    elif src is not None:
+        raise ApiError(400, "source_path must be the recording's absolute path on this "
+                            "machine (or upload it as multipart `file`)")
+    elif "track" in body and body.get("track") is None:
+        res = K.clear_track(ep)
+    else:
+        raise ApiError(400, "send source_path (or a multipart `file`) to attach a "
+                            "recording, or track: null to clear it")
+    build = E.build_episode(ep)
+    episode_event(ctx, ep)
+    return 200, {"track": E.track_info(ep, pass_), "hash": res["hash"], "build": build,
+                 "path": res["path"], "copied": res["copied"],
+                 "reformatted": res["reformatted"]}
+
+
+@handler
+def post_align(ctx: Context, body):
+    """Run h3align on the episode (a subprocess), sending `h3pipe.align` as it
+    goes. 409 with `missing` when a dependency isn't installed; `dry_run`
+    writes nothing."""
+    body = body_dict(body)
+    ep = check_ep(ctx, body.get("ep"))
+    pass_ = check_pass(body.get("pass"))
+    track = body.get("track")
+    if track is not None and (not isinstance(track, str) or not track.strip()):
+        raise ApiError(400, "track must be the recording's path (relative to the episode)")
+    if isinstance(track, str):
+        track = ep_file(ctx, ep, track.strip(), escape_status=400)[0]
+    model = body.get("model")
+    if model is not None and (not isinstance(model, str) or not model.strip()):
+        raise ApiError(400, "model must be a Whisper model name, e.g. medium.en")
+    snap = body.get("snap", True)
+    dry = body.get("dry_run", False)
+    for name, v in (("snap", snap), ("dry_run", dry)):
+        if not isinstance(v, bool):
+            raise ApiError(400, f"{name} must be true or false")
+
+    def progress(ev):
+        ctx.emit("h3pipe.align", {"ep": ep, "stage": ev["stage"], "pct": ev["pct"],
+                                  "text": ev["text"]})
+
+    res = K.align(ep, track=track, model=(model or "").strip() or None, snap=snap,
+                  dry_run=dry, progress=progress)
+    build = None if dry else E.build_episode(ep)
+    if not dry:
+        episode_event(ctx, ep)
+    return 200, {"ok": bool(res.get("ok")), "dry_run": dry, "report": res.get("report", ""),
+                 "report_path": res.get("report_path"), "changes": res.get("changes", []),
+                 "notes": res.get("notes", []), "recording": res.get("recording"),
+                 "duration": res.get("duration"), "words": res.get("words"),
+                 "script_hash": res.get("script_hash"), "series_hash": res.get("series_hash"),
+                 "track": E.track_info(ep, pass_), "build": build, "log": res.get("log", "")}
+
+
 # (method, path, handler, what it takes: "query", "body" (JSON) or "form" (JSON, or
 # multipart/form-data whose file field arrives as an Upload))
 ROUTES = [
@@ -1646,4 +1731,7 @@ ROUTES = [
     ("PUT", "/h3pipe/source", put_source, "body"),
     ("GET", "/h3pipe/promote", get_promote, "query"),
     ("POST", "/h3pipe/promote", post_promote, "body"),
+    ("GET", "/h3pipe/align/ready", get_align_ready, "query"),
+    ("POST", "/h3pipe/track", post_track, "form"),
+    ("POST", "/h3pipe/align", post_align, "body"),
 ]

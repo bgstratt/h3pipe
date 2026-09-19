@@ -21,7 +21,10 @@ What it does
        the pause has room, so nothing is padded.
     4. Rewrites the script: `audio: in-out` on every shot it placed, old `dur:`
        lines kept as comments. Points the series config at the recording
-       (audio.mode = source_track). Both files are backed up as .bak first.
+       (audio.mode = source_track). Both files are written the way the editor
+       writes them (h3source): the old one is copied to <episode>/_history/
+       first and the write is atomic, so the editor and the command line keep
+       one history.
 
 Because the windows are contiguous, the assembled picture lines up with the
 recording end to end: h3assemble trims each clip to its window, and the
@@ -37,6 +40,13 @@ Needs
         pip install faster-whisper        (recommended; uses GPU if it can, else CPU)
         pip install openai-whisper        (fallback)
     The Whisper model downloads once on first use (--model, default medium.en).
+
+For the editor
+    --progress prints one `##h3align {json}` line per stage (transcribe,
+    match, write) and --json PATH writes the result (the windows it placed,
+    the notes, the report and the files' new hashes) as JSON. Everything else
+    is unchanged: h3track.py runs this script with both and turns the lines
+    into `h3pipe.align` events (docs/API.md, "Phase 9c").
 """
 from __future__ import annotations
 
@@ -54,6 +64,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import h3build  # noqa: E402  (parse_script, parse_story)
+import h3source as HS  # noqa: E402  (the editor's read/save: _history, atomic writes)
 
 SR = 16000
 LEAD = 0.25      # seconds of air kept before a line's first word
@@ -348,8 +359,63 @@ def rewrite_script(text: str, windows: dict[str, list[float] | None]) -> str:
     return "\n".join(out) + ("\n" if text.endswith("\n") else "")
 
 
-def backup(path: str) -> None:
-    shutil.copy2(path, path + ".bak")
+PROGRESS = "##h3align "     # the prefix of a --progress line (h3track reads them)
+
+
+def progress(on: bool, stage: str, pct: int, text: str) -> None:
+    """One machine-readable progress line for the editor (--progress)."""
+    if on:
+        print(PROGRESS + json.dumps({"stage": stage, "pct": pct, "text": text}), flush=True)
+
+
+def report_md(md_p: str, rec_rel: str, duration: float, start: float | None,
+              rows: list, notes: list[str], lines: list[dict]) -> str:
+    """align_report.md's text (written unless --dry-run; also in --json)."""
+    out = [f"# Alignment — {os.path.basename(md_p)} against {rec_rel}\n\n"
+           f"Recording {duration:.2f}s. Picture starts at "
+           f"{'-' if start is None else f'{start:.3f}'}s into the recording.\n\n"
+           f"| Shot | Window (s) | Length | Frames req/render | Speech |\n|---|---|---|---|---|\n"]
+    for r in rows:
+        out.append(f"| {r[0]} | {r[1].strip()} | {r[2]:.2f} | {r[3]} | {r[4]} |\n")
+    out.append("\n" + ("\n".join(f"- {n}" for n in notes) or "- no problems found") + "\n")
+    out.append("\n## Lines\n\n| Shot | Who | Start | End | Match | Line |\n"
+               "|---|---|---|---|---|---|\n")
+    for ln in lines:
+        match = "guess" if ln.get("estimated") else f"{ln['coverage']:.0%}"
+        out.append(f"| {ln['shot']} | {ln['who']} | {ln['start']:.2f} | {ln['end']:.2f} | "
+                   f"{match} | {ln['text']} |\n")
+    return "".join(out)
+
+
+def changes_json(shots: list[dict], notes: list[str]) -> list[dict]:
+    """One entry per shot: its window (seconds on the recording, null when it
+    keeps its `dur:`) and the notes that name it."""
+    out = []
+    for s in shots:
+        w = s.get("window")
+        note = " ".join(n.strip() for n in notes if s["id"] in n)
+        out.append({"shot": s["id"],
+                    "audio_in": round(w[0], 3) if w else None,
+                    "audio_out": round(w[1], 3) if w else None,
+                    "note": note or ("keeps its `dur:`" if not w else "")})
+    return out
+
+
+def write_series_track(series_cfg_p: str, ep: str, raw: dict, rec_rel: str,
+                       policy: str | None, retention: str | None) -> str:
+    """Point the series config at the recording (audio.mode source_track),
+    through the editor's save path: a copy in <ep>/_history/ first, then an
+    atomic write that keeps the file's line endings and BOM. The new hash."""
+    audio = dict(raw.get("audio") or {})
+    audio["mode"] = "source_track"
+    audio["track"] = rec_rel
+    if policy:
+        audio["default_policy"] = policy
+    if retention:
+        audio["retention"] = retention
+    raw["audio"] = audio
+    src = HS.read_file(ep, "series", series_cfg_p)
+    return HS.write_source(src, HS.dump_series(raw, src.text))
 
 
 def main() -> int:
@@ -374,7 +440,12 @@ def main() -> int:
     ap.add_argument("--retention", choices=["fully_copy", "partially_copy", "reference"],
                     help="set audio.retention in series.json (default depends on policy)")
     ap.add_argument("--dry-run", action="store_true", help="report only; change no files")
+    ap.add_argument("--progress", action="store_true",
+                    help="print a `##h3align {json}` line per stage (for the editor)")
+    ap.add_argument("--json", dest="json_out", metavar="PATH",
+                    help="write the result (windows, notes, report, hashes) as JSON")
     args = ap.parse_args()
+    prog = args.progress
 
     ep = args.episode
     series_cfg_p, md_p = episode_files(ep)
@@ -403,7 +474,8 @@ def main() -> int:
     chars = {k for k, v in series_cfg["subjects"].items()
              if not k.startswith("_") and isinstance(v, dict)
              and v.get("kind", "character") == "character"}
-    text = open(md_p, encoding="utf-8").read()
+    script_src = HS.read_file(ep, "script", md_p)
+    text = script_src.text
     epi = h3build.parse_script(text, subjects, chars)
     snap_of = shot_grids(series_cfg_p, text)
     shots, lines = [], []
@@ -420,18 +492,24 @@ def main() -> int:
     # transcript
     cache = rec_abs + ".words.json"
     if args.words:
+        progress(prog, "transcribe", 10, f"reading {os.path.basename(args.words)}")
         words = json.load(open(args.words, encoding="utf-8"))
     elif os.path.isfile(cache) and not args.retranscribe \
             and os.path.getmtime(cache) >= os.path.getmtime(rec_abs):
+        progress(prog, "transcribe", 10, f"using the cached transcript "
+                                         f"{os.path.basename(cache)}")
         words = json.load(open(cache, encoding="utf-8"))
         print(f"  using cached transcript {cache}")
     else:
+        progress(prog, "transcribe", 10, f"transcribing {os.path.basename(rec_abs)} with "
+                                         f"Whisper {args.model} (this takes a while)")
         prompt = " ".join(l["text"] for l in lines)[:600]
         words = transcribe(rec_abs, args.model, args.device, args.language, prompt)
         json.dump(words, open(cache, "w", encoding="utf-8"), indent=1)
         print(f"  cached transcript -> {cache}")
     if not words:
         sys.exit("  !! the transcript is empty")
+    progress(prog, "match", 65, f"matching {len(words)} words to {len(lines)} lines")
 
     pcm = load_pcm(rec_abs)
     duration = len(pcm) / SR
@@ -470,44 +548,45 @@ def main() -> int:
     if not notes:
         print("  no problems found")
 
+    windows = {s["id"]: s.get("window") for s in shots}
+    starts = [w[0] for w in windows.values() if w]
+    report = report_md(md_p, rec_rel, duration, min(starts) if starts else None,
+                       rows, notes, lines)
+    result = {"ok": True, "episode": os.path.abspath(ep), "script": md_p,
+              "series": series_cfg_p, "recording": rec_rel, "duration": round(duration, 3),
+              "words": len(words), "dry_run": bool(args.dry_run),
+              "changes": changes_json(shots, notes), "notes": notes, "report": report,
+              "report_path": None, "script_hash": None, "series_hash": None}
+
     if args.dry_run:
         print("\n  dry run — no files changed\n")
+        progress(prog, "write", 100, "dry run — nothing written")
+        write_result(args.json_out, result)
         return 0
 
     # write
-    windows = {s["id"]: s.get("window") for s in shots}
-    backup(md_p)
-    open(md_p, "w", encoding="utf-8").write(rewrite_script(text, windows))
-    backup(series_cfg_p)
-    audio = dict(series_cfg.get("audio", {}))
-    audio["mode"] = "source_track"
-    audio["track"] = rec_rel
-    if args.policy:
-        audio["default_policy"] = args.policy
-    if args.retention:
-        audio["retention"] = args.retention
-    series_cfg["audio"] = audio
-    json.dump(series_cfg, open(series_cfg_p, "w", encoding="utf-8"), indent=2, ensure_ascii=False)
-
+    progress(prog, "write", 90, "writing the script and the series config")
+    result["script_hash"] = HS.write_source(script_src, rewrite_script(text, windows))
+    result["series_hash"] = write_series_track(series_cfg_p, ep, series_cfg, rec_rel,
+                                               args.policy, args.retention)
     rep = os.path.join(ep, "align_report.md")
     with open(rep, "w", encoding="utf-8") as fh:
-        fh.write(f"# Alignment — {os.path.basename(md_p)} against {rec_rel}\n\n"
-                 f"Recording {duration:.2f}s. Picture starts at "
-                 f"{min(w[0] for w in windows.values() if w):.3f}s into the recording.\n\n"
-                 f"| Shot | Window (s) | Length | Frames req/render | Speech |\n|---|---|---|---|---|\n")
-        for r in rows:
-            fh.write(f"| {r[0]} | {r[1].strip()} | {r[2]:.2f} | {r[3]} | {r[4]} |\n")
-        fh.write("\n" + ("\n".join(f"- {n}" for n in notes) or "- no problems found") + "\n")
-        fh.write("\n## Lines\n\n| Shot | Who | Start | End | Match | Line |\n|---|---|---|---|---|---|\n")
-        for ln in lines:
-            match = "guess" if ln.get("estimated") else f"{ln['coverage']:.0%}"
-            fh.write(f"| {ln['shot']} | {ln['who']} | {ln['start']:.2f} | {ln['end']:.2f} | "
-                     f"{match} | "
-                     f"{ln['text']} |\n")
-    print(f"\n  -> {md_p}  (backup .bak)\n  -> {series_cfg_p}  (audio.mode source_track, "
-          f"track {rec_rel}; backup .bak)\n  -> {rep}\n"
+        fh.write(report)
+    result["report_path"] = os.path.basename(rep)
+    hist = os.path.join(ep, HS.HISTORY)
+    print(f"\n  -> {md_p}  (old copy in {hist})\n  -> {series_cfg_p}  "
+          f"(audio.mode source_track, track {rec_rel}; old copy in {hist})\n  -> {rep}\n"
           f"  next: python h3.py build {ep}\n")
+    progress(prog, "write", 100, "written")
+    write_result(args.json_out, result)
     return 0
+
+
+def write_result(path: str | None, result: dict) -> None:
+    """--json: the run as the editor reads it (h3track.align)."""
+    if path:
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(result, fh, ensure_ascii=False, indent=1)
 
 
 if __name__ == "__main__":

@@ -273,18 +273,12 @@ def key_line(text: str, span: tuple[int, int], key: str) -> int | None:
     return hit
 
 
-def dump_series(raw: dict, like: str) -> str:
-    """The series config as the promote writes it: 2-space indent, key order
-    and non-ASCII text kept, a final newline if the file had one."""
-    return json.dumps(raw, indent=2, ensure_ascii=False) + ("\n" if like.endswith("\n") else "")
-
-
-def formatted(text: str) -> bool:
-    """Whether a series config text is already what dump_series writes."""
-    try:
-        return dump_series(json.loads(text), text).rstrip("\n") == text.rstrip("\n")
-    except ValueError:
-        return False
+# The series config as the promote writes it (2-space indent, key order and
+# non-ASCII text kept, a final newline if the file had one), and whether a text
+# is already in that shape. They live in h3source now: every route that writes
+# the series config (the promote, POST /h3pipe/track, h3align) writes it alike.
+dump_series = H.dump_series
+formatted = H.formatted
 
 
 def unified(old: str, new: str, name: str) -> str:
