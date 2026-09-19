@@ -406,7 +406,8 @@ class FakeComfy:
     def run_image(self, graph: dict, pid: str) -> str:
         """A reference-image job: what H3SaveRefTake (or SaveImage) does."""
         lat = next(v["inputs"] for v in graph.values()
-                   if v["class_type"] in ("EmptyLatentImage", "EmptySD3LatentImage"))
+                   if v["class_type"] in ("EmptyLatentImage", "EmptySD3LatentImage",
+                                      "EmptyFlux2LatentImage"))
         seed = next(v["inputs"].get("seed", v["inputs"].get("noise_seed", 0))
                     for v in graph.values() if v["class_type"].startswith("KSampler"))
         png = png_bytes(lat["width"], lat["height"],

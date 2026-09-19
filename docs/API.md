@@ -799,8 +799,8 @@ existing routes now show:
 - **`missing_refs`** entries may carry `anyway: false` and `why`: the shot can't render
   without that ref even with `allow_missing_refs: true`. That is `wan22_i2v`'s first frame:
   `{"slot": "first frame", "kind": "image", "path": "refs/shots/sh050/first.png",
-  "anyway": false, "why": "Wan 14B I2V needs a first frame: use continuity or import one,
-  or retarget to wan22_ti2v"}`. **`POST /h3pipe/render`** skips such a shot either way,
+  "anyway": false, "why": "Wan 14B I2V needs a first frame: generate one or use continuity
+  (or import one), or retarget to wan22_ti2v"}` (Phase 8.5 wording). **`POST /h3pipe/render`** skips such a shot either way,
   with `why` as its `reason`. The editor shows `why` and offers no render-anyway for it.
 - **VACE's reference image** is composed when the shot is queued, like the ingredients
   sheet but on white (one panel per subject), uploaded as `h3pipe/<sha1>.png`, and kept as
@@ -1002,3 +1002,126 @@ the series config's `negative`, then the target preset's.
 ### Small items
 - **An estimated length** (`dur: model` before a take exists): episode shots carry `length_estimated: true`, and the UI marks them "≈".
 - **Wan's `model_low`** gets a picker, like `model`: `GET /h3pipe/models?param=model_low`, and the override field `model_low`.
+
+### Phase 8.5 as built
+
+Everything above is implemented. Each point is marked **[differs]** (the contract said
+otherwise), **[added]** (the contract said nothing; the UI agent's ten follow-up points are
+here too) or **[settled]** (the contract left it open).
+
+**Image targets**
+- **[settled]** Built: `z_image_turbo` (saved `z-image-turbo-t2i.json`), `flux2_klein`
+  (`image_flux2_text_to_image_9b.json`), `flux2_klein_edit`
+  (`image_flux2_klein_9b_kv_image_edit.json`: its models are installed; the `_9b_base` edit
+  needs `flux-2-klein-base-9b-fp8`, which isn't), `flux_kontext`
+  (`flux_kontext_image_base.json`, trimmed to the branch its SaveImage reads). No
+  Illustrious/SDXL target: the only SDXL workflow (`sdxl_simple_example.json`) is a
+  base+refiner img2img canvas. Repo copies are API graphs with titled nodes, known by
+  `h3pipe_*.json` names so a canvas can't leak in; the saved canvases' LoRA loaders are left
+  out. Each passes `check_graph` against `tests/fixtures/workflows/object_info_image.json`
+  (trimmed from the live `/object_info`).
+- **[added]** `GET /h3pipe/targets` image entries: `capabilities` `{mode, max_refs,
+  negative_prompt}` (krea2, Z-Image, Klein `t2i`/0; Klein edit `edit`/4; Kontext `edit`/1).
+  Video entries add `capabilities.requires_first` (true only for `wan22_i2v`).
+- **[settled]** Klein and Klein edit: the model is an **accelerator** (the installed
+  distilled KV model, 4 steps, cfg 1); `base` is the base 9B at 20 steps, cfg 5 (the saved
+  workflows' own). Z-Image and Kontext: all required. Families from the installed files'
+  headers: `z-image` (Turbo by name), `flux2-klein-9b`, `flux1` (`-dev` / `-schnell` by
+  tensors; `flux1-kontext-dev` by name under dev), `qwen3-4b`, `qwen3-8b`, `qwen3vl-4b`,
+  `clip-l`, `t5-xxl`, `flux1-vae`, `flux2-vae`. Files resolve by family at queue time
+  (`h3refs.resolve_job_models`, the video code); a missing required file is an `errors[]`
+  entry with `missing_files`.
+- **[added]** Reference images reach an edit graph through a chain titled "Reference 1 ..."
+  that graph code repeats per image (or cuts out with none); each is uploaded as
+  `h3pipe/<sha1>.png`. A character with no picked view gets that panel cut out of its live
+  sheet (`h3_refsheet.py`, PIL).
+- **[added] Image defaults.** `GET /h3pipe/refs` returns `{"refs": [...], "defaults":
+  {"target", "target_source", "keyframe_target", "keyframe_target_source"}}`, sources
+  `"editor"` | `"series"` | `"default"`. **`PUT /h3pipe/refs/defaults`** `{ep, target?,
+  keyframe_target?}` (null clears; a key left out is kept) stores `overrides.json`
+  `episode.refs_target` / `episode.keyframe_target` beside the video `episode.target` and
+  returns `{"defaults": ...}`; 400 for a non-image target or a body with neither key.
+  Precedence: request, then the ref's override (`target` in `refs/_overrides.json`, now a
+  `PUT /h3pipe/refs/override` field), then the episode's, then the series config's `refs`,
+  then built-in. "Ready" for the built-in keyframe default means every required file of
+  `flux2_klein_edit` is among ComfyUI's model lists.
+- **[added]** Each ref's `effective.target` is the image target a generate would use (a
+  character's top-level `effective` is `{target}`; each view's has the rest). Ref-take
+  sidecars add `target`, `negative`, `negative_source`, `values`, `resolved`, `notes`, and
+  for a keyframe `references` (`[{role, subject|location, name, kind, view?, crop?, path,
+  sha1}]`), `inputs`, `render_width`, `render_height`, `video_target`.
+- **[added]** `POST /h3pipe/refs/generate` takes `target`, `negative` and `pass` (a
+  keyframe's size: default `final`, the larger; the file serves both passes). `queued[]`
+  entries carry `target`.
+
+**Keyframes as needed refs**
+- **[settled]** Script lines `first:` / `last:` on a shot or a `#` header; IR `first` /
+  `last` on shots and sequences, omitted when unset. `none` removes an optional keyframe
+  from the built entry's `keyframes` (a required one stays: the shot stays blocked).
+- **[settled]** `method` defaults to `continuity` only for a **first** frame whose shot has a
+  previous shot **in the same sequence** (across sequences the location changes); else
+  `generate`. A path in the script is `method: "import"` with `import_path`.
+- **[added]** Keyframe refs carry `shot`, `which`, `need`, `method`, `target` (the video
+  target), `requested` (the script asks for one), `script` (the raw line), `reads` (whether
+  the target reads that end), `import_path`, `cleared`, and with an edit keyframe target
+  `edit_refs: [{id, role, view?, crop?, path}]` (exactly what a generate feeds, after
+  `max_refs`). Needed keyframes list before any take exists; ones that only exist (a take,
+  a live file) list as before, with `need: null`.
+- **[differs] Size:** the shot's render size for its target and pass, **scaled up** (same
+  aspect, multiples of 16) to the image target's `template.min_pixels` (786432 for the new
+  targets; krea2 has none, so exact): a 640x352 proxy frame is generated at 1200x656. Every
+  video target scales a keyframe to its frame. The sidecar records both sizes and a note.
+- **[settled] Prompt** (`targets/image/common.py keyframe_prompt`): an edit target's
+  references named first ("Image 1 is Bolt: draw this character exactly as in image 1 ...",
+  "Image 2 is the background plate: ..."); then "The first/last frame of a <size> of
+  <location description>, one still picture. Drawn as <look>." and each subject's design;
+  then the moment: first = the action's first sentence "at the very start of the action"
+  (the rest in parentheses, "not yet shown"); last = its last sentence "after the action is
+  over, ... completed". Speakers are "about to speak" / "have just spoken"; no dialogue
+  text; "No text, captions, speech bubbles or borders."
+- **[added] Reference choice:** characters (script order), then props and vehicles, then the
+  plate, each only when its file exists; a character gives `04_face` on a single-subject
+  `close`/`cu` shot, else `01_threequarter`: its picked take of that view, else that panel
+  of its live sheet.
+- **[settled] "Generate missing"** in the CLI: `h3.py keyframe <ep> --missing [--proxy]
+  [--dry-run] [--target T]` fills required keyframes and any the script asks for, not live
+  and not cleared: continuity (`keyframe_from_take`) when the previous shot has a usable take
+  in the pass's cut, else a still; a script path is imported and picked. `h3.py keyframe <ep>
+  <shot> --generate [--first|--last] [--target T] [--pick|--no-pick] [--dry-run]` makes one
+  still. No new route: the UI calls `/refs/keyframe` and falls back to `/refs/generate` on
+  409 / 400.
+
+**Clear**
+- **[added]** `DELETE /h3pipe/refs/pick` returns the ref as `/h3pipe/refs` lists it;
+  `h3pipe.ref` carries the take that was picked (null if none). 400 for a voice.
+  `_picks.json` records `"cleared": "<time>"` on the ref (on a character's view,
+  `views.<view> = {"cleared"}`, and the stitched sheet is removed); auto-pick (`GET
+  /h3pipe/refs`, and `keyframe_from_take` with `pick: null`) skips a cleared ref until
+  anything is picked. Every ref and view in the listing carries `cleared`.
+- **[added] CLI:** `h3.py keyframe <ep> <shot> --clear [--first|--last]`; `kreagen --clear
+  REF[:VIEW]` (repeatable) for series refs.
+
+**Negatives**
+- **[differs] `negative_source` values:** `"request"` | `"override"` | `"negative.txt"` |
+  `"series"` | `"preset"` | `"none"` (a target without a negative param: H3, Klein edit).
+  `kreagen --negative-file` records `"request"`. The series config's is a top-level
+  `"negative": "..."`.
+- **[added]** The shot override field `negative` is per pass (like `prompt`; `""` is an
+  explicit empty negative, null clears); `POST /h3pipe/render` takes `negative` for one run.
+  Video sidecars on a negative-taking target record `negative_source`; a non-preset negative
+  lands in the frozen shotlist and, at cfg <= 1, adds a note. Wan's "Negative prompt"
+  `CLIPTextEncode` feeds `WanImageToVideo.negative` (checked).
+- **[added]** `GET /h3pipe/shot` `effective` adds `negative` (null for `none`) and
+  `negative_source`, and `model_low` on a two-stage target.
+
+**Inspector and small items**
+- **[settled] `refs_used`** entries also carry `slot`; `role` can also be `"voice"` (a clone
+  sample) or `"recording"` (a dub track); `id` is null for a recording or a plate the series
+  config doesn't name. `path` and `thumb` are relative to the episode (`../` beside a
+  parent-folder series config), `thumb` null when the file isn't on disk. The
+  `reference_sheet` entry (ltx2_ingredients, wan22_vace) points at the latest take's kept
+  sheet or reference, else null.
+- **[added]** A take's `reference_image` is relative to the episode, null when not kept.
+- **[settled]** `length_estimated: true` appears only on estimated shots.
+- **[added]** `model_low` is a per-pass override field; `GET /h3pipe/models?target=...&param=
+  model_low` works for `wan22_i2v` and `wan22_vace` (`target` is required, as for `model`).

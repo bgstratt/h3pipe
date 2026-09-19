@@ -44,7 +44,7 @@
     "keyframes": ["first", "last"],
     "keyframe_path": "refs/shots/{shot}/{end}.png",
     "keyframe_required": {
-      "first": "Wan 14B I2V needs a first frame: use continuity or import one, or retarget to wan22_ti2v"
+      "first": "Wan 14B I2V needs a first frame: generate one or use continuity (or import one), or retarget to wan22_ti2v"
     },
     "prompt": "prose",
     "size_hints": {

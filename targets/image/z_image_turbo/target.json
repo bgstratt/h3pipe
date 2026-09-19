@@ -1,0 +1,82 @@
+{
+  "id": "z_image_turbo",
+  "kind": "image",
+  "label": "Z-Image Turbo (fast text to image)",
+  "short": "Z-Image",
+  "code": "target.py",
+
+  "capabilities": {
+    "_note": "Text to image only: no reference images.",
+    "mode": "t2i",
+    "max_refs": 0
+  },
+
+  "template": {
+    "_note": "Sizes a series ref is generated at (as krea2's). A keyframe is generated at its shot's render size, scaled up (same aspect, multiples of size_multiple) to at least min_pixels: the video targets scale a keyframe to the frame anyway, and Z-Image draws poorly far below its 1 MP training size.",
+    "view_size": [1024, 1024],
+    "plate_size": [1344, 768],
+    "object_size": [1024, 1024],
+    "size_multiple": 16,
+    "min_pixels": 786432
+  },
+
+  "recipe": {
+    "_note": "Series refs are worded as krea2 words them (targets/image/common.py). Keyframes: targets/image/common.py keyframe_prompt."
+  },
+
+  "binding": {
+    "_note": "An API graph built from the user's saved z-image-turbo-t2i.json (ComfyUI's Z-Image Turbo template: UNETLoader + CLIPLoader lumina2 + ae VAE, ModelSamplingAuraFlow, KSampler res_multistep / simple, 8 steps, cfg 1). The saved canvas' LoRA loader is left out (references follow the series config's look; `loras` splices one in after the UNETLoader when asked). Every node the binding names has a title. H3SaveRefTake takes the place of SaveImage; prune drops anything it doesn't need. Known by the h3pipe_ name among ComfyUI's saved workflows, so the user's own canvas never leaks in.",
+    "workflow": "workflow.json",
+    "workflow_name": "h3pipe_z_image_turbo.json",
+    "env": "H3_Z_IMAGE_WORKFLOW",
+    "saver": {"class_type": "H3SaveRefTake",
+              "replace": {"class_type": "SaveImage", "inputs": {"images": "images"}}},
+    "prune": true,
+    "params": {
+      "model": {"class_type": "UNETLoader", "field": "unet_name"},
+      "text_encoder": {"class_type": "CLIPLoader", "field": "clip_name"},
+      "vae": {"class_type": "VAELoader", "field": "vae_name"},
+      "loras": {"class_type": "LoraLoaderModelOnly", "name": "lora_name", "strength": "strength_model",
+                "input": "model", "chain": true,
+                "insert_after": {"class_type": "UNETLoader", "output": 0}},
+      "prompt": {"class_type": "CLIPTextEncode", "field": "text", "title": "Positive prompt"},
+      "negative": {"class_type": "CLIPTextEncode", "field": "text", "title": "Negative prompt"},
+      "width": {"class_type": "EmptySD3LatentImage", "field": "width"},
+      "height": {"class_type": "EmptySD3LatentImage", "field": "height"},
+      "steps": {"class_type": "KSampler", "field": "steps"},
+      "seed": {"class_type": "KSampler", "field": "seed"},
+      "cfg": {"class_type": "KSampler", "field": "cfg"},
+      "sampler": {"class_type": "KSampler", "field": "sampler_name"},
+      "shift": {"class_type": "ModelSamplingAuraFlow", "field": "shift"}
+    }
+  },
+
+  "models": {
+    "_note": "Families from the installed files' headers (targets/modelid.py): Z-Image base and Turbo share their tensors, so Turbo is told by name. All required.",
+    "model": {"family": "z-image-turbo", "patterns": ["z_image_turbo*", "*z*image*turbo*"],
+              "tier": "required", "exclude": ["*lora*"]},
+    "text_encoder": {"family": "qwen3-4b", "patterns": ["qwen_3_4b*", "*qwen*3*4b*"],
+                     "tier": "required", "exclude": ["*vl*"]},
+    "vae": {"family": "flux1-vae", "patterns": ["ae.safetensors", "*flux1*ae.*", "*flux1*vae*"],
+            "tier": "required"}
+  },
+
+  "presets": {
+    "_note": "ComfyUI's Z-Image Turbo template (image_z_image_turbo.json): 8 steps, cfg 1, res_multistep, shift 3 (the user's saved copy says 5). The negative prompt is the saved workflow's; at cfg 1 there is no guidance, so it has no effect (a take says so when one is set).",
+    "final": {
+      "model": "z_image_turbo_bf16.safetensors",
+      "text_encoder": "qwen_3_4b.safetensors",
+      "vae": "ae.safetensors",
+      "lora": "",
+      "steps": 8, "cfg": 1.0, "sampler": "res_multistep", "shift": 3,
+      "negative": "low quality, bad anatomy, extra digits, missing digits, extra limbs, missing limbs"
+    }
+  },
+
+  "downloads": {
+    "_note": "URLs from ComfyUI's image_z_image_turbo.json template (properties.models); the user's saved z-image-turbo-t2i.json has the same.",
+    "z_image_turbo_bf16.safetensors": {"folder": "diffusion_models", "url": "https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/diffusion_models/z_image_turbo_bf16.safetensors", "source": "ComfyUI template image_z_image_turbo.json (properties.models)"},
+    "qwen_3_4b.safetensors": {"folder": "text_encoders", "url": "https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/text_encoders/qwen_3_4b.safetensors", "source": "ComfyUI template image_z_image_turbo.json (properties.models)"},
+    "ae.safetensors": {"folder": "vae", "url": "https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/vae/ae.safetensors", "source": "ComfyUI template image_z_image_turbo.json (properties.models)"}
+  }
+}

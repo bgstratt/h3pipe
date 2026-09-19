@@ -297,5 +297,88 @@ class ParentSeriesConfigApiTest(ApiTest):
         self.err(A.get_file(self.ctx, {"ep": self.ep, "path": t["image"]}), 400)
 
 
+class Phase85ApiTest(ApiTest):
+    """GET /refs `defaults`, PUT /refs/defaults, DELETE /refs/pick, keyframe
+    generate with a target, the negative / model_low override fields, and
+    /models?param=model_low (docs/API.md "Phase 8.5")."""
+
+    def png(self, name="in.png") -> str:
+        p = os.path.join(self.tmp, name)
+        with open(p, "wb") as fh:
+            fh.write(png_bytes(32, 16, (5, 6, 7)))
+        return p
+
+    def test_defaults(self):
+        data = self.ok(A.get_refs(self.ctx, {"ep": self.ep}))
+        d = data["defaults"]
+        self.assertEqual((d["target"], d["target_source"], d["keyframe_target_source"]),
+                         ("krea2", "default", "default"))
+        got = self.ok(A.put_refs_defaults(self.ctx, {"ep": self.ep, "target": "z_image_turbo",
+                                                     "keyframe_target": "flux_kontext"}))
+        self.assertEqual((got["defaults"]["target"], got["defaults"]["target_source"],
+                          got["defaults"]["keyframe_target"]),
+                         ("z_image_turbo", "editor", "flux_kontext"))
+        ov = T.load_overrides(self.ep)
+        self.assertEqual((ov["episode"]["refs_target"], ov["episode"]["keyframe_target"]),
+                         ("z_image_turbo", "flux_kontext"))
+        refs = {r["id"]: r for r in self.ok(A.get_refs(self.ctx, {"ep": self.ep}))["refs"]}
+        self.assertEqual(refs["location:kitchen"]["effective"]["target"], "z_image_turbo")
+        self.assertEqual(refs["subject:ada"]["effective"]["target"], "z_image_turbo")
+        self.ok(A.put_refs_defaults(self.ctx, {"ep": self.ep, "target": None}))
+        self.assertEqual(self.ok(A.get_refs(self.ctx, {"ep": self.ep}))["defaults"]["target"],
+                         "krea2")
+        self.err(A.put_refs_defaults(self.ctx, {"ep": self.ep, "target": "ltx2"}), 400)
+        self.err(A.put_refs_defaults(self.ctx, {"ep": self.ep}), 400)
+        # the episode's video target is kept beside them
+        E.set_episode_target(self.ep, "ltx2")
+        self.ok(A.put_refs_defaults(self.ctx, {"ep": self.ep, "keyframe_target": None}))
+        self.assertEqual(T.episode_target(T.load_overrides(self.ep)), "ltx2")
+
+    def test_clear_route(self):
+        self.ok(A.post_refs_import(self.ctx, {"ep": self.ep, "ref": "shot:sh010:first",
+                                              "source_path": self.png()}))
+        self.ok(A.get_refs(self.ctx, {"ep": self.ep}))            # auto-picks it
+        f = os.path.join(self.ep, "refs", "shots", "sh010", "first.png")
+        self.assertTrue(os.path.isfile(f))
+        self.events.clear()
+        r = self.ok(A.delete_refs_pick(self.ctx, {"ep": self.ep, "ref": "shot:sh010:first"}))
+        self.assertEqual((r["id"], r["exists"], r["cleared"], r["picked"]),
+                         ("shot:sh010:first", False, True, None))
+        self.assertEqual(self.events_of("h3pipe.ref"),
+                         [{"ep": self.ep, "ref": "shot:sh010:first", "view": None, "take": 1,
+                           "status": "cleared"}])
+        self.assertEqual(self.events_of("h3pipe.episode"), [{"ep": self.ep}])
+        # GET /refs (which auto-picks) leaves it cleared
+        refs = {r["id"]: r for r in self.ok(A.get_refs(self.ctx, {"ep": self.ep}))["refs"]}
+        self.assertFalse(refs["shot:sh010:first"]["exists"])
+        self.assertFalse(os.path.isfile(f))
+        self.err(A.delete_refs_pick(self.ctx, {"ep": self.ep, "ref": "voice:ada"}), 400)
+        self.err(A.delete_refs_pick(self.ctx, {"ep": self.ep, "ref": "shot:nope:first"}), 404)
+        self.assertIn(("DELETE", "/h3pipe/refs/pick"), {(m, p) for m, p, _f, _t in A.ROUTES})
+
+    def test_generate_keyframe_with_target(self):
+        data = self.ok(A.post_refs_generate(self.ctx, {"ep": self.ep, "ref": "shot:sh010:first",
+                                                       "target": "z_image_turbo",
+                                                       "pass": "proxy"}))
+        self.assertEqual(data["errors"], [])
+        self.assertEqual(data["queued"][0]["target"], "z_image_turbo")
+        self.err(A.post_refs_generate(self.ctx, {"ep": self.ep, "ref": "shot:sh010:first",
+                                                 "target": "ltx2"}), 400)
+
+    def test_negative_and_model_low_overrides(self):
+        body = {"ep": self.ep, "pass": "proxy", "shot": "sh010",
+                "fields": {"target": "wan22_i2v", "negative": "no blur",
+                           "model_low": "my_low.safetensors"}}
+        self.ok(A.put_override(self.ctx, body))
+        d = self.ok(A.get_shot(self.ctx, {"ep": self.ep, "pass": "proxy", "shot": "sh010"}))
+        self.assertEqual((d["effective"]["negative"], d["effective"]["negative_source"],
+                          d["effective"]["model_low"]),
+                         ("no blur", "override", "my_low.safetensors"))
+        self.assertIsInstance(d["refs_used"], list)
+        self.err(A.put_override(self.ctx, dict(body, fields={"negative": 3})), 400)
+        m = self.ok(A.get_models(self.ctx, {"target": "wan22_i2v", "param": "model_low"}))
+        self.assertEqual((m["param"], m["family"]), ("model_low", "wan2.2-i2v-14b-low"))
+
+
 if __name__ == "__main__":
     unittest.main()

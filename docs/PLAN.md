@@ -850,6 +850,42 @@ shared code in `targets/video/wan/`: `common.py` the compile, ref slots and grap
   are cheap.
 - **Afterwards:** revisit Phases 1–8 for anything missing or worth doing, then Phase 9.
 
+**Phase 8.5 — backend as built** (2026-09-19; docs/API.md "Phase 8.5 as built" lists every
+deviation)
+- **Image targets** `z_image_turbo`, `flux2_klein`, `flux2_klein_edit` (Klein 9B KV: its models
+  are installed, the 9B base edit's aren't), `flux_kontext`, from the user's saved workflows as
+  titled API graphs (`h3pipe_*.json` names; the canvases' LoRAs left out). Shared code:
+  `targets/image/common.py` (krea2's wording for series refs, the keyframe prompt, the
+  reference chains). No Illustrious/SDXL target (no saved t2i workflow fits). modelid gained
+  Z-Image, Klein 9B, FLUX.1 (dev/schnell; Kontext by name), Qwen3 4B/8B, Qwen3-VL 4B, CLIP-L,
+  T5-XXL and the FLUX.1/FLUX.2 VAEs, from headers only. Readiness on this machine: all five
+  image targets ready.
+- **h3refs** generates through whichever image target applies (request → ref override →
+  episode (`overrides.json` `episode.refs_target` / `keyframe_target`) → series config `refs`
+  → krea2 / Klein edit when ready), resolving files by family (`resolve_job_models`) and
+  uploading an edit target's references. kreagen gained `--target` and `--clear`.
+- **Keyframes as needed refs** (`h3refs.keyframe_needs`), `first:` / `last:` in the script and
+  IR (omitted when unset: every golden unchanged), the keyframe prompt, `h3.py keyframe
+  --generate / --missing / --clear`, `DELETE /h3pipe/refs/pick` with a sticky clear.
+- **Negatives** (`h3jobs.negative_for`), `refs_used`, `reference_image`, `length_estimated`,
+  the `model_low` / `negative` override fields, `PUT /h3pipe/refs/defaults`.
+- **Goldens:** only `tests/golden/wan22_i2v/kitchen_sink*.json` changed (intended): the Wan
+  first-frame warning now says "generate one or use continuity (or import one)".
+- **Live check (2026-09-19, scratch copy of ep05, 4 renders):** `z_image_turbo` plate of
+  `workshop_bench` (1344x768, 11 s; on the look, vise, gears, bolt can, window). `flux2_klein_edit`
+  sh030 first frame with Bolt's face panel cut from his sheet + the plate (1200x656 for a
+  640x352 Wan proxy, 13 s): Bolt on model (glass lantern head with teal cap, bottle-cap eyes,
+  striped coffee-can body, chain arms, clothespin hands, spring legs, wind-up key) in the
+  plate's workshop; framed medium rather than the script's close-up. `wan22_i2v` proxy of sh030
+  from that frame (after `--clear` of a stale last frame): 49 frames at 16 fps in 27 s, pushes
+  in, clothespin hands wave, stays on model. `flux_kontext` (one reference, the face panel):
+  face and body colours right, but hands drawn as gloves and an invented kitchen set (no plate
+  at `max_refs` 1).
+- **Left:** a keyframe framing hint stronger than the size word (Klein drew the close-up
+  medium); Kontext's single reference could be a composed sheet (character + plate); the editor
+  side of `PUT /h3pipe/refs/defaults` (the UI agent's); `--missing` from the editor as one
+  route, if the UI's keyframe-then-generate fallback proves clumsy.
+
 **Phase 9 — later**
 - Script pane: `epNN.md` in a text editor with live `--check` errors beside the lines;
   save → rebuild.

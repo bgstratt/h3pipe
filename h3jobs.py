@@ -916,6 +916,7 @@ class RenderRequest:
     allow_missing_refs: bool = False   # render anyway: blank images / no audio ref
     target: str | None = None          # render on this video target, this run only
     allow_model_mismatch: bool = False  # render even if a model file is another family
+    negative: str | None = None        # the negative prompt, this run only (negative_for)
 
 
 @dataclass
@@ -977,6 +978,9 @@ class Job:
     based: bool = False                # an accelerator is missing: the base preset renders
     steps_set: bool = False            # steps came from the request or overrides.json
     target_source: str = ""            # request | override | script | episode | series | default
+    # where the negative prompt comes from (negative_for): request | override |
+    # negative.txt | series | preset, or "none" for a target without one
+    negative_source: str = "none"
 
     @property
     def id(self) -> str:
@@ -1227,6 +1231,20 @@ def plan_job(root: str, pass_: str, doc: dict, index: int, req: RenderRequest,
         notes.append(f"steps {steps} is recorded but not used: {target.short} has no steps "
                      f"setting (its sampling schedule is fixed in the workflow)")
     prompt = pick("prompt", source.get("prompt", ""), req.prompt)
+    values: dict = {}
+    negative_source = "none"
+    if target.binding.specs("negative"):
+        # request -> shot override -> negative.txt -> series config -> preset
+        preset_neg = source.get("negative", dflt.get("negative"))
+        neg, negative_source = negative_for(root, preset_neg, ov.get("negative"), req.negative)
+        if negative_source == "override":
+            overridden.append("negative")
+        if negative_source != "preset":
+            values["negative"] = neg
+    if ov.get("model_low") and target.binding.specs("model_low"):
+        # the low noise model of a two-stage target, like `model`
+        values["model_low"] = ov["model_low"]
+        overridden.append("model_low")
     if shot.get("audio_note"):
         notes.append(shot["audio_note"])
     length_source = "estimate" if shot.get("length_estimated") else "script"
@@ -1264,7 +1282,61 @@ def plan_job(root: str, pass_: str, doc: dict, index: int, req: RenderRequest,
                recompiled=recompiled, missing_mode=missing_mode, missing_why=missing_why,
                built_target=built_target.id, notes=notes, error=error,
                length_source=length_source, allow_model_mismatch=req.allow_model_mismatch,
-               steps_set="steps" in explicit, target_source=target_source)
+               steps_set="steps" in explicit, target_source=target_source,
+               values=values, negative_source=negative_source)
+
+
+# ---------------------------------------------------------------------------
+# negatives: request -> shot override -> negative.txt -> series config -> preset
+# ---------------------------------------------------------------------------
+
+NEGATIVE_FILE = "negative.txt"
+NEGATIVE_SOURCES = ("request", "override", "negative.txt", "series", "preset", "none")
+
+
+def episode_negative(root: str) -> str | None:
+    """The episode's negative.txt (stripped), or None without one (or empty)."""
+    try:
+        with open(os.path.join(root, NEGATIVE_FILE), encoding="utf-8-sig") as fh:
+            text = fh.read().strip()
+    except OSError:
+        return None
+    return text or None
+
+
+def negative_for(root: str, preset_value, override=None, requested=None,
+                 series_cfg: dict | None = None) -> tuple[str, str]:
+    """(the negative prompt, where it comes from) for a target that takes one:
+    the request's ("request"), else the shot's override ("override"), else
+    the episode's negative.txt ("negative.txt"), else the series config's
+    `negative` ("series"), else the target preset's ("preset"). A value of
+    None is unset; "" is an explicit empty negative."""
+    if requested is not None:
+        return str(requested), "request"
+    if override is not None:
+        return str(override), "override"
+    ep = episode_negative(root)
+    if ep is not None:
+        return ep, "negative.txt"
+    cfg = series_cfg if series_cfg is not None else series_config(root)
+    sv = (cfg or {}).get("negative")
+    if isinstance(sv, str) and sv.strip():
+        return sv.strip(), "series"
+    return ("" if preset_value is None else str(preset_value)), "preset"
+
+
+def negative_note(cfg, source: str) -> str:
+    """The take note for a negative set above the preset that can't bite: at
+    cfg <= 1 there is no unconditioned branch to push away from ("" when
+    cfg > 1, or the negative is the preset's)."""
+    try:
+        c = float(cfg)
+    except (TypeError, ValueError):
+        return ""
+    if source == "preset" or c > 1.0:
+        return ""
+    return (f"the negative prompt (from the {source}) has no effect at cfg {c:g}: "
+            f"a turbo / distilled model samples without guidance")
 
 
 def estimate_seconds(doc: dict, shot: dict) -> str:
@@ -1423,6 +1495,12 @@ def ref_files(job: Job) -> list[dict]:
 
 def sidecar_for(job: Job) -> dict:
     d = job.doc.get("defaults", {})
+    notes = list(job.notes)
+    if job.negative_source not in ("none", "preset"):
+        cfg = job.values.get("cfg", (job.recompiled or job.shot).get("cfg", d.get("cfg")))
+        n = negative_note(cfg, job.negative_source)
+        if n and n not in notes:
+            notes.append(n)
     return {
         "target": job.target, "status": "queued", "queued": T.now(),
         "comfy_prompt_id": None,
@@ -1448,7 +1526,9 @@ def sidecar_for(job: Job) -> dict:
         # only when there is something to say, likewise
         **({"built_target": job.built_target} if job.retargeted else {}),
         **({"inputs": dict(job.inputs)} if job.inputs else {}),
-        **({"notes": list(job.notes)} if job.notes else {}),
+        **({"notes": notes} if notes else {}),
+        # where the negative prompt came from (a target that takes one)
+        **({"negative_source": job.negative_source} if job.negative_source != "none" else {}),
         # which installed file each model param used (resolve_models)
         **({"resolved": copy.deepcopy(job.resolved)} if job.resolved else {}),
         **({"base": True} if job.based else {}),

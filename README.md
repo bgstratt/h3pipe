@@ -31,9 +31,14 @@ then load `targets/video/minimax_h3_ref2va/workflow.json` (save it in ComfyUI as
 finds that workflow in ComfyUI's saved workflows, else in the repo; set `H3_WORKFLOW` to
 override, or pass `--workflow`.
 
-`kreagen.py` generates reference images with a Krea2 image stack; the model file names are
-constants at the top of that file, and you will want to point them at whatever image model
-you have. Everything else in the pipeline is model-agnostic.
+`kreagen.py` generates reference images through an **image target** (`targets/image/<id>/`):
+`krea2` by default, or `z_image_turbo`, `flux2_klein`, `flux2_klein_edit` (FLUX.2 Klein 9B
+with reference images) or `flux_kontext`, chosen by the series config's `refs` block, the
+editor, or `--target`. Shot keyframes are generated the same way, by default with
+`flux2_klein_edit` when it is installed, which also reads the picked character views and
+the plate (`h3.py keyframe <ep> --missing`). `python h3.py targets --kind image` says which
+are installed and where to download the rest. Everything else in the pipeline is
+model-agnostic.
 
 ## Models
 
@@ -215,7 +220,11 @@ python h3.py refs Shows\ep05               # everything missing, most-needed fir
 - Negative prompts do nothing on krea2 turbo: no negative field, and no guidance branch at
   cfg 1. kreagen leaves a workflow's negative side as saved, so a NAG or negpip setup passes
   through; `--negative-file` only bites above `--cfg 1.0`, on a model that expects guidance.
-  H3 takes no negative prompt at all. Details in `KREA_PIPE.md`.
+  H3 takes no negative prompt at all. Details in `KREA_PIPE.md`. The other image targets
+  take the episode's `negative.txt` or the series config's `negative` (inert at cfg 1 too);
+  `--negative-file` beats both for its run.
+- `--target z_image_turbo` (or any image target) draws with another model; `--clear
+  location:kitchen` unpicks a ref (its file goes, the takes stay).
 - No style LoRA by default. `--lora <file> --lora-strength 0.7` adds one, `--unet` swaps the
   image model. Match the LoRA to the look in `series.json`: a realism LoRA helps live action
   and hurts a flat 2D show.

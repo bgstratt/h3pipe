@@ -304,7 +304,8 @@ class GenerateTest(RefsTest):
         lat = next(v for v in self.comfy.graphs[-1].values()
                    if v["class_type"] == "EmptyLatentImage")["inputs"]
         self.assertEqual((lat["width"], lat["height"]), (1344, 768))
-        for bad in (dict(ref="voice:ada"), dict(ref="shot:sh010:first"),
+        # (a shot keyframe generates since Phase 8.5: KeyframeGenerateTest)
+        for bad in (dict(ref="voice:ada"),
                     dict(ref="subject:ada", prompt="x"), dict(ref="location:kitchen", count=0),
                     dict(ref="location:kitchen", seed_mode="odd")):
             with self.assertRaises(R.RefError, msg=bad):

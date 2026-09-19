@@ -30,9 +30,11 @@ clone) or null; the default is decided per target. `preserve` is how strictly a
 recording is reused: strict | loose | style, or null.
 
 `target` and `profile` are the script's `target:` / `profile:` lines (a
-video target id, a series config profile name), or null. Both are omitted from
-the JSON when null, so a script that uses neither gives the same shots.json it
-always has. Which target a shot renders on is decided by the targets package
+video target id, a series config profile name), or null. `first` and `last`
+are its `first:` / `last:` keyframe lines (continuity | generate | import |
+none, or a path to an image), or null; a sequence's are the default of its
+shots (Shot.keyframe). All four are omitted from the JSON when null, so a
+script that uses none of them gives the same shots.json it always has. Which target a shot renders on is decided by the targets package
 (series config default -> profiles -> sequence -> shot), not here.
 
 `unparsed` holds script values the parser could not interpret, keyed by IR
@@ -63,8 +65,9 @@ def _overrides(d: dict | None = None) -> dict:
 
 
 def _put_choice(d: dict, node) -> None:
-    """`target` and `profile`, only when set (see the module docstring)."""
-    for k in ("target", "profile"):
+    """`target`, `profile`, `first` and `last`, only when set (see the module
+    docstring)."""
+    for k in ("target", "profile", "first", "last"):
         if getattr(node, k):
             d[k] = getattr(node, k)
 
@@ -110,6 +113,16 @@ class Shot:
     unparsed: dict = field(default_factory=dict)
     target: str | None = None
     profile: str | None = None
+    first: str | None = None         # `first:`: a keyframe method or an image path
+    last: str | None = None
+
+    def keyframe(self, end: str, seq: "Sequence | None" = None) -> str | None:
+        """The script's `first:` / `last:` for this shot: its own line, else
+        its sequence's, else None (the target and the refs listing decide)."""
+        own = getattr(self, end)
+        if own:
+            return own
+        return getattr(seq, end) if seq is not None else None
 
     def to_json(self) -> dict:
         d = {"id": self.id, "cast": list(self.cast), "props": list(self.props),
@@ -139,7 +152,8 @@ class Shot:
                    pace=d.get("pace"), audio=d.get("audio"), preserve=d.get("preserve"),
                    seed_key=d.get("seed_key", ""), overrides=_overrides(d.get("overrides")),
                    source=dict(d.get("source", {})), unparsed=dict(d.get("unparsed", {})),
-                   target=d.get("target"), profile=d.get("profile"))
+                   target=d.get("target"), profile=d.get("profile"),
+                   first=d.get("first"), last=d.get("last"))
 
 
 @dataclass
@@ -153,6 +167,8 @@ class Sequence:
     unparsed: dict = field(default_factory=dict)
     target: str | None = None
     profile: str | None = None
+    first: str | None = None         # the default `first:` / `last:` of its shots
+    last: str | None = None
 
     def to_json(self) -> dict:
         d = {"id": self.id, "location": self.location, "continuous": self.continuous,
@@ -171,7 +187,8 @@ class Sequence:
                    source=dict(d.get("source", {})),
                    shots=[Shot.from_json(s) for s in d.get("shots", [])],
                    unparsed=dict(d.get("unparsed", {})),
-                   target=d.get("target"), profile=d.get("profile"))
+                   target=d.get("target"), profile=d.get("profile"),
+                   first=d.get("first"), last=d.get("last"))
 
 
 @dataclass

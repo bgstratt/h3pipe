@@ -349,6 +349,17 @@ def duration_estimate(target: "Target", timing: dict, preset: "Preset | None",
     return est, predict, note
 
 
+def keyframe_ends(recipe: dict, shot_ir, seq_ir=None) -> list[str]:
+    """The keyframes a shot's entry names: the recipe's (`keyframes`), less
+    any the script turns off with `first: none` / `last: none` (the shot's
+    line, else its sequence's). A keyframe the target requires
+    (`keyframe_required`: Wan 14B I2V's first frame) is always named: `none`
+    can't make the target work without it, so the shot stays blocked."""
+    hard = recipe.get("keyframe_required") or {}
+    return [e for e in recipe.get("keyframes") or ()
+            if e in hard or shot_ir.keyframe(e, seq_ir) != "none"]
+
+
 def voice_prompt(name: str, voice: str) -> str:
     """What a voice sample should be. No audio target exists (nothing generates
     voices); this is the note refs_todo prints for a person recording one."""
@@ -576,9 +587,17 @@ class Target:
 
     def capabilities(self) -> dict:
         """What a picker or the core may need to know without asking which
-        model this is (GET /h3pipe/targets)."""
+        model this is (GET /h3pipe/targets). An image target: {"mode": "t2i"
+        | "edit", "max_refs", "negative_prompt"}."""
         r = self.recipe
+        if self.kind == "image":
+            caps = self.spec.get("capabilities") or {}
+            return {"mode": caps.get("mode") or "t2i",
+                    "max_refs": int(caps.get("max_refs") or 0),
+                    "negative_prompt": bool(self.binding.specs("negative"))}
         return {"policies": self.policies, "duration": self.duration,
+                # the first keyframe is required (Wan 14B I2V: the picture it animates)
+                "requires_first": "first" in (r.get("keyframe_required") or {}),
                 # "none": the model makes no sound (Wan 2.2): every take is silent
                 "audio": (self.spec.get("capabilities") or {}).get("audio") or "generate",
                 "policy_fallback": (r.get("policy_fallback") or {}).get("to"),
@@ -638,7 +657,7 @@ class Target:
                 "saver": self.binding.saver_class or None,
                 "template": self.template.to_json(),
                 "short": self.short,
-                "capabilities": self.capabilities() if self.kind == "video" else {},
+                "capabilities": self.capabilities(),
                 "models": {k: {"family": v["family"], "label": modelid.family_label(v["family"]),
                                "patterns": list(v["patterns"]), "folder": v["folder"],
                                "tier": v["tier"],
@@ -696,9 +715,46 @@ def video_target(series_cfg: dict | None = None) -> Target:
     return load_target(tid, "video")
 
 
+DEFAULT_KEYFRAME_TARGET = "flux2_klein_edit"   # when it is ready, else the refs target
+
+
+def refs_block(series_cfg: dict | None) -> dict:
+    """The series config's `refs` block ({"target", "keyframe_target"}),
+    validated: each must name an image target. ValueError otherwise."""
+    raw = (series_cfg or {}).get("refs") or {}
+    if not isinstance(raw, dict):
+        raise ValueError("series.json `refs` must be an object: {\"target\": \"<image target>\", "
+                         "\"keyframe_target\": \"<image target>\"}")
+    out = {}
+    known = [t.id for t in list_targets("image")]
+    for k in ("target", "keyframe_target"):
+        v = raw.get(k)
+        if v in (None, ""):
+            continue
+        if not isinstance(v, str) or v not in known:
+            raise ValueError(f"series.json refs.{k}: {v!r} is not an image target "
+                             f"(known: {', '.join(known)})")
+        out[k] = v
+    return out
+
+
 def image_target(series_cfg: dict | None = None) -> Target:
-    """The image target that makes this series' refs (only krea2 so far)."""
-    return load_target(DEFAULT_IMAGE_TARGET, "image")
+    """The image target that makes this series' refs: the series config's
+    `refs.target`, else krea2."""
+    return load_target(refs_block(series_cfg).get("target") or DEFAULT_IMAGE_TARGET, "image")
+
+
+def keyframe_target(series_cfg: dict | None = None, ready=None) -> Target:
+    """The image target that makes shot keyframes: the series config's
+    `refs.keyframe_target`, else flux2_klein_edit when `ready(target)` says
+    it can render here (None: assume it can), else the refs target."""
+    block = refs_block(series_cfg)
+    if block.get("keyframe_target"):
+        return load_target(block["keyframe_target"], "image")
+    t = load_target(DEFAULT_KEYFRAME_TARGET, "image")
+    if ready is None or ready(t):
+        return t
+    return image_target(series_cfg)
 
 
 def repo_workflow(name: str) -> str | None:
@@ -889,6 +945,8 @@ MODEL_FOLDERS: dict[tuple, str] = {
     ("LTXAVTextEncoderLoader", "ckpt_name"): "checkpoints",
     ("LTXAVTextEncoderLoader", "text_encoder"): "text_encoders",
     ("CLIPLoader", "clip_name"): "text_encoders",
+    ("DualCLIPLoader", "clip_name1"): "text_encoders",
+    ("DualCLIPLoader", "clip_name2"): "text_encoders",
     ("VAELoader", "vae_name"): "vae",
     ("LatentUpscaleModelLoader", "model_name"): "latent_upscale_models",
     ("ModelPatchLoader", "name"): "model_patches",
