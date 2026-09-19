@@ -814,3 +814,58 @@ existing routes now show:
   series config's `series.fps`) with ffmpeg's `fps` filter, timing each converted clip by
   its duration on the cut's running clock, lay silence under mute clips, and scale any clip
   of another size to the cut's.
+
+## Readiness, requirement tiers, and the episode target (contract written before building, 2026-09-19)
+
+### Requirement tiers (`target.json`)
+Each model param in a target's `models` block gets a `tier`:
+
+| tier | examples | if no matching file is installed |
+|---|---|---|
+| `required` | the diffusion model, text encoder, VAEs | the target is **not ready**: its shots are blocked before a take is reserved, naming the file and where to get it |
+| `accelerator` | turbo / distilled LoRAs | the job falls back to the pass's **`base`** preset (`presets.<pass>.base`: `steps`, `cfg`, `sampler`, `loras: []`, … in the target's own terms). It is slower but works, and the take notes it. |
+| `optional` | LTX duration head, voice ID-LoRA | only that feature is off (e.g. `dur: model` uses the estimate); the take notes it |
+
+An unmarked param is `required`. A target may also declare `nodes` it needs beyond its
+workflow's own classes.
+
+### Resolving files by family
+At queue time each model param resolves to an **installed** file:
+1. the preset's exact file, if installed;
+2. otherwise the best installed file of the same family (`targets/modelid.py`): a name match beats a fingerprint match; within a tie, prefer the same precision as the preset (fp8 / int8 / bf16 / fp16), then the shortest name.
+
+The sidecar records `resolved: {param: {"want", "using", "how": "exact" | "family" | "base" | "off"}}`.
+`h3render --dry-run --check-nodes` prints the same resolution.
+
+### Downloads (`target.json` `downloads`)
+`{"<file name>": {"folder": "diffusion_models", "url": "…" | null, "source": "…"}}`. A
+URL is only given when it comes from a trustworthy record: a ComfyUI template's embedded
+`properties.models` entry, or ComfyUI-Manager's model list. Otherwise `url` is null and
+`source` says what to search for. Never guess a URL.
+
+### `GET /h3pipe/targets?ready=1`
+Each target gains `readiness` (cached briefly; computed off the event loop from
+`/object_info` and the model folders):
+```json
+{"status": "ready" | "degraded" | "not_ready" | "unknown",
+ "missing": [{"param": "loras", "tier": "accelerator", "want": "…safetensors",
+              "family": "…", "folder": "loras", "url": "…" | null, "source": "…"}],
+ "resolved": {"model": {"want": "…", "using": "…", "how": "exact" | "family"}},
+ "features_off": ["dur: model (duration head)"],
+ "nodes_missing": ["LTXVDurationPredictor"]}
+```
+- `degraded`: only accelerators or optional files are missing.
+- `unknown`: ComfyUI didn't answer.
+
+### `h3.py targets [<episode>] [--json]`
+The same readiness as a table: status, what's missing, the folder, and the URL when known.
+
+### The episode target
+- **`overrides.json`** gains a top-level `"episode": {"target": "<id>"}`. It is the episode's default for every shot that has no target of its own (script `target:`, a profile's target, or a shot override). Precedence: request → shot override → shot/sequence script line or profile → **episode override** → `series.target` → `minimax_h3_ref2va`. Shots whose resolved target differs from what the build compiled are compiled at queue time, as a retarget is.
+- **`PUT /h3pipe/episode-target`**, body `{ep, target: "<id>" | null}`. `null` clears it. Returns the episode's target info and emits `h3pipe.episode`.
+- **`GET /h3pipe/episode`** gains:
+  - `target`: the episode default now in force;
+  - `target_source`: `"editor"` | `"series"` | `"default"`;
+  - `series_target`;
+  - per shot, `target` (already present) and `target_source`: `"request"` | `"override"` | `"script"` | `"episode"`.
+- **`series.json` is never written by the editor.** The UI offers a copyable `"target": "<id>"` snippet for `series.series` to make the choice permanent.
