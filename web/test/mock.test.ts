@@ -90,7 +90,7 @@ describe("mock refs", () => {
     expect(imp).toMatchObject({ take: 1, source: "imported", status: "ok" });
     r = await api.refsPick({ ep, ref: bo.id, view: "04_face", take: imp.take });
     expect(r.exists).toBe(true);
-    expect(api.refFileUrl(ep, r.path, r.sha1)).toMatch(/^data:image\/svg/);
+    expect(api.refFileUrl(ep, r.path!, r.sha1)).toMatch(/^data:image\/svg/);
     const after = await api.episode(ep, "proxy");
     expect(after.shots.filter((s) => s.missing_refs?.some((m) => m.path === bo.path))).toEqual([]);
   });

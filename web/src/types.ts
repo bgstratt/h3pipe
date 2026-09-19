@@ -378,13 +378,16 @@ export interface Ref {
   scope: RefScope;
   kind: RefKind;
   name: string;
-  /** the file renders read */
-  path: string;
+  /** the file renders read; null when the bible names none (a voice-only character) */
+  path: string | null;
   exists: boolean;
   sha1: string | null;
   used_by: Partial<Record<Pass, string[]>>;
-  /** the prompt a generate would use now */
-  prompt: string;
+  /** the prompt a generate would use now; null when the bible lacks what it needs */
+  prompt: string | null;
+  /** false when this ref can't be generated; `why_not` says why */
+  can_generate?: boolean;
+  why_not?: string | null;
   override: { fields: string[]; stale: boolean };
   /** characters only */
   views?: RefView[];

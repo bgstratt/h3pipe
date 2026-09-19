@@ -29,7 +29,8 @@ export interface MissingSummary {
 }
 
 /** Normalised path, for matching a ref's path to a shot's missing_refs. */
-export function normPath(p: string): string {
+export function normPath(p: string | null | undefined): string {
+  if (!p) return "";
   return p.replace(/\\/g, "/").replace(/^\.\//, "").toLowerCase();
 }
 

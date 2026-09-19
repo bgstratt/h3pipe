@@ -194,14 +194,16 @@ export function createMockRefs(opts: {
   }
 
   function setLive(r: MRef) {
+    if (!r.path) return;
+    const path = r.path;
     r.sha1 = hash(`${r.id}${Date.now()}${Math.random()}`).toString(16).padStart(8, "0");
     if (r.views) {
       const urls = r.views.map((v) => images.get(v.takes.find((t) => t.take === v.picked)?.image ?? "") ?? "");
-      images.set(r.path, svgSheet(r.name, urls));
+      images.set(path, svgSheet(r.name, urls));
     } else {
       const t = r.takes.find((x) => x.take === r.picked);
       const img = t?.image ? images.get(t.image) : undefined;
-      if (img) images.set(r.path, img);
+      if (img) images.set(path, img);
     }
     r.exists = true;
   }
@@ -312,7 +314,7 @@ export function createMockRefs(opts: {
       const out: MissingRef[] = [];
       for (const u of usesOf(i)) {
         const r = byId(u.ref);
-        if (r.exists) continue;
+        if (r.exists || !r.path) continue;
         out.push({ slot: u.slot, kind: r.kind === "voice" ? "audio" : "image", path: r.path, ...(r.subject ? { subject: r.subject } : {}) });
       }
       return out;

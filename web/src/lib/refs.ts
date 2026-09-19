@@ -48,6 +48,7 @@ export function usedBy(r: Pick<Ref, "used_by">, pass: Pass): string[] {
 export function blockedShots(r: Ref, st: EpisodeStatus | undefined, pass: Pass): string[] {
   if (!st) return r.exists ? [] : usedBy(r, pass);
   const p = normPath(r.path);
+  if (!p) return [];                       // the bible names no file: it blocks nothing
   return st.shots.filter((s) => missingOf(s).some((m) => normPath(m.path) === p)).map((s) => s.shot);
 }
 
@@ -102,7 +103,10 @@ export function isAudioRef(r: Pick<Ref, "kind">): boolean {
 }
 
 /** Generation isn't offered for voices (nothing generates them yet) or keyframes (FL2V, later). */
-export function canGenerate(r: Pick<Ref, "kind" | "scope">): boolean {
+export function canGenerate(r: Pick<Ref, "kind" | "scope"> & { can_generate?: boolean }): boolean {
+  // the server knows best (a character with no sheet or no design can't be
+  // generated); the kind rule is the fallback
+  if (r.can_generate === false) return false;
   return r.kind !== "voice" && groupOf(r) !== "keyframes";
 }
 

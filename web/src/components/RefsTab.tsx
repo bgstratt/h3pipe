@@ -29,9 +29,18 @@ const FILTERS: { id: RefFilter; label: string; title: string }[] = [
 ];
 
 export const KEYFRAMES_EMPTY = "FL2V keyframes: generated when an FL2V model is set up";
+const NO_FILE = "series.json names no file for this (e.g. a voice-only character has no sheet)";
 
 /** A ref's live file (the one renders read), or a "missing" placeholder. */
 function LiveThumb({ ep, r, size }: { ep: string; r: Ref; size: number }) {
+  if (!r.path) {
+    // the bible names no file for it (a voice-only character has no sheet)
+    return (
+      <div className="h3-refthumb h3-thumb h3-empty" style={{ width: size, height: size }} title={NO_FILE}>
+        <span className="h3-thumb-label">no file</span>
+      </div>
+    );
+  }
   if (isAudioRef(r)) {
     return (
       <div className={`h3-refthumb h3-thumb${r.exists ? "" : " h3-empty h3-missing"}`} style={{ width: size, height: size }} title={r.path}>
@@ -249,8 +258,8 @@ function RefOverrideEditor({ r }: { r: Ref }) {
   const busy = useApp((s) => !!s.busy[`refoverride|${r.id}`]);
   const src: OverrideSource = useMemo(() => ({
     override: r.override_values ?? {},
-    effective: { prompt: r.effective?.prompt ?? r.prompt },
-    built_prompt: r.built_prompt ?? (r.override.fields.includes("prompt") ? "" : r.prompt),
+    effective: { prompt: r.effective?.prompt ?? r.prompt ?? "" },
+    built_prompt: r.built_prompt ?? (r.override.fields.includes("prompt") ? "" : r.prompt ?? ""),
   }), [r]);
   const initial = useMemo(() => formFromDetail(src), [src]);
   const [form, setForm] = useState<OverrideForm>(initial);
@@ -323,8 +332,8 @@ function RefDetail({ ep, r }: { ep: string; r: Ref }) {
   return (
     <div className="h3-ref-detail">
       <div className="h3-row h3-small">
-        <span className="h3-mono h3-ell h3-grow" title={r.path}>{r.path}</span>
-        <button className="h3-link" onClick={() => void copyText(r.path, "Path")}>copy</button>
+        <span className="h3-mono h3-ell h3-grow" title={r.path ?? NO_FILE}>{r.path ?? NO_FILE}</span>
+        {r.path && <button className="h3-link" onClick={() => void copyText(r.path!, "Path")}>copy</button>}
       </div>
       {blocked.length > 0 && (
         <div className="h3-small h3-err">Blocks {blocked.length} shot{blocked.length > 1 ? "s" : ""}: {blocked.slice(0, 12).join(", ")}{blocked.length > 12 ? "…" : ""}</div>
@@ -355,6 +364,9 @@ function RefDetail({ ep, r }: { ep: string; r: Ref }) {
         <CandidateGrid ep={ep} r={r} view={null} />
       )}
       <Selection r={r} />
+      {r.can_generate === false && r.why_not && (
+        <div className="h3-small h3-muted">Can't generate: {r.why_not}. Import a file instead.</div>
+      )}
       <GenerateBar r={r} />
       {canGenerate(r) && (
         <details className="h3-ref-settings">

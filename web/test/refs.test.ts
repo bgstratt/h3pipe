@@ -145,3 +145,23 @@ describe("browse helpers", () => {
     expect(reachable("C:\\Shows\\Dean\\ep05", [])).toBe(false);
   });
 });
+
+// Regression: the real server sends `path: null` (and `prompt: null`) for a
+// voice-only character with no sheet in the bible. The Refs tab crashed on it.
+describe("a ref whose bible entry names no file", () => {
+  const narrator = ref("subject:narrator", "character", {
+    path: null, exists: false, sha1: null, prompt: null, can_generate: false,
+    why_not: "no `sheet` path in series.json",
+  });
+  const st = { shots: [shot("sh010", [M("Picture 4", "refs/_bg/x.png")])] } as unknown as EpisodeStatus;
+  it("groups, counts and blocks nothing without throwing", () => {
+    expect(() => groupRefs([narrator], "all", "proxy")).not.toThrow();
+    expect(() => groupRefs([narrator], "missing", "proxy")).not.toThrow();
+    expect(blockedShots(narrator, st, "proxy")).toEqual([]);
+    expect(() => refCounts([narrator], st, "proxy")).not.toThrow();
+  });
+  it("can't be generated when the server says so", () => {
+    expect(canGenerate(narrator)).toBe(false);
+    expect(canGenerate(ref("subject:ada", "character"))).toBe(true);
+  });
+});
