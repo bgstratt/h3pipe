@@ -1,0 +1,35 @@
+[
+  {
+    "path": "refs/_bg/kitchen.png",
+    "kind": "background plate",
+    "prompt": "A background plate drawn as a flat vector cartoon with thick even outlines and a limited pastel palette. An empty establishing view of a cramped diner kitchen with steel counters, a hanging ticket rail and cold fluorescent light from overhead. No characters, no props, no figures in frame — the environment only. Wide framing that shows the layout of the space.",
+    "target": "1344x768 (the render resolution)",
+    "exists": false,
+    "blocks_shots": [
+      "sh010",
+      "sh030",
+      "sh060"
+    ]
+  },
+  {
+    "path": "refs/ada/ada_sheet_4panel.png",
+    "kind": "character sheet",
+    "prompt": "A character model sheet on a plain flat background: FOUR panels side by side in a single horizontal strip, left to right — three-quarter body, side profile full body, back view full body, and a head-and-shoulders facial close-up. The SAME character in all four. a tall woman in her thirties with a short grey bob, a mustard apron over a striped shirt, and round red glasses. Drawn as a flat vector cartoon with thick even outlines and a limited pastel palette. Output 4096x1024 or larger.",
+    "target": "4096x1024 or larger (horizontal 4-panel strip)",
+    "exists": false,
+    "blocks_shots": [
+      "sh010",
+      "sh030"
+    ]
+  },
+  {
+    "path": "refs/bo/bo_sheet_4panel.png",
+    "kind": "character sheet",
+    "prompt": "A character model sheet on a plain flat background: FOUR panels side by side in a single horizontal strip, left to right — three-quarter body, side profile full body, back view full body, and a head-and-shoulders facial close-up. The SAME character in all four. a stocky teenage boy with a shaved head, an oversized green bomber jacket and orange high-tops. Drawn as a flat vector cartoon with thick even outlines and a limited pastel palette. Output 4096x1024 or larger.",
+    "target": "4096x1024 or larger (horizontal 4-panel strip)",
+    "exists": false,
+    "blocks_shots": [
+      "sh060"
+    ]
+  }
+]

@@ -17,7 +17,8 @@ fail; each is checked against the kitchen_sink series config and its golden is t
 error message.
 
 What is captured per fixture: the story IR (shots.json), both passes' shotlist
-and refs_todo (.json and .md), the stdout of --check for both passes (it carries every warning, which is
+(and, for an episode that mixes targets, each other target's
+shotlist.<target>[_proxy].json) and refs_todo (.json and .md), the stdout of --check for both passes (it carries every warning, which is
 H3 logic that moves in later phases), and the stdout of --pace.
 
 Builds run in a fresh temp folder, so refs_todo never sees refs on disk.
@@ -91,6 +92,11 @@ def capture(series_cfg: str, script: str) -> dict[str, bytes]:
         for rel in OUTPUTS:
             with open(os.path.join(tmp, rel), "rb") as fh:
                 out[os.path.basename(rel)] = norm(fh.read())
+        # an episode that mixes targets also writes shotlist.<target>[_proxy].json
+        for name in sorted(os.listdir(os.path.join(tmp, "shotlist"))):
+            if name.startswith("shotlist.") and name != "shotlist.json":
+                with open(os.path.join(tmp, "shotlist", name), "rb") as fh:
+                    out[name] = norm(fh.read())
     # --check writes nothing and never prints the output folder
     for flags, name in (([], "check.txt"), (["--proxy"], "check_proxy.txt"),
                         (["--pace"], "pace.txt")):

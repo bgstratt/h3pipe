@@ -11,12 +11,15 @@ assets you still need to make, and a timing report.
     python3 h3build.py series.json script.md --check
 
 It runs in three steps: parse the script into the model-free story IR
-(h3core.story, written to shotlist/shots.json), pick the episode's video
-target (targets.episode_target: the series config's `series.target`, checked
-against every `target:` and `profile:` the script names), and compile the IR
-with that target (`target.compile_episode`). Everything model-specific -- the
-frame grid, reference slots, the prompt format, audio policy, presets -- is the
-target's (targets/video/<id>/). This file only parses, reports and writes.
+(h3core.story, written to shotlist/shots.json), pick each shot's video target
+(targets.episode_targets: the series config's `series.target`, then every
+`target:` and `profile:` the script names), and compile each target's shots
+with it (`target.compile_episode`). The series target's shots go to
+shotlist.json (always written); another target's to shotlist.<target>.json
+(`_proxy` likewise), and refs_todo merges what they all need. Everything
+model-specific -- the frame grid, reference slots, the prompt format, audio
+policy, presets -- is the target's (targets/video/<id>/). This file only
+parses, reports and writes.
 """
 
 from __future__ import annotations
@@ -141,10 +144,12 @@ def print_report(r: dict, root: str) -> None:
 
 
 def print_pacing(story: ir.Episode, series_cfg: dict, fps: float = 24.0,
-                 template: TG.Template | None = None) -> int:
+                 template: TG.Template | None = None,
+                 templates: dict[str, TG.Template] | None = None) -> int:
     """Every dialogue shot measured against the rate it forces on the delivery,
-    in the window the target will actually render (`template`)."""
-    snap = (template or DEFAULT_TARGET.template).snap
+    in the window the target will actually render (`template`, or per shot
+    `templates` in an episode that mixes targets)."""
+    default_snap = (template or DEFAULT_TARGET.template).snap
     default = series_cfg.get("speech", {}).get("pace", "normal")
     rows, crammed, tight, gain = [], 0, 0, 0.0
     for seq in story.sequences:
@@ -152,6 +157,8 @@ def print_pacing(story: ir.Episode, series_cfg: dict, fps: float = 24.0,
             dialogue = [{"who": d.speaker, "line": d.line} for d in shot.dialogue]
             if not dialogue:
                 continue
+            snap = (templates[shot.id].snap if templates and shot.id in templates
+                    else default_snap)
             pace = shot.pace or default
             t = shot.timing or {}
             if "audio_in" in t:
@@ -211,13 +218,18 @@ def main() -> int:
             # parse -> story IR
             story = parse_story(fh.read(), subject_ids(series_cfg), character_ids(series_cfg),
                                 series_info(series_cfg))
-        # -> the video target every shot renders on (profiles and target:
-        # lines checked here) -> its compile
-        target = TG.episode_target(story, series_cfg)
+        # -> the video target each shot renders on (profiles and target:
+        # lines checked here) -> each target compiles its own shots
+        groups = TG.episode_targets(story, series_cfg)
+        target = groups[0][0]
         if args.pace:
-            return print_pacing(story, series_cfg, template=target.template)
-        doc, report = target.compile_episode(story, series_cfg,
-                                             "proxy" if args.proxy else "final")
+            per_shot = {sid: t.template for t, ids in groups[1:] for sid in ids}
+            return print_pacing(story, series_cfg, template=target.template,
+                                templates=per_shot)
+        pass_ = "proxy" if args.proxy else "final"
+        built = [(t, *t.compile_episode(story, series_cfg, pass_, only=ids))
+                 for t, ids in groups]
+        _, doc, report = built[0]
     except (ScriptError, ValueError, KeyError) as exc:
         print(f"\n  error in {os.path.basename(args.script)}: {exc}\n", file=sys.stderr)
         return 1
@@ -226,17 +238,46 @@ def main() -> int:
         return 1
 
     print_report(report, args.out)
+    for t, _, rep in built[1:]:
+        print(f"  target {t.id} ({t.short}): {rep['shots']} shot(s) of this episode")
+        print_report(rep, args.out)
+    if len(built) > 1:
+        # one work order for the episode: every target's refs, the series
+        # target's first (a later target only adds what it alone needs)
+        report = dict(report, needed=dict(report["needed"]),
+                      blocked_shots={k: list(v) for k, v in report["blocked_shots"].items()},
+                      size_hints=dict(report.get("size_hints", SIZE_HINT)))
+        for _, _, rep in built[1:]:
+            for p, v in rep["needed"].items():
+                report["needed"].setdefault(p, v)
+            for p, ids in rep.get("blocked_shots", {}).items():
+                have = report["blocked_shots"].setdefault(p, [])
+                have += [i for i in ids if i not in have]
+            for k, v in (rep.get("size_hints") or {}).items():
+                report["size_hints"].setdefault(k, v)
     if args.check:
         return 0
 
     os.makedirs(os.path.join(args.out, "shotlist"), exist_ok=True)
 
-    # One shotlist per pass, for the episode's one target. Per-target files
-    # (shotlist.<target>.json) come with Phase 8's mixed-target episodes.
-    name = f"shotlist{'_proxy' if args.proxy else ''}.json"
-    sl = os.path.join(args.out, "shotlist", name)
+    # One shotlist per pass for the series target, and one per other target
+    # that some shot renders on (shotlist.<target>[_proxy].json).
+    sfx = "_proxy" if args.proxy else ""
+    sl = os.path.join(args.out, "shotlist", f"shotlist{sfx}.json")
+    written = [sl]
     with open(sl, "w", encoding="utf-8") as fh:
         json.dump(doc, fh, ensure_ascii=False, indent=2)
+    for t, tdoc, _ in built[1:]:
+        p = os.path.join(args.out, "shotlist", f"shotlist.{t.id}{sfx}.json")
+        with open(p, "w", encoding="utf-8") as fh:
+            json.dump(tdoc, fh, ensure_ascii=False, indent=2)
+        written.append(p)
+    # a target no shot uses any more leaves no stale file behind
+    keep = {os.path.basename(p) for p in written}
+    for n in os.listdir(os.path.join(args.out, "shotlist")):
+        if (n.startswith("shotlist.") and n.endswith(f"{sfx}.json") and n not in keep
+                and (args.proxy or not n.endswith("_proxy.json"))):
+            os.remove(os.path.join(args.out, "shotlist", n))
     # The story IR: model-free and pass-free, so both passes write the same file.
     ir_path = os.path.join(args.out, "shotlist", "shots.json")
     with open(ir_path, "w", encoding="utf-8") as fh:
@@ -261,7 +302,8 @@ def main() -> int:
             for p, v in report["needed"].items()
         ], fh, ensure_ascii=False, indent=2)
 
-    print(f"  -> {sl}")
+    for p in written:
+        print(f"  -> {p}")
     print(f"  -> {ir_path}")
     print(f"  -> {todo}")
     print(f"  -> {todo_json}\n")

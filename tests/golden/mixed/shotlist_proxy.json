@@ -1,0 +1,152 @@
+{
+  "episode": "mx01",
+  "title": "Mixed Targets",
+  "prompt_prefix": "",
+  "defaults": {
+    "width": 448,
+    "height": 256,
+    "steps": 4,
+    "model": "series_model.safetensors",
+    "lora": "proxy_turbo_4step.safetensors",
+    "sheet_panels": 4,
+    "audio_policy": "generate",
+    "master_track": "audio/ks01_mix.wav"
+  },
+  "subjects": {
+    "ada": {
+      "kind": "character",
+      "sheet": "refs/ada/ada_sheet_4panel.png",
+      "voice_sample": "audio/voices/ada_sample.wav"
+    },
+    "bo": {
+      "kind": "character",
+      "sheet": "refs/bo/bo_sheet_4panel.png",
+      "voice_sample": "audio/voices/bo_sample.wav"
+    },
+    "cy": {
+      "kind": "character",
+      "sheet": "refs/cy/cy_sheet_4panel.png",
+      "voice_sample": "audio/voices/cy_sample.wav"
+    },
+    "rex": {
+      "kind": "character",
+      "sheet": "refs/rex/rex_sheet_4panel.png",
+      "voice_sample": ""
+    },
+    "narrator": {
+      "kind": "character",
+      "sheet": "refs/narrator/narrator_sheet_4panel.png",
+      "voice_sample": "audio/voices/narrator_sample.wav"
+    },
+    "kettle": {
+      "kind": "prop",
+      "sheet": "refs/props/kettle.png",
+      "voice_sample": ""
+    },
+    "van": {
+      "kind": "vehicle",
+      "sheet": "refs/props/van.png",
+      "voice_sample": ""
+    }
+  },
+  "shots": [
+    {
+      "id": "sh010",
+      "sequence": "sq01",
+      "subjects": [
+        "ada"
+      ],
+      "background": "refs/_bg/kitchen.png",
+      "size": "ws",
+      "panels": 1,
+      "panel_view": "body",
+      "length": 73,
+      "seed": 6404904127736879035,
+      "steps": 4,
+      "audio_policy": "generate",
+      "audio_retention": "",
+      "voices": [],
+      "voice_subject": "",
+      "voice_refs": [],
+      "prompt": [
+        "subject_definitions:\n<Subject 1> is Ada, defined by <Picture 1> — a single reference image of ONE character, a three-quarter view of the whole body. Exactly one person appears in that image. Exactly one person appears in this shot. Preserve the exact reference styling: a tall woman in her thirties with a short grey bob, a mustard apron over a striped shirt, and round red glasses.\n<Subject 2> is the location, defined by <Picture 4> — a background plate of a cramped diner kitchen with steel counters, a hanging ticket rail and cold fluorescent light from overhead. It establishes the layout, color palette, lighting direction and depth of the space, not a fixed camera framing.",
+        "summary:\n[reference generation] Ada slams the walk-in door shut and turns to face the kitchen.",
+        "retention_analysis:\n<Subject 1> (appears in [Shot 1]): fully_preserved - facial identity, hairstyle, body proportions, wardrobe and colors are retained from <Picture 1> while allowing natural poses and expressions.\n<Subject 2> (appears in [Shot 1]): partially_preserved - the layout, color palette and lighting direction of the location are retained while the camera framing and visible portion of the space differ from the plate.",
+        "detailed_description:\nThe target video is a flat vector cartoon with thick even outlines and a limited pastel palette.\n[Shot 1] The scene takes place in <Subject 2>, a cramped diner kitchen with steel counters, a hanging ticket rail and cold fluorescent light from overhead. Ada slams the walk-in door shut and turns to face the kitchen. The camera pushes in on Ada with small amplitude at slow speed.",
+        "overall_soundscape: The compressor hum of the walk-in, a door latch clanking.",
+        "non_diegetic_music: a plucky ukulele sting"
+      ],
+      "duration": 2.5
+    },
+    {
+      "id": "sh030",
+      "sequence": "sq01",
+      "subjects": [
+        "ada"
+      ],
+      "background": "refs/_bg/kitchen.png",
+      "size": "cu",
+      "panels": 1,
+      "panel_view": "face",
+      "length": 39,
+      "seed": 66758040906062216,
+      "steps": 4,
+      "audio_policy": "generate",
+      "audio_retention": "",
+      "voices": [
+        "ada"
+      ],
+      "voice_subject": "ada",
+      "voice_refs": [],
+      "prompt": [
+        "subject_definitions:\n<Subject 1> is Ada, defined by <Picture 1> — a single reference image of ONE character, a head-and-shoulders facial close-up. Exactly one person appears in that image. Exactly one person appears in this shot. Preserve the exact reference styling: a tall woman in her thirties with a short grey bob, a mustard apron over a striped shirt, and round red glasses.\n<Subject 2> is the location, defined by <Picture 4> — a background plate of a cramped diner kitchen with steel counters, a hanging ticket rail and cold fluorescent light from overhead. It establishes the layout, color palette, lighting direction and depth of the space, not a fixed camera framing.",
+        "summary:\n[reference generation] Ada's eyes narrow at the kettle.",
+        "retention_analysis:\n<Subject 1> (appears in [Shot 1]): fully_preserved - facial identity, hairstyle, body proportions, wardrobe and colors are retained from <Picture 1> while allowing natural poses and expressions.\n<Subject 2> (appears in [Shot 1]): weak_reference - only the color palette, lighting direction and material character of the location are retained; the layout of the space is not reproduced and most of it falls outside the frame.",
+        "detailed_description:\nThe target video is a flat vector cartoon with thick even outlines and a limited pastel palette.\n[Shot 1] The scene takes place in <Subject 2>, a cramped diner kitchen with steel counters, a hanging ticket rail and cold fluorescent light from overhead. Ada's eyes narrow at the kettle. The camera holds a static shot with fixed composition.\n<Subject 1>, with a voice that is dry, quick and precise, (S1) says in an off-screen voiceover: <d>[English] Not today.</d> while her lips remain completely closed.",
+        "overall_soundscape: Continuous room tone and environmental ambience with synchronized physical action sounds.",
+        "non_diegetic_music: N/A"
+      ],
+      "duration": 1.62
+    },
+    {
+      "id": "sh060",
+      "sequence": "sq03",
+      "subjects": [
+        "bo"
+      ],
+      "background": "refs/_bg/kitchen.png",
+      "size": "close",
+      "panels": 1,
+      "panel_view": "face",
+      "length": 56,
+      "seed": 2866895572062163449,
+      "steps": 7,
+      "audio_policy": "generate",
+      "audio_retention": "",
+      "voices": [],
+      "voice_subject": "",
+      "voice_refs": [],
+      "prompt": [
+        "subject_definitions:\n<Subject 1> is Bo, defined by <Picture 1> — a single reference image of ONE character, a head-and-shoulders facial close-up. Exactly one person appears in that image. Exactly one person appears in this shot. Preserve the exact reference styling: a stocky teenage boy with a shaved head, an oversized green bomber jacket and orange high-tops.\n<Subject 2> is the location, defined by <Picture 4> — a background plate of a cramped diner kitchen with steel counters, a hanging ticket rail and cold fluorescent light from overhead. It establishes the layout, color palette, lighting direction and depth of the space, not a fixed camera framing.",
+        "summary:\n[reference generation] Bo pours the tea.",
+        "retention_analysis:\n<Subject 1> (appears in [Shot 1]): fully_preserved - facial identity, hairstyle, body proportions, wardrobe and colors are retained from <Picture 1> while allowing natural poses and expressions.\n<Subject 2> (appears in [Shot 1]): weak_reference - only the color palette, lighting direction and material character of the location are retained; the layout of the space is not reproduced and most of it falls outside the frame.",
+        "detailed_description:\nThe target video is a flat vector cartoon with thick even outlines and a limited pastel palette.\n[Shot 1] The scene takes place in <Subject 2>, a cramped diner kitchen with steel counters, a hanging ticket rail and cold fluorescent light from overhead. Bo pours the tea. The camera holds a static shot with fixed composition.",
+        "overall_soundscape: Continuous room tone and environmental ambience with synchronized physical action sounds.",
+        "non_diegetic_music: N/A"
+      ],
+      "model": "profile_model.safetensors",
+      "loras": [
+        {
+          "name": "profile_turbo_8step.safetensors",
+          "strength": 1.0
+        },
+        {
+          "name": "profile_style.safetensors",
+          "strength": 0.6
+        }
+      ],
+      "profile": "dialogue_close",
+      "duration": 2.0
+    }
+  ]
+}

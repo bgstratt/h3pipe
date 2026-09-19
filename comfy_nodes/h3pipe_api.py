@@ -425,6 +425,18 @@ def _opt_loras(v) -> list[dict] | None:
     return out
 
 
+def _opt_target(v) -> str | None:
+    """A video target id from a request (null: not set), 400 if unknown."""
+    if v is None or v == "":
+        return None
+    if not isinstance(v, str):
+        raise ApiError(400, "target must be a video target id or null")
+    try:
+        return J.check_video_target(v)
+    except Exception as e:
+        raise ApiError(400, str(e))
+
+
 @handler
 def post_render(ctx: Context, body):
     body = body_dict(body)
@@ -448,16 +460,33 @@ def post_render(ctx: Context, body):
         model=_opt_str(body, "model") or None, loras=_opt_loras(body.get("loras")),
         steps=_opt_steps(body.get("steps")), prompt=_opt_prompt(body.get("prompt")),
         parent_take=check_take(body.get("parent_take"), "parent_take", nullable=True),
-        note=_opt_str(body, "note") or "", allow_missing_refs=allow_missing)
-    doc = J.load_shotlist(ep, pass_)                     # 404 before anything else
-    target = J.shotlist_target(doc)
-    b = target.binding
-    try:
-        base, _ = J.target_workflow(target, None, ctx.comfy_url)
-        J.node_of(base, b.loader_class), J.node_of(base, b.saver_class)
-    except Exception as e:
-        raise ApiError(500, f"no usable {b.workflow_name}: {e}")
-    result = E.queue_shots(ep, pass_, shots, template, ctx.comfy, base)
+        note=_opt_str(body, "note") or "", allow_missing_refs=allow_missing,
+        target=_opt_target(body.get("target")))
+    J.load_shotlist(ep, pass_)                           # 404 before anything else
+    workflows: dict = {}
+
+    def base_for(target_id: str) -> dict:
+        """The workflow of a job's target, resolved once per request; a target
+        whose workflow can't be read fails every shot on it (reported per shot)."""
+        if target_id not in workflows:
+            t = TG.load_target(target_id, "video")
+            b = t.binding
+            try:
+                base, _ = J.target_workflow(t, None, ctx.comfy_url)
+                if b.loader_class:
+                    J.node_of(base, b.loader_class)
+                if not (b.saver.get("replace") and any(
+                        v["class_type"] == b.saver["replace"]["class_type"] for v in base.values())):
+                    J.node_of(base, b.saver_class)
+                workflows[target_id] = base
+            except Exception as e:
+                workflows[target_id] = RuntimeError(f"no usable {b.workflow_name}: {e}")
+        got = workflows[target_id]
+        if isinstance(got, Exception):
+            raise got
+        return got
+
+    result = E.queue_shots(ep, pass_, shots, template, ctx.comfy, base_for)
     for q in result["queued"]:
         # "queued" even if the job has already finished: the saver sends its own event
         take_event(ctx, ep, T.get_take(ep, pass_, q["shot"], q["take"]), "queued")
@@ -570,7 +599,7 @@ def put_cut(ctx: Context, body):
     return 200, {"cut": cut}
 
 
-OVERRIDE_FIELDS = ("prompt", "seed", "model", "loras", "steps", "note")
+OVERRIDE_FIELDS = ("prompt", "seed", "model", "loras", "steps", "note", "target")
 
 
 @handler
@@ -608,21 +637,31 @@ def put_override(ctx: Context, body):
     if "steps" in fields:
         pass_fields["steps"] = _opt_steps(fields["steps"])
 
-    built = E.pass_builds(ep, shot)
-    passes = list(T.PASSES) if both else [pass_]
-    if not built:
+    built_target = E.shot_built_target(ep, shot)
+    if built_target is None:
         raise ApiError(404, f"{shot} is in no built shotlist of this episode")
+    ov = T.load_overrides(ep)
+    if "target" in fields:
+        # shared by both passes; the built target itself (or null) clears it
+        want = _opt_target(fields["target"])
+        T.set_shot_target(ov, shot, None if want == built_target else want)
+    # overrides are keyed by the target the shot renders on (after this change)
+    target = J.effective_target(ov, shot, built_target)
+    built = E.pass_entries(ep, shot, target)
+    passes = list(T.PASSES) if both else [pass_]
     missing = [ps for ps in passes if ps not in built]
     if pass_fields and missing:
-        raise ApiError(409, f"{shot} has no {'/'.join(missing)} build: build the episode first")
-    doc = J.load_shotlist(ep, next(iter(built)))
-    target = J.shotlist_target(doc).id                  # overrides are keyed by target
-    ov = T.load_overrides(ep)
+        raise ApiError(409, f"{shot} has no {'/'.join(missing)} build"
+                            + (f" that compiles for {target}" if target != built_target else "")
+                            + ": build the episode first")
     E.set_shot_override(ov, shot, built, passes, shot_fields, pass_fields, target)
-    ov.setdefault("episode", doc.get("episode", ""))
+    if "episode" not in ov:
+        ov["episode"] = next((J.load_shotlist(ep, ps).get("episode", "") for ps in T.PASSES
+                              if os.path.isfile(os.path.join(ep, J.shotlist_rel(ps)))), "")
     T.save_overrides(ep, ov)
     episode_event(ctx, ep)
-    return 200, seeds_out({"override": E.override_view(ov, shot, built, target)})
+    return 200, seeds_out({"override": E.override_view(ov, shot, built, target),
+                           "target": target, "built_target": built_target})
 
 
 @handler
@@ -631,14 +670,18 @@ def delete_override(ctx: Context, query: dict):
     shot = check_shot(query.get("shot"))
     p = query.get("pass")
     pass_ = check_pass(p) if p else None
-    built = E.pass_builds(ep, shot)
-    target = (J.shotlist_target(J.load_shotlist(ep, next(iter(built)))).id if built
-              else T.DEFAULT_TARGET)
+    built_target = E.shot_built_target(ep, shot) or T.DEFAULT_TARGET
     ov = T.load_overrides(ep)
+    target = J.effective_target(ov, shot, built_target)
     E.clear_shot_override(ov, shot, pass_, target)
+    if pass_ is None:                                   # everything: the retarget too
+        T.set_shot_target(ov, shot, None)
+        target = built_target
     T.save_overrides(ep, ov)
     episode_event(ctx, ep)
-    return 200, seeds_out({"override": E.override_view(ov, shot, built, target)})
+    built = E.pass_entries(ep, shot, target)
+    return 200, seeds_out({"override": E.override_view(ov, shot, built, target),
+                           "target": target, "built_target": built_target})
 
 
 # ---------------------------------------------------------------------------

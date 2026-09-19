@@ -355,6 +355,11 @@ def sweep_queued(takes: list[Take], alive: set[str], as_of: str | None = None,
 # pass's `base_hash` records the build of the shot its override was written
 # against. Seed and note are shared: both passes render the same seeds on
 # purpose, so the proxy stays a preview of the final.
+#
+# A shot may also carry a `target` beside its per-target blocks
+# ({"sh020": {"target": "ltx2", ...}}): its renders then use that video target
+# (the shot's IR is recompiled for it at queue time), both passes. See
+# shot_target / set_shot_target.
 
 OVERRIDES_FILE = "overrides.json"
 PASS_FIELDS = ("prompt", "model", "loras", "steps", "base_hash")
@@ -380,6 +385,27 @@ def shot_override(data: dict, shot_id: str, pass_: str,
         if k in PASS_FIELDS and v is not None:
             out[k] = v
     return out
+
+
+def shot_target(data: dict, shot_id: str) -> str | None:
+    """The video target overrides.json retargets a shot to (its shot-level
+    `target`, shared by both passes), or None."""
+    t = data.get("shots", {}).get(shot_id, {}).get("target")
+    return t if isinstance(t, str) and t else None
+
+
+def set_shot_target(data: dict, shot_id: str, target: str | None) -> dict:
+    """Retarget a shot (None: back to the target the build compiled it for).
+    It sits beside the per-target blocks: {"shots": {"sh020": {"target":
+    "ltx2", "ltx2": {...}, "minimax_h3_ref2va": {...}}}}."""
+    shots = data.setdefault("shots", {})
+    if target:
+        shots.setdefault(shot_id, {})["target"] = target
+    elif shot_id in shots:
+        shots[shot_id].pop("target", None)
+        if not shots[shot_id]:
+            del shots[shot_id]
+    return data
 
 
 def set_override(data: dict, shot_id: str, pass_: str | None = None,

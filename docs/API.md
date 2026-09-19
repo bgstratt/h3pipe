@@ -398,7 +398,8 @@ Everything model-specific lives in a **target**: `targets/video/<id>/` for a sho
 `targets/image/<id>/` for a reference-image model (`targets/__init__.py`). Today there is
 one of each: `minimax_h3_ref2va` (MiniMax H3 Ref2VA) and `krea2`. A built shotlist
 belongs to one video target, the series config's `series.target` (default
-`minimax_h3_ref2va`). Episodes that mix targets arrive with Phase 8.
+`minimax_h3_ref2va`). Episodes that mix targets arrive with Phase 8. (Phase 8: they have;
+`ltx2` is the second video target. See **Phase 8 as built** at the end.)
 
 ### `GET /h3pipe/targets[?kind=video|image]`
 Every target, for pickers. Nothing here is per-episode.
@@ -486,3 +487,73 @@ write the shot **without** the missing refs, when it can:
 - **Takes** record the `target` they rendered with (already true since Phase 7).
 - **`GET /h3pipe/targets`** is what the UI's target picker lists, video targets only.
   Model and LoRA pickers filter by the chosen target's binding widgets.
+
+## Phase 8 as built
+
+Everything in **Phase 8 additions** above is implemented as written. What the text left
+open, and what was added:
+
+- **`PUT /h3pipe/override`:**
+  - `fields.target` must name a video target (`GET /h3pipe/targets?kind=video`), else 400.
+    Setting the shot's built target, or `null`, clears the retarget.
+  - Pass fields (`prompt`, `model`, `loras`, `steps`) and `seed` / `note` go to the block
+    of the target the shot renders on **after** the request's `target` change, and are
+    stamped against that target's entry (the retargeted one when it is retargeted). So one
+    request can retarget a shot and set its LTX steps.
+  - The response adds `"target"` (what the next render uses) and `"built_target"` beside
+    `"override"`. Each pass's view carries `target` when the shot is retargeted.
+  - A pass field on a retargeted shot whose IR no longer compiles (the build is out of date)
+    answers 409.
+- **`DELETE /h3pipe/override`** without `pass` also clears the retarget. The response adds
+  `target` and `built_target`.
+- **`POST /h3pipe/render`:**
+  - `target` (a video target id or `null`) beats the override for this run; an unknown one is 400.
+  - Each shot renders with its own target's workflow, resolved once per request. A target
+    whose workflow can't be read no longer fails the whole request with 500: each of its
+    shots is reported in `errors`, and shots on other targets still queue.
+  - A shot that can't be retargeted (shots.json / the series config no longer build it:
+    rebuild) is reported in `errors` with the reason.
+  - `queued` entries carry `"target"`.
+  - An LTX shot's keyframes (`refs/shots/<shot>/first.png`, `last.png`, when they exist)
+    are uploaded to ComfyUI's input folder as `h3pipe/<sha1>.png` (through ComfyUI's own
+    `POST /upload/image`, so it works however ComfyUI is installed) before the job is queued.
+  - A retargeted shot's takes on its *old* target don't count as done: `redo: false` still
+    renders it on the new one.
+- **`GET /h3pipe/episode`:**
+  - Shots come from every target's shotlist, in script order (`shots.json`), merged with
+    `cut.json` as before.
+  - Each shot has `target` (the next render's: override, else build) and `built_target`.
+    `override.fields` includes `"target"` when the shot is retargeted. `missing_refs` is the
+    next render's (an `ltx2` shot needs none: its keyframes are optional).
+  - `retarget_error` (a string) is present when the shot is retargeted but its IR can't be
+    compiled for that target: rebuild the episode.
+  - `length`, `seconds`, `subjects`, `audio_policy`, `size` are still the **built** entry's.
+    The next render's length is in shot detail's `effective.length`.
+  - A take's `stale` can also hold **`target`**: the take was rendered on another target than
+    the shot's next render uses. The other reasons are judged against the entry the take's
+    own target would render now.
+  - Top-level `target` is the series target (`shotlist.json`'s).
+- **`GET /h3pipe/shot`** adds `built_target`. `effective` adds `target`, `width`, `height`,
+  `length`, and, when there is something to say, `notes` (e.g. "the prompt override was
+  ignored: …", "audio clone renders as generate on LTX-2: …") and `error` (the shot can't
+  be rendered on its target). `override` carries `target` when retargeted. `built` stays the
+  built entry; for a retargeted shot `effective.prompt` is the new target's prompt.
+- **`GET /h3pipe/targets`** adds, per target:
+  - `short`: a short label ("H3", "LTX-2").
+  - `capabilities`: `{policies, policy_fallback, voice_reference, subject_refs,
+    keyframes, prompt ("sections" | "prose"), negative_prompt}`.
+  - `template` may carry `fps: "series"` (the target renders at the series config's fps),
+    `max_size` (`{long_side, pixels}`) and `size_fit: "snap"`.
+  - `widgets` values are always single specs (for a param patched into several widgets,
+    the first). An `ltx2` widget spec may carry `feeds` ([class, input]: which of several
+    nodes of that class), `all` or `scale`; a picker only needs `class_type` and `field`.
+    `ltx2` has no `steps` widget: its sampling schedule is fixed in the workflow.
+- **Take sidecars** may add `built_target` (retargeted), `inputs` (`{role: name in
+  ComfyUI's input folder}` of the keyframes used) and `notes` (a list of strings: audio
+  fallbacks, an ignored prompt override, a `steps` value the target doesn't use). An `ltx2`
+  take's `refs` lists its keyframes with `role` and `optional: true`, `sha1: null` when the
+  file didn't exist.
+- **Files:** an episode that mixes targets has `shotlist/shotlist.<target>.json` and
+  `shotlist.<target>_proxy.json` beside `shotlist.json` / `shotlist_proxy.json`, each with a
+  top-level `"target"`. `shotlist.json` is always the series target's, even when no shot is
+  left on it.

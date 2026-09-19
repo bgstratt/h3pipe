@@ -61,8 +61,9 @@ shot 93. So:
 - Resolution must be a multiple of 32 on both axes. **1280×720 is illegal**, because 720 is
   not. 1344×768 is H3's native canvas.
 - `steps`, `lora` and `model` are optional per pass; see the README's **Steps, model and LoRA**.
-- `series.target` names the video model the episode renders on. Leave it out: the only one
-  today is `minimax_h3_ref2va` (MiniMax H3), the default.
+- `series.target` names the video model the episode renders on: `minimax_h3_ref2va`
+  (MiniMax H3, the default: leave it out) or `ltx2` (LTX-2.5 distilled). Single shots or
+  sequences can render on the other one; see **Rendering a shot on LTX-2** below.
 
 ### Render profiles
 
@@ -168,7 +169,7 @@ sound: running footsteps on grass, fabric movement
 | `extras: …` | other people in frame, described; see **Crowds and extras** |
 | `model:`, `lora:`, `steps:` | per-shot render overrides; also valid under a `#` header |
 | `profile: dialogue_close` | a render profile from the series config; also valid under a `#` header |
-| `target: minimax_h3_ref2va` | the video model for this shot or sequence; see below |
+| `target: ltx2` | the video model for this shot or sequence (`minimax_h3_ref2va` or `ltx2`); see below |
 | `NAME: line` | dialogue from someone on screen |
 | `NAME (V.O.): line` | voiceover: speaks, is not drawn, costs no reference slot |
 | `NAME (O.S.): line` | off-screen: in the space, outside the frame |
@@ -177,9 +178,32 @@ sound: running footsteps on grass, fabric movement
 
 Any other line is action prose.
 
-`target:` exists so a shot can one day render on another model. Today there is one video
-target, so `target:` may only name the series target (or be left out); anything else is an
-error. Episodes that mix targets come later.
+### Rendering a shot on LTX-2
+
+`target: ltx2` on a `##` shot, under a `#` header, or in a profile renders that shot (or
+sequence) on LTX-2.5 instead of the series target; any other name is an error. One episode
+can mix the two: the build writes the LTX shots to their own shotlist, and the editor, the
+render command and the review cut treat the episode as one. What changes for an LTX shot:
+
+- **No reference pictures.** LTX takes no character sheets or plates. Everyone in `who:` /
+  `with:` is described in words from their `design`, and the place from the location's
+  `description`, so those sentences carry the look on their own. A first- and/or last-frame
+  keyframe (`refs/shots/<shot>/first.png`, `last.png`, imported in the editor's Refs tab)
+  pins the picture when you have one; without them the shot is text-to-video.
+- **Its own grid:** `8k + 1` frames (9, 17, 25, … 73 = 3.04s, 97 = 4.04s at 24fps), up to
+  about 20 seconds. The same `dur:` snaps to a slightly different length than on H3.
+- **Sound is always generated with the picture.** LTX takes no voice sample and no recording:
+  a shot the series would `clone` or `dub` renders with `generate` instead, and the build
+  and the take say so. Each speaker's `voice` line is what shapes the voice.
+- **One paragraph of prose**, written for you: the look, then the framing and the camera,
+  then who is in frame and what they do, the lines with who says them and how, then the
+  sound and music. Write `camera:` for a move you want; without it the camera stays still.
+- **Size** comes from the series config's pass blocks, snapped down to a multiple of 64 and
+  kept under 1 MP (1344×768 stays; H3's 480×272 proxy becomes 448×256). Its model, LoRA
+  and steps are the target's own: a series written for H3 doesn't hand them H3's.
+
+To try a shot on LTX without touching the script, retarget it from the editor or with
+`h3.py override <ep> sh040 --target ltx2` (`--target built` undoes it).
 
 ## Durations land on a grid
 

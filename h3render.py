@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 h3render.py — queue every shot of one or more episodes on a local ComfyUI,
-using the H3 Ref2VA shot-list workflow, and wait for each render.
+each with its video target's workflow, and wait for each render.
 
     python h3render.py path/to/project/ep05
     python h3render.py Shows\\ep05 --proxy
@@ -10,12 +10,23 @@ using the H3 Ref2VA shot-list workflow, and wait for each render.
     python h3render.py --all Shows --proxy          # every ep* folder
     python h3render.py Shows\\ep05 --list           # what would run
     python h3render.py Shows\\ep05 --dry-run        # write the API graph, queue nothing
+    python h3render.py Shows\\ep05 --proxy --only sh040 --target ltx2 --dry-run --check-nodes
 
-This is the command-line twin of H3_Ref2VA_Shotlist_v1.json. It loads that
-workflow, points Shot List Loader at a frozen one-shot shotlist for each take
-and Save Shot at the take's folder and sidecar, and queues one shot at a time.
-The work of deciding what a take renders lives in h3jobs.py, which the editor
-will share.
+This is the command-line twin of the targets' workflows (H3's is
+H3_Ref2VA_Shotlist_v1.json). For H3 it points Shot List Loader at a frozen
+one-shot shotlist for each take; for a target with no loader (ltx2) it
+patches the values straight into the workflow's widgets. Save Shot writes the
+take either way, and one shot is queued at a time. The work of deciding what
+a take renders lives in h3jobs.py, which the editor shares.
+
+Targets
+    Each shot renders on the target its build chose (shotlist.json, or
+    shotlist.<target>.json in an episode that mixes targets), unless
+    overrides.json retargets it (h3.py override --target) or --target does
+    for this run: the shot's IR (shotlist/shots.json) is then compiled for that
+    target now, without a rebuild. Keyframes a target reads (ltx2's
+    refs/shots/<shot>/first.png, last.png) are uploaded into ComfyUI's
+    input/h3pipe/ folder first.
 
 The script must run on the machine that runs ComfyUI: it checks
 <project>/<subfolder>/<shot>/ on disk to skip finished shots and to confirm
@@ -47,7 +58,9 @@ Proxy vs final
         python h3assemble.py -o <project> --shotlist shotlist/shotlist_proxy.json
 
 Workflow file
-    --workflow, else $H3_WORKFLOW, else H3_Ref2VA_Shotlist_v1.json as saved in
+    Per target. --workflow replaces the workflow of --target's target (else
+    the series target's). Otherwise, for H3:
+    $H3_WORKFLOW, else H3_Ref2VA_Shotlist_v1.json as saved in
     the running ComfyUI (its user workflows, fetched over the API, so the graph
     always matches that ComfyUI's node versions), else $COMFYUI_PATH's
     workflows folder, else the copy in this repo (the target's, at
@@ -66,7 +79,9 @@ import sys
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import h3jobs as J  # noqa: E402
 import h3takes as T  # noqa: E402
+import targets as TG  # noqa: E402
 # Re-exported: kreagen imports load_graph from here.
 from h3jobs import (  # noqa: E402,F401
     LOADER, SAVER, LORA, UNET, WORKFLOW_NAME, Comfy, RenderRequest, find_workflow,
@@ -98,12 +113,12 @@ def sweep(comfy: Comfy, roots: list[str], pass_: str, folder: str | None) -> int
     n = 0
     for root in roots:
         try:
-            doc = load_shotlist(root, pass_)
+            shots = J.episode_shots(root, pass_)
         except FileNotFoundError:
             continue
-        for s in doc["shots"]:
-            n += len(T.sweep_queued(T.list_takes(root, pass_, s["id"], folder), alive,
-                                    as_of=as_of))
+        for d, i in shots:
+            n += len(T.sweep_queued(T.list_takes(root, pass_, d["shots"][i]["id"], folder),
+                                    alive, as_of=as_of))
     return n
 
 
@@ -135,6 +150,13 @@ def main() -> int:
     ap.add_argument("--model", help="H3 unet file name; overrides the shotlist")
     ap.add_argument("--steps", type=int, help="sampler steps; overrides the shotlist")
     ap.add_argument("--note", default="", help="free text stored in each take's sidecar")
+    ap.add_argument("--target", metavar="TARGET",
+                    help="render on this video target for this run (e.g. ltx2): the shot's "
+                         "IR is compiled for it now, no rebuild needed. overrides.json's "
+                         "`target` (h3.py override --target) does the same for every run")
+    ap.add_argument("--check-nodes", action="store_true",
+                    help="with --dry-run: ask the running ComfyUI (/object_info) whether it "
+                         "knows every node class and input of the graph")
     ap.add_argument("--allow-missing-refs", action="store_true",
                     help="render shots even when references are missing: a missing picture "
                          "becomes flat grey, a missing voice/recording no audio reference "
@@ -168,15 +190,38 @@ def main() -> int:
         ap.error("give one or more episode folders, or --all DIR")
 
     loras = [l for spec in args.lora for l in parse_lora(spec)] if args.lora else None
+    if args.target:
+        try:
+            J.check_video_target(args.target)
+        except Exception as e:
+            ap.error(str(e))
     template = RenderRequest(
         shot_id="", take=args.take, redo=args.redo, seed=args.seed,
         seed_mode="new" if args.new_seed else "same" if args.same_seed else "auto",
         model=args.model or None, loras=loras, steps=args.steps, note=args.note,
-        allow_missing_refs=args.allow_missing_refs)
+        allow_missing_refs=args.allow_missing_refs, target=args.target)
     only = {s.strip() for s in args.only.split(",")} if args.only else None
 
-    base, wf = resolve_workflow(args.workflow, WORKFLOW_NAME, args.comfy)
-    node_of(base, LOADER), node_of(base, SAVER)       # fail early on the wrong workflow
+    # Each job renders with its own target's workflow. --workflow replaces the
+    # workflow of --target's target if given, else the series target's.
+    workflows: dict = {}
+    wf_target = args.target or None
+
+    def base_for(target_id: str):
+        if target_id not in workflows:
+            t = TG.load_target(target_id, "video")
+            b = t.binding
+            explicit = args.workflow if (args.workflow and (
+                target_id == wf_target or (wf_target is None and target_id == default_id))) \
+                else None
+            g, where = J.target_workflow(t, explicit, args.comfy)
+            if b.loader_class:
+                node_of(g, b.loader_class)                # fail early on the wrong workflow
+            if not (b.saver.get("replace") and any(
+                    v["class_type"] == b.saver["replace"]["class_type"] for v in g.values())):
+                node_of(g, b.saver_class)
+            workflows[target_id] = (g, where)
+        return workflows[target_id]
 
     comfy = Comfy(args.comfy)
     if not args.dry_run:
@@ -185,23 +230,29 @@ def main() -> int:
             print(f"\n  marked {swept} take(s) failed: queued, but ComfyUI no longer has the job")
 
     plans, total_frames = [], 0
+    default_id = TG.DEFAULT_VIDEO_TARGET
     for root in roots:
         try:
             jobs = plan_episode(root, pass_, default=template, folder=folder, only=only)
+            default_id = J.shotlist_target(load_shotlist(root, pass_)).id \
+                if root == roots[0] else default_id
         except FileNotFoundError as e:
             print(f"  ! {e}")
             continue
         todo = [j for j in jobs if j.runs]
         busy = sum(1 for j in jobs if j.action == "busy")
         blocked = [j for j in jobs if j.action == "blocked"]
+        errors = [j for j in jobs if j.action == "error"]
         plans.append((root, jobs))
         total_frames += sum(j.frames for j in todo)
         print(f"\n  {os.path.basename(root)}  ·  {len(todo)} to render, "
-              f"{len(jobs) - len(todo) - busy} done"
+              f"{len(jobs) - len(todo) - busy - len(blocked) - len(errors)} done"
               + (f", {busy} already queued" if busy else "")
               + (f", {len(blocked)} blocked (missing refs)" if blocked else "")
+              + (f", {len(errors)} can't be planned" if errors else "")
               + f"  ·  {pass_}  ->  {shown_folder}/")
-        for key, vals in (("model", sorted({j.model for j in todo if j.model})),
+        for key, vals in (("target", sorted({j.target for j in todo})),
+                          ("model", sorted({j.model for j in todo if j.model})),
                           ("lora", sorted({lora_label(j.loras) for j in todo}))):
             if vals:
                 print(f"    {key} {', '.join(vals)}")
@@ -213,7 +264,13 @@ def main() -> int:
         if blocked:
             print("    ! make the refs (h3.py refs), or --allow-missing-refs to render "
                   "those shots with flat grey stand-ins")
+        for j in errors:
+            print(f"    !! {j.error}")
         for j in todo:
+            if j.retargeted:
+                print(f"    ~ {j.id}: retargeted {j.built_target} -> {j.target}")
+            for n in j.notes:
+                print(f"    ~ {j.id}: {n}")
             if j.missing:
                 how = ("prompt rewritten without them" if j.missing_mode == "recompiled"
                        else "grey stand-ins" + (f" ({j.missing_why})" if j.missing_why else ""))
@@ -227,27 +284,51 @@ def main() -> int:
                 extra = f"  seed {j.seed} ({j.seed_source})" if j.runs else ""
                 ov = f"  override: {','.join(j.overridden)}" if j.overridden and j.runs else ""
                 print(f"    [{j.action:>9}] #{j.index:<3} {j.id:<8} t{j.take:02d}"
-                      f"  {j.frames:>4}f  {j.shot.get('audio_policy', '')}{extra}{ov}")
+                      f"  {j.frames:>4}f  {j.target:<18} {j.shot.get('audio_policy', '')}"
+                      f"{extra}{ov}")
     n_todo = sum(1 for _, js in plans for j in js if j.runs)
-    print(f"\n  workflow {wf}\n  {n_todo} shot(s), {total_frames / 24:.1f}s of video"
-          f" · comfy {args.comfy}\n")
+    need = sorted({j.target for _, js in plans for j in js if j.runs}) or [default_id]
+    try:
+        for tid in need:
+            print(f"\n  workflow {tid}: {base_for(tid)[1]}")
+    except Exception as e:
+        print(f"\n  !! {e}")
+        return 1
+    fps = next((j.fps for _, js in plans for j in js if j.runs), 24.0)
+    print(f"  {n_todo} shot(s), {total_frames / fps:.1f}s of video · comfy {args.comfy}\n")
 
     gkw = dict(panel_mode=args.panel_mode, save_frames=args.save_frames,
                review_copy=not args.no_review_copy, strip_meta=args.strip_meta)
     if args.list:
         return 0
     if args.dry_run:
-        # Nothing is reserved or written in the episode: the graph points at
-        # where the take WOULD go.
+        # Nothing is reserved, written or uploaded: the graph points at where
+        # the take WOULD go, and at the names its keyframes WOULD get.
         for root, jobs in plans:
             for j in (j for j in jobs if j.runs):
                 take = T.Take(j.id, j.take, pass_,
                               T.take_paths(root, pass_, j.id, j.take, folder))
-                g = graph_for(base, j, take, **gkw)
+                J.stage_inputs(j)
+                g = graph_for(base_for(j.target)[0], j, take, **gkw)
                 out = os.path.join(os.getcwd(), "h3render_graph.json")
                 with open(out, "w", encoding="utf-8") as fh:
                     json.dump(g, fh, indent=2)
-                print(f"  wrote {out} ({j.id} of {os.path.basename(root)})")
+                print(f"  wrote {out} ({j.id} of {os.path.basename(root)}, {j.target}"
+                      + (f", inputs {j.inputs}" if j.inputs else "") + ")")
+                if args.check_nodes:
+                    try:
+                        info = comfy.object_info()
+                    except Exception as e:
+                        print(f"  !! cannot read /object_info from {args.comfy}: {e}")
+                        return 1
+                    problems = J.check_graph(g, info)
+                    print(f"  {len(g)} nodes, {len({v['class_type'] for v in g.values()})} "
+                          f"classes checked against {args.comfy}/object_info: "
+                          + ("all known, every link and required input in place"
+                             if not problems else f"{len(problems)} problem(s)"))
+                    for p in problems:
+                        print(f"    ! {p}")
+                    return 1 if problems else 0
                 return 0
         return 0
     if not n_todo:
@@ -270,12 +351,21 @@ def main() -> int:
             ep = os.path.basename(root)
             for j in (j for j in jobs if j.runs):
                 t0 = time.time()
+                label = f"{ep}/{j.id}"
+                try:
+                    J.stage_inputs(j, comfy)
+                except Exception as e:
+                    failed += 1
+                    failures.append(label)
+                    print(f"  !! {label}: couldn't copy its keyframes into ComfyUI: {e}",
+                          flush=True)
+                    continue
                 current = take = start_job(j)
                 label = f"{ep}/{j.id} t{take.take:02d}"
-                print(f"  .. {label}  ({j.frames}f, {j.shot.get('audio_policy', '')}, "
+                print(f"  .. {label}  ({j.frames}f, {j.target}, {j.shot.get('audio_policy', '')}, "
                       f"seed {j.seed} {j.seed_source})", flush=True)
                 try:
-                    pid = comfy.queue(graph_for(base, j, take, **gkw))
+                    pid = comfy.queue(graph_for(base_for(j.target)[0], j, take, **gkw))
                     mark_queued(take, pid)
                     comfy.wait(pid, args.timeout)
                     if finish_job(take) != "ok":

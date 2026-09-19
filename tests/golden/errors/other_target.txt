@@ -1,4 +1,4 @@
 exit 1
 
-  error in other_target.md: shot sh010: target 'ltx_2_3' is not the series target 'minimax_h3_ref2va' (and no video target is called that: minimax_h3_ref2va). Episodes that mix targets arrive with Phase 8; until then every shot renders on the series target.
+  error in other_target.md: shot sh010: target 'ltx_2_3' is not a video target (known: ltx2, minimax_h3_ref2va)
 

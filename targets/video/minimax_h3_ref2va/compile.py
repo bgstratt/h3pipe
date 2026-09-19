@@ -494,16 +494,28 @@ def _lora_list(loras: list[dict]) -> str:
     return ", ".join(f"{lo['name']}@{lo.get('strength', 1.0):g}" for lo in loras) or "none"
 
 
-def compile_legacy(target, ep: dict, series_cfg: dict, pass_: str) -> tuple[dict, dict]:
-    """The parser-shaped episode -> (shotlist doc, report)."""
+def compile_legacy(target, ep: dict, series_cfg: dict, pass_: str,
+                   only: set[str] | None = None) -> tuple[dict, dict]:
+    """The parser-shaped episode -> (shotlist doc, report). With `only`, just
+    those shots (the rest of an episode that mixes targets is another
+    target's); each keeps its place in its sequence, so it compiles exactly as
+    in a full build."""
     ctx = Ctx(target, ep["id"], series_cfg, pass_)
     preset = ctx.preset
     width, height, steps, model, lora = (preset.width, preset.height, preset.steps,
                                          preset.model, preset.lora)
     shots_out = []
     for seq in ep["sequences"]:
-        seq_loc = ctx.register_sequence(seq)
+        if only is not None:
+            mine = [sh for sh in seq["shots"] if sh["id"] in only]
+            if not mine:
+                continue
+            seq_loc = ctx.register_sequence(dict(seq, shots=mine))
+        else:
+            seq_loc = ctx.register_sequence(seq)
         for i, shot in enumerate(seq["shots"]):
+            if only is not None and shot["id"] not in only:
+                continue
             shots_out.append(_compile_shot(ctx, seq, i, shot, seq_loc))
 
     book, warnings = ctx.book, ctx.warnings
@@ -548,7 +560,8 @@ def compile_legacy(target, ep: dict, series_cfg: dict, pass_: str) -> tuple[dict
         "resolution": f"{width}x{height}", "steps": steps,
         "model": model, "lora": lora, "fps": fps,
         "shots": len(shots_out),
-        "sequences": len(ep["sequences"]),
+        "sequences": (len(ep["sequences"]) if only is None else
+                      len({sh["sequence"] for sh in shots_out})),
         "target_s": ctx.total_req / fps, "delivered_s": ctx.total_raw / fps,
         "pad_frames": ctx.total_raw - ctx.total_req,
         "policies": {p: sum(1 for s in shots_out if s["audio_policy"] == p)
@@ -560,8 +573,8 @@ def compile_legacy(target, ep: dict, series_cfg: dict, pass_: str) -> tuple[dict
 
 
 def compile_episode(target, story: ir.Episode, series_cfg: dict,
-                    pass_: str) -> tuple[dict, dict]:
-    return compile_legacy(target, legacy_episode(story), series_cfg, pass_)
+                    pass_: str, only: set[str] | None = None) -> tuple[dict, dict]:
+    return compile_legacy(target, legacy_episode(story), series_cfg, pass_, only)
 
 
 def _find(story: ir.Episode, shot_id: str) -> tuple[ir.Sequence, int]:

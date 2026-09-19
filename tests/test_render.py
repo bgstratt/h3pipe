@@ -285,6 +285,7 @@ class FakeComfy:
         self.running: list[str] = []
         self.pending: list[str] = []
         self.posts: list[tuple[str, dict]] = []
+        self.uploads: dict[str, bytes] = {}       # /upload/image: "sub/name" -> bytes
         fake = self
 
         class H(BaseHTTPRequestHandler):
@@ -331,7 +332,23 @@ class FakeComfy:
                     self._send({})
 
             def do_POST(self):
-                data = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+                raw = self.rfile.read(int(self.headers["Content-Length"]))
+                if self.path == "/upload/image":
+                    # multipart: keep the fields and the file's bytes
+                    import email.parser
+                    import email.policy
+                    msg = email.parser.BytesParser(policy=email.policy.default).parsebytes(
+                        b"Content-Type: " + self.headers["Content-Type"].encode() + b"\r\n\r\n"
+                        + raw)
+                    form = {p.get_param("name", header="content-disposition"):
+                            (p.get_filename(), p.get_payload(decode=True))
+                            for p in msg.iter_parts()}
+                    name = form["image"][0]
+                    sub = form["subfolder"][1].decode()
+                    fake.uploads[f"{sub}/{name}"] = form["image"][1]
+                    self._send({"name": name, "subfolder": sub, "type": "input"})
+                    return
+                data = json.loads(raw)
                 if self.path == "/prompt" and fake.mode == "reject":
                     self._send({"error": "invalid prompt",
                                 "node_errors": {"11": {"errors": ["bad input"]}}})
@@ -360,9 +377,15 @@ class FakeComfy:
             return self.run_image(graph, pid)
         si = next(v["inputs"] for v in graph.values() if v["class_type"] == J.SAVER)
         root = si["project_root"]
-        shotlist = next(v["inputs"] for v in graph.values()
-                        if v["class_type"] == J.LOADER)["shotlist_file"]
-        shot = T.read_json(os.path.join(root, shotlist))["shots"][0]
+        loader = next((v["inputs"] for v in graph.values() if v["class_type"] == J.LOADER),
+                      None)
+        if loader is not None:
+            shot = T.read_json(os.path.join(root, loader["shotlist_file"]))["shots"][0]
+        else:
+            # a loader-less target (ltx2): the saver names the shot, the latent its length
+            lat = next(v["inputs"] for v in graph.values()
+                       if v["class_type"] == "EmptyLTXVLatentVideo")
+            shot = {"id": si["shot_id"], "length": lat["length"]}
         stem = f"{T.safe_id(shot['id'])}_t{si['take']:02d}"
         d = os.path.join(root, si["subfolder"], T.safe_id(shot["id"]))
         open(os.path.join(d, stem + ".mp4"), "wb").close()
