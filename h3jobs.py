@@ -909,6 +909,10 @@ class Job:
     notes: list[str] = field(default_factory=list)      # said in the sidecar
     inputs: dict = field(default_factory=dict)          # role -> name ComfyUI loads
     error: str = ""                    # action "error": why it can't be planned
+    # files a target made for this take at stage_inputs (the ingredients
+    # reference sheet), waiting for start_job to move them into the take:
+    # [{"tmp", "suffix", "slot", "kind", "role"}]
+    staged: list = field(default_factory=list)
 
     @property
     def id(self) -> str:
@@ -1246,6 +1250,19 @@ def start_job(job: Job) -> T.Take:
     take = T.reserve_take(job.root, job.pass_, job.id, sidecar_for(job),
                           take=job.take if job.forced else None, folder=job.folder)
     job.take = take.take
+    if job.staged:
+        # a file the target composed for this take (stage_inputs): into the
+        # take as <stem><suffix>, listed in the sidecar's refs with its sha1
+        made = []
+        for f in job.staged:
+            dst = os.path.join(take.paths.dir, take.paths.stem + f["suffix"])
+            os.replace(f["tmp"], dst)
+            made.append({"slot": f["slot"], "kind": f.get("kind", "image"),
+                         "path": os.path.relpath(dst, job.root).replace(os.sep, "/"),
+                         "role": f.get("role"), "sha1": T.file_sha1(dst)})
+        job.staged = []
+        take.sidecar = T.update_sidecar(take.paths.sidecar,
+                                        refs=list((take.sidecar or {}).get("refs") or []) + made)
     T.write_json(take.paths.shotlist, frozen_shotlist(job))
     return take
 
@@ -1538,7 +1555,10 @@ def stage_inputs(job: Job, comfy=None) -> dict:
     and record their names in job.inputs ({role: "h3pipe/<sha1>.png"}).
     `comfy` uploads them (h3jobs.Comfy.upload_input: POST /upload/image, which
     works wherever ComfyUI runs); without it (a dry run) only the names are
-    worked out."""
+    worked out. A target that makes an input of its own (ltx2_ingredients
+    composes the shot's reference sheet) does it here too, in its
+    `stage_inputs`; a file it keeps for the take waits in job.staged until
+    start_job moves it into the take."""
     out = {}
     for r in ref_slots(job.doc, job.shot):
         role, p = r.get("role"), r.get("path")
@@ -1551,5 +1571,8 @@ def stage_inputs(job: Job, comfy=None) -> dict:
         if comfy is not None:
             comfy.upload_input(full, name)
         out[role] = name
+    t = job_target(job)
+    if t.supports("stage_inputs"):
+        out.update(t.stage_inputs(job, comfy) or {})
     job.inputs = out
     return out

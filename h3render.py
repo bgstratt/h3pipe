@@ -26,7 +26,9 @@ Targets
     for this run: the shot's IR (shotlist/shots.json) is then compiled for that
     target now, without a rebuild. Keyframes a target reads (ltx2's
     refs/shots/<shot>/first.png, last.png) are uploaded into ComfyUI's
-    input/h3pipe/ folder first.
+    input/h3pipe/ folder first, and so is ltx2_ingredients' reference sheet,
+    composed from the shot's refs (it needs PIL in this Python) and kept in
+    the take as <shot>_tNN_refsheet.png. A dry run composes nothing.
 
 The script must run on the machine that runs ComfyUI: it checks
 <project>/<subfolder>/<shot>/ on disk to skip finished shots and to confirm
@@ -357,7 +359,7 @@ def main() -> int:
                 except Exception as e:
                     failed += 1
                     failures.append(label)
-                    print(f"  !! {label}: couldn't copy its keyframes into ComfyUI: {e}",
+                    print(f"  !! {label}: couldn't stage its input images in ComfyUI: {e}",
                           flush=True)
                     continue
                 current = take = start_job(j)
