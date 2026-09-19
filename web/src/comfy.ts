@@ -17,7 +17,7 @@
 import { app as comfyApp } from "comfyui/app";
 import { api as comfyApi } from "comfyui/api";
 import { pushToast, start } from "./actions";
-import { createHttpApi } from "./api";
+import { createHttpApi, xhrUpload } from "./api";
 import { setApi, setHost, type Host, type HostEvent, type Surface } from "./host";
 import { mountOverlay, mountSurface, unmountSurface } from "./surfaces";
 
@@ -114,7 +114,12 @@ function tab(surface: Surface, title: string): CustomTab {
 
 export function install() {
   setHost(comfyHost);
-  setApi(createHttpApi({ fetch: (p, init) => api.fetchApi(p, init), url: (p) => api.apiURL(p) }));
+  setApi(createHttpApi({
+    fetch: (p, init) => api.fetchApi(p, init),
+    url: (p) => api.apiURL(p),
+    // XMLHttpRequest, for upload progress (the h3pipe routes need no user header)
+    upload: (p, form, onProgress) => xhrUpload(api.apiURL(p), form, onProgress),
+  }));
 
   app.registerExtension({
     name: "h3pipe.editor",

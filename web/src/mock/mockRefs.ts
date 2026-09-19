@@ -3,12 +3,19 @@
 // uses other names, so its shots are mapped onto kitchen_sink refs by index:
 // synthetic, but enough to see missing refs block shots, and picks unblock them.
 // Candidate images are SVGs made on the fly (data: URLs).
+//
+// The shapes follow what h3refs.ref_json really sends (checked against a real
+// episode): `views: []` on every ref that isn't a character, a character's
+// top-level `effective` is just `{target}` and each view has its own prompt,
+// override and effective, a voice's candidates carry `audio` (with `image`
+// null), and the narrator is voice-only here, as in real series configs:
+// `path: null`, `can_generate: false`.
 
 import seriesCfgRaw from "../../../tests/fixtures/kitchen_sink/series.json?raw";
 import { VIEWS } from "../lib/refs";
 import type {
-  Lora, MissingRef, Override, OverrideFields, Pass, Ref, RefEffective, RefGenerateRequest, RefGenerateResult,
-  RefFrameSource, RefImportRequest, RefPickRequest, RefTake, RefView, SeedMode,
+  EditRef, Lora, MissingRef, Override, OverrideFields, Pass, Ref, RefDefaultSource, RefDefaults, RefEffective, RefGenerateRequest,
+  RefGenerateResult, RefFrameSource, RefImportRequest, RefPickRequest, RefTake, RefView, SeedMode,
 } from "../types";
 import { fsFileExists } from "./mockFs";
 
@@ -29,12 +36,20 @@ type Emit = (event: "progress" | "execution_start" | "execution_success" | "exec
 /** a ref as the mock keeps it: the contract's shape plus its override values */
 interface MRef extends Ref {
   base_prompt: string;
+  /** the ref's own override */
   ov: Override;
+  /** a character's per-view overrides */
+  vov: Record<string, Override>;
   subject?: string;
+  /** views cleared by Clear (a character) */
+  vcleared: Record<string, boolean>;
+  why?: string;
 }
 
 const MODEL = "flux2_krea_dev_fp8.safetensors";
 const STEPS = 28;
+/** the mock's voice-only character (its series config entry has no picture here) */
+const VOICE_ONLY = new Set(["narrator"]);
 
 function hash(s: string): number {
   let h = 2166136261;
@@ -99,21 +114,28 @@ export interface KeyframeNeedSpec {
   method: string;
   target: string;
   requested: boolean;
+  /** the script's raw line, when it has one */
+  script?: string | null;
 }
 
-/** The image targets' presets the mock generates with. */
-const IMAGE_MODELS: Record<string, { model: string; steps: number }> = {
+/** The image targets' presets the mock generates with, and how many references an edit one takes. */
+const IMAGE_MODELS: Record<string, { model: string; steps: number; edit?: number }> = {
   krea2: { model: MODEL, steps: STEPS },
   z_image_turbo: { model: "z_image_turbo_bf16.safetensors", steps: 8 },
   flux2_klein: { model: "flux2_klein_9b_fp8.safetensors", steps: 4 },
-  flux2_klein_edit: { model: "flux2_klein_9b_fp8.safetensors", steps: 4 },
-  flux_kontext: { model: "flux1-kontext-dev-fp8.safetensors", steps: 20 },
+  flux2_klein_edit: { model: "flux2_klein_9b_fp8.safetensors", steps: 4, edit: 4 },
+  flux_kontext: { model: "flux1-kontext-dev-fp8.safetensors", steps: 20, edit: 1 },
   illustrious_sdxl: { model: "illustriousXL_v01.safetensors", steps: 8 },
 };
+/** the built-in defaults (series.json has no `refs` block in the mock) */
 export const MOCK_REF_DEFAULTS = { target: "krea2", keyframe_target: "flux2_klein_edit" };
 
 export interface MockRefs {
   list(): Ref[];
+  /** GET /h3pipe/refs `defaults` */
+  defaults(): RefDefaults;
+  /** PUT /h3pipe/refs/defaults: null clears; a key left out is kept */
+  setDefaults(fields: { target?: string | null; keyframe_target?: string | null }): RefDefaults;
   /** a ref's file state, for refs_used */
   info(id: string): { path: string | null; exists: boolean; kind: string; sha1: string | null } | undefined;
   /** the keyframes a shot needs now */
@@ -128,10 +150,14 @@ export interface MockRefs {
   generate(req: RefGenerateRequest): RefGenerateResult;
   pick(req: RefPickRequest): Ref;
   import(req: RefImportRequest): RefTake & { view: string | null };
+  /** the multipart import (Phase 8.6): a file by name, picked with `pick` */
+  upload(req: { ref: string; view: string | null; name: string; pick: boolean }): RefTake & { view: string | null; original_name: string };
+  /** POST /h3pipe/refs/discard */
+  discard(req: { ref: string; view: string | null; take: number }): Ref;
   /** a keyframe take cut out of a video take (the api resolves the source) */
   keyframe(req: { shot: string; which: "first" | "last"; from: RefFrameSource; pick: boolean | null }): Ref;
-  putOverride(ref: string, fields: OverrideFields): void;
-  deleteOverride(ref: string): void;
+  putOverride(ref: string, fields: OverrideFields, view?: string | null): Override & { stale: boolean };
+  deleteOverride(ref: string, view?: string | null): Override & { stale: boolean };
   /** the dependents to mark ref-stale after a pick (shot indexes) */
   dependents(ref: string): number[];
 }
@@ -151,39 +177,40 @@ export function createMockRefs(opts: {
   const look = seriesCfg.style?.look ?? "";
   const refs: MRef[] = [];
   const images = new Map<string, string>();
+  /** the episode's image targets (overrides.json episode.refs_target / keyframe_target) */
+  const chosen: { target: string | null; keyframe_target: string | null } = { target: null, keyframe_target: null };
 
   const key = (id: string) => id.replace(/:/g, "__");
   const takePath = (r: MRef, view: string | null, take: number, ext = "png") =>
     `refs/_takes/${key(r.id)}/${key(r.id)}${view ? `_${view}` : ""}_t${String(take).padStart(2, "0")}.${ext}`;
+  const base = (id: string, kind: Ref["kind"], extra: Partial<MRef>): MRef => ({
+    id, scope: "series", kind, name: id, path: null, exists: false, sha1: null, used_by: {}, prompt: "", base_prompt: "",
+    override: { fields: [], stale: false }, ov: {}, vov: {}, vcleared: {}, takes: [], picked: null, views: [], ...extra,
+  });
 
   for (const [id, raw] of Object.entries(seriesCfg.subjects)) {
     if (id.startsWith("_") || typeof raw !== "object") continue;
     const kind = (raw.kind ?? "character") as Ref["kind"];
     const name = raw.name ?? id;
+    const voiceOnly = VOICE_ONLY.has(id);
     const base_prompt = kind === "character"
       ? `A character reference sheet of ${name}: ${raw.design ?? ""}. ${look}. Plain light-grey background, even studio light.`
       : `A reference picture of ${name}: ${raw.design ?? ""}, alone on a plain light-grey background. ${look}.`;
-    refs.push({
-      id: `subject:${id}`, scope: "series", kind, name, path: raw.sheet ?? `refs/${id}/${id}.png`, exists: false, sha1: null,
-      used_by: {}, prompt: base_prompt, base_prompt, override: { fields: [], stale: false }, ov: {}, subject: id,
+    refs.push(base(`subject:${id}`, kind, {
+      name, path: voiceOnly ? null : raw.sheet ?? `refs/${id}/${id}.png`, prompt: base_prompt, base_prompt, subject: id,
+      ...(voiceOnly ? { why: `the series config names no sheet for ${name} (a voice-only character)` } : {}),
       ...(kind === "character" ? { views: VIEWS.map((v) => ({ view: v.view, picked: null, takes: [] })) } : {}),
-      takes: [], picked: null,
-    });
+    }));
     if (raw.voice_sample) {
-      refs.push({
-        id: `voice:${id}`, scope: "series", kind: "voice", name: `${name}'s voice`, path: raw.voice_sample, exists: false, sha1: null,
-        used_by: {}, prompt: "", base_prompt: "", override: { fields: [], stale: false }, ov: {}, subject: id, takes: [], picked: null,
-      });
+      refs.push(base(`voice:${id}`, "voice", {
+        name: `${name}'s voice`, path: raw.voice_sample, subject: id, why: "nothing generates voices yet: import a recording",
+      }));
     }
   }
   for (const [id, raw] of Object.entries(seriesCfg.locations)) {
     if (id.startsWith("_") || typeof raw !== "object") continue;
     const base_prompt = `A background plate, no people: ${raw.description ?? id}. ${look}.`;
-    refs.push({
-      id: `location:${id}`, scope: "series", kind: "location", name: id.replace(/_/g, " "), path: raw.plate ?? `refs/_bg/${id}.png`,
-      exists: false, sha1: null, used_by: {}, prompt: base_prompt, base_prompt, override: { fields: [], stale: false }, ov: {},
-      takes: [], picked: null,
-    });
+    refs.push(base(`location:${id}`, "location", { name: id.replace(/_/g, " "), path: raw.plate ?? `refs/_bg/${id}.png`, prompt: base_prompt, base_prompt }));
   }
   const byId = (id: string) => {
     const r = refs.find((x) => x.id === id);
@@ -191,18 +218,41 @@ export function createMockRefs(opts: {
     return r;
   };
 
-  function imageTarget(r: MRef): string {
-    return r.ov.target ?? (r.kind === "keyframe" ? MOCK_REF_DEFAULTS.keyframe_target : MOCK_REF_DEFAULTS.target);
+  function defaults(): RefDefaults {
+    const src = (v: string | null): RefDefaultSource => (v ? "editor" : "default");
+    return {
+      target: chosen.target ?? MOCK_REF_DEFAULTS.target,
+      target_source: src(chosen.target),
+      keyframe_target: chosen.keyframe_target ?? MOCK_REF_DEFAULTS.keyframe_target,
+      keyframe_target_source: src(chosen.keyframe_target),
+    };
   }
 
-  function effective(r: MRef, target = imageTarget(r)): RefEffective {
+  function imageTarget(r: MRef): string {
+    const d = defaults();
+    return r.ov.target ?? (r.kind === "keyframe" ? d.keyframe_target! : d.target!);
+  }
+
+  /** the override a generate of (r, view) uses: the ref's fields, then the view's */
+  function merged(r: MRef, view: string | null): Override {
+    return { ...r.ov, ...(view ? r.vov[view] ?? {} : {}) };
+  }
+
+  function effective(r: MRef, view: string | null = null, target = imageTarget(r)): RefEffective {
     const m = IMAGE_MODELS[target] ?? IMAGE_MODELS.krea2;
+    const ov = merged(r, view);
+    const prompt = view ? `${r.base_prompt} View: ${view.replace(/^\d+_/, "")}.` : r.base_prompt;
+    const generated = (view ? r.views?.find((v) => v.view === view)?.takes : r.takes)?.some((t) => t.source === "generated");
     return {
-      prompt: typeof r.ov.prompt === "string" ? r.ov.prompt : r.base_prompt,
-      seed: r.ov.seed ?? stableSeed(r.id),
-      model: r.ov.model ?? m.model,
-      loras: r.ov.loras !== undefined ? r.ov.loras ?? null : null,
-      steps: r.ov.steps ?? m.steps,
+      prompt: typeof ov.prompt === "string" ? ov.prompt : prompt,
+      // `auto` keeps the stable seed until the ref has a generated take (then a new one each time)
+      seed: ov.seed ?? (generated ? null : stableSeed(r.id + (view ?? ""))),
+      seed_source: ov.seed != null ? "override" : generated ? "new" : "stable",
+      model: ov.model ?? m.model,
+      loras: ov.loras !== undefined ? ov.loras ?? null : null,
+      steps: ov.steps ?? m.steps,
+      width: 1024,
+      height: r.kind === "location" ? 576 : 1024,
       target,
     };
   }
@@ -213,12 +263,10 @@ export function createMockRefs(opts: {
     let r = refs.find((x) => x.id === id);
     if (!r) {
       const base_prompt = `The ${which === "first" ? "opening" : "closing"} frame of ${shot}: ${look}. How the shot ${which === "first" ? "opens" : "ends"}, the location and the characters as designed.`;
-      r = {
-        id, scope: "shot", kind: "keyframe", name: `${shot} ${which} frame`, path: `refs/shots/${shot}/${which}.png`,
-        exists: false, sha1: null, used_by: { final: [], proxy: [] }, prompt: base_prompt, base_prompt,
-        override: { fields: [], stale: false }, ov: {}, takes: [], picked: null, can_generate: true,
-        shot, which,
-      };
+      r = base(id, "keyframe", {
+        scope: "shot", name: `${shot} ${which} frame`, path: `refs/shots/${shot}/${which}.png`,
+        used_by: { final: [], proxy: [] }, prompt: base_prompt, base_prompt, shot, which,
+      });
       refs.push(r);
     }
     return r;
@@ -227,48 +275,58 @@ export function createMockRefs(opts: {
   /** Put the build's keyframe needs on the keyframe refs (listing needed ones before any take exists). */
   function syncKeyframes() {
     const needs = opts.needs?.() ?? [];
-    const byId = new Map(needs.map((n) => [`shot:${n.shot}:${n.which}`, n]));
+    const byKf = new Map(needs.map((n) => [`shot:${n.shot}:${n.which}`, n]));
     for (const n of needs) ensureKeyframe(n.shot, n.which);
     for (const r of refs) {
       if (r.kind !== "keyframe") continue;
-      const n = byId.get(r.id);
+      const n = byKf.get(r.id);
       r.need = n?.need ?? null;
       r.method = n?.method ?? null;
       r.target = n?.target ?? null;
       r.requested = n?.requested ?? false;
-      r.used_by = n ? { final: [n.shot], proxy: [n.shot] } : { final: [], proxy: [] };
+      r.script = n?.script ?? (n?.requested ? n.method : null);
+      r.reads = n ? true : null;
+      // real keyframe refs list no shots in used_by
+      r.used_by = { final: [], proxy: [] };
     }
   }
 
-  function addTake(r: MRef, view: string | null, opts: { status: RefTake["status"]; seed: string; source?: RefTake["source"]; note?: string; ext?: string; sourceName?: string; target?: string | null }): RefTake {
+  function addTake(r: MRef, view: string | null, o: { status: RefTake["status"]; seed: string; source?: RefTake["source"]; note?: string; ext?: string; sourceName?: string; target?: string | null }): RefTake {
     const list = view ? r.views!.find((v) => v.view === view)!.takes : r.takes;
-    const take = (list[list.length - 1]?.take ?? 0) + 1;
-    const eff = effective(r, opts.target ?? imageTarget(r));
-    const gen = opts.source !== "imported" && opts.source !== "frame";
+    const take = Math.max(0, ...list.map((t) => t.take), ...(trash.get(`${r.id}|${view ?? ""}`) ?? [])) + 1;
+    const eff = effective(r, view, o.target ?? imageTarget(r));
+    const gen = o.source !== "imported" && o.source !== "frame";
     const t: RefTake = {
-      take, status: opts.status, seed: opts.source === "imported" ? null : opts.seed, image: null,
-      source: opts.source ?? "generated", note: opts.note ?? "", prompt: gen ? eff.prompt : undefined,
-      model: gen ? eff.model : undefined, steps: gen ? eff.steps : undefined,
-      loras: eff.loras, queued: new Date().toISOString(), finished: null, save_notes: "",
+      take, view, status: o.status, usable: false, seed: gen ? o.seed : null, seed_source: gen ? "stable" : null,
+      image: null, audio: null, source: o.source ?? "generated", note: o.note ?? "", prompt: gen ? eff.prompt : null,
+      model: gen ? eff.model : null, steps: gen ? eff.steps : null, loras: eff.loras ?? null, width: null, height: null,
+      overrides: gen ? Object.keys(merged(r, view)).filter((k) => k !== "target") : [],
+      queued: new Date().toISOString(), finished: null, comfy_prompt_id: null, save_notes: "",
       ...(gen ? { target: eff.target } : {}),
     };
     list.push(t);
-    if (opts.status === "ok") finishTake(r, view, t, opts.ext, opts.sourceName);
+    if (o.status === "ok") finishTake(r, view, t, o.ext, o.sourceName);
     return t;
   }
 
   function finishTake(r: MRef, view: string | null, t: RefTake, ext?: string, sourceName?: string) {
     t.status = "ok";
+    t.usable = true;
     t.finished = new Date().toISOString();
-    t.image = takePath(r, view, t.take, ext ?? (r.kind === "voice" ? "wav" : "png"));
+    const file = takePath(r, view, t.take, ext ?? (r.kind === "voice" ? "wav" : "png"));
+    // a voice's candidate is audio: `image` stays null
+    if (r.kind === "voice") t.audio = file;
+    else t.image = file;
     if (r.kind === "keyframe") {
       const sub = sourceName ? `imported: ${sourceName}` : `still · t${String(t.take).padStart(2, "0")} · ${t.target ?? ""}`;
-      images.set(t.image, svgImage(r.name, sub, `${t.seed ?? sourceName}`, "location", 448, 256));
+      images.set(file, svgImage(r.name, sub, `${t.seed ?? sourceName}`, "location", 448, 256));
       t.width = 448;
       t.height = 256;
     } else if (r.kind !== "voice") {
       const sub = sourceName ? `imported: ${sourceName}` : `${view ? view.replace(/^\d+_/, "") + " · " : ""}t${String(t.take).padStart(2, "0")} · ${t.seed}`;
-      images.set(t.image, svgImage(r.name, sub, `${t.seed ?? sourceName}${view ?? ""}`, r.kind));
+      images.set(file, svgImage(r.name, sub, `${t.seed ?? sourceName}${view ?? ""}`, r.kind));
+      t.width = 1024;
+      t.height = r.kind === "location" ? 576 : 1024;
     }
   }
 
@@ -276,16 +334,20 @@ export function createMockRefs(opts: {
     if (!r.path) return;
     const path = r.path;
     r.sha1 = hash(`${r.id}${Date.now()}${Math.random()}`).toString(16).padStart(8, "0");
-    if (r.views) {
+    r.cleared = false;
+    if (r.views?.length) {
       const urls = r.views.map((v) => images.get(v.takes.find((t) => t.take === v.picked)?.image ?? "") ?? "");
       images.set(path, svgSheet(r.name, urls));
-    } else {
+    } else if (r.kind !== "voice") {
       const t = r.takes.find((x) => x.take === r.picked);
       const img = t?.image ? images.get(t.image) : undefined;
       if (img) images.set(path, img);
     }
     r.exists = true;
   }
+
+  /** take numbers moved to _trash, per ref|view (a new take never reuses one) */
+  const trash = new Map<string, number[]>();
 
   // ---- the starting state -------------------------------------------------
   const seedOf = (r: MRef, n: number) => stableSeed(`${r.id}#${n}`);
@@ -300,8 +362,10 @@ export function createMockRefs(opts: {
   charViews("subject:ada", [2, 2, 1, 2], [1, 2, 1, 1]);
   charViews("subject:bo", [2, 1, 1, 0], [2, 1, null, null]);
   charViews("subject:rex", [1, 0, 0, 0], [null, null, null, null]);
-  charViews("subject:narrator", [1, 1, 1, 1], [1, 1, 1, 1]);
   {
+    // Ada's face view has a prompt of its own
+    const ada = byId("subject:ada");
+    ada.vov["04_face"] = { prompt: `${ada.base_prompt} View: face. Close on the face, glasses catching the light.` };
     const k = byId("subject:kettle");
     for (let i = 0; i < 3; i++) addTake(k, null, { status: "ok", seed: seedOf(k, i) });
     k.picked = 2;
@@ -324,7 +388,7 @@ export function createMockRefs(opts: {
     va.sha1 = "5eed0000";
     // Phase 8.5: sh070 (Wan 2.2 I2V) has a generated first frame, live
     const kf = ensureKeyframe("sh070", "first");
-    addTake(kf, null, { status: "ok", seed: seedOf(kf, 0) });
+    addTake(kf, null, { status: "ok", seed: seedOf(kf, 0), target: MOCK_REF_DEFAULTS.keyframe_target });
     kf.picked = 1;
     setLive(kf);
   }
@@ -352,19 +416,60 @@ export function createMockRefs(opts: {
     r.used_by = { final: used, proxy: used } as Record<Pass, string[]>;
   }
 
+  /** What an edit keyframe target is fed: the shot's characters (three-quarter view), then its plate, up to max_refs. */
+  function editRefs(r: MRef, target: string): EditRef[] | undefined {
+    const max = IMAGE_MODELS[target]?.edit;
+    if (!max || !r.shot) return undefined;
+    const uses = usesOf(shots.indexOf(r.shot)).map((u) => byId(u.ref)).filter((x) => x.kind !== "voice" && x.exists);
+    const order = (x: MRef) => (x.kind === "character" ? 0 : x.kind === "location" ? 2 : 1);
+    return [...new Set(uses)].sort((a, b) => order(a) - order(b)).slice(0, max).map((x) => {
+      if (x.kind === "location") return { id: x.id, role: "plate", path: x.path };
+      const v = x.views?.find((y) => y.view === "01_threequarter");
+      const t = v?.takes.find((y) => y.take === v.picked);
+      return { id: x.id, role: "subject", view: "01_threequarter", path: t?.image ?? x.path };
+    });
+  }
+
+  const fieldsOf = (o: Override) => Object.keys(o).filter((k) => (o as Record<string, unknown>)[k] != null).sort();
+
   function view(r: MRef): Ref {
-    const { base_prompt, ov, subject, ...rest } = r;
-    void subject;
-    const eff = effective(r);
-    return JSON.parse(JSON.stringify({
+    const { base_prompt, ov, vov, subject, vcleared, why, ...rest } = r;
+    void base_prompt;
+    const chars = !!r.views?.length;
+    const tgt = imageTarget(r);
+    const eff = r.why ? null : chars ? { target: tgt } : effective(r, null, tgt);
+    const out: Ref = {
       ...rest,
-      prompt: eff.prompt,
-      override: { fields: Object.keys(ov).sort(), stale: false },
-      // not in the contract yet (see TODO(contract) in api.ts): the editor reads them if present
+      key: key(r.id),
+      subject: subject ?? null,
+      // a character's own prompt is its sheet text; each view has what it generates with
+      prompt: chars || !eff ? r.base_prompt : eff.prompt ?? r.base_prompt,
+      can_generate: !why,
+      why_not: why ?? null,
+      override: { fields: fieldsOf(ov), stale: false, values: ov },
       override_values: ov,
       effective: eff,
-      built_prompt: base_prompt,
-    }));
+      built_prompt: r.base_prompt,
+      cleared: !!r.cleared,
+      views: chars
+        ? r.views!.map((v): RefView => {
+          const m = merged(r, v.view);
+          const ve = why ? null : effective(r, v.view, tgt);
+          return {
+            view: v.view, picked: v.picked, cleared: !!vcleared[v.view],
+            prompt: ve?.prompt ?? `${r.base_prompt} View: ${v.view.replace(/^\d+_/, "")}.`,
+            override: { fields: fieldsOf(m), stale: false, values: m },
+            effective: ve,
+            takes: v.takes,
+          };
+        })
+        : [],
+    } as Ref & { key: string; subject: string | null };
+    if (r.kind === "keyframe") {
+      const er = editRefs(r, tgt);
+      if (er) out.edit_refs = er;
+    }
+    return JSON.parse(JSON.stringify(out));
   }
 
   function simulate(r: MRef, v: string | null, t: RefTake, pid: string) {
@@ -377,6 +482,7 @@ export function createMockRefs(opts: {
         opts.emit("progress", { value: k, max, prompt_id: pid, node: "9" });
         await opts.wait(250);
       }
+      if (t.status !== "queued") return; // discarded meanwhile
       finishTake(r, v, t);
       opts.emit("executing", null);
       opts.emit("execution_success", { prompt_id: pid });
@@ -384,17 +490,84 @@ export function createMockRefs(opts: {
     });
   }
 
-  function pickSeed(r: MRef, list: RefTake[], mode: SeedMode, typed: string | null, forceNew: boolean): string {
+  function pickSeed(r: MRef, view: string | null, list: RefTake[], mode: SeedMode, typed: string | null, forceNew: boolean): string {
     if (typed) return typed;
-    if (mode === "same") return list[list.length - 1]?.seed ?? effective(r).seed;
+    if (mode === "same") return list[list.length - 1]?.seed ?? stableSeed(r.id + (view ?? ""));
     if (mode === "new" || forceNew) return randomSeed();
-    return list.some((t) => t.source === "generated") ? randomSeed() : effective(r).seed;
+    return effective(r, view).seed ?? randomSeed();
+  }
+
+  function listOf(r: MRef, view: string | null): { list: RefTake[]; rv?: RefView } {
+    if (r.views?.length) {
+      if (!view) throw new RefError(`${r.name} is a character: name a view`, 400);
+      const rv = r.views.find((v) => v.view === view);
+      if (!rv) throw new RefError(`No view ${view}`, 404);
+      return { list: rv.takes, rv };
+    }
+    return { list: r.takes };
+  }
+
+  function doPick(r: MRef, view: string | null, take: number) {
+    const { rv } = listOf(r, view);
+    if (rv) {
+      rv.picked = take;
+      r.vcleared[rv.view] = false;
+      if (r.views!.every((v) => v.picked != null)) setLive(r);
+    } else {
+      r.picked = take;
+      if (r.kind === "voice") {
+        r.exists = true;
+        r.cleared = false;
+        r.sha1 = hash(`${r.id}${Date.now()}`).toString(16);
+      } else setLive(r);
+    }
+    opts.onLiveChange(r.id);
+  }
+
+  function doClear(r: MRef, view: string | null) {
+    const { rv } = listOf(r, view);
+    if (rv) {
+      rv.picked = null;
+      r.vcleared[rv.view] = true;
+    } else {
+      r.picked = null;
+      r.cleared = true;
+    }
+    r.exists = false;
+    r.sha1 = null;
+    if (r.path) images.delete(r.path);
+    opts.onLiveChange(r.id);
+  }
+
+  function importFile(r: MRef, view: string | null, name: string) {
+    listOf(r, view);
+    const audio = r.kind === "voice";
+    if (!r.path) throw new RefError(`${r.id}: the series config names no file for it`, 400);
+    if (audio ? !/\.(wav|mp3|flac|ogg|m4a)$/i.test(name) : !/\.(png|jpe?g|webp)$/i.test(name)) {
+      throw new RefError(audio ? `${name}: a voice takes wav, mp3, flac, ogg or m4a` : `${name}: an image must be png, jpg, jpeg or webp`, 400);
+    }
+    return addTake(r, view, { status: "ok", seed: "", source: "imported", sourceName: name, ext: audio ? (name.split(".").pop() ?? "wav") : "png" });
+  }
+
+  function refFor(id: string): MRef {
+    const m = /^shot:(.+):(first|last)$/.exec(id);
+    return m ? ensureKeyframe(m[1], m[2] as "first" | "last") : byId(id);
   }
 
   return {
     list: () => {
       syncKeyframes();
       return refs.map(view);
+    },
+    defaults,
+    setDefaults(fields) {
+      for (const k of ["target", "keyframe_target"] as const) {
+        if (!(k in fields)) continue;
+        const v = fields[k] ?? null;
+        if (v != null && !IMAGE_MODELS[v]) throw new RefError(`${v} isn't an image target`, 400);
+        chosen[k] = v;
+      }
+      return defaults();
     },
     info(id) {
       const r = refs.find((x) => x.id === id);
@@ -404,19 +577,10 @@ export function createMockRefs(opts: {
     addImage: (path, url) => void images.set(path, url),
     unpick(ref, v) {
       const r = byId(ref);
-      if (r.views && r.views.length) {
-        if (!v) throw new RefError(`${r.name} is a character: clear one view`, 400);
-        const rv = r.views.find((x) => x.view === v);
-        if (!rv) throw new RefError(`No view ${v}`, 404);
-        rv.picked = null;
-      } else {
-        r.picked = null;
-      }
-      r.exists = false;
-      r.sha1 = null;
-      if (r.path) images.delete(r.path);
-      opts.onLiveChange(r.id);
-      opts.emit("h3pipe.ref", { ep: opts.ep, ref: r.id, view: v, take: null, status: "cleared" });
+      if (r.kind === "voice") throw new RefError("A voice can't be cleared", 400);
+      const prev = v ? r.views?.find((x) => x.view === v)?.picked ?? null : r.picked;
+      doClear(r, v);
+      opts.emit("h3pipe.ref", { ep: opts.ep, ref: r.id, view: v, take: prev, status: "cleared" });
       syncKeyframes();
       return view(r);
     },
@@ -435,19 +599,20 @@ export function createMockRefs(opts: {
     },
     image: (path) => images.get(path),
     generate(req) {
-      const m = /^shot:(.+):(first|last)$/.exec(req.ref);
-      const r = m ? ensureKeyframe(m[1], m[2] as "first" | "last") : byId(req.ref);
+      const r = refFor(req.ref);
       if (r.kind === "voice") throw new RefError("Nothing generates voices yet: import a recording.", 400);
+      if (r.why) throw new RefError(r.why, 400);
       if (req.count < 1 || req.count > 16) throw new RefError("count is 1 to 16", 400);
       if (req.target != null && !IMAGE_MODELS[req.target]) throw new RefError(`${req.target} isn't an image target`, 400);
-      const views: (string | null)[] = r.views ? (req.view ? [req.view] : VIEWS.map((v) => v.view)) : [null];
+      if (req.prompt != null && r.views?.length && !req.view) throw new RefError(`${r.id} is a character: a prompt is per view`, 400);
+      const views: (string | null)[] = r.views?.length ? (req.view ? [req.view] : VIEWS.map((v) => v.view)) : [null];
       const out: RefGenerateResult = { queued: [], errors: [] };
       for (let c = 0; c < req.count; c++) {
         let shared: string | null = null; // all four views share one seed per candidate
         for (const v of views) {
           const list = v ? r.views!.find((x) => x.view === v)!.takes : r.takes;
-          // count > 1: each candidate gets a new seed
-          const seed: string = shared ?? pickSeed(r, list, req.seed_mode, req.seed, req.count > 1);
+          // count > 1: each candidate after the first gets a new seed
+          const seed: string = shared ?? pickSeed(r, v, list, req.seed_mode, req.seed, c > 0);
           shared = seed;
           const t = addTake(r, v, { status: "queued", seed, note: req.note, target: req.target ?? null });
           // one-off settings for this call land in the candidate's record
@@ -457,7 +622,7 @@ export function createMockRefs(opts: {
           if (req.loras != null) t.loras = req.loras;
           const pid = opts.nextPrompt();
           t.comfy_prompt_id = pid;
-          out.queued.push({ ref: r.id, view: v, take: t.take, prompt_id: pid, seed });
+          out.queued.push({ ref: r.id, view: v, take: t.take, prompt_id: pid, seed, target: t.target ?? imageTarget(r) });
           opts.emit("h3pipe.ref", { ep: opts.ep, ref: r.id, view: v, take: t.take, status: "queued" });
           simulate(r, v, t, pid);
         }
@@ -466,51 +631,59 @@ export function createMockRefs(opts: {
     },
     pick(req) {
       const r = byId(req.ref);
-      let rv: RefView | undefined;
-      if (r.views) {
-        if (!req.view) throw new RefError(`${r.name} is a character: pick a take per view`, 400);
-        rv = r.views.find((v) => v.view === req.view);
-        if (!rv) throw new RefError(`No view ${req.view}`, 404);
-      }
-      const list = rv ? rv.takes : r.takes;
+      const { list } = listOf(r, req.view ?? null);
       const t = list.find((x) => x.take === req.take);
       if (!t) throw new RefError(`No take ${req.take}`, 404);
       if (t.status !== "ok") throw new RefError(`t${String(req.take).padStart(2, "0")} is ${t.status}; only a finished candidate can be picked`, 409);
-      if (rv) {
-        rv.picked = req.take;
-        if (r.views!.every((v) => v.picked != null)) setLive(r);
-      } else {
-        r.picked = req.take;
-        if (r.kind === "voice") {
-          r.exists = true;
-          r.sha1 = hash(`${r.id}${Date.now()}`).toString(16);
-        } else setLive(r);
-      }
-      opts.onLiveChange(r.id);
+      doPick(r, req.view ?? null, req.take);
       return view(r);
     },
     import(req) {
-      const r = byId(req.ref);
-      if (r.views && !req.view) throw new RefError("Import into one view of a character", 400);
+      const r = refFor(req.ref);
       if (!fsFileExists(req.source_path)) throw new RefError(`${req.source_path} doesn't exist on the ComfyUI machine`, 404);
       const name = req.source_path.split(/[\\/]/).pop() ?? "file";
-      const audio = r.kind === "voice";
-      if (audio !== /\.(wav|mp3|flac|ogg|m4a)$/i.test(name)) throw new RefError(audio ? "A voice takes an audio file" : "Import an image file", 400);
-      const t = addTake(r, req.view ?? null, { status: "ok", seed: "", source: "imported", sourceName: name, ext: audio ? "wav" : "png" });
+      const t = importFile(r, req.view ?? null, name);
       opts.emit("h3pipe.ref", { ep: opts.ep, ref: r.id, view: req.view ?? null, take: t.take, status: "ok" });
+      if (req.pick) {
+        doPick(r, req.view ?? null, t.take);
+        opts.emit("h3pipe.ref", { ep: opts.ep, ref: r.id, view: req.view ?? null, take: t.take, status: "picked" });
+      }
       return { ...JSON.parse(JSON.stringify(t)), view: req.view ?? null };
+    },
+    upload(req) {
+      const r = refFor(req.ref);
+      const t = importFile(r, req.view, req.name);
+      opts.emit("h3pipe.ref", { ep: opts.ep, ref: r.id, view: req.view, take: t.take, status: "ok" });
+      if (req.pick) {
+        doPick(r, req.view, t.take);
+        opts.emit("h3pipe.ref", { ep: opts.ep, ref: r.id, view: req.view, take: t.take, status: "picked" });
+      }
+      return { ...JSON.parse(JSON.stringify(t)), view: req.view, original_name: req.name };
+    },
+    discard(req) {
+      const r = refFor(req.ref);
+      const { list, rv } = listOf(r, req.view);
+      const i = list.findIndex((x) => x.take === req.take);
+      if (i < 0) throw new RefError(`${r.id}${req.view ? ` ${req.view}` : ""} has no take ${req.take}`, 404);
+      if (list[i].status === "queued") throw new RefError(`t${String(req.take).padStart(2, "0")} is still queued`, 409);
+      const [gone] = list.splice(i, 1);
+      const tk = `${r.id}|${req.view ?? ""}`;
+      trash.set(tk, [...(trash.get(tk) ?? []), gone.take]);
+      // a voice is never cleared: its picked take is only moved (the live file stays)
+      const live = r.kind !== "voice" && (rv ? rv.picked : r.picked) === req.take;
+      if (live) doClear(r, req.view);
+      opts.emit("h3pipe.ref", { ep: opts.ep, ref: r.id, view: req.view, take: req.take, status: "discarded" });
+      if (live) opts.emit("h3pipe.ref", { ep: opts.ep, ref: r.id, view: req.view, take: req.take, status: "cleared" });
+      return view(r);
     },
     keyframe(req) {
       const id = `shot:${req.shot}:${req.which}`;
       const r = ensureKeyframe(req.shot, req.which);
       const f = req.from;
       const t = addTake(r, null, { status: "queued", seed: "", source: "frame" });
-      t.seed = null;
-      t.prompt = undefined;
-      t.model = undefined;
-      t.steps = undefined;
       t.from = { ...f };
       t.status = "ok";
+      t.usable = true;
       t.finished = new Date().toISOString();
       t.image = takePath(r, null, t.take);
       t.width = 448;
@@ -518,7 +691,7 @@ export function createMockRefs(opts: {
       t.save_notes = `frame ${f.frame} of ${f.frames} of ${f.shot} ${f.pass} t${String(f.take).padStart(2, "0")}`;
       images.set(t.image, svgImage(`${f.shot} t${String(f.take).padStart(2, "0")}`, `frame ${f.frame} → ${req.shot} ${req.which}`, `${f.shot}${f.take}${f.frame}`, "location", 448, 256));
       opts.emit("h3pipe.ref", { ep: opts.ep, ref: id, view: null, take: t.take, status: "ok" });
-      if (req.pick || (req.pick == null && !r.exists)) {
+      if (req.pick || (req.pick == null && !r.exists && !r.cleared)) {
         r.picked = t.take;
         setLive(r);
         opts.onLiveChange(r.id);
@@ -526,16 +699,24 @@ export function createMockRefs(opts: {
       }
       return view(r);
     },
-    putOverride(ref, fields) {
-      const r = byId(ref);
+    putOverride(ref, fields, v) {
+      const r = refFor(ref);
       if (r.kind === "voice") throw new RefError("A voice has no generation settings", 400);
-      for (const [k, v] of Object.entries(fields) as [keyof Override, unknown][]) {
-        if (v === null || v === "") delete r.ov[k];
-        else (r.ov as Record<string, unknown>)[k] = k === "loras" ? (v as Lora[]) : v;
+      if (r.views?.length && !v && fields.prompt != null) throw new RefError(`${r.id} is a character: a prompt override is per view`, 400);
+      if (v && fields.target != null) throw new RefError("an image target override is per ref, not per view", 400);
+      if (v) listOf(r, v);
+      const dst: Override = v ? (r.vov[v] ??= {}) : r.ov;
+      for (const [k, val] of Object.entries(fields) as [keyof Override, unknown][]) {
+        if (val === null || val === "") delete dst[k];
+        else (dst as Record<string, unknown>)[k] = k === "loras" ? (val as Lora[]) : val;
       }
+      return { ...merged(r, v ?? null), stale: false };
     },
-    deleteOverride(ref) {
-      byId(ref).ov = {};
+    deleteOverride(ref, v) {
+      const r = refFor(ref);
+      if (v) delete r.vov[v];
+      else r.ov = {};
+      return { ...merged(r, v ?? null), stale: false };
     },
   };
 }

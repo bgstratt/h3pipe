@@ -3,10 +3,10 @@
 
 import { useSyncExternalStore } from "react";
 import type { ToastAction } from "./host";
-import type { RefTargetChoice } from "./lib/imageTargets";
 import type { RefFilter } from "./lib/refs";
 import type {
-  BuildResult, Config, EpisodeStatus, EpisodeSummary, ModelList, Pass, Ref, RefDefaults, ShotDetail, TakeRef, TargetList,
+  BuildResult, Config, EpisodeStatus, EpisodeSummary, ModelList, Pass, Ref, RefDefaults, RefGenerateMissingResult, ShotDetail, TakeRef,
+  TargetList,
 } from "./types";
 
 // ---------------------------------------------------------------------------
@@ -144,6 +144,24 @@ export interface MissingPanelState {
   target: string | null;
 }
 
+/** A file being uploaded into a ref slot (drag and drop, or the file picker). */
+export interface UploadState {
+  /** the file's name */
+  name: string;
+  /** bytes sent / total (total 0: unknown) */
+  sent: number;
+  total: number;
+  /** set when it failed (the slot shows it until dismissed or retried) */
+  error?: string;
+  /** finished: the new candidate's take */
+  take?: number;
+}
+
+/** The key of a ref slot's upload: the ref, and a character's view. */
+export function uploadKey(ref: string, view?: string | null): string {
+  return `${ref}|${view ?? ""}`;
+}
+
 export interface AppState {
   config: Config | null;
   configError: string | null;
@@ -186,10 +204,12 @@ export interface AppState {
   refSel: { ref: string; view: string | null; take: number } | null;
   /** ComfyUI prompt id -> the ref take it generates */
   refPrompts: Record<string, RefTakeRef>;
-  /** Phase 8.5: the series config's `refs` defaults as /refs sends them, by episode */
+  /** the episode's image targets for refs and keyframes, as /refs sends them, by episode */
   refDefaults: Record<string, RefDefaults | null>;
-  /** Phase 8.5: the Refs tab's image-model choice for this session (null: the series default) */
-  refTargetChoice: RefTargetChoice;
+  /** Phase 8.6: uploads into ref slots, by uploadKey(ref, view) */
+  uploads: Record<string, UploadState>;
+  /** Phase 8.6: the last Generate missing, by episode (what it queued, picked and skipped) */
+  missingResult: Record<string, RefGenerateMissingResult & { pass: Pass; at: number }>;
   /** Phase 8.5: the Refs tab scrolls to this ref (n changes on every request) */
   refFocus: { id: string; n: number } | null;
   menu: MenuState | null;
@@ -257,7 +277,9 @@ export function initialState(prefs: Prefs = {}): AppState {
     refSel: null,
     refPrompts: {},
     refDefaults: {},
-    refTargetChoice: {},
+    uploads: {},
+    missingResult: {},
+
     refFocus: null,
     menu: null,
     redo: null,

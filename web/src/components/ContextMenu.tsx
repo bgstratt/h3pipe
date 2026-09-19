@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
-  cancelTake, clearRef, closeMenu, copyText, generateKeyframe, keyframeFromTake, loadRefs, openInspector, openRedo, openSidecar,
+  cancelTake, clearRef, closeMenu, copyText, discardTake, generateKeyframe, keyframeFromTake, loadRefs, openInspector, openRedo, openSidecar,
   openViewer, pickTake, playAll, requestRender, showMissingRefs,
 } from "../actions";
 import { absPath, tn } from "../lib/format";
@@ -192,6 +192,16 @@ export function ContextMenu() {
               <i className="pi pi-ban" /> Cancel this render
             </button>
           )}
+          <button
+            className="h3-menu-danger"
+            disabled={take.status === "queued"}
+            title={take.status === "queued"
+              ? "Still queued: cancel the render first"
+              : `Move ${tn(take.take)}'s files to the _trash folder beside them (nothing is deleted)${isCut ? "; the cut goes back to the latest usable take" : ""}`}
+            onClick={run(() => void discardTake({ ep, pass: menu.pass, shot: menu.shot, take: take.take }))}
+          >
+            <i className="pi pi-trash" /> Discard take…
+          </button>
           {common}
         </>
       ) : (

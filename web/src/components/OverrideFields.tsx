@@ -34,7 +34,7 @@ export interface OverrideFieldsProps {
   loraChoices?: string[] | null;
   /** Phase 8: the prompt can't be overridden (a retargeted shot): show this
    * note and the effective prompt read-only instead of the editor. */
-  promptLocked?: { note: ReactNode; text: string } | null;
+  promptLocked?: { note: ReactNode; text: string; label?: string } | null;
   /** Phase 8.5: the negative field (targets with a `negative` param); absent hides it.
    * `effective` is the negative a render uses without an override, `source` where it comes from. */
   negative?: { effective: string; source: string; note?: string | null } | null;
@@ -52,7 +52,7 @@ export function OverrideFields(p: OverrideFieldsProps) {
       {locked ? (
         <>
           <div className="h3-row">
-            <span className="h3-h h3-grow">Prompt <span className="h3-muted">(written by the target, read-only)</span></span>
+            <span className="h3-h h3-grow">Prompt <span className="h3-muted">({locked.label ?? "written by the target, read-only"})</span></span>
           </div>
           <div className="h3-note h3-note-info h3-small">{locked.note}</div>
           <pre className="h3-pre" style={{ maxHeight: 260 }}>{locked.text}</pre>

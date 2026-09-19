@@ -25,6 +25,7 @@ import { ResolvedNotes, TargetReadinessNote } from "./Readiness";
 import { PassToggle } from "./ShotsTab";
 import { TargetSelect, useTargetPickers, useTargets } from "./Targets";
 import { Badges } from "./Thumb";
+import { DropSlot, UploadButton } from "./Upload";
 
 /** The shot's video target: a picker over the video targets (the default
  * marked). A change saves the override's `target` for both passes. */
@@ -36,7 +37,7 @@ function TargetPicker({ d, shot }: { d: ShotDetail | undefined; shot: string }) 
   const current = shotTarget(src, seriesDefault);
   const built = src?.built_target ?? null;
   const note = retargetNote(list, src);
-  const tsrc = s?.target_source;
+  const tsrc = d?.target_source ?? s?.target_source;
   const srcNote = targetSourceNote(tsrc, targetLabel(list, seriesDefault));
   // with target_source known, only a shot override can be reverted; else the old rule
   const canRevert = tsrc ? tsrc === "override" : isRetargeted(src);
@@ -76,6 +77,8 @@ function targetSourceNote(src: string | null | undefined, episodeLabel: string):
     case "override": return "set for this shot in the editor";
     case "script": return "set by the script (a target: line or a profile)";
     case "request": return "set for this run";
+    case "series": return `the series config's target (${episodeLabel})`;
+    case "default": return `the built-in default (${episodeLabel})`;
     default: return null;
   }
 }
@@ -130,23 +133,28 @@ function RefsUsed({ shot, d }: { shot: string; d: ShotDetail | undefined }) {
       <div className="h3-refs-used">
         {tiles.map((t) => {
           const url = t.image ? api().refFileUrl(ep, t.image, t.version) : null;
-          const canOpen = known.has(t.id);
-          return (
+          const canOpen = !!t.refId && known.has(t.refId);
+          const tile = (
             <div
-              key={t.id}
-              className={`h3-ru h3-ru-${t.status}${canOpen ? " h3-ru-link" : ""}`}
-              title={canOpen ? t.title : t.title.replace(/\nClick:.*$/, "")}
-              onClick={() => canOpen && focusRef(t.id)}
+              className={`h3-ru h3-ru-${t.status}${canOpen ? " h3-ru-link" : ""}${t.audio ? " h3-ru-audio" : ""}`}
+              title={(canOpen ? t.title : t.title.replace(/\nClick:.*$/, "")) + (t.keyframe ? "\nDrop an image here: it becomes the live keyframe" : "")}
+              onClick={() => canOpen && focusRef(t.refId!)}
             >
               <div
                 className={`h3-thumb${url ? "" : " h3-empty"}`}
                 style={{ width: 64, height: 44, ...(url ? { backgroundImage: `url("${url}")`, backgroundSize: "contain" } : {}) }}
               >
-                {!url && <span className="h3-small">{t.status === "live" ? "" : "—"}</span>}
+                {t.audio ? <i className="pi pi-volume-up" /> : !url && <span className="h3-small">{t.status === "live" ? "" : "—"}</span>}
               </div>
               <span className="h3-small h3-ell" style={{ maxWidth: 64 }}>{t.label}</span>
               <span className={`h3-small h3-ru-status`}>{t.statusText}</span>
             </div>
+          );
+          // a keyframe slot takes a dropped image (uploaded and picked)
+          return t.keyframe && t.refId ? (
+            <DropSlot key={t.id} refId={t.refId} view={null} kind="image">{tile}</DropSlot>
+          ) : (
+            <div key={t.id}>{tile}</div>
           );
         })}
       </div>
@@ -162,6 +170,16 @@ function RefsUsed({ shot, d }: { shot: string; d: ShotDetail | undefined }) {
           >
             <i className={busyPrev ? "pi pi-spin pi-spinner" : "pi pi-link"} /> From previous{prev ? ` (${prev})` : ""}
           </button>
+          {tiles.filter((t) => t.keyframe && t.refId).map((t) => (
+            <UploadButton
+              key={`up-${t.id}`}
+              refId={t.refId!}
+              view={null}
+              kind="image"
+              label={`Upload ${t.role === "last" ? "last" : "first"}…`}
+              title={`Upload an image from this computer as ${shot}'s ${t.role} keyframe, live at once (or drop one on its tile)`}
+            />
+          ))}
           {KEYFRAME_ENDS.filter((end) => end === "first" || kf.last?.exists).map((end) => (
             <button
               key={end}
@@ -197,6 +215,25 @@ function TakeReference({ d, take }: { d: ShotDetail; take: number | null }) {
 }
 
 const RECT_KEY = "h3pipe.inspector.rect";
+
+/** What the server says about the shot's next render (an ignored prompt
+ * override, an audio fallback), and why it can't render on its target. */
+function RenderNotes({ d }: { d: ShotDetail }) {
+  const notes = d.effective.notes ?? [];
+  const err = d.effective.error;
+  if (!notes.length && !err) return null;
+  return (
+    <div className="h3-col" style={{ gap: 2 }}>
+      {err && <div className="h3-note h3-note-err h3-small">{err}</div>}
+      {notes.length > 0 && (
+        <div className="h3-note h3-note-info h3-small">
+          <b>Next render:</b>
+          <ul className="h3-missing-list">{notes.map((n) => <li key={n}>{n}</li>)}</ul>
+        </div>
+      )}
+    </div>
+  );
+}
 
 function Built({ d }: { d: ShotDetail }) {
   const { list } = useTargets();
@@ -432,6 +469,8 @@ export function Inspector() {
           <TargetPicker d={d} shot={shot} />
           {d && <TakeResolved d={d} take={selTake ?? ct?.take ?? null} />}
           {d && <TakeReference d={d} take={selTake ?? ct?.take ?? null} />}
+          {d && <RenderNotes d={d} />}
+
           <MissingRefsNote blocked={missing.length ? [{ shot, refs: missing }] : []} allow={allowMissing} setAllow={setAllowMissing} />
           <RefsUsed shot={shot} d={d} />
           <div className="h3-row h3-wrap">

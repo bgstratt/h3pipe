@@ -179,11 +179,10 @@ describe("the episode target", () => {
 describe("render skips for a missing file", () => {
   const files = [req("ic.safetensors", { param: "loras", folder: "loras" })];
 
-  it("spots them by their files or their reason, not missing refs or mismatches", () => {
+  it("spots them by their missing_files (the settled shape), not missing refs or mismatches", () => {
     expect(isMissingFileSkip({ shot: "a", reason: "x", missing_files: files })).toBe(true);
-    expect(isMissingFileSkip({ shot: "a", reason: "x", missing: files })).toBe(true);
-    expect(isMissingFileSkip({ shot: "a", reason: "required file missing: ic.safetensors" })).toBe(true);
-    expect(isMissingFileSkip({ shot: "a", reason: "ltx2_ingredients is not ready" })).toBe(true);
+    expect(isMissingFileSkip({ shot: "a", reason: "model files not installed: ic.safetensors", missing_files: [] })).toBe(false);
+
     expect(isMissingFileSkip({ shot: "a", reason: "has a usable take (pass redo: true)" })).toBe(false);
     expect(isMissingFileSkip({ shot: "a", reason: "missing refs", missing_refs: [{ slot: "Picture 1", kind: "image", path: "p" }] })).toBe(false);
   });
@@ -275,7 +274,7 @@ describe("mock readiness and the episode target", () => {
     let st = await api.episode(ep, "proxy");
     expect(st).toMatchObject({ target: "minimax_h3_ref2va", target_source: "series", series_target: "minimax_h3_ref2va" });
     const src = (id: string) => st.shots.find((s) => s.shot === id)!.target_source;
-    expect([src("sh010"), src("sh030"), src("sh040")]).toEqual(["episode", "override", "script"]);
+    expect([src("sh010"), src("sh030"), src("sh040")]).toEqual(["series", "override", "script"]); // series.json names the target (as built: "series" | "default")
 
     const r = await api.putEpisodeTarget(ep, WAN_VACE);
     expect(r).toMatchObject({ target: WAN_VACE, target_source: "editor" });
@@ -283,6 +282,7 @@ describe("mock readiness and the episode target", () => {
     st = await api.episode(ep, "proxy");
     expect(st.target_source).toBe("editor");
     expect(st.shots.find((s) => s.shot === "sh010")!.target).toBe(WAN_VACE);
+    expect(st.shots.find((s) => s.shot === "sh010")!.target_source).toBe("episode");
     expect(st.shots.find((s) => s.shot === "sh030")!.target).toBe("ltx2");
     expect(st.shots.find((s) => s.shot === "sh040")!.target).toBe("minimax_h3_ref2va");
 

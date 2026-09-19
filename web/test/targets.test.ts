@@ -5,12 +5,12 @@ import { describe, expect, it, vi } from "vitest";
 import { planRedo, type RedoPlan } from "../src/actions";
 import { createHttpApi, type Transport } from "../src/api";
 import {
-  comboChoices, isRetargeted, pickerChoices, pickerSpec, renderWarnings, retargetNote, runSize, seriesDefaultTarget,
+  comboChoices, isRetargeted, pickerChoices, pickerSpec, retargetNote, runSize, seriesDefaultTarget,
   shotTarget, shotTargetBadge, takeTargetBadge, targetBadges, targetShort, videoTargets,
 } from "../src/lib/targets";
 import { createMockApi } from "../src/mock/mockApi";
 import { MOCK_TARGETS } from "../src/mock/mockTargets";
-import type { RenderResult, ShotDetail, TargetList } from "../src/types";
+import type { ShotDetail, TargetList } from "../src/types";
 
 const H3 = "minimax_h3_ref2va";
 const LTX = "ltx2";
@@ -142,37 +142,6 @@ describe("runSize", () => {
   });
 });
 
-describe("renderWarnings", () => {
-  const base: RenderResult = { queued: [], skipped: [], errors: [] };
-  it("reads a top-level warnings array of strings or objects", () => {
-    const r = { ...base, warnings: ["one", { shot: "sh010", warning: "audio downgraded to generate" }, { shot: "sh020", message: "m" }] };
-    expect(renderWarnings(r)).toEqual([
-      { text: "one", shot: undefined },
-      { shot: "sh010", text: "audio downgraded to generate" },
-      { shot: "sh020", text: "m" },
-    ]);
-  });
-  it("reads warnings on queued, skipped and errored entries, and dedupes", () => {
-    const r = {
-      ...base,
-      queued: [{ shot: "sh010", take: 1, prompt_id: "p", seed: "1", seed_source: "new", warnings: ["no voice ref"] }],
-      skipped: [{ shot: "sh020", reason: "x", warning: "w" } as unknown as RenderResult["skipped"][number]],
-      errors: [{ shot: "sh030", error: "e", warnings: [{ text: "t" }] }],
-      warnings: [{ shot: "sh010", warning: "no voice ref" }],
-    } as RenderResult;
-    expect(renderWarnings(r)).toEqual([
-      { shot: "sh010", text: "no voice ref" },
-      { shot: "sh020", text: "w" },
-      { shot: "sh030", text: "t" },
-    ]);
-  });
-  it("never throws on odd shapes", () => {
-    expect(renderWarnings(undefined)).toEqual([]);
-    expect(renderWarnings({ warnings: "just one" } as unknown as RenderResult)).toEqual([{ text: "just one", shot: undefined }]);
-    expect(renderWarnings({ queued: null, skipped: [null, 3], errors: "x", warnings: [null, 5, {}, ""] } as unknown as RenderResult)).toEqual([]);
-  });
-});
-
 describe("planRedo with a target", () => {
   const d = {
     shot: "sh020", pass: "proxy", index: 0, built: {}, built_prompt: "BUILT", override: {}, override_stale: false, takes: [],
@@ -285,7 +254,7 @@ describe("mock: retargeting", () => {
     expect(d.effective.width).toBe(448);
   });
 
-  it("renders on a one-off target and warns about the voice", async () => {
+  it("renders on a one-off target; a retargeted shot's notes warn about the voice", async () => {
     vi.useFakeTimers();
     try {
       const api = createMockApi(() => {}, { latency: 0 });
@@ -293,13 +262,15 @@ describe("mock: retargeting", () => {
       const base = { ep, pass: "final" as const, redo: true, seed_mode: "new" as const, seed: null, model: null, loras: null, steps: null, prompt: null, parent_take: null, note: "", allow_missing_refs: true };
       const r = await api.render({ ...base, shots: ["sh010"], target: LTX });
       expect(r.queued[0]).toMatchObject({ shot: "sh010", target: LTX });
-      expect(renderWarnings(r)).toEqual([expect.objectContaining({ shot: "sh010", text: expect.stringMatching(/audio downgraded/) })]);
       const s = (await api.episode(ep, "final")).shots.find((x) => x.shot === "sh010")!;
       expect(s.takes[s.takes.length - 1].target).toBe(LTX);
       expect(s.target).toBe(H3); // a one-off doesn't retarget the shot
-      const r2 = await api.render({ ...base, shots: ["sh010"] });
-      expect(renderWarnings(r2)).toEqual([]);
+      expect((await api.shot(ep, "final", "sh010")).effective.notes).toBeUndefined();
+      // the render response carries no warnings: shot detail's effective.notes says it beforehand
+      await api.putOverride({ ep, pass: "final", shot: "sh010", both: true, fields: { target: LTX } });
+      expect((await api.shot(ep, "final", "sh010")).effective.notes).toEqual([expect.stringMatching(/audio clone renders as generate/)]);
       await vi.runAllTimersAsync();
+
     } finally {
       vi.useRealTimers();
     }

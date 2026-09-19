@@ -279,19 +279,15 @@ export function seriesSnippet(id: string): string {
 // render skips
 // ---------------------------------------------------------------------------
 
-/** The files a skip names, wherever the server put them (see RenderSkip). */
+/** The files a skip names (`missing_files`: the shot's target isn't ready). */
 export function skipMissingFiles(x: RenderSkip): MissingFile[] {
-  const v = x.missing_files ?? x.missing;
+  const v = x.missing_files;
   return Array.isArray(v) ? v.filter((m) => m && typeof m === "object" && typeof m.want === "string") : [];
 }
 
-/**
- * A skip because the shot's target isn't ready (a required file missing): it
- * names the files, or its reason says so. Missing refs and model mismatches
- * are their own kinds.
- */
+/** A skip because the shot's target isn't ready (required model files not
+ * installed): it carries `missing_files`. */
 export function isMissingFileSkip(x: RenderSkip): boolean {
-  if (x.missing_refs?.length || x.model_mismatch?.length) return false;
-  if (skipMissingFiles(x).length) return true;
-  return /required (model )?file|not installed|isn't ready|is not ready|not ready|can't render yet|file missing|missing (model )?file/i.test(x.reason ?? "");
+  return skipMissingFiles(x).length > 0;
 }
+
