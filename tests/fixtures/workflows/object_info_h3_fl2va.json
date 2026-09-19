@@ -1,0 +1,535 @@
+{
+ "BasicGuider": {
+  "input": {
+   "required": {
+    "conditioning": [
+     "CONDITIONING"
+    ],
+    "model": [
+     "MODEL"
+    ]
+   }
+  },
+  "output": [
+   "GUIDER"
+  ],
+  "output_name": [
+   "GUIDER"
+  ]
+ },
+ "BasicScheduler": {
+  "input": {
+   "required": {
+    "denoise": [
+     "FLOAT"
+    ],
+    "model": [
+     "MODEL"
+    ],
+    "scheduler": [
+     "COMBO"
+    ],
+    "steps": [
+     "INT"
+    ]
+   }
+  },
+  "output": [
+   "SIGMAS"
+  ],
+  "output_name": [
+   "SIGMAS"
+  ]
+ },
+ "CLIPLoader": {
+  "input": {
+   "optional": {
+    "device": [
+     "COMBO"
+    ]
+   },
+   "required": {
+    "clip_name": [
+     "COMBO"
+    ],
+    "type": [
+     "COMBO"
+    ]
+   }
+  },
+  "output": [
+   "CLIP"
+  ],
+  "output_name": [
+   "CLIP"
+  ]
+ },
+ "ComfyMathExpression": {
+  "input": {
+   "required": {
+    "expression": [
+     "STRING"
+    ],
+    "values": [
+     "COMFY_AUTOGROW_V3"
+    ]
+   }
+  },
+  "output": [
+   "FLOAT",
+   "INT",
+   "BOOLEAN"
+  ],
+  "output_name": [
+   "FLOAT",
+   "INT",
+   "BOOL"
+  ]
+ },
+ "CreateVideo": {
+  "input": {
+   "optional": {
+    "audio": [
+     "AUDIO"
+    ],
+    "bit_depth": [
+     "COMBO"
+    ],
+    "codec": [
+     "COMBO"
+    ],
+    "color_space": [
+     "COMBO"
+    ]
+   },
+   "required": {
+    "fps": [
+     "FLOAT"
+    ],
+    "images": [
+     "IMAGE"
+    ]
+   }
+  },
+  "output": [
+   "VIDEO"
+  ],
+  "output_name": [
+   "VIDEO"
+  ]
+ },
+ "GetImageSize": {
+  "input": {
+   "required": {
+    "image": [
+     "IMAGE"
+    ]
+   }
+  },
+  "output": [
+   "INT",
+   "INT",
+   "INT"
+  ],
+  "output_name": [
+   "width",
+   "height",
+   "batch_size"
+  ]
+ },
+ "H3SaveShot": {
+  "input": {
+   "optional": {
+    "audio": [
+     "AUDIO"
+    ],
+    "sidecar": [
+     "STRING"
+    ]
+   },
+   "required": {
+    "audio_policy": [
+     "STRING"
+    ],
+    "fps": [
+     "FLOAT"
+    ],
+    "images": [
+     "IMAGE"
+    ],
+    "project_root": [
+     "STRING"
+    ],
+    "save_frames": [
+     "BOOLEAN"
+    ],
+    "shot_id": [
+     "STRING"
+    ],
+    "subfolder": [
+     "STRING"
+    ],
+    "take": [
+     "INT"
+    ]
+   }
+  },
+  "output": [
+   "STRING",
+   "STRING"
+  ],
+  "output_name": [
+   "shot_dir",
+   "status"
+  ]
+ },
+ "ImageScaleToTotalPixels": {
+  "input": {
+   "required": {
+    "image": [
+     "IMAGE"
+    ],
+    "megapixels": [
+     "FLOAT"
+    ],
+    "resolution_steps": [
+     "INT"
+    ],
+    "upscale_method": [
+     "COMBO"
+    ]
+   }
+  },
+  "output": [
+   "IMAGE"
+  ],
+  "output_name": [
+   "IMAGE"
+  ]
+ },
+ "KSamplerSelect": {
+  "input": {
+   "required": {
+    "sampler_name": [
+     "COMBO"
+    ]
+   }
+  },
+  "output": [
+   "SAMPLER"
+  ],
+  "output_name": [
+   "SAMPLER"
+  ]
+ },
+ "LoadAudio": {
+  "input": {
+   "required": {
+    "audio": [
+     "COMBO"
+    ]
+   }
+  },
+  "output": [
+   "AUDIO"
+  ],
+  "output_name": [
+   "AUDIO"
+  ]
+ },
+ "LoadImage": {
+  "input": {
+   "required": {
+    "image": [
+     "COMBO"
+    ]
+   }
+  },
+  "output": [
+   "IMAGE",
+   "MASK"
+  ],
+  "output_name": [
+   "IMAGE",
+   "MASK"
+  ]
+ },
+ "LoraLoaderModelOnly": {
+  "input": {
+   "required": {
+    "lora_name": [
+     "COMBO"
+    ],
+    "model": [
+     "MODEL"
+    ],
+    "strength_model": [
+     "FLOAT"
+    ]
+   }
+  },
+  "output": [
+   "MODEL"
+  ],
+  "output_name": [
+   "MODEL"
+  ]
+ },
+ "MiniMaxH3AddGuide": {
+  "input": {
+   "optional": {
+    "audio": [
+     "AUDIO"
+    ],
+    "audio_vae": [
+     "VAE"
+    ],
+    "image": [
+     "IMAGE"
+    ],
+    "vae": [
+     "VAE"
+    ]
+   },
+   "required": {
+    "frame_idx": [
+     "INT"
+    ],
+    "latent": [
+     "LATENT"
+    ],
+    "positive": [
+     "CONDITIONING"
+    ]
+   }
+  },
+  "output": [
+   "CONDITIONING"
+  ],
+  "output_name": [
+   "positive"
+  ]
+ },
+ "MiniMaxH3ImageToVideo": {
+  "input": {
+   "optional": {
+    "first_frame": [
+     "IMAGE"
+    ],
+    "last_frame": [
+     "IMAGE"
+    ]
+   },
+   "required": {
+    "clip": [
+     "CLIP"
+    ],
+    "height": [
+     "INT"
+    ],
+    "length": [
+     "INT"
+    ],
+    "prompt": [
+     "STRING"
+    ],
+    "vae": [
+     "VAE"
+    ],
+    "width": [
+     "INT"
+    ]
+   }
+  },
+  "output": [
+   "CONDITIONING",
+   "LATENT"
+  ],
+  "output_name": [
+   "positive",
+   "LATENT"
+  ]
+ },
+ "PrimitiveFloat": {
+  "input": {
+   "required": {
+    "value": [
+     "FLOAT"
+    ]
+   }
+  },
+  "output": [
+   "FLOAT"
+  ],
+  "output_name": [
+   "FLOAT"
+  ]
+ },
+ "RandomNoise": {
+  "input": {
+   "required": {
+    "noise_seed": [
+     "INT"
+    ]
+   }
+  },
+  "output": [
+   "NOISE"
+  ],
+  "output_name": [
+   "NOISE"
+  ]
+ },
+ "ResolutionSelector": {
+  "input": {
+   "optional": {
+    "preview": [
+     "RESOLUTION_PREVIEW"
+    ]
+   },
+   "required": {
+    "aspect_ratio": [
+     "COMBO"
+    ],
+    "megapixels": [
+     "FLOAT"
+    ],
+    "multiple": [
+     "INT"
+    ]
+   }
+  },
+  "output": [
+   "INT",
+   "INT"
+  ],
+  "output_name": [
+   "width",
+   "height"
+  ]
+ },
+ "SamplerCustomAdvanced": {
+  "input": {
+   "required": {
+    "guider": [
+     "GUIDER"
+    ],
+    "latent_image": [
+     "LATENT"
+    ],
+    "noise": [
+     "NOISE"
+    ],
+    "sampler": [
+     "SAMPLER"
+    ],
+    "sigmas": [
+     "SIGMAS"
+    ]
+   }
+  },
+  "output": [
+   "LATENT",
+   "LATENT"
+  ],
+  "output_name": [
+   "output",
+   "denoised_output"
+  ]
+ },
+ "SaveVideo": {
+  "input": {
+   "optional": {
+    "codec": [
+     "COMFY_DYNAMICCOMBO_V3"
+    ]
+   },
+   "required": {
+    "filename_prefix": [
+     "STRING"
+    ],
+    "format": [
+     "COMFY_DYNAMICCOMBO_V3"
+    ],
+    "video": [
+     "VIDEO"
+    ]
+   }
+  },
+  "output": [
+   "VIDEO"
+  ],
+  "output_name": [
+   "video"
+  ]
+ },
+ "UNETLoader": {
+  "input": {
+   "required": {
+    "unet_name": [
+     "COMBO"
+    ],
+    "weight_dtype": [
+     "COMBO"
+    ]
+   }
+  },
+  "output": [
+   "MODEL"
+  ],
+  "output_name": [
+   "MODEL"
+  ]
+ },
+ "VAEDecode": {
+  "input": {
+   "required": {
+    "samples": [
+     "LATENT"
+    ],
+    "vae": [
+     "VAE"
+    ]
+   }
+  },
+  "output": [
+   "IMAGE"
+  ],
+  "output_name": [
+   "IMAGE"
+  ]
+ },
+ "VAEDecodeAudio": {
+  "input": {
+   "required": {
+    "samples": [
+     "LATENT"
+    ],
+    "vae": [
+     "VAE"
+    ]
+   }
+  },
+  "output": [
+   "AUDIO"
+  ],
+  "output_name": [
+   "AUDIO"
+  ]
+ },
+ "VAELoader": {
+  "input": {
+   "required": {
+    "vae_name": [
+     "COMBO"
+    ]
+   }
+  },
+  "output": [
+   "VAE"
+  ],
+  "output_name": [
+   "VAE"
+  ]
+ }
+}

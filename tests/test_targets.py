@@ -43,8 +43,8 @@ class LoadingTest(unittest.TestCase):
     def test_list_and_load(self):
         ids = {(t.kind, t.id) for t in TG.list_targets()}
         self.assertEqual(ids, {("video", H3), ("video", "ltx2"), ("video", "ltx2_ingredients"),
-                               ("image", "krea2")})
-        self.assertEqual([t.id for t in TG.list_targets("video")], ["ltx2", "ltx2_ingredients", H3])
+                               ("video", "minimax_h3_fl2va"), ("image", "krea2")})
+        self.assertEqual([t.id for t in TG.list_targets("video")], ["ltx2", "ltx2_ingredients", "minimax_h3_fl2va", H3])
         self.assertIs(TG.load_target(H3), TG.load_target(H3))
         with self.assertRaises(TG.TargetError) as cm:
             TG.load_target("ltx_2_3", "video")
@@ -166,7 +166,7 @@ class ProfileTest(unittest.TestCase):
         series_cfg["profiles"]["dialogue_close"]["target"] = "ltx_2_3"
         with self.assertRaises(ValueError) as cm:
             TG.episode_target(story, series_cfg)
-        self.assertIn("not a video target (known: ltx2, ltx2_ingredients, minimax_h3_ref2va)",
+        self.assertIn("not a video target (known: ltx2, ltx2_ingredients, minimax_h3_fl2va, minimax_h3_ref2va)",
                       str(cm.exception))
         # sh320 names the series target itself, which beats its profile's; sh330
         # takes the profile's
@@ -389,9 +389,16 @@ class TargetsRouteTest(ApiTest):
     def test_targets(self):
         data = self.ok(A.get_targets(self.ctx, {}))
         by = {t["id"]: t for t in data["targets"]}
-        self.assertEqual(set(by), {H3, "ltx2", "ltx2_ingredients", "krea2"})
+        self.assertEqual(set(by), {H3, "ltx2", "ltx2_ingredients", "minimax_h3_fl2va", "krea2"})
         self.assertEqual((by["ltx2_ingredients"]["label"], by["ltx2_ingredients"]["short"]),
                          ("LTX-2.3 ingredients (character/plate refs)", "LTX+refs"))
+        fl = by["minimax_h3_fl2va"]
+        self.assertEqual((fl["label"], fl["short"]),
+                         ("MiniMax H3 FL2VA (first/last frames)", "H3 FL2V"))
+        self.assertEqual(fl["capabilities"]["keyframes"], ["first", "last"])
+        self.assertEqual(fl["capabilities"]["policies"], ["generate", "dub", "dub_keep_foley"])
+        self.assertEqual(fl["capabilities"]["policy_fallback"], "generate")
+        self.assertFalse(fl["capabilities"]["subject_refs"])
         self.assertEqual(by[H3]["kind"], "video")
         self.assertIn("loras", by[H3]["widgets"])
         # what a target picker needs

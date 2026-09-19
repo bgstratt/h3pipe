@@ -1,0 +1,83 @@
+{
+  "id": "minimax_h3_fl2va",
+  "kind": "video",
+  "label": "MiniMax H3 FL2VA (first/last frames)",
+  "short": "H3 FL2V",
+  "code": "compile.py",
+
+  "template": {
+    "_note": "The same grid as H3 Ref2VA: 17k+5 frames at 24 fps, width and height multiples of 32. The model is trained on about 124-362 frames (5-15 s); longer shots are allowed, with a warning. No continuous-sequence chaining: a shot continues the one before it through its first keyframe (continuity).",
+    "fps": 24,
+    "frames": {"step": 17, "base": 5, "max": 3592},
+    "size_multiple": 32,
+    "trained_frames": 362
+  },
+
+  "recipe": {
+    "_note": "No subject pictures: H3 FL2VA has no reference slots, so subjects are written in words from the series config's `design` and the location from its `description`. Optional keyframes: shot:<id>:first is the first frame, shot:<id>:last the last (MiniMaxH3ImageToVideo's first_frame / last_frame; the text encoder sees them as <Picture 1> and <Picture 2>, in that order). A shot with neither renders text-to-video. Recorded dialogue (dub / dub_keep_foley) is the shot's slice of the series config's audio.track (or its own audio_file), uploaded to ComfyUI's input folder and anchored at frame 0 with MiniMaxH3AddGuide. clone takes no voice sample here: it renders with generate and says so.",
+    "policies": ["generate", "dub", "dub_keep_foley"],
+    "policy_fallback": {"to": "generate", "why": "H3 FL2VA takes no voice sample (it anchors a recording, but has no voice-reference slot)"},
+    "keyframes": ["first", "last"],
+    "keyframe_path": "refs/shots/{shot}/{end}.png",
+    "audio_anchor": {"slot": "dialogue recording", "frame_idx": 0, "take_suffix": "_dub.wav"},
+    "prompt": "fields",
+    "size_hints": {
+      "keyframe": "the render size (any size works: the first frame is stretched to the canvas, the last is cover-cropped)"
+    }
+  },
+
+  "binding": {
+    "_note": "ComfyUI's MiniMax H3 image-to-video template (video_minimax_h3_i2v.json: a subgraph, flattened by h3jobs.ui_to_api). No loader node: every value is patched into a widget, so it renders without any custom node beyond H3SaveShot, which takes the place of CreateVideo/SaveVideo. The template has no LoRA loader: one is inserted after the UNETLoader for the turbo LoRA. patch_graph wires the keyframes (LoadImage straight into first_frame / last_frame; the template's 1 MP pre-scale is dropped, the node resizes to the canvas itself) and the dialogue anchor (LoadAudio -> MiniMaxH3AddGuide at frame 0); prune drops the rest.",
+    "workflow": "workflow.json",
+    "workflow_name": "h3pipe_minimax_h3_fl2va.json",
+    "env": "H3_FL2VA_WORKFLOW",
+    "saver": {"class_type": "H3SaveShot",
+              "inputs": {"root": "project_root", "subfolder": "subfolder", "take": "take",
+                         "sidecar": "sidecar"},
+              "replace": {"class_type": "CreateVideo", "inputs": {"images": "images", "audio": "audio"}},
+              "drop": ["SaveVideo"],
+              "set": {"save_frames": false}},
+    "prune": true,
+    "params": {
+      "model": {"class_type": "UNETLoader", "field": "unet_name"},
+      "loras": {"class_type": "LoraLoaderModelOnly", "name": "lora_name",
+                "strength": "strength_model", "input": "model", "chain": true,
+                "insert_after": {"class_type": "UNETLoader", "output": 0}},
+      "steps": {"class_type": "BasicScheduler", "field": "steps"},
+      "seed": {"class_type": "RandomNoise", "field": "noise_seed"},
+      "sampler": {"class_type": "KSamplerSelect", "field": "sampler_name"},
+      "prompt": {"class_type": "MiniMaxH3ImageToVideo", "field": "prompt"},
+      "width": {"class_type": "MiniMaxH3ImageToVideo", "field": "width"},
+      "height": {"class_type": "MiniMaxH3ImageToVideo", "field": "height"},
+      "length": {"class_type": "MiniMaxH3ImageToVideo", "field": "length"},
+      "fps": {"class_type": "H3SaveShot", "field": "fps"},
+      "shot_id": {"class_type": "H3SaveShot", "field": "shot_id"},
+      "audio_policy": {"class_type": "H3SaveShot", "field": "audio_policy"},
+      "text_encoder": {"class_type": "CLIPLoader", "field": "clip_name"},
+      "video_vae": {"class_type": "VAELoader", "field": "vae_name", "feeds": ["VAEDecode", "vae"]},
+      "audio_vae": {"class_type": "VAELoader", "field": "vae_name", "feeds": ["VAEDecodeAudio", "vae"]}
+    },
+    "review_nodes": []
+  },
+
+  "presets": {
+    "_note": "Turbo LoRA per pass, as H3 Ref2VA: the final uses lightx2v's 8-step FL2V v1.0 with res_multistep (ComfyUI's H3 t2v template, lightning branch); the proxy the 4-step v0.1 with euler (the user's own 4-step H3 workflows). Not the SLA LoRA: it is co-distilled with block-sparse attention and needs that node. The series config's pass blocks override model, LoRA and steps only when this is the series target; otherwise only their size carries over.",
+    "final": {
+      "model": "minimax_h3_fl2va_pruned_int8_convrot.safetensors",
+      "lora": "minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors",
+      "steps": 8, "width": 1344, "height": 768,
+      "sampler": "res_multistep",
+      "text_encoder": "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
+      "video_vae": "minimax_h3_video_vae_fp16.safetensors",
+      "audio_vae": "minimax_h3_audio_vae_fp32.safetensors"
+    },
+    "proxy": {
+      "lora": "minimax_h3_fl2v_lightx2v_turbo_4step_v0.1_comfy.safetensors",
+      "steps": 4, "width": 448, "height": 256,
+      "sampler": "euler",
+      "text_encoder": "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
+      "video_vae": "minimax_h3_video_vae_fp16.safetensors",
+      "audio_vae": "minimax_h3_audio_vae_fp32.safetensors"
+    }
+  }
+}

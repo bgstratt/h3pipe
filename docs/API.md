@@ -542,7 +542,7 @@ open, and what was added:
 - **`GET /h3pipe/targets`** adds, per target:
   - `short`: a short label ("H3", "LTX-2").
   - `capabilities`: `{policies, policy_fallback, voice_reference, subject_refs,
-    keyframes, prompt ("sections" | "prose"), negative_prompt}`.
+    keyframes, prompt ("sections" | "prose"; `minimax_h3_fl2va`: "fields"), negative_prompt}`.
   - `template` may carry `fps: "series"` (the target renders at the series config's fps),
     `max_size` (`{long_side, pixels}`) and `size_fit: "snap"`.
   - `widgets` values are always single specs (for a param patched into several widgets,
@@ -562,8 +562,8 @@ open, and what was added:
 ## Continuity keyframes
 
 A shot's first keyframe is usually the previous shot's last frame, so the cut runs on
-without a jump. `ltx2` reads `shot:<shot>:first` / `last` (Phase 8); `minimax_h3_ref2va`
-doesn't use keyframes (`GET /h3pipe/targets`: `capabilities.keyframes` is `[]`).
+without a jump. `ltx2` reads `shot:<shot>:first` / `last` (Phase 8), and so does
+`minimax_h3_fl2va` (see its section below); `minimax_h3_ref2va` doesn't use keyframes (`GET /h3pipe/targets`: `capabilities.keyframes` is `[]`).
 
 ### `POST /h3pipe/refs/keyframe`
 Cuts one frame out of a video take with ffmpeg and adds it as a new take of the shot's
@@ -642,3 +642,39 @@ ones now show:
   `role: "sheet"`, its path in the take folder and `sha1`); `inputs` is
   `{"sheet": "h3pipe/<sha1>.png"}`. When a LoRA list from a script line or profile didn't
   name the IC-LoRA, it is put back first and `notes` says so.
+
+## The `minimax_h3_fl2va` target (as built)
+
+A fourth video target: MiniMax H3 first/last-frame to video + audio, on ComfyUI's H3
+image-to-video template (`MiniMaxH3ImageToVideo`; with no keyframe it is text-to-video).
+Nothing new in the routes; what the existing ones now show:
+
+- **`GET /h3pipe/targets`** lists it: `label` "MiniMax H3 FL2VA (first/last frames)",
+  `short` "H3 FL2V". `capabilities`: `keyframes: ["first", "last"]`, `policies:
+  ["generate", "dub", "dub_keep_foley"]`, `policy_fallback: "generate"` (clone),
+  `subject_refs` / `voice_reference` / `negative_prompt` false, `prompt: "fields"`.
+  `template` is H3's (`fps: 24`, `frames: {step: 17, base: 5, max: 3592}`,
+  `size_multiple: 32`); the build warns past the model's trained 362 frames. Presets: final
+  1344×768, `minimax_h3_fl2va_pruned_int8_convrot` + `minimax_h3_fl2v_turbo_8step_v1.0` at
+  8 steps (`res_multistep`); proxy 448×256, the 4-step lightx2v v0.1 LoRA at 4 steps
+  (`euler`). `widgets` add `sampler` (KSamplerSelect) and have `steps` (BasicScheduler).
+- **Shotlist entries** are like `ltx2`'s: `keyframes` `{first, last}` (the conventional
+  paths), no `panels`, no `negative`; `audio_intent` / `audio_note` on a clone shot. The
+  `prompt` is H3's base-mode format: `integrated_multimodal_description: [Shot 1] …`,
+  `overall_soundscape: …`, `non_diegetic_music: …`, with no `<Picture N>` (subjects in
+  words).
+- **Keyframes** come from continuity (`POST /h3pipe/refs/keyframe`) or an import, and are
+  optional. At queue time the prompt gets H3's alignment line for the frames the render
+  has, first line then a blank line: first only "For the target video, at 0.00 seconds
+  into the target video, <Picture 1> (from [Shot 1]) is fully referenced."; first and last
+  "How the reference pictures align with the target video — Picture 1 (from Shot 1) aligns
+  with the 0.00-second mark …; Picture 2 (from Shot 1) aligns with the S.SS-second mark …";
+  last only the same with `<Picture 1>` at S.SS. The take's frozen shotlist has that
+  prompt; `effective.prompt` in `GET /h3pipe/shot` is the built one.
+- **Dub:** a `dub` / `dub_keep_foley` shot's `refs` add `slot: "dialogue recording"` (the
+  series config's `audio.track`, or the shot's `audio_file`; `kind: "audio"`, required,
+  so a missing file blocks it; rendering anyway recompiles it as `generate`). At queue time
+  its `audio_in`–`audio_out` slice is cut (stdlib `wave`; ffmpeg for other formats; mono
+  made stereo), uploaded as `h3pipe/<sha1>.wav`, anchored at frame 0 by a
+  `MiniMaxH3AddGuide`, and kept as `<shot>_tNN_dub.wav` (`slot: "dialogue slice"`, `role:
+  "audio"`). The sidecar's `inputs` then has `audio` beside `first` / `last`.

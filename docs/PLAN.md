@@ -2,9 +2,10 @@
 
 Status (2026-09-19): Phases 0–3 and 5–8 done; Phase 4 (evaluate) continues through use. Targets:
 `minimax_h3_ref2va` (default), `ltx2` (LTX-2.5, text/keyframes), `ltx2_ingredients` (LTX-2.3 + IC-LoRA
-reference sheet from the picked refs: character identity on LTX). Keyframe continuity (the previous shot's
+reference sheet from the picked refs: character identity on LTX), `minimax_h3_fl2va` (H3 from first/last
+keyframes, or text; dub anchors the recording). Keyframe continuity (the previous shot's
 last frame becomes this shot's first) is in the CLI, the routes and the editor. Next candidates: Wan 2.2
-(VACE, with references), H3 FL2VA (uses keyframes), the Phase 9 editor items. The open LTX items are under
+(VACE, with references), the Phase 9 editor items. The open LTX items are under
 **Phase 8 — as built**.
 This is the working plan for the next round of development. `CLAUDE.md` points here.
 
@@ -596,6 +597,60 @@ saved `template_ltx2_3_ic_lora_ingredients.json`; label "LTX-2.3 ingredients
   per-character face + body panels (the card's advice) instead of H3's one-panel rule;
   shots longer than the bucket (split automatically, or allow up to ~10 s with a warning);
   the editor showing the take's refsheet.
+
+**MiniMax H3 FL2VA — as built** (`targets/video/minimax_h3_fl2va/`, from ComfyUI's H3
+image-to-video template as the user saved it, `video_minimax_h3_i2v.json`, known to the
+binding as `h3pipe_minimax_h3_fl2va.json` so an edited canvas can't leak in; label "MiniMax
+H3 FL2VA (first/last frames)", short `H3 FL2V`)
+- **Template:** H3's (fps 24, 17k+5 up to 3592 frames, sizes /32), without the continuous
+  chain (a shot continues the last through its first keyframe). A shot past the trained
+  362 frames is a build warning.
+- **Binding:** no loader; widgets as in `ltx2`: prompt / width / height / length on
+  `MiniMaxH3ImageToVideo`, `BasicScheduler.steps`, `RandomNoise`, `KSamplerSelect`
+  (`sampler`, a preset value), the UNET, CLIP and both VAEs. The template has no LoRA
+  loader: one is inserted after the UNETLoader (`insert_after`, as `ltx2`). `H3SaveShot`
+  replaces `CreateVideo`; prune drops `SaveVideo`, the size selector and the duration maths.
+  Checked with `check_graph` against a trimmed `/object_info` from the running ComfyUI
+  (`tests/fixtures/workflows/object_info_h3_fl2va.json`).
+- **Presets:** final `minimax_h3_fl2va_pruned_int8_convrot` + `minimax_h3_fl2v_turbo_8step_v1.0`,
+  8 steps, `res_multistep` (the t2v template's lightning branch), 1344×768; proxy the 4-step
+  lightx2v v0.1 LoRA, 4 steps, `euler` (the user's 4-step H3 workflows), 448×256. Not the
+  SLA LoRA (it needs the block-sparse attention node).
+- **Recipe:** no subject pictures (subjects and place in words). Keyframes
+  `shot:<id>:first|last`, optional, staged and uploaded by `h3jobs.stage_inputs` like
+  `ltx2`'s, wired straight into `first_frame` / `last_frame` (the node resizes; the
+  template's 1 MP pre-scale goes); neither = text-to-video. `capabilities.keyframes`
+  `["first", "last"]`.
+- **Prompt:** H3's base-mode format (the prompt-writing spec's T2VA/I2VA/FL2VA/L2VA: the
+  Ref2VA six sections minus the three that exist for `<Picture N>` references):
+  `integrated_multimodal_description: [Shot 1] <look>, <size> ...`, subjects from their
+  `design`, the location scaled to the framing, `(Sn)` speaker ids, `<d>[English] …</d>`,
+  the voiceover phrase and lips-closed clause; then `overall_soundscape` and
+  `non_diegetic_music`. Keyframes are known only at queue time, so the target's
+  `stage_inputs` adds the spec's alignment line for the frames the render has (I2VA,
+  FL2VA or L2VA wording; comfy's tokenizer labels the frames `<Picture 1>`, `<Picture 2>`
+  in first/last order) and a landing sentence; idempotent, and the frozen shotlist carries
+  the prompt the graph got.
+- **Audio:** policies `generate`, `dub`, `dub_keep_foley`; `clone` falls back to generate
+  with a note (no voice-reference slot). Dub: `MiniMaxH3AddGuide` takes audio as well as
+  images (the model packs it as conditioning audio on the target's time axis, like a
+  keyframe's latent), so the target cuts the shot's `audio_in`–`audio_out` slice (stdlib
+  `wave`, ffmpeg for other formats, mono made stereo), uploads it with the same
+  `/upload/image` route (`LoadAudio` reads `h3pipe/<sha1>.wav`), anchors it at frame 0
+  and keeps it in the take as `<shot>_tNN_dub.wav`. The recording is a required ref:
+  missing blocks; render anyway recompiles the shot as generate (`compile_without`).
+- **Live check (2026-09-19, scratch copy of ep05, proxy, CLI `--target minimax_h3_fl2va`
+  after `--dry-run --check-nodes`, 16 nodes clean):** 42 s for all three, no restart.
+  sh050, first keyframe from continuity: frame 0 vs keyframe 24.2 dB PSNR (mean abs error
+  10.0/255). sh040, first + a last made with `h3.py keyframe sh040 --last` (sh050's first
+  frame): frame 0 23.3 dB (10.6), frame 72 vs the last keyframe 24.2 dB (9.7). sh060,
+  text-only, 90 frames. Each: sidecar `ok`, frames on the 17k+5 grid (73, 73, 90),
+  448×256, 24 fps, stereo AAC, thumbnail and strip written. Frame 0 keeps the keyframe's
+  composition and drawing but isn't a pixel copy (H3 conditions on it; LTX's in-place
+  first frame measured 27.4 dB).
+- **Left:** a live dub render (ep05 has no recording; the wiring is tested offline);
+  whether `retention:` should map onto anything here; the anchored dialogue's lip sync
+  quality; an FL2VA final at 8 steps checked by eye.
 
 **Phase 9 — later**
 - Script pane: `epNN.md` in a text editor with live `--check` errors beside the lines;
