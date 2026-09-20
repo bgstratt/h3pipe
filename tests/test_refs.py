@@ -102,7 +102,8 @@ class ListingTest(RefsTest):
             [i for i in refs],
             ["subject:ada", "subject:bo", "subject:cy", "subject:rex", "subject:narrator",
              "subject:kettle", "subject:van", "location:kitchen", "location:kitchen_window",
-             "location:street", "voice:ada", "voice:bo", "voice:cy", "voice:narrator"])
+             "location:street", "voice:ada", "voice:bo", "voice:cy", "voice:rex",
+             "voice:narrator"])
         ada = refs["subject:ada"]
         self.assertEqual((ada["scope"], ada["kind"], ada["name"], ada["path"]),
                          ("series", "character", "Ada", "refs/ada/ada_sheet_4panel.png"))
@@ -121,14 +122,19 @@ class ListingTest(RefsTest):
         self.assertEqual(refs["voice:ada"]["used_by"]["proxy"], [])
         self.assertEqual(refs["voice:ada"]["used_by"]["final"],
                          todo["audio/voices/ada_sample.wav"]["blocks_shots"])
-        self.assertFalse(refs["voice:ada"]["can_generate"])
+        # Phase 9c-B: an audio target generates voices, and rex (a character with
+        # no `voice_sample` yet) has a voice ref of his own, with no live file
+        self.assertTrue(refs["voice:ada"]["can_generate"])
+        self.assertEqual((refs["voice:rex"]["path"], refs["voice:rex"]["exists"]), (None, False))
         # the narrator is never on screen: a sheet nobody reads
         self.assertEqual(refs["subject:narrator"]["used_by"], {"final": [], "proxy": []})
         # one source of wording: the listing's prompts are refs_todo's
         for rid, path in (("subject:ada", ada["path"]), ("subject:kettle", "refs/props/kettle.png"),
                           ("location:kitchen", "refs/_bg/kitchen.png"),
-                          ("voice:bo", "audio/voices/bo_sample.wav")):
+                          ):
             self.assertEqual(refs[rid]["prompt"], todo[path]["prompt"], rid)
+        # a voice's prompt is the audio target's brief now, not refs_todo's note
+        self.assertIn("Bo says:", refs["voice:bo"]["prompt"])
         v = ada["views"][1]
         self.assertEqual(v["prompt"], R.VIEW_TMPL.format(
             view=R.VIEW_DESC["02_side"], design=self.s.series_cfg["subjects"]["ada"]["design"],
@@ -305,8 +311,7 @@ class GenerateTest(RefsTest):
                    if v["class_type"] == "EmptyLatentImage")["inputs"]
         self.assertEqual((lat["width"], lat["height"]), (1344, 768))
         # (a shot keyframe generates since Phase 8.5: KeyframeGenerateTest)
-        for bad in (dict(ref="voice:ada"),
-                    dict(ref="subject:ada", prompt="x"), dict(ref="location:kitchen", count=0),
+        for bad in (dict(ref="subject:ada", prompt="x"), dict(ref="location:kitchen", count=0),
                     dict(ref="location:kitchen", seed_mode="odd")):
             with self.assertRaises(R.RefError, msg=bad):
                 R.plan_generate(self.s, R.GenRequest(**bad))

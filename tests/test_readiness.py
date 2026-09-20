@@ -582,7 +582,7 @@ class DownloadsDataTest(unittest.TestCase):
         self.assertEqual({t.id for t in TG.list_targets()
                           if any(m["tier"] == "accelerator" for m in t.models.values())},
                          {"minimax_h3_ref2va", "minimax_h3_fl2va", "wan22_i2v", "ltx2_ingredients",
-                          "flux2_klein", "flux2_klein_edit"})
+                          "flux2_klein", "flux2_klein_edit", "ltx2_voice"})
         self.assertEqual(TG.load_target("ltx2").models["duration_head"]["tier"], "optional")
 
 

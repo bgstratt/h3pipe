@@ -85,7 +85,9 @@ class RefsApiTest(ApiTest):
         self.assertEqual(len(data["queued"]), 2)
 
     def test_generate_errors(self):
-        self.err(A.post_refs_generate(self.ctx, {"ep": self.ep, "ref": "voice:ada"}), 400)
+        # a voice generates since Phase 9c-B (test_phase9c_voice); `seconds` is its own
+        self.err(A.post_refs_generate(self.ctx, {"ep": self.ep, "ref": "subject:kettle",
+                                                 "seconds": 5}), 400)
         self.err(A.post_refs_generate(self.ctx, {"ep": self.ep, "ref": "subject:nobody"}), 404)
         self.err(A.post_refs_generate(self.ctx, {"ep": self.ep}), 400)
         self.err(A.post_refs_generate(self.ctx, {"ep": self.ep, "ref": "subject:ada",
@@ -352,7 +354,8 @@ class Phase85ApiTest(ApiTest):
         refs = {r["id"]: r for r in self.ok(A.get_refs(self.ctx, {"ep": self.ep}))["refs"]}
         self.assertFalse(refs["shot:sh010:first"]["exists"])
         self.assertFalse(os.path.isfile(f))
-        self.err(A.delete_refs_pick(self.ctx, {"ep": self.ep, "ref": "voice:ada"}), 400)
+        # a voice the series config names no sample for has no file to clear
+        self.err(A.delete_refs_pick(self.ctx, {"ep": self.ep, "ref": "voice:rex"}), 400)
         self.err(A.delete_refs_pick(self.ctx, {"ep": self.ep, "ref": "shot:nope:first"}), 404)
         self.assertIn(("DELETE", "/h3pipe/refs/pick"), {(m, p) for m, p, _f, _t in A.ROUTES})
 

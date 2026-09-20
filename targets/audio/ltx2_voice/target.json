@@ -1,0 +1,100 @@
+{
+  "id": "ltx2_voice",
+  "kind": "audio",
+  "label": "LTX-2.5 audio-only (voice sample)",
+  "short": "LTX-2 voice",
+  "code": "target.py",
+
+  "capabilities": {
+    "_note": "mode t2a: the wording alone makes the voice. reference_audio is FALSE on purpose. LTXVReferenceAudio (\"LTXV Reference Audio (ID-LoRA)\") is installed and the graph code can wire it in (targets/audio/ltx2_voice/target.py patch_graph), but with the installed LTX-2.5 transformers it produces silence: three live runs on 2026-09-19 (stereo and mono 5 s references, identity_guidance_scale 3.0 and 0.0, everything else identical to a run that produced 6.0 s of speech at peak 211/255) came back at peak 4/255 and 0/255 with no energy above the noise floor. The node only sets `ref_audio` on the conditioning; the model has to carry the audio ID-LoRA weights to use it, and no such file is installed or recorded in ComfyUI-Manager's model list on this machine. Turn it on (and name the weights under `models`) when they are.",
+    "mode": "t2a",
+    "reference_audio": false,
+    "max_seconds": 20
+  },
+
+  "template": {
+    "_note": "How long a generated sample is. LTX-2 renders 8k+1 audio frames at the conditioning's frame rate, so a request in seconds is snapped onto that grid (targets/audio/common.py is the wording; the grid is here). 20 s is the same ceiling the ltx2 video target uses; LTXVEmptyLatentAudio's own maximum is 1000 frames.",
+    "fps": 24,
+    "frames": {"step": 8, "base": 1, "max": 481},
+    "default_seconds": 8.0,
+    "min_seconds": 2.0,
+    "max_seconds": 20.0
+  },
+
+  "recipe": {
+    "_note": "The brief is targets/audio/common.py's, for every audio target: who is speaking, the series config's `voice` line, and a line to say (the character's longest line in this episode's script, else a neutral sentence)."
+  },
+
+  "binding": {
+    "_note": "An API graph built for this target (no saved canvas has an audio-only LTX graph): UNETLoader -> LTXVAudioOnlyModel, the LTX-2.5 gemma text encoder, an empty video latent (LTXVAudioOnlyEmptyVideoLatent) concatenated with LTXVEmptyLatentAudio, LTXVDualCFGGuider, LTXVScheduler + SamplerCustomAdvanced, then LTXVSeparateAVLatent -> LTXVAudioVAEDecode. H3SaveRefAudio takes SaveAudio's place and writes the take's wav. Validated live against ComfyUI 0.36.0 on 2026-09-19.",
+    "workflow": "workflow.json",
+    "workflow_name": "h3pipe_ltx2_voice.json",
+    "env": "H3_LTX2_VOICE_WORKFLOW",
+    "saver": {"class_type": "H3SaveRefAudio",
+              "replace": {"class_type": "SaveAudio", "inputs": {"audio": "audio"}}},
+    "prune": true,
+    "params": {
+      "model": {"class_type": "UNETLoader", "field": "unet_name"},
+      "loras": {"class_type": "LoraLoaderModelOnly", "name": "lora_name",
+                "strength": "strength_model", "input": "model", "chain": true,
+                "insert_after": {"class_type": "UNETLoader", "output": 0}},
+      "text_encoder": {"class_type": "CLIPLoader", "field": "clip_name"},
+      "audio_vae": {"class_type": "VAELoader", "field": "vae_name"},
+      "prompt": {"class_type": "CLIPTextEncode", "field": "text", "title": "Positive prompt"},
+      "negative": {"class_type": "CLIPTextEncode", "field": "text", "title": "Negative prompt"},
+      "steps": {"class_type": "LTXVScheduler", "field": "steps"},
+      "seed": {"class_type": "RandomNoise", "field": "noise_seed"},
+      "cfg": {"class_type": "LTXVDualCFGGuider", "field": "audio_cfg"},
+      "sampler": {"class_type": "KSamplerSelect", "field": "sampler_name"},
+      "length": {"class_type": "LTXVEmptyLatentAudio", "field": "frames_number"},
+      "fps": [{"class_type": "LTXVConditioning", "field": "frame_rate"},
+              {"class_type": "LTXVEmptyLatentAudio", "field": "frame_rate"}]
+    },
+    "reference_audio": {
+      "_note": "Where patch_graph splices LTXVReferenceAudio in when a voice ref has a sample to copy (capabilities.reference_audio). The LoadAudio node reads the uploaded sample by name; the guider then reads the patched model and conditioning.",
+      "guider": {"class_type": "LTXVDualCFGGuider",
+                 "inputs": {"model": "model", "positive": "positive", "negative": "negative"}}
+    }
+  },
+
+  "models": {
+    "_note": "Families as the ltx2 video target declares them (targets/modelid.py). The distilled transformer is an accelerator: without it the pass renders `base`, the LTX-2.5 dev transformer at 30 steps and audio cfg 6 (a substitute must say `distilled` or `dev` like the wanted file: `keep`). The text encoder and the audio VAE are required. LTXVAudioVAELoader is not used: it reads models/checkpoints, and the audio VAEs are installed in models/vae, which VAELoader lists.",
+    "model": {"family": "ltx2.5", "patterns": ["ltx-2.5*", "*ltx*2.5*", "*ltx*2_5*"],
+              "tier": "accelerator",
+              "keep": ["(?<![a-z])(distilled|dev)(?![a-z])"], "exclude": ["*lora*"]},
+    "text_encoder": {"family": "ltx2.5-text-encoder", "patterns": ["*gemma*4*ltx*2.5*"],
+                     "tier": "required"},
+    "audio_vae": {"family": "ltx2.5-audio-vae", "patterns": ["*ltx*2.5*audio*vae*"],
+                  "tier": "required"}
+  },
+
+  "nodes": {
+    "_note": "Beyond the workflow's own classes: the two nodes the reference-audio path would add. Optional, so a ComfyUI without them is `degraded`, not blocked (the path is off anyway: capabilities.reference_audio).",
+    "LoadAudio": {"tier": "optional", "feature": "voice cloning (LTXVReferenceAudio)"},
+    "LTXVReferenceAudio": {"tier": "optional", "feature": "voice cloning (LTXVReferenceAudio)"}
+  },
+
+  "presets": {
+    "_note": "The installed LTX-2.5 22B distilled transformer (int8) through LTXVScheduler at 8 steps, audio cfg 1, euler_ancestral: about 25 s for an 8 s sample on this machine. `base` is the dev transformer at 30 steps and audio cfg 6, for a ComfyUI that has the dev model and not the distilled one. `identity_guidance_scale` is the reference-audio path's, kept here so it is one edit away when the ID-LoRA weights exist.",
+    "final": {
+      "model": "ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors",
+      "text_encoder": "gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors",
+      "audio_vae": "ltx-2.5-audio-vae-bf16.safetensors",
+      "lora": "",
+      "steps": 8, "cfg": 1.0, "sampler": "euler_ancestral", "fps": 24,
+      "negative": "music, song, singing, instrumental, score, crowd, applause, second voice, noise, static, hum, distortion, clipping, heavy reverb, echo, silence",
+      "default_seconds": 8.0, "min_seconds": 2.0, "max_seconds": 20.0,
+      "identity_guidance_scale": 3.0,
+      "base": {"model": "ltx-2.5-22b-dev-transformer-comfy-int8-convrot.safetensors",
+               "steps": 30, "cfg": 6.0, "loras": []}
+    }
+  },
+
+  "downloads": {
+    "_note": "Where to get each file this target names (docs/API.md 'Downloads'). Every URL here comes from ComfyUI-Manager's model list on this machine (user/__manager/cache/4245046894_model-list.json); the audio VAE is also in the video_ltx2_5_i2v template's properties.models.",
+    "ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors": {"folder": "diffusion_models", "url": "https://huggingface.co/Lightricks/LTX-2.5/resolve/main/diffusion_models/ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors", "source": "ComfyUI-Manager model list (\"LTX-2.5 22B Distilled Transformer Comfy INT8\")"},
+    "ltx-2.5-22b-dev-transformer-comfy-int8-convrot.safetensors": {"folder": "diffusion_models", "url": "https://huggingface.co/Lightricks/LTX-2.5/resolve/main/diffusion_models/ltx-2.5-22b-dev-transformer-comfy-int8-convrot.safetensors", "source": "ComfyUI-Manager model list (\"LTX-2.5 22B Dev Transformer Comfy INT8\")"},
+    "gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors": {"folder": "text_encoders", "url": "https://huggingface.co/Lightricks/LTX-2.5/resolve/main/text_encoders/gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors", "source": "ComfyUI-Manager model list (\"LTX-2.5 Gemma4 12B Text Encoder Comfy INT8\")"},
+    "ltx-2.5-audio-vae-bf16.safetensors": {"folder": "vae", "url": "https://huggingface.co/Lightricks/LTX-2.5/resolve/main/vae/ltx-2.5-audio-vae-bf16.safetensors", "source": "ComfyUI template video_ltx2_5_i2v.json (properties.models)"}
+  }
+}
