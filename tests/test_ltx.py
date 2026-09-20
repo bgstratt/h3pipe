@@ -32,6 +32,7 @@ import h3jobs as J  # noqa: E402
 import h3takes as T  # noqa: E402
 import targets as TG  # noqa: E402
 from h3core import ir  # noqa: E402
+from test_ltx_ingredients import needs_pil, real_refs  # noqa: E402
 from test_render import ENV, FakeComfy, stub_refs  # noqa: E402
 
 WF = os.path.join(HERE, "fixtures", "workflows")
@@ -396,9 +397,15 @@ class MixedEpisodeTest(unittest.TestCase):
         take = J.start_job(job)
         sc = T.read_sidecar(take.paths.sidecar)
         self.assertEqual(sc["inputs"], got)
-        self.assertEqual({r["role"]: bool(r["sha1"]) for r in sc["refs"]},
+        # the keyframes keep their roles; the sheet's panels are role-less
+        # optional refs (their sha1 is what makes a take ref-stale)
+        self.assertEqual({r["role"]: bool(r["sha1"]) for r in sc["refs"] if r.get("role")},
                          {"first": True, "last": False})
+        self.assertTrue([r for r in sc["refs"] if r["slot"].startswith("sheet panel ")])
         self.assertEqual(sc["target"], LTX)
+        # sh050's refs were never made, so there is nothing to put on a sheet:
+        # the shot renders from the prompt alone, as ltx2 always did
+        self.assertNotIn("sheet", got)
         self.assertNotIn("notes", sc)                   # the proxy generates anyway
         # the final clones (the series' audio mode): the sidecar says it can't
         job = self.plan("sh050", "final")
@@ -600,6 +607,241 @@ class RetargetRouteTest(unittest.TestCase):
         data = self.ok(A.delete_override(self.ctx, {"ep": self.ep, "shot": "sh010"}))
         self.assertEqual(data["target"], H3)
         self.assertIsNone(T.shot_target(T.load_overrides(self.ep), "sh010"))
+
+
+# ---------------------------------------------------------------------------
+# the quality profile (the dev transformer) and the ingredients reference sheet
+# ---------------------------------------------------------------------------
+
+DEV = "ltx-2.5-22b-dev-transformer-comfy-int8-convrot.safetensors"
+DISTILLED = "ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors"
+IC25 = "ltx-2.5-22b-ic-lora-ingredients-0.9.safetensors"
+
+
+class LtxQualityAndSheetTest(unittest.TestCase):
+    """Both are decided at QUEUE time, from the transformer the job loads and
+    the refs on disk, so a build is byte-for-byte what it always was."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls._tmp = tempfile.TemporaryDirectory()
+        cls.src = os.path.join(cls._tmp.name, "mx01")
+        os.makedirs(cls.src)
+        build_mixed(cls.src)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._tmp.cleanup()
+
+    def setUp(self):
+        self._t = tempfile.TemporaryDirectory()
+        self.root = os.path.join(self._t.name, "mx01")
+        shutil.copytree(self.src, self.root)
+        self.base = J.load_graph(os.path.join(ROOT, "targets", "video", LTX, "workflow.json"))
+        self.mod = TG.load_target(LTX, "video").module
+
+    def tearDown(self):
+        self._t.cleanup()
+
+    def plan(self, sid, pass_="proxy", **req):
+        doc, i = J.find_shot(self.root, pass_, sid)
+        return J.plan_job(self.root, pass_, doc, i, J.RenderRequest(sid, **req),
+                          T.load_overrides(self.root))
+
+    def graph(self, job, inputs=None):
+        take = T.Take(job.id, job.take, job.pass_,
+                      T.take_paths(self.root, job.pass_, job.id, job.take))
+        return J.graph_for(self.base, job, take, inputs=inputs)
+
+    def stages(self, g):
+        return self.mod._stages(g)
+
+    # -- the sampling mode ---------------------------------------------------
+
+    def test_sampling_mode_follows_the_transformer(self):
+        self.assertEqual(self.mod.sampling_mode(DISTILLED)[0], "distilled")
+        self.assertEqual(self.mod.sampling_mode(DEV)[0], "dev")
+        self.assertEqual(self.mod.sampling_mode("")[0], "distilled")     # the recipe's default
+        distilled = self.mod.sampling_mode(DISTILLED)[1]
+        self.assertFalse(self.mod._patches(distilled))                   # nothing to change
+        dev = self.mod.sampling_mode(DEV)[1]
+        self.assertEqual((dev["steps"], dev["video_cfg"], dev["sampler"]),
+                         (30, 4.0, "euler_ancestral"))
+        self.assertNotIn("with_sheet", dev)                              # laid over, not left in
+        # with a reference sheet the same transformer wants other settings
+        sheet = self.mod.sampling_mode(DEV, True)[1]
+        self.assertEqual((sheet["steps"], sheet["video_cfg"], sheet["sampler"]),
+                         (30, 3.0, "euler"))
+        self.assertEqual(sheet["refine"]["sampler"], "euler")
+
+    def test_steps_on_the_distilled_model_say_they_cant_bite(self):
+        job = self.plan("sh040", steps=12)
+        self.mod.sampling_plan(job)
+        self.assertEqual(job.steps, 12)                                  # recorded as asked
+        self.assertIn("isn't used by", " ".join(job.notes))
+        self.assertEqual(job.values.get("cfg"), None)
+        # unchanged steps say nothing about steps
+        job = self.plan("sh040")
+        self.mod.sampling_plan(job)
+        self.assertFalse(any("isn't used by" in n for n in job.notes), job.notes)
+
+    def test_quality_profile_settles_steps_guidance_and_sampler(self):
+        job = self.plan("sh040", model=DEV)
+        self.mod.sampling_plan(job)
+        self.assertEqual(job.steps, 30)                                  # the mode's own
+        self.assertEqual(job.values["cfg"], 4.0)
+        self.assertEqual(job.values["audio_cfg"], 4.0)
+        self.assertEqual(job.values["sampler"], "euler_ancestral")
+        self.assertEqual(job.values["refine_cfg"], 1.0)
+        self.assertIn("the quality profile", " ".join(job.notes))
+        # a step count set for the shot wins over the mode's
+        job = self.plan("sh040", model=DEV, steps=18)
+        self.mod.sampling_plan(job)
+        self.assertEqual(job.steps, 18)
+
+    def test_quality_graph(self):
+        job = self.plan("sh040", model=DEV, loras=[])        # `lora: none`: no sheet
+        J.stage_inputs(job)                                  # settles the sampling
+        g = self.graph(job)
+        self.assertEqual(J.check_graph(g, OBJECT_INFO), [])
+        st = self.stages(g)
+        sch = g[g[st[1]["sampler"]]["inputs"]["sigmas"][0]]
+        self.assertEqual(sch["class_type"], "LTXVScheduler")
+        self.assertEqual(sch["inputs"]["steps"], 30)
+        self.assertEqual(sch["inputs"]["max_shift"], 2.05)
+        # the shift follows the shot's own latent, not the node's 4096 default
+        self.assertEqual(g[sch["inputs"]["latent"][0]]["class_type"], "EmptyLTXVLatentVideo")
+        self.assertEqual(g[st[1]["guider"]]["inputs"]["video_cfg"], 4.0)
+        self.assertEqual(g[st[2]["guider"]]["inputs"]["video_cfg"], 1.0)   # the refine stays at 1
+        self.assertEqual(g[g[st[1]["sampler"]]["inputs"]["sampler"][0]]["inputs"]["sampler_name"],
+                         "euler_ancestral")
+        # the refine keeps the workflow's own short schedule
+        self.assertEqual(g[g[st[2]["sampler"]]["inputs"]["sigmas"][0]]["class_type"],
+                         "ManualSigmas")
+
+    def test_the_distilled_graph_is_untouched(self):
+        job = self.plan("sh040", loras=[])                   # `lora: none`: no sheet
+        J.stage_inputs(job)
+        g = self.graph(job)
+        self.assertEqual(J.check_graph(g, OBJECT_INFO), [])
+        self.assertFalse(of(g, "LTXVScheduler"))
+        st = self.stages(g)
+        self.assertEqual(g[st[1]["guider"]]["inputs"]["video_cfg"], 1)
+        self.assertEqual(len(of(g, "ManualSigmas")), 2)
+
+    # -- the reference sheet -------------------------------------------------
+
+    def test_panels_and_ref_slots_come_from_the_entry(self):
+        doc, i = J.find_shot(self.root, "proxy", "sh020")
+        shot = doc["shots"][i]
+        self.assertNotIn("panels", shot)                     # the build writes none
+        panels = self.mod.sheet_panels(doc, shot)
+        self.assertEqual([p.get("subject") or "plate" for p in panels],
+                         ["ada", "bo", "kettle", "plate"])
+        self.assertEqual(panels[0]["view"], "body")
+        slots = J.ref_slots(doc, shot)
+        self.assertTrue(all(r["optional"] for r in slots))    # never blocks a shot
+        self.assertEqual([r["slot"] for r in slots if r["slot"].startswith("sheet")],
+                         ["sheet panel 1", "sheet panel 2", "sheet panel 3", "sheet panel 4"])
+        self.assertEqual(J.missing_refs(self.root, doc, shot), [])
+        # a single-character close-up takes the face panel instead
+        doc, i = J.find_shot(self.root, "proxy", "sh050")
+        self.assertEqual(self.mod.sheet_panels(doc, doc["shots"][i])[0]["view"], "face")
+
+    def test_lora_none_turns_the_sheet_off(self):
+        real_refs(self.root)
+        job = self.plan("sh020", loras=[])
+        self.assertTrue(self.mod.lora_off(job))
+        self.assertEqual(J.stage_inputs(job), {})
+        self.assertFalse(any("reference sheet" in n for n in job.notes))
+        # and so does an IC-LoRA that isn't installed
+        job = self.plan("sh020")
+        job.resolved = {"reference_lora": {"want": IC25, "using": None, "how": "off",
+                                           "tier": "optional"}}
+        self.assertEqual(J.stage_inputs(job), {})
+        self.assertIn("isn't installed", " ".join(job.notes))
+
+    @needs_pil
+    def test_sheet_take_prompt_and_graph(self):
+        real_refs(self.root)
+        job = self.plan("sh020")
+        built = job.prompt
+        self.assertTrue(built.startswith("Style:"))
+        comfy = FakeComfy()
+        try:
+            got = J.stage_inputs(job, J.Comfy(comfy.url))
+            self.assertEqual(list(got), ["sheet"])
+            take = J.start_job(job)
+        finally:
+            comfy.close()
+        # the IC-LoRA's two labelled parts, written by ltx2_ingredients
+        self.assertTrue(job.prompt.startswith("Reference sheet: Ada"))
+        self.assertIn("\n\nGenerated video: Style:", job.prompt)
+        self.assertIn("reference sheet (4 panels)", " ".join(job.notes))
+        # the take records the panels and the sheet
+        frozen = T.read_json(take.paths.shotlist)["shots"][0]
+        self.assertEqual([p.get("subject") or "plate" for p in frozen["panels"]],
+                         ["ada", "bo", "kettle", "plate"])
+        self.assertEqual(frozen["prompt"], job.prompt)
+        sc = T.read_sidecar(take.paths.sidecar)
+        refs = {r["slot"]: r for r in sc["refs"]}
+        self.assertEqual(refs["reference sheet"]["path"],
+                         "renders_proxy/sh020/sh020_t01_refsheet.png")
+        self.assertTrue(all(refs[f"sheet panel {i}"]["sha1"] for i in (1, 2, 3, 4)))
+        self.assertEqual(sc["inputs"], got)
+
+        g = self.graph(job, got)
+        self.assertEqual(J.check_graph(g, OBJECT_INFO), [])
+        st = self.stages(g)
+        self.assertEqual(g[J.node_of(g, "LoadImage")]["inputs"]["image"], got["sheet"])
+        fit = g[J.node_of(g, "ResizeAndPadImage")]["inputs"]
+        # the base stage samples at half the output size: the guide must match
+        self.assertEqual((fit["target_width"], fit["target_height"]), (224, 128))
+        self.assertEqual((fit["padding_color"], fit["interpolation"]), ("black", "lanczos"))
+        # the reference video is exactly the clip's length (a longer guide is
+        # refused by LTXAddVideoICLoRAGuide)
+        self.assertEqual(g[J.node_of(g, "RepeatImageBatch")]["inputs"]["amount"], job.frames)
+        ic = g[J.node_of(g, "LTXICLoRALoaderModelOnly")]["inputs"]
+        self.assertEqual((ic["lora_name"], ic["strength_model"]), (IC25, 1.0))
+        guide = g[J.node_of(g, "LTXAddVideoICLoRAGuide")]["inputs"]
+        self.assertEqual(guide["latent_downscale_factor"][1], 1)     # the loader's second output
+        self.assertEqual(guide["frame_idx"], 0)
+        # only the guided stage reads the patched model, and its guide frames
+        # are cropped back off before the upsampler
+        self.assertEqual(g[st[1]["guider"]]["inputs"]["model"][0],
+                         J.node_of(g, "LTXICLoRALoaderModelOnly"))
+        self.assertEqual(g[st[2]["guider"]]["inputs"]["model"][0], J.node_of(g, "UNETLoader"))
+        self.assertEqual(len(of(g, "LTXVCropGuides")), 1)
+        self.assertEqual(g[st["upsampler"]]["inputs"]["samples"][0], of(g, "LTXVCropGuides")[0])
+        self.assertIn("under the IC-LoRA's 121", " ".join(job.notes))
+
+    @needs_pil
+    def test_sheet_and_a_last_keyframe_share_one_crop_per_stage(self):
+        real_refs(self.root)
+        job = self.plan("sh040")                             # has both keyframes
+        got = J.stage_inputs(job)
+        g = self.graph(job, dict(got, last="h3pipe/b.png"))
+        self.assertEqual(J.check_graph(g, OBJECT_INFO), [])
+        self.assertEqual(len(of(g, "LTXVCropGuides")), 2)    # one per stage, not four
+        self.assertEqual(len(of(g, "LTXAddVideoICLoRAGuide")), 1)
+        self.assertEqual(len(of(g, "LTXVAddGuide")), 2)
+
+    @needs_pil
+    def test_quality_profile_with_a_sheet_takes_the_with_sheet_settings(self):
+        real_refs(self.root)
+        job = self.plan("sh020", model=DEV)
+        got = J.stage_inputs(job)
+        self.assertEqual(job.values["cfg"], 3.0)
+        self.assertEqual(job.values["sampler"], "euler")
+        g = self.graph(job, got)
+        self.assertEqual(J.check_graph(g, OBJECT_INFO), [])
+        st = self.stages(g)
+        self.assertEqual(g[st[1]["guider"]]["inputs"]["video_cfg"], 3.0)
+        for s in of(g, "KSamplerSelect"):
+            self.assertEqual(g[s]["inputs"]["sampler_name"], "euler")
+        # the scheduler still measures the clip, not the clip plus its guide
+        sch = g[g[st[1]["sampler"]]["inputs"]["sigmas"][0]]
+        self.assertEqual(g[sch["inputs"]["latent"][0]]["class_type"], "EmptyLTXVLatentVideo")
 
 
 if __name__ == "__main__":

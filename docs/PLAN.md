@@ -2,8 +2,11 @@
 
 Status (2026-09-19): Phases 0–3, 5–8, 8.5 and 8.6 done; Phase 4 (evaluate) continues through use. Video targets:
 `minimax_h3_ref2va` (default), `minimax_h3_fl2va` (H3 from first/last keyframes; dub anchors the recording),
-`ltx2` (LTX-2.5; `dur: model` predicts length once the duration head is installed), `ltx2_ingredients`
-(LTX-2.3 + IC-LoRA reference sheet: identity), `wan22_i2v` / `wan22_ti2v` / `wan22_vace` (Wan 2.2, silent,
+`ltx2` (LTX-2.5; `dur: model` predicts length once the duration head is installed; naming the dev
+transformer as the model renders the **quality profile**, 30 steps with real guidance, and a shot
+whose refs are on disk draws a **reference sheet** through the 2.5 ingredients IC-LoRA — both decided
+at queue time, both optional-tier, see **LTX-2.5: the quality profile and ingredients references** in
+docs/API.md), `ltx2_ingredients` (LTX-2.3 + IC-LoRA reference sheet: identity), `wan22_i2v` / `wan22_ti2v` / `wan22_vace` (Wan 2.2, silent,
 16/24 fps; assemble converts fps). Model files are checked against each target's family (name patterns +
 safetensors header). Keyframe continuity is in the CLI, the routes and the editor. Readiness (backend,
 2026-09-19): each target's model params have tiers (required / accelerator / optional), accelerated presets a

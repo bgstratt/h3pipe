@@ -396,6 +396,7 @@ LOADERS = {("UNETLoader", "unet_name"): ["diffusion_models"],
            ("CLIPLoader", "clip_name"): ["text_encoders"],
            ("VAELoader", "vae_name"): ["vae"],
            ("LoraLoaderModelOnly", "lora_name"): ["loras"],
+           ("LTXICLoRALoaderModelOnly", "lora_name"): ["loras"],
            ("CheckpointLoaderSimple", "ckpt_name"): ["checkpoints"],
            ("LTXVAudioVAELoader", "ckpt_name"): ["checkpoints"],
            ("LTXAVTextEncoderLoader", "ckpt_name"): ["checkpoints"],
@@ -459,6 +460,30 @@ class ReadinessTest(unittest.TestCase):
         self.assertEqual(self.ready(None, error="down")["krea2"],
                          {"status": "unknown", "missing": [], "resolved": {}, "by_pass": {},
                           "features_off": [], "nodes_missing": [], "error": "down"})
+
+    def test_ltx2_extras_are_optional(self):
+        """The dev transformer (the quality profile) and the 2.5 ingredients
+        IC-LoRA (reference sheets) degrade ltx2, they never block it."""
+        r = self.ready(fake_object_info(drop_files={
+            "ltx-2.5-22b-dev-transformer-comfy-int8-convrot.safetensors",
+            "ltx-2.5-22b-ic-lora-ingredients-0.9.safetensors"}))
+        t = r["ltx2"]
+        self.assertEqual(t["status"], "degraded")
+        self.assertEqual(sorted(t["features_off"]),
+                         ["reference sheets (LTX-2.5 ingredients IC-LoRA)",
+                          "the quality profile (LTX-2.5 dev transformer)"])
+        self.assertEqual({m["param"]: m["tier"] for m in t["missing"]},
+                         {"quality_model": "optional", "reference_lora": "optional"})
+        self.assertEqual({m["folder"] for m in t["missing"]}, {"diffusion_models", "loras"})
+        self.assertTrue(all(m["url"].startswith("https://huggingface.co/") for m in t["missing"]))
+        self.assertEqual(t["resolved"]["model"]["how"], "exact")     # the distilled one still is
+        # their nodes are optional too: a ComfyUI without them is degraded
+        r = self.ready(fake_object_info(drop_nodes={"LTXICLoRALoaderModelOnly",
+                                                    "LTXAddVideoICLoRAGuide", "LTXVScheduler"}))
+        self.assertEqual(r["ltx2"]["status"], "degraded")
+        self.assertEqual(sorted(r["ltx2"]["features_off"]),
+                         ["reference sheets (LTX-2.5 ingredients IC-LoRA)",
+                          "the quality profile (LTX-2.5 dev transformer)"])
 
     def test_nodes(self):
         r = self.ready(fake_object_info(drop_nodes={"LTXVDurationPredictor", "H3SaveShot"}))
@@ -557,14 +582,23 @@ class DownloadsDataTest(unittest.TestCase):
                 if d["url"] is not None:
                     self.assertTrue(d["url"].startswith("https://huggingface.co/"), (t.id, name))
                     self.assertTrue(d["url"].endswith("/" + name), (t.id, name))
+                    # a URL always says where the record came from: a ComfyUI
+                    # template, a saved workflow, ComfyUI-Manager's model
+                    # list, or the model's own Hugging Face repo listing
                     self.assertRegex(d["source"], r"^(ComfyUI template |saved workflow |"
-                                                  r"ComfyUI-Manager model list )")
+                                                  r"ComfyUI-Manager model list |"
+                                                  r"the Hugging Face repo )")
                 else:
                     self.assertIn("Search", d["source"], (t.id, name))
         # the LTX duration head's URL comes from ComfyUI-Manager's list
         d = TG.load_target("ltx2").downloads["ltx-2.5-duration-head-bf16.safetensors"]
         self.assertEqual(d["folder"], "model_patches")
         self.assertIn("ComfyUI-Manager model list", d["source"])
+        # the 2.5 ingredients IC-LoRA is in neither, so its record is the
+        # file listing of the Lightricks repo that ships it
+        d = TG.load_target("ltx2").downloads["ltx-2.5-22b-ic-lora-ingredients-0.9.safetensors"]
+        self.assertEqual(d["folder"], "loras")
+        self.assertIn("LTX-2.5-22b-IC-LoRA-Ingredients", d["url"])
 
     def test_tiers_and_bases(self):
         for t in TG.list_targets():
@@ -583,7 +617,9 @@ class DownloadsDataTest(unittest.TestCase):
                           if any(m["tier"] == "accelerator" for m in t.models.values())},
                          {"minimax_h3_ref2va", "minimax_h3_fl2va", "wan22_i2v", "ltx2_ingredients",
                           "flux2_klein", "flux2_klein_edit", "ltx2_voice"})
-        self.assertEqual(TG.load_target("ltx2").models["duration_head"]["tier"], "optional")
+        self.assertEqual({p for p, m in TG.load_target("ltx2").models.items()
+                          if m["tier"] == "optional"},
+                         {"duration_head", "quality_model", "reference_lora"})
 
 
 # ---------------------------------------------------------------------------

@@ -369,11 +369,22 @@ sequence) on LTX-2.5 instead of the series target; any other name is an error. O
 can mix the two: the build writes the LTX shots to their own shotlist, and the editor, the
 render command and the review cut treat the episode as one. What changes for an LTX shot:
 
-- **No reference pictures.** LTX takes no character sheets or plates. Everyone in `who:` /
-  `with:` is described in words from their `design`, and the place from the location's
-  `description`, so those sentences carry the look on their own. A first- and/or last-frame
-  keyframe (`refs/shots/<shot>/first.png`, `last.png`, imported in the editor's Refs tab)
-  pins the picture when you have one; without them the shot is text-to-video.
+- **Your refs are used when they are there.** Everyone in `who:` / `with:` is described in
+  words from their `design` and the place from the location's `description`, so the
+  sentences carry the look on their own — and when the shot's subjects and plate have
+  picked refs on disk **and** the LTX-2.5 ingredients IC-LoRA is installed, those refs are
+  also drawn onto one reference sheet that conditions the clip, exactly as
+  `target: ltx2_ingredients` does (see below for the sheet's layout). It is decided when
+  the shot is queued, never at build time, so nothing in the shotlist changes; the take
+  says which panels it used, keeps the sheet as `<shot>_tNN_refsheet.png`, and re-picking a
+  view marks it stale. Without the refs or without the LoRA the shot renders from the
+  prompt alone, as it always did. **No panel is ever required**: a missing one just leaves
+  that element off the sheet. To turn the sheet off for a shot, sequence or profile, write
+  `lora: none` (`"loras": ["none"]` in a profile) — the opposite of `ltx2_ingredients`,
+  where the IC-LoRA is put back because the target is pointless without it.
+  A first- and/or last-frame keyframe (`refs/shots/<shot>/first.png`, `last.png`, imported
+  in the editor's Refs tab) pins the picture when you have one; without keyframes and
+  without a sheet the shot is text-to-video.
 - **Its own grid:** `8k + 1` frames (9, 17, 25, … 73 = 3.04s, 97 = 4.04s at 24fps), up to
   about 20 seconds. The same `dur:` snaps to a slightly different length than on H3.
 - **Sound is always generated with the picture.** LTX takes no voice sample and no recording:
@@ -385,6 +396,26 @@ render command and the review cut treat the episode as one. What changes for an 
 - **Size** comes from the series config's pass blocks, snapped down to a multiple of 64 and
   kept under 1 MP (1344×768 stays; a 480×272 proxy becomes 448×256). Its model, LoRA
   and steps are the target's own: a series written for H3 doesn't hand them H3's.
+- **Two transformers: fast by default, or a quality pass.** The default is the *distilled*
+  LTX-2.5 transformer, which was distilled for a fixed 8-step schedule at guidance 1 — a
+  `steps:` line can't change that, and the take says so. Name the *dev* (non-distilled)
+  transformer as the model and LTX-2 renders the **quality profile** instead: 30 steps with
+  real guidance, for crisper lines and steadier faces. It costs very little — the extra
+  steps run on the half-size base pass, and a 4-second 768×512 shot measured 39 s either
+  way. Set it wherever a model is set — a profile for a kind of
+  shot, a `model:` line on a shot or sequence, the series config's `series` block for the
+  whole episode, or the editor's model picker for one shot:
+
+  ```json
+  "profiles": {
+    "quality": { "target": "ltx2",
+                 "model": "ltx-2.5-22b-dev-transformer-comfy-int8-convrot.safetensors" }
+  }
+  ```
+
+  Then `profile: quality` on a `##` shot or a `#` header. A `steps:` line on such a shot
+  wins over the profile's 30. The dev file is optional: without it installed, `h3.py
+  targets` says the feature is off and everything else still renders.
 
 To try a shot on LTX without touching the script, retarget it from the editor or with
 `h3.py override <ep> sh040 --target ltx2` (`--target built` undoes it).

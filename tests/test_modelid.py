@@ -246,10 +246,15 @@ class CheckModelTest(unittest.TestCase):
                                      "text_encoder": "qwen3vl-32b",
                                      "video_vae": "minimax-h3-video-vae",
                                      "audio_vae": "minimax-h3-audio-vae"},
+                # quality_model and reference_lora are the two optional extras:
+                # the dev transformer (the quality profile) and the 2.5
+                # ingredients IC-LoRA (reference sheets)
                 "ltx2": {"model": "ltx2.5", "text_encoder": "ltx2.5-text-encoder",
                          "video_vae": "ltx2.5-video-vae", "audio_vae": "ltx2.5-audio-vae",
                          "upscaler": "ltx2.5-latent-upscaler",
-                         "duration_head": "ltx2.5-duration-head"},
+                         "duration_head": "ltx2.5-duration-head",
+                         "quality_model": "ltx2.5",
+                         "reference_lora": "ltx2.5-ic-lora-ingredients"},
                 "ltx2_ingredients": {"model": "ltx2.3", "loras": "ltx2.3-ic-lora-ingredients",
                                      "text_encoder": "gemma3-12b"},
                 "krea2": {"model": "krea2", "text_encoder": "qwen3vl-4b", "vae": "wan2.1-vae"}}

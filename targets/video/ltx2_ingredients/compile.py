@@ -137,13 +137,14 @@ def _ordered(shot: ir.Shot, book: dict) -> list[str]:
     return chars + [s for s in subjects if s not in chars]
 
 
-def panel_view(subjects: list[str], book: dict, size: str) -> str:
+def panel_view(subjects: list[str], book: dict, size: str, sheet: dict | None = None) -> str:
     """Which panel of a character's 4-panel sheet goes on the reference sheet:
     the face on a single-character close-up, else the three-quarter body (the
-    H3 loader's choice)."""
+    H3 loader's choice). `sheet` is the recipe's `reference_sheet` block, so
+    another target reusing this (ltx2) reads its own."""
     return ("face" if len(subjects) == 1
             and book[subjects[0]].get("kind", "character") == "character"
-            and size in SHEET["face_sizes"] else "body")
+            and size in (sheet or SHEET)["face_sizes"] else "body")
 
 
 def _panels(ctx: Ctx, shot: ir.Shot, loc_key: str) -> list[dict]:
@@ -396,20 +397,23 @@ def sheet_panels(job) -> tuple[list[dict], list[dict]]:
     return have, gone
 
 
-def sheet_spec(job, panels: list[dict]) -> dict:
+def sheet_spec(job, panels: list[dict], sheet: dict | None = None) -> dict:
     """What comfy_nodes/h3_refsheet.py composes: the render size, black, and
-    each panel's file (a character's one view of its 4-panel strip)."""
-    n = int(SHEET.get("sheet_panels", 4))
+    each panel's file (a character's one view of its 4-panel strip). `sheet`
+    is the recipe's `reference_sheet` block, so another target reusing this
+    (ltx2) composes with its own numbers."""
+    sheet = sheet or SHEET
+    n = int(sheet.get("sheet_panels", 4))
     out = []
     for p in panels:
         d = {"path": os.path.abspath(_abs(job.root, p["path"])),
              "fit": "cover" if p.get("kind") == "plate" else "figure"}
         if p.get("kind") == "character":
-            d["crop"] = {"panels": n, "index": int(SHEET["views"][p.get("view", "body")])}
+            d["crop"] = {"panels": n, "index": int(sheet["views"][p.get("view", "body")])}
         out.append(d)
     return {"width": job.width, "height": job.height,
-            "background": SHEET.get("background", "black"),
-            "gap": SHEET.get("gap", 0.02), "panels": out}
+            "background": sheet.get("background", "black"),
+            "gap": sheet.get("gap", 0.02), "panels": out}
 
 
 def _label(p: dict) -> str:
