@@ -4,12 +4,16 @@ Write an episode as a screenplay-flavoured markdown file (`epNN.md`) plus a seri
 (`series.json`). h3pipe parses the script into a model-free **story IR**
 (`shotlist/shots.json`), compiles every shot for its **video target** (a model and its
 ComfyUI workflow), generates the reference images and keyframes the shots need through an
-**image target**, renders each shot on a local ComfyUI, and cuts the takes together.
+**image target** and their voice samples through an **audio target**, renders each shot on
+a local ComfyUI, and cuts the takes together.
 
 You drive it from an editor inside ComfyUI (shots, takes, refs, the cut) or from one
 command, `h3.py`. One shot per queue: nothing chains, so a bad shot is re-rendered alone
 and the rest of the episode is untouched. Every take is kept with the exact settings that
 made it.
+
+New here? **[INSTALL.md](INSTALL.md)** goes from a clean ComfyUI to a rendered proxy
+episode; **[docs/AUTHORING.md](docs/AUTHORING.md)** is the script and series config format.
 
 ```
   you write                     generated                                  rendered
@@ -46,27 +50,59 @@ queued; no rebuild. The format and how to choose are in
 | `flux2_klein_edit` (default for keyframes, when installed) | FLUX.2 Klein 9B edit (uses reference images) |
 | `flux_kontext` | FLUX.1 Kontext dev (edit, one reference) |
 
+| Audio target | Label |
+|---|---|
+| `ltx2_voice` (default for voices) | LTX-2.5 audio-only: one speaking voice from a character's `voice` line |
+
 Each target lives in `targets/<kind>/<id>/`: `target.json` (presets, the model files it
 needs with their tier and download links, the workflow binding), its code (the prompt writer, the
-compile), and `workflow.json`. The image target for refs and keyframes comes from the series config's
-`refs` block, the editor, or `--target`.
+compile), and `workflow.json`. The image and audio targets for refs, keyframes and voices come from
+the series config's `refs` block (`target`, `keyframe_target`, `voice_target`), the editor, or
+`--target`.
 
 **What's installed?** With ComfyUI running, `python h3.py targets` prints one line per
 target (`ready`, `degraded`, `not_ready`, `unknown`) and, under it, every missing file with
-its models folder and download link. `--kind video|image` narrows it, an episode folder
+its models folder and download link. `--kind video|image|audio` narrows it, an episode folder
 adds its series config (`python h3.py targets Shows\ep05`), `--json` prints data. A
 missing required file skips the shot with its link; a missing accelerator (a turbo LoRA)
 renders the slower base preset; the take says which. The editor's target picker and its
 **What's missing** window show the same.
 
+## Install
+
+**[INSTALL.md](INSTALL.md) is the full walkthrough** — requirements, the node pack, the
+workflows, every model file with its folder and download link, and a first episode end to
+end. The short version:
+
+```
+git clone https://github.com/<you>/h3pipe.git
+mklink /J C:\path\to\ComfyUI\custom_nodes\ComfyUI-H3-Shotlist C:\path\to\h3pipe\comfy_nodes
+```
+
+(`ln -s` on Linux/macOS; if you copy the folder instead, set `H3PIPE_HOME` to the repo for
+ComfyUI.) Restart ComfyUI: the pack brings the loader and save nodes, the editor's routes
+(`docs/API.md`) and the editor itself (`comfy_nodes/web/h3pipe-editor.js`).
+
+The pipeline itself needs nothing installed — Python 3.10+, standard library only — plus
+`ffmpeg` and `ffprobe` on PATH for `assemble`, the peaks and the audio work. `pip install
+faster-whisper numpy` adds `align`, `pip install demucs` the `dub_keep_foley` foley bed.
+
+Run `python h3.py` from the repo (or by its path from anywhere; it finds the scripts beside
+it). Each episode lives in its own folder (`Shows\ep05`) holding its script and
+`series.json`.
+
 ## Models
 
 Each target's `target.json` lists the files it needs (`models`: what each file is and its
 tier, required / accelerator / optional) and a download link for each one it has a
-trustworthy record of (`downloads`). `python h3.py targets` checks them against your
-ComfyUI. See **Which model? Readiness and downloads** in [docs/AUTHORING.md](docs/AUTHORING.md).
+trustworthy record of (`downloads`). **[INSTALL.md](INSTALL.md#4-models) has the whole list**,
+grouped by model family with folders and links, generated from those records by
+`python tools/make_models_md.py`. `python h3.py targets` checks them against your ComfyUI.
+See also **Which model? Readiness and downloads** in [docs/AUTHORING.md](docs/AUTHORING.md).
 
-The default target, H3 Ref2VA:
+The default target, H3 Ref2VA, from
+[Comfy-Org/MiniMax-H3](https://huggingface.co/Comfy-Org/MiniMax-H3) with the turbo LoRAs
+from [lightx2v/Minimax-h3-Turbo](https://huggingface.co/lightx2v/Minimax-h3-Turbo):
 
 | Role | File used here |
 |---|---|
@@ -76,60 +112,7 @@ The default target, H3 Ref2VA:
 | Text encoder | `qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors` |
 | Video / audio VAE | `minimax_h3_video_vae_fp16` / `minimax_h3_audio_vae_fp32` |
 
-Models come from [Comfy-Org/MiniMax-H3](https://huggingface.co/Comfy-Org/MiniMax-H3) and the
-turbo LoRAs from [lightx2v/Minimax-h3-Turbo](https://huggingface.co/lightx2v/Minimax-h3-Turbo).
 Swap any of them per pass or per shot; see **Steps, model and LoRA**.
-
-LTX-2.5 (`ltx2`), for example, needs ComfyUI's LTX-2.5 nodes (core ComfyUI) and these files,
-from [Lightricks/LTX-2.5](https://huggingface.co/Lightricks/LTX-2.5) and
-[Comfy-Org/gemma-4](https://huggingface.co/Comfy-Org/gemma-4):
-
-| Role | File used here |
-|---|---|
-| Diffusion model (distilled, both passes) | `ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors` |
-| Text encoder (`CLIPLoader`, type `ltxv`) | `gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors` |
-| Video / audio VAE | `ltx-2.5-video-vae-bf16.safetensors` / `ltx-2.5-audio-vae-bf16.safetensors` |
-| Latent upscaler (x2, second stage) | `ltx-2.5-latent-spatial-upscaler-x2-bf16-1.0.safetensors` |
-
-The other targets' files are in their `target.json`, and `h3.py targets` prints what is
-missing with links.
-
-## Requirements
-
-- Python 3.10+ (the pipeline is standard library only; the ComfyUI nodes use torch, which
-  ComfyUI provides)
-- A local [ComfyUI](https://github.com/comfyanonymous/ComfyUI), frontend 1.3 or later for
-  the editor, with the model files of the targets you use (`python h3.py targets`; the
-  default H3 files are listed under **Models**)
-- `ffmpeg` and `ffprobe` on PATH for `assemble`
-- Optional: `pip install demucs` for the `dub_keep_foley` audio policy, `pip install
-  faster-whisper` for `align`
-
-## Install
-
-```
-git clone https://github.com/<you>/h3pipe.git
-```
-
-Link `comfy_nodes/` into ComfyUI's `custom_nodes` and restart ComfyUI. A link (a junction on
-Windows) lets the editor find the pipeline beside it:
-
-```
-mklink /J C:\path\to\ComfyUI\custom_nodes\ComfyUI-H3-Shotlist C:\path\to\h3pipe\comfy_nodes
-```
-
-If you copy the folder instead, set `H3PIPE_HOME` to the repo for ComfyUI. The node pack
-brings the loader and save nodes, the editor's routes (`docs/API.md`) and the editor
-itself (`comfy_nodes/web/h3pipe-editor.js`).
-
-Each target's workflow is looked up among ComfyUI's saved workflows by the name its
-`target.json` binding gives (H3 Ref2VA: `H3_Ref2VA_Shotlist_v1.json`), else the repo's
-`targets/<kind>/<id>/workflow.json`; `--workflow` overrides it for a run. Saving the
-repo's workflow in ComfyUI under that name keeps it in step with your node versions.
-
-Run `python h3.py` from the repo (or by its path from anywhere; it finds the scripts beside
-it). Each episode lives in its own folder (`Shows\ep05`) holding its script and
-`series.json`.
 
 ## The editor
 
@@ -137,22 +120,40 @@ Open ComfyUI after installing the node pack:
 
 - **h3 Shots** (sidebar): pick the project folders (roots) and the episode, the pass
   (final / proxy) and the episode's model; build; every shot with its takes, status and
-  stale marks; render, redo, pick the take the cut uses.
+  stale marks; render, redo, cancel, pick the take the cut uses, discard a take to
+  `renders[_proxy]/_trash/`.
 - **h3 Refs** (sidebar): every character view, prop, plate, voice and shot keyframe the
-  series config and script call for, with candidates (takes) to generate, import, compare
-  and pick, and each ref's prompt override and image target.
-- **h3 Timeline** (bottom panel): the cut in order, with Play all and assemble.
+  series config and script call for, with candidates (takes) to generate, import, compare,
+  discard and pick, and each ref's prompt override and image target.
+- **h3 Timeline** (bottom panel): the cut as an editable track — drag to reorder, drag the
+  clip edges to trim frame by frame, lock a clip, undo/redo, copy the order or the trims
+  from the other pass, **Play all** (watch the cut straight from its takes, no ffmpeg) and
+  **Export** (assemble the mp4).
+- **Script** and **Series config** (floating): the two authored files, edited in place with
+  live checking, Ctrl-S to save and rebuild, and a copy of the old version kept in
+  `_history/`. The Script window follows the selected shot both ways.
 - **Viewer** (floating): a shot's takes with A/B compare (side by side or wipe), Play all,
   and a ref's candidates.
 - **Inspector** (floating): the selected shot: target, overrides (prompt, seed, model,
   LoRAs, steps, per pass), refs used, missing refs.
+- **Recording** (floating): attach the episode's dialogue recording — browse the ComfyUI
+  machine, type a path, or drop a file in — and run `h3align` against it, with what to
+  install if it can't run, live progress, and the report.
+- **Audio from…** (floating): a clip's picture with another clip's sound, a file from the
+  episode, or silence, with both waveforms drawn and the offset draggable.
+- **Promote** (dialog): which of the episode's overrides can move into the script or the
+  series config, the diffs of both, and Confirm to write them and rebuild.
 - **What's missing** (floating): which model files a target lacks, with folders and links.
 
 The project roots are kept in ComfyUI's user folder (`user/default/h3pipe/config.json`),
 else read from `H3PIPE_ROOTS`. Everything the editor does is a file in the episode folder
-(`overrides.json`, `cut.json`, take sidecars), and the commands below do the same.
+(`overrides.json`, `cut.json`, take sidecars, `_history/`), and the commands below do the
+same.
 
 ## Quick start (command line)
+
+First time on this machine? [INSTALL.md](INSTALL.md) walks the same path from a clean
+ComfyUI, with an episode you can paste in.
 
 ```
 python h3.py build    Shows\ep05             # story IR, shotlists, reference work orders
@@ -183,6 +184,9 @@ disk alone. ComfyUI must be running for `targets`, `refs`, `keyframe --generate`
 | `h3.py assemble` | `h3assemble.py`: the review cut, in `cut.json` order |
 | `h3.py align` | `h3align.py`: times the script against a dialogue recording |
 | `h3.py takes` / `pick` / `override` | takes and why they're stale; the take the cut uses; per-shot tweaks and retargeting (`h3edit.py`) |
+| `h3.py cut` | edit the cut itself: `--show`, `--order`, `--move … --before`, `--trim SH IN OUT`, `--lock`/`--unlock`, `--reset`, `--copy-from final\|proxy`, `--audio` (a clip's sound from another take, a file, none or its own) |
+| `h3.py discard` | move a take to `renders[_proxy]/_trash/<shot>/`; a cut pick of it goes back to `latest` |
+| `h3.py promote` | `h3promote.py`: which overrides can move into the script / series config, with the diffs; `--all` or `--item` moves them, drops those overrides and rebuilds |
 | `h3.py targets` | readiness and downloads per target |
 
 ## The scripts
@@ -194,12 +198,14 @@ disk alone. ComfyUI must be running for `targets`, `refs`, `keyframe --generate`
 | `kreagen.py` | Generates every missing reference image through the image target and saves it where the series config names | `refs_todo.json`, `series.json` | `refs/…` (takes in `refs/_takes/`) |
 | `mksheet.py` | Joins four character views into one 4096×1024 sheet (kreagen calls it) | 4 images | `refs/<char>/<char>_sheet_4panel.png` |
 | `h3render.py` | Queues each shot on ComfyUI through its target's workflow, waits, skips finished shots | `shotlist*.json`, `overrides.json`, the workflows | `renders/` or `renders_proxy/` |
-| `h3edit.py` | `takes`, `pick`, `override`, `keyframe`, `targets` (through `h3.py`) | the episode | `cut.json`, `overrides.json`, `refs/shots/` |
+| `h3edit.py` | `takes`, `pick`, `override`, `keyframe`, `discard`, `cut`, `targets` (through `h3.py`) | the episode | `cut.json`, `overrides.json`, `refs/shots/` |
+| `h3promote.py` | Moves an override into the script or the series config where it belongs, and rebuilds | `overrides.json`, `epNN.md`, `series.json` | updated script and series config, `_history/` |
 | `h3align.py` | Times the script against a dialogue recording and writes the `audio:` windows | recording, `epNN.md`, `series.json` | updated script and series config, `align_report.md` |
-| `h3assemble.py` | Joins the rendered shots in cut order (`cut.json`, else script order), trimming timed shots to their windows | `shotlist*.json`, renders | `renders/epNN.mp4`, `epNN_shots.txt` |
+| `h3assemble.py` | Joins the rendered shots in cut order (`cut.json`, else script order), trimming timed shots to their windows and using each clip's chosen audio | `shotlist*.json`, `cut.json`, renders | `renders/epNN.mp4`, `epNN_shots.txt` |
 
-`h3core/` (parser, story IR, series config, speech pacing), `h3jobs.py`, `h3takes.py` and
-`h3refs.py` are the library the commands and the editor's routes share.
+`h3core/` (parser, story IR, series config, speech pacing), `h3jobs.py`, `h3takes.py`,
+`h3refs.py`, `h3source.py` (the authored files), `h3track.py` (recordings and alignment)
+and `h3peaks.py` (waveforms) are the library the commands and the editor's routes share.
 
 ### What you write
 
@@ -295,12 +301,20 @@ model or LoRA changes, so group experiments rather than scattering them through 
 python h3.py refs Shows\ep05 --list        # what would run
 python h3.py refs Shows\ep05 --only dean   # one asset first
 python h3.py refs Shows\ep05               # everything missing, most-needed first
+python h3.py refs Shows\ep05 --voices      # also the voice samples, on the audio target
 ```
 
 - Skips anything already on disk. `--redo` makes a new take (kept in `refs/_takes/`) and
   leaves the live file alone unless you add `--pick`; combine it with `--only`. `--all`
   works from the whole series config instead of `refs_todo.json`.
 - `--only` matches part of the file path, so `dean` also matches `dean_grown`.
+- **Voices.** Images only, unless `--voices`: then each character's voice ref is generated
+  on the audio target (`--voice-target`, `--voice-seconds`; default `ltx2_voice`) into
+  `refs/voices/<char>.wav`, as takes like any other ref. `--from-take sh020:2:1.5-6.0`
+  needs no model at all — it cuts those seconds out of a rendered take's sound into a
+  voice candidate.
+- `--discard subject:ada:02_side:2` moves a candidate to `refs/_takes/_trash/` (nothing is
+  deleted; if it was the pick, the ref is cleared).
 - Each character is made as four square views sharing a seed, then joined by mksheet.
   Every view is a take in `refs/_takes/subject__<char>/`, so one angle can be redone and
   re-picked in the editor's Refs tab (h3refs.py).
@@ -365,15 +379,18 @@ python h3.py render Shows --each --proxy               # every episode
   run. An LTX shot's keyframes (`refs/shots/<shot>/first.png`, `last.png`) are uploaded into
   ComfyUI's `input/h3pipe/` first. `--dry-run --check-nodes` also asks the running ComfyUI
   (`/object_info`) whether it knows every node and input of the graph.
-- Failed shots are reported and skipped; `--stop-on-error` halts instead.
+- Failed shots are reported and skipped; `--stop-on-error` halts instead. A shot whose
+  reference images are still missing is **blocked**, and the report names the exact files;
+  `--allow-missing-refs` renders it against flat grey stand-ins.
 - Other flags: `--panel-mode`, `--save-frames` / `--no-frames`, `--no-review-copy`, `--comfy URL`,
-  `--workflow`, `--dry-run` (writes the API job to `h3render_graph.json`).
+  `--workflow`, `--allow-model-mismatch`, `--dry-run` (writes the API job to `h3render_graph.json`).
 - Each target's workflow comes from the running ComfyUI's saved workflows (the name in its
-  `target.json` binding: `H3_Ref2VA_Shotlist_v1.json` for H3; `kreagen` uses
-  `krea2_refs_t2i.json`), so it always matches
-  your ComfyUI's node versions. Failing that, `$COMFYUI_PATH`, then the copy in this repo
-  (`targets/video/minimax_h3_ref2va/workflow.json`, `targets/image/krea2/workflow.json`). `--workflow` or `$H3_WORKFLOW` / `$KREA_WORKFLOW` beat all of those. Keep the
-  saved `krea2_refs_t2i.json` free of style LoRAs (experiment under another name), since the
+  `target.json` binding: `H3_Ref2VA_Shotlist_v1.json` for H3, `krea2_refs_t2i.json` for
+  reference images), so it always matches your ComfyUI's node versions; failing that,
+  `$COMFYUI_PATH`'s workflows folder, then the copy in this repo. `--workflow` and the
+  target's own env var (`$H3_WORKFLOW`, `$KREA_WORKFLOW`, …) beat all of those. Every
+  target's name and variable is in [INSTALL.md](INSTALL.md#3-workflows). Keep the saved
+  `krea2_refs_t2i.json` free of style LoRAs (experiment under another name), since the
   references must follow the series config's look.
 - It converts the canvas workflow to API format itself. If ComfyUI rejects it, save
   **Workflow → Export (API)** and pass that file with `--workflow`.
@@ -386,7 +403,7 @@ python h3.py assemble Shows\ep05 --partial         # join what exists so far
 ```
 
 - Follows the episode's `cut.json` if there is one (a list per pass of
-  `{"shot", "take", "pass", "trim_in", "trim_out"}` entries). The list sets the order and,
+  `{"shot", "take", "pass", "trim_in", "trim_out", "audio"}` entries). The list sets the order and,
   with `take: N`, the exact take. Without `cut.json`, or for a shot the list leaves out,
   a shot goes in script order and uses its latest usable take: status `ok` and the mp4 is
   there, so a `--redo` still queued or failed is skipped. Takes from before sidecars count
@@ -400,8 +417,12 @@ python h3.py assemble Shows\ep05 --partial         # join what exists so far
 - `--check` lists the resolved cut (order, take, pass, trims, placeholders, orphans) and
   writes nothing. `--name` sets the output filename, `--shotlist` picks the proxy files,
   `--subfolder` reads this pass's takes from another folder.
-- Mute clips (dub, clone) get their `_h3.wav` added so the join works. `--audio h3|none|master`
-  chooses the sound.
+- Mute clips (dub, clone) get their `_h3.wav` added so the join works.
+  `--audio auto|mp4|h3|none|master` chooses the sound for the clips that have none of
+  their own. A clip **can** have its own: `cut.json`'s `audio` lays another take's sound,
+  a file's, or silence under it, cut or padded to the clip so the length never changes
+  (the Timeline's **Audio from…**, or `h3.py cut --audio`). `--audio master` and `none`
+  override those; the others leave them alone.
 - Shots with an `audio:` window are trimmed to it (re-encoded, x264 CRF 16) so the cut lines up
   with the recording. `--no-trim` keeps the padding.
 - `epNN_shots.txt` lists every shot's start time in the cut.
@@ -418,6 +439,7 @@ python h3.py override Shows\ep05 sh020 --prompt-file sh020.txt --seed 1234
 python h3.py override Shows\ep05 sh020 --lora a.safetensors --lora b.safetensors:0.6 --steps 10
 python h3.py override Shows\ep05 sh020 --clear prompt
 python h3.py render   Shows\ep05 --only sh020 --redo                 # renders with the override
+python h3.py discard  Shows\ep05 sh020 2          # take 2 goes to renders\_trash\sh020\
 ```
 
 - `takes` marks a take **stale** when rendering the shot now would differ: `script` (the
@@ -429,14 +451,32 @@ python h3.py render   Shows\ep05 --only sh020 --redo                 # renders w
   audio. The seed applies to both passes. A rebuild never loses an override. If the shot has
   changed since you wrote it, `takes` and `override` flag it STALE, and it is still applied.
 - Model, LoRAs and steps belong in the script when they're decisions about the film.
-  `overrides.json` is for the tweak loop.
+  `overrides.json` is for the tweak loop. When a tweak turns out to be a decision,
+  `h3.py promote` moves it into the script or the series config for you — it prints the
+  plan and the diffs first, and `--all` (or `--item shot:sh020:steps`) writes them, drops
+  those overrides and rebuilds. The old files are kept in `<episode>\_history\`.
+
+### Editing the cut
+
+```
+python h3.py cut Shows\ep05 --proxy --show                     # the cut: order, takes, trims, audio
+python h3.py cut Shows\ep05 --proxy --move sh050 --before sh020
+python h3.py cut Shows\ep05 --proxy --trim sh020 4 0           # drop 4 frames off the head
+python h3.py cut Shows\ep05 --proxy --lock sh020               # reordering leaves it alone
+python h3.py cut Shows\ep05 --copy-from proxy order            # take the proxy's order into the final
+python h3.py cut Shows\ep05 --proxy --audio sh020 take sh030:2 # sh020's picture, sh030 take 2's sound
+python h3.py cut Shows\ep05 --proxy --audio sh020 file audio\line_b.wav --at 0.4 --gain 1.2
+```
+
+`cut.json` holds it all — order, the take each shot uses, trims, locks and per-clip audio —
+per pass, and `h3assemble` follows it. The editor's Timeline writes the same file.
 
 ## Recorded dialogue (lip sync)
 
 Full guide: `RECORDED_DIALOGUE.md`.
 
 ```
-pip install faster-whisper                                             # once; model downloads on first run
+pip install faster-whisper numpy                    # once; the model downloads on first run
 python h3.py align    Shows\ep05 audio\ep05_dialogue.wav --dry-run
 python h3.py align    Shows\ep05 audio\ep05_dialogue.wav
 python h3.py build    Shows\ep05
@@ -444,6 +484,10 @@ python h3.py render   Shows\ep05 --proxy
 python h3.py assemble Shows\ep05 --proxy --audio master          # picture over the recording
 ```
 
+- The editor does the same from its **Recording** window: attach the file (browse the
+  ComfyUI machine, type a path, or drop it in), then align, with progress and the report.
+  It runs h3align in whichever Python has `faster-whisper` and `numpy` — see
+  [INSTALL.md](INSTALL.md#1-requirements) if it picks the wrong one.
 - h3align transcribes the recording with word timings, matches it to the script, and cuts it
   into one continuous run of windows with cuts at the quietest point of each pause.
 - It writes `audio: in-out` on every shot, points the series config at the recording, keeps the
@@ -474,11 +518,18 @@ the series config). `clone` and `generate` shots don't use it.
   shotlist/*_proxy.json        generated: the same for the proxy pass
   refs_todo.md / .json         generated work order
   overrides.json               editor / `h3.py override`: per-shot tweaks, retargets, episode target
-  cut.json                     editor / `h3.py pick`: order and the take each shot uses
+  cut.json                     editor / `h3.py cut` / `pick`: per pass, the order, the take
+                               each shot uses, trims, locks and each clip's audio source
+  align_report.md              generated: what h3align matched (h3.py align)
+  _history/                    old copies of the script, series config and cut.json,
+                               kept by the editor, h3promote and h3align
+  _cache/peaks/                generated: cached waveforms for the timeline
   refs/<char>/<char>_sheet_4panel.png   horizontal 4-panel strip
   refs/props/<name>.png                 single clean object image
   refs/_bg/<location>.png               background plate -> <Picture 4>
+  refs/voices/<char>.wav                a generated voice sample (audio target)
   refs/_takes/<ref>/…_tNN.png/.json     every ref candidate (h3refs)
+  refs/_takes/_trash/<ref>/             discarded ref candidates
   refs/_picks.json, _overrides.json     which take is live; ref prompt/seed/target tweaks
   refs/shots/<shot>/first.png, last.png a shot's keyframes
   audio/voices/<char>_sample.wav        clone mode
@@ -490,7 +541,9 @@ the series config). `clone` and `generate` shots don't use it.
     <shot_id>_t01.jpg            mid-frame thumbnail (480 px long side)
     <shot_id>_t01_strip.jpg      8 frames side by side, for hover scrub
     <shot_id>_t01.json           take sidecar: written queued, closed by Save Shot
+    <shot_id>_t01.shotlist.json  the exact shot that was rendered
     frames/<shot_id>_t01_%06d.png
+  renders/_trash/<shot_id>/      discarded takes (`h3.py discard`; nothing is deleted)
   renders_proxy/...            same layout for the animatic
 ```
 
