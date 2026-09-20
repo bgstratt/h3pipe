@@ -14,10 +14,12 @@ IR + targets). Read it before changing `h3build.py`, `h3render.py`, `kreagen.py`
 - `h3core/` — model-free core: script parser → story IR (`shotlist/shots.json`), series config loading, speech pacing
 - `h3build.py` — script + series config → story IR → H3 compile → `shotlist/*.json`, `refs_todo.*`
 - `h3render.py` — queues shots on ComfyUI through the shot's target (`targets/video/<id>/`: template, recipe,
-  binding, prompt writer, workflow; H3 is `minimax_h3_ref2va`). Ref images: `targets/image/krea2/`
+  binding, prompt writer, workflow; H3 is `minimax_h3_ref2va`). Ref images: `targets/image/krea2/`;
+  voice refs: `targets/audio/ltx2_voice/`
 - `h3takes.py` (take/cut/override files), `h3jobs.py` (plan + queue a take), `h3edit.py`
   (episode status, pick/override, the `takes`/`pick`/`override` commands),
-  `h3refs.py` (refs as takes, driven by the series config), `h3source.py` (read/check/save the script and
+  `h3refs.py` (refs as takes, driven by the series config), `h3track.py` (attach a recording, run h3align),
+  `h3source.py` (read/check/save the script and
   series config), `h3promote.py` (overrides → script/series config) — shared by the CLI and the routes
 - `comfy_nodes/h3pipe_api.py` + `h3pipe_routes.py` — the editor's HTTP API (`docs/API.md`);
   `web/` — the editor UI (React/Vite), built into `comfy_nodes/web/h3pipe-editor.js`
