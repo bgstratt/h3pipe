@@ -11,7 +11,7 @@ import type { HostEvent } from "../host";
 import { reachable } from "../lib/browse";
 import { promptText } from "../lib/format";
 import type {
-  BuildResult, CutEntry, EpisodeStatus, EpisodeSummary, Lora, MissingRef, Override, OverrideResult, Pass,
+  BuildResult, CutAudioSource, CutEntry, EpisodeStatus, EpisodeSummary, Lora, MissingRef, Override, OverrideResult, Pass,
   RefGenerateMissingResult, RefUsed, RenderResult, ShotDetail, ShotStatus, ShotTargetSource, SourceCheck, SourceFile,
   TakeDetail, TakeSummary, Track, TrackResult,
 } from "../types";
@@ -21,7 +21,7 @@ import { keyframeWanted } from "../lib/keyframes";
 import { hasViews } from "../lib/refs";
 import fixturesRaw from "./fixtures.json?raw";
 import { FsError, browse as fsBrowse, fsExists, fsFileExists } from "./mockFs";
-import { TRACK_RATE, makeTrack, slicePeaks, takePeaks, type MockWindow } from "./mockAudio";
+import { TRACK_RATE, makeTrack, makeVoice, slicePeaks, takePeaks, type MockWindow } from "./mockAudio";
 import { AlignError, createMockAlign } from "./mockTrack";
 import { CutError, applyCut, checkEntries, copyEntries, materialize, resetEntries } from "./mockCut";
 import { RefError, createMockRefs } from "./mockRefs";
@@ -259,7 +259,11 @@ export function createMockApi(emit: Emit, opts: MockOptions = {}): Api & { outsi
   function recut(pass: Pass) {
     const e = status[pass];
     if (!e) return;
-    e.shots = applyCut(e.shots, cut[pass], pass, scriptOrder[pass], (shot) => status[otherPass(pass)]?.shots.find((x) => x.shot === shot)?.takes ?? []);
+    e.shots = applyCut(
+      e.shots, cut[pass], pass, scriptOrder[pass],
+      (shot) => status[otherPass(pass)]?.shots.find((x) => x.shot === shot)?.takes ?? [],
+      (shot, a) => audioSourceFile(shot, a),
+    );
   }
 
   // ---- Phase 9b: the recorded dialogue track, dialogue windows, peaks ----
@@ -282,6 +286,33 @@ export function createMockApi(emit: Emit, opts: MockOptions = {}): Api & { outsi
 
   function round3(n: number) {
     return Math.round(n * 1000) / 1000;
+  }
+
+  // ---- Phase 9d: loose media files inside the episode, for a clip's audio ----
+  /** `<episode>/audio/*`: synthetic, playable and drawable, like a voice sample. */
+  const clipFiles = new Map<string, ReturnType<typeof makeVoice>>([
+    ["audio/line_sh030.wav", makeVoice("clip|line_sh030", 3.5)],
+    ["audio/room_tone.wav", makeVoice("clip|room_tone", 12)],
+    ["audio/no_sound.wav", makeVoice("clip|silent", 0)],
+  ]);
+
+  /**
+   * What an audio source will actually play, relative to the episode (null:
+   * there is nothing to play, which PUT /h3pipe/cut answers 400 for).
+   */
+  function audioSourceFile(own: string, a: CutAudioSource): string | null {
+    if (a.source === "none") return null;
+    if (a.source === "file") {
+      const p = (a.path ?? "").replace(/\\/g, "/");
+      const f = clipFiles.get(p);
+      if (f) return f.duration > 0 ? p : null;
+      // a take's own media is a file inside the episode too
+      return mediaSeconds(p) ? p : null;
+    }
+    const pass = a.pass ?? "proxy";
+    const sh = status[pass]?.shots.find((x) => x.shot === (a.shot || own));
+    const t = sh?.takes.find((x) => x.take === a.take);
+    return t && t.status === "ok" && t.has_video && t.mp4 ? t.mp4 : null;
   }
 
   /** Phase 9b fields on a status copy: the track, windows, take audio and frames. */
@@ -325,6 +356,8 @@ export function createMockApi(emit: Emit, opts: MockOptions = {}): Api & { outsi
    * track, with their length. */
   function mediaSeconds(path: string): number | null {
     if (path === TRACK_PATH) return track.duration;
+    const clip = clipFiles.get(path.replace(/\\/g, "/"));
+    if (clip) return clip.duration;
     const voice = refs.audioSeconds(path);
     if (voice != null) return voice;
     for (const p of ["final", "proxy"] as Pass[]) {
@@ -740,6 +773,9 @@ export function createMockApi(emit: Emit, opts: MockOptions = {}): Api & { outsi
       if (pic) return pic;
       // Phase 9b: the synthetic dialogue track (a real clip's sound outside a browser)
       if (path === TRACK_PATH) return track.url() ?? media + "sh010_t01.mp4";
+      // Phase 9d: a loose media file inside the episode, for a clip's audio
+      const clip = clipFiles.get(path.replace(/\\/g, "/"));
+      if (clip) return clip.url() ?? media + "sh010_t01.mp4";
       // Phase 9c-B: a voice candidate's synthetic wav
       const wav = refs.audio(path);
       if (wav) return wav;
@@ -927,7 +963,7 @@ export function createMockApi(emit: Emit, opts: MockOptions = {}): Api & { outsi
     async putCut(ep, pass, entries) {
       await wait();
       need(ep);
-      cut[pass] = clone(checkEntries(entries, st(pass).fps || 24, (e) => entryFrames(pass, e)));
+      cut[pass] = clone(checkEntries(entries, st(pass).fps || 24, (e) => entryFrames(pass, e), (shot, a) => audioSourceFile(shot, a)));
       recut(pass);
       emit("h3pipe.episode", { ep: EP });
       return { cut: { episode: "ep05", ...clone(cut) } };
@@ -935,7 +971,7 @@ export function createMockApi(emit: Emit, opts: MockOptions = {}): Api & { outsi
     async cutReset(ep, pass, what) {
       await wait();
       need(ep);
-      if (!["order", "trims", "all"].includes(what)) throw new MockError(`what must be order, trims or all`, 400);
+      if (!["order", "trims", "audio", "all"].includes(what)) throw new MockError(`what must be order, trims, audio or all`, 400);
       st(pass);
       cut[pass] = resetEntries(cut[pass], pass, scriptOrder[pass], what);
       recut(pass);
@@ -946,6 +982,7 @@ export function createMockApi(emit: Emit, opts: MockOptions = {}): Api & { outsi
       await wait();
       need(ep);
       if (from === to) throw new MockError("from and to are the same pass", 400);
+      // Phase 9d: audio comes with "all" only (`/cut/copy` takes no "audio")
       if (!["order", "trims", "all"].includes(what)) throw new MockError(`what must be order, trims or all`, 400);
       cut[to] = copyEntries(cut[from], from, st(from).fps || 24, cut[to], to, st(to).fps || 24, scriptOrder[to], what, (e) => entryFrames(to, e));
       recut(to);
@@ -960,8 +997,24 @@ export function createMockApi(emit: Emit, opts: MockOptions = {}): Api & { outsi
       if (secs == null) throw new MockError(`No such file: ${path}`, 404);
       // the track and a voice candidate have real peaks (their wav is synthetic
       // but playable); a video take's are made up from its path
-      const full = path === TRACK_PATH ? track.peaks() : refs.audioPeaks(path) ?? takePeaks(path, secs);
+      const clip = clipFiles.get(path.replace(/\\/g, "/"));
+      if (clip && !(clip.duration > 0)) return { duration: 0, bins: 0, peaks: [], silent: true };
+      const full = path === TRACK_PATH ? track.peaks() : clip ? clip.peaks() : refs.audioPeaks(path) ?? takePeaks(path, secs);
       return slicePeaks(full, secs, bins, start, end);
+    },
+    async uploadClipAudio(req) {
+      await wait(500);
+      need(req.ep);
+      const name = (req.name || "audio.wav").replace(/[^A-Za-z0-9 ._()-]/g, "_");
+      if (!/\.(wav|mp3|flac|ogg|m4a|aac|opus|mp4)$/i.test(name)) {
+        throw new MockError(`${name} is not a media file (wav, mp3, flac, ogg, m4a, aac, opus, mp4)`, 400);
+      }
+      const size = (req.file as Blob | undefined)?.size ?? 0;
+      if (size > UPLOAD_LIMIT) throw new MockError(`${name} is too big`, 413);
+      const path = `audio/${name}`;
+      // its length stands in for the real file's: enough to draw and play
+      clipFiles.set(path, makeVoice(`clip|${name}`, 2 + (name.length % 7)));
+      return { path };
     },
     async putOverride(req) {
       await wait();

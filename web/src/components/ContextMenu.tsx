@@ -1,9 +1,10 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
-  cancelTake, clearRef, closeMenu, copyText, discardTake, generateKeyframe, keyframeFromTake, loadRefs, openInspector, openRedo, openSidecar,
-  openViewer, pickTake, playAll, requestRender, showInScript, showMissingRefs,
+  cancelTake, clearRef, closeMenu, copyText, discardTake, generateKeyframe, keyframeFromTake, loadRefs, openClipAudio,
+  openInspector, openRedo, openSidecar, openViewer, pickTake, playAll, requestRender, showInScript, showMissingRefs,
 } from "../actions";
-import { nudgeClip, setTrims, toggleLock } from "../cutActions";
+import { clearClipAudio, nudgeClip, setTrims, toggleLock } from "../cutActions";
+import { audioOf, audioWhy } from "../lib/audioSource";
 import { absPath, tn } from "../lib/format";
 import { cutNeighbour, keyframeNote, keyframeRefId } from "../lib/keyframes";
 import { missingOf } from "../lib/missingRefs";
@@ -70,6 +71,8 @@ export function ContextMenu() {
   const locked = !!cutShot?.cut?.locked;
   const trimmed = !!cutShot && ((cutShot.cut.trim_in ?? 0) > 0 || (cutShot.cut.trim_out ?? 0) > 0);
   const cutIdx = cutSt?.shots.findIndex((x) => x.shot === menu.shot) ?? -1;
+  // Phase 9d: what this clip plays, if not its own take's sound
+  const clipAudio = audioOf(cutShot?.cut);
   const run = (fn: () => void) => () => {
     closeMenu();
     fn();
@@ -150,6 +153,21 @@ export function ContextMenu() {
       {trimmed && (
         <button disabled={locked} title={locked ? `${menu.shot} is locked` : `Back to the whole take (${cutShot!.cut.trim_in || 0} + ${cutShot!.cut.trim_out || 0} frames trimmed)`} onClick={run(() => void setTrims(menu.shot, 0, 0, `Clear ${menu.shot} trims`))}>
           <i className="pi pi-arrows-h" /> Clear trims
+        </button>
+      )}
+      <button
+        disabled={!cutShot}
+        title={clipAudio
+          ? `${menu.shot} plays ${cutShot?.cut.audio_why || audioWhy(clipAudio, menu.shot)} instead of its own sound — change or clear it`
+          : `This take's picture with another take's (or a file's) sound under it, cut to ${menu.shot}'s length`}
+        onClick={run(() => openClipAudio(menu.shot, curPass))}
+      >
+        <i className={clipAudio?.source === "none" ? "pi pi-volume-off" : "pi pi-volume-up"} /> Audio from…
+        {clipAudio && <span className="h3-muted"> ({cutShot?.cut.audio_why || audioWhy(clipAudio, menu.shot)})</span>}
+      </button>
+      {clipAudio && (
+        <button disabled={locked} title={locked ? `${menu.shot} is locked` : `${menu.shot} back to its own take's sound`} onClick={run(() => void clearClipAudio(menu.shot))}>
+          <i className="pi pi-undo" /> Back to its own audio
         </button>
       )}
       <button disabled={locked || cutIdx <= 0} title="Alt+← in the timeline" onClick={run(() => void nudgeClip(menu.shot, -1))}>

@@ -3,13 +3,16 @@
 // trimmed parts dimmed.
 
 import { useEffect, useState } from "react";
-import { currentPlaylist } from "../actions";
-import { setTrims, toggleLock } from "../cutActions";
+import { currentPlaylist, openClipAudio } from "../actions";
+import { clearClipAudio, setTrims, toggleLock } from "../cutActions";
 import { api } from "../host";
+import { GAIN_DEFAULT, RECORDING_IGNORES_AUDIO, audioOf, gainOf, offsetOf, startOf } from "../lib/audioSource";
 import { framesLabel, isOutOfOrder, trimLimits } from "../lib/cutEdit";
 import { fmtSeconds, tn } from "../lib/format";
 import { clipTake } from "../lib/playlist";
 import { useApp } from "../store";
+import type { ShotStatus } from "../types";
+import { AudioBadge } from "./ClipAudio";
 import { useStatus } from "./hooks";
 
 /** A whole number of frames typed in a field: the number, or null when it isn't one. */
@@ -106,10 +109,57 @@ export function CutSection({ shot }: { shot: string }) {
           <button className="h3-btn" disabled={!canTrim} onClick={() => void setTrims(shot, 0, 0, `Clear ${shot} trims`)}>Clear</button>
         )}
       </div>
+      <ClipAudioLine shot={shot} cut={s.cut} locked={locked} />
       <span className="h3-small h3-muted">
         {it ? `plays ${fmtSeconds(it.dur)}${total != null ? ` of ${fmtSeconds(total / fps)}` : ""}${it.audioIn != null ? ` · dialogue window ${it.audioIn.toFixed(2)}–${(it.audioOut ?? 0).toFixed(2)} s` : ""}` : "not in Play all"}
         {locked ? " · locked: unlock to trim, move or re-pick" : ""}
       </span>
+    </div>
+  );
+}
+
+/**
+ * Phase 9d: what this clip plays. Its own take's sound needs no line beyond
+ * the button; an audio source shows where it comes from, how it sits, and
+ * clears back to its own.
+ */
+function ClipAudioLine({ shot, cut, locked }: { shot: string; cut: ShotStatus["cut"]; locked: boolean }) {
+  const recording = useApp((s) => s.cutAudio === "recording");
+  const a = audioOf(cut);
+  const bits = a && a.source !== "none"
+    ? [
+      startOf(a) ? `from ${startOf(a).toFixed(2)} s in` : "",
+      offsetOf(a) ? `${offsetOf(a) > 0 ? "+" : ""}${offsetOf(a).toFixed(2)} s against the picture` : "",
+      gainOf(a) !== GAIN_DEFAULT ? `gain ${gainOf(a)}` : "",
+    ].filter(Boolean)
+    : [];
+  return (
+    <div className="h3-row h3-wrap h3-small">
+      <span className="h3-muted">audio</span>
+      {a ? (
+        <>
+          <AudioBadge shot={shot} cut={cut} dim={recording} />
+          {bits.length > 0 && <span className="h3-muted">{bits.join(" · ")}</span>}
+          {cut.audio_file && <span className="h3-muted h3-mono h3-ell" title={cut.audio_file}>{cut.audio_file}</span>}
+        </>
+      ) : (
+        <span className="h3-muted">its own take's sound</span>
+      )}
+      <span className="h3-grow" />
+      <button className="h3-btn" title={`Pick where ${shot}'s sound comes from`} onClick={() => openClipAudio(shot)}>
+        <i className="pi pi-volume-up" /> Audio from…
+      </button>
+      {a && (
+        <button
+          className="h3-btn"
+          disabled={locked}
+          title={locked ? `${shot} is locked in the cut` : `${shot} back to its own take's sound`}
+          onClick={() => void clearClipAudio(shot)}
+        >
+          Clear
+        </button>
+      )}
+      {a && recording && <span className="h3-muted" title={RECORDING_IGNORES_AUDIO}>(ignored while Play all is on the recording)</span>}
     </div>
   );
 }

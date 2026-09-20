@@ -10,6 +10,7 @@ import {
 } from "../actions";
 import { cutKey, isTyping, lockedPickRefusal, setCutAudio } from "../cutActions";
 import { api } from "../host";
+import { RECORDING_IGNORES_AUDIO, clipsWithAudio } from "../lib/audioSource";
 import { anyOutOfOrder } from "../lib/cutEdit";
 import { fmtClock, realStale, tn } from "../lib/format";
 import { frameAt } from "../lib/keyframes";
@@ -428,6 +429,8 @@ function CutPlayer({ ep, v }: { ep: string; v: ViewerState }) {
   const ts = trackState(st?.track);
   const track = ts && !ts.why ? ts : null;
   const recording = audioMode === "recording" && !!track;
+  // Phase 9d: the recording wins over every clip's own audio source
+  const audioClips = useMemo(() => clipsWithAudio(st?.shots ?? []), [st]);
   const winRef = useRef<HTMLDivElement>(null);
   const v0 = useRef<HTMLVideoElement>(null);
   const v1 = useRef<HTMLVideoElement>(null);
@@ -737,10 +740,15 @@ function CutPlayer({ ep, v }: { ep: string; v: ViewerState }) {
             className="h3-seg"
             title={ts.why
               ? `Audio: ${ts.why}, so Play all plays the clips' own sound`
-              : `Audio: each clip's own sound, or the recorded dialogue (${ts.path}) under the cut, as h3assemble --audio master lays it`}
+              : `Audio: each clip's own sound (and any clip's own audio source), or the recorded dialogue (${ts.path}) under the cut, as h3assemble --audio master lays it.\n\n${RECORDING_IGNORES_AUDIO}`}
           >
             <button className={!recording ? "h3-on" : ""} onClick={() => setCutAudio("clips")}>clips</button>
             <button className={recording ? "h3-on" : ""} disabled={!!ts.why} onClick={() => setCutAudio("recording")}>recording</button>
+          </span>
+        )}
+        {recording && audioClips.length > 0 && (
+          <span className="h3-muted h3-small h3-ell" title={`${RECORDING_IGNORES_AUDIO}\n\n${audioClips.join(", ")}`}>
+            {audioClips.length} clip{audioClips.length > 1 ? "s' own" : "'s own"} audio ignored
           </span>
         )}
         {recording && sync.warnings.length > 0 && (

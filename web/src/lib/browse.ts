@@ -64,5 +64,28 @@ export function sameDir(a: string, b: string): boolean {
   return norm(a) === norm(b);
 }
 
+/**
+ * Phase 9d: an absolute path as the routes want it — relative to the episode,
+ * forward slashes, or `../…` for a file beside a parent-folder series config.
+ * Null when it is somewhere else entirely (/h3pipe/file can't serve it).
+ */
+export function epRelative(path: string, ep: string): string | null {
+  const p = path.replace(/\\/g, "/").replace(/\/+$/, "");
+  const root = ep.replace(/\\/g, "/").replace(/\/+$/, "");
+  const inside = (base: string): string | null => {
+    const b = base.toLowerCase();
+    const l = p.toLowerCase();
+    return l.startsWith(b + "/") ? p.slice(base.length + 1) : null;
+  };
+  const here = inside(root);
+  if (here) return here;
+  const parent = root.slice(0, root.lastIndexOf("/"));
+  if (!parent || parent === root) return null;
+  const up = inside(parent);
+  return up ? `../${up}` : null;
+}
+
 export const IMAGE_EXT = /\.(png|jpe?g|webp|gif|bmp)$/i;
 export const AUDIO_EXT = /\.(wav|mp3|flac|ogg|m4a)$/i;
+/** Phase 9d: a clip's audio may also come from a rendered take (an mp4). */
+export const CLIP_AUDIO_EXT = /\.(wav|mp3|flac|ogg|m4a|aac|opus|mp4|mov|mkv|webm)$/i;

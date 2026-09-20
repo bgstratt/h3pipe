@@ -4,17 +4,19 @@
 // render that happened since. Undo and redo are each one PUT /h3pipe/cut.
 
 import type { CutEntry } from "../types";
+import { sameAudio } from "./audioSource";
 import { applyOrder, fieldsOf, withFields, type CutFields } from "./cutEdit";
 
 export interface CutEdit {
   label: string;
   /** the order before and after (null: the edit moved nothing) */
   order: { before: string[]; after: string[] } | null;
-  /** the shots whose trims / lock it changed */
+  /** the shots whose trims / lock / audio source it changed */
   fields: Record<string, { before: CutFields; after: CutFields }>;
 }
 
-const sameFields = (a: CutFields, b: CutFields) => a.trim_in === b.trim_in && a.trim_out === b.trim_out && a.locked === b.locked;
+const sameFields = (a: CutFields, b: CutFields) =>
+  a.trim_in === b.trim_in && a.trim_out === b.trim_out && a.locked === b.locked && sameAudio(a.audio, b.audio);
 
 /** What turned `before` into `after`, or null when nothing changed. */
 export function diffEdit(label: string, before: CutEntry[], after: CutEntry[]): CutEdit | null {
