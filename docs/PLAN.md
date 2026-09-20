@@ -924,11 +924,23 @@ trims, undo, locks, ruler seek and J/K/L, a recording-under-the-cut toggle, wave
 - Drag-reorder and trims in the timeline; play-through of the cut (partly there: play all);
   master dialogue waveform under the timeline (only useful with a recorded track).
 
-**Phase 9c — voices** (after 9b)
-- Voice refs made in ComfyUI instead of import-only. Candidates: LTX-2's audio-only nodes
-  (`LTXVAudioOnlyModel`, `LTXVReferenceAudio`; installed models), a local TTS node pack
-  (downloads), or cutting a line out of a video take's generated audio (works today, but the
-  voice changes between takes).
+**Phase 9c — audio** ✅ done 2026-09-19 (`h3track.py`, `targets/audio/ltx2_voice`; contract and
+as built in `docs/API.md`, "Phase 9c")
+- **A — a recording from the editor:** attach one (`POST /h3pipe/track`), then align
+  (`POST /h3pipe/align` runs `h3align`, progress events, dry run); `h3align` writes through
+  `h3source` (`_history/`, no more `.bak`). The timeline's clips/recording toggle works once
+  an episode has a track. The first align of a recording needs `faster-whisper` (not
+  installed here); a re-align uses the cached transcript and needs only ffmpeg.
+- **B — generated voice refs:** a third target kind, `audio`, with `ltx2_voice` (LTX-2
+  audio-only, validated live: 8 s at peak 216/255, silent against a "silence" prompt).
+  Voice refs list for every character, generate as takes, and picking writes `voice_sample`
+  into the series config when the character has none. "Use a line from a take" cuts a span
+  out of a take's audio instead.
+- **Left:** voice cloning. `LTXVReferenceAudio` is wired and tested but produces silence:
+  it needs audio ID-LoRA weights that aren't installed or listed in ComfyUI-Manager, so
+  `capabilities.reference_audio` is false and those nodes are optional (degraded, not
+  blocked). One flag to switch on if the weights appear. A local TTS node pack is the other
+  route to a steady voice.
 
 ## Story IR — `shotlist/shots.json` (Phase 6)
 
