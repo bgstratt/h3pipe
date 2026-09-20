@@ -713,9 +713,8 @@ H3 FL2VA (first/last frames)", short `H3 FL2V`)
   `length_source: estimate` and the not-installed note. The predictor graph (head forced)
   passes `check_graph` against the live `/object_info` (35 nodes). The partial proxy cut
   assembled with no frame-count mismatch.
-- **Left:** install `ltx-2.5-duration-head-bf16.safetensors` in `models/model_patches`
-  (from `Lightricks/LTX-2.5`, `model_patches/`, 3.8 MB) and render one `dur: model` shot for
-  real; an editor mark for an estimated length.
+- **Left:** render one `dur: model` shot for real (the duration head is installed, and the
+  editor marks an estimated length since 8.5).
 - **Later, not built: a `clone` audio policy for LTX.** ComfyUI's `LTXVReferenceAudio`
   ("LTXV Reference Audio (ID-LoRA)", `nodes_lt.py`) transfers a speaker's identity: inputs
   `model`, `positive`, `negative`, `reference_audio` (AUDIO, ~5 s recommended, its training
@@ -1227,8 +1226,8 @@ episode target** is the contract; its "as built" notes list where the build diff
   installed) the installed lightx2v 4-step Ref2V LoRA stood in; with a 2-step one (none of
   that family) the base preset ran: no LoRA loader in the graph, `res_multistep`; both
   graphs passed `/object_info`.
-- **Left:** the editor's readiness view and episode-target picker (the UI agent's side);
-  `h3refs` / kreagen don't resolve krea2's files at queue time yet (readiness covers them).
+- ~~**Left:** the editor's readiness view and episode-target picker; queue-time file resolution
+  for the image targets.~~ Done in 8.5.
 
 ## Source of truth
 
@@ -1247,7 +1246,8 @@ episode target** is the contract; its "as built" notes list where the build diff
 - Package name/layout: keep flat scripts as thin CLIs over a package, or restructure fully?
 - ~~`h3plan.py` (legacy chained compiler): keep, move to `legacy/`, or delete?~~ Resolved: deleted 2026-09-19.
 - Where does the editor live: this repo (`comfy_nodes/` + `web/`) or its own repo?
-- Take cleanup: a "discard take" that moves files to `renders/_trash/` rather than deleting?
+- ~~Take cleanup: a "discard take" that moves files to `renders/_trash/` rather than deleting?~~
+  Resolved: built in 8.6 (takes and ref candidates, routes, CLI and the editor).
 - Layered LoRAs from several levels (series + profile + shot): does a lower level
   replace the list or append to it? Default to replace until real use says otherwise.
   (Phase 7 implements replace: the most specific level that names LoRAs wins outright.)
