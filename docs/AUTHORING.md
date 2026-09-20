@@ -213,13 +213,15 @@ A shot whose target is not the one it was built for is compiled for its new targ
 it is queued, so you don't need to rebuild. To make an episode target permanent, put
 `"target": "<id>"` in `series.json`'s `series` block and rebuild.
 
-### Reference images: the `refs` block
+### Reference images and voices: the `refs` block
 
 Reference images (character views, props, plates) and shot keyframes are made by an
-**image model**. The series config can say which:
+**image model**; a character's voice sample is made by an **audio model**. The series
+config can say which:
 
 ```json
-"refs": {"target": "krea2", "keyframe_target": "flux2_klein_edit"}
+"refs": {"target": "krea2", "keyframe_target": "flux2_klein_edit",
+         "voice_target": "ltx2_voice"}
 ```
 
 | image target | what it is |
@@ -230,10 +232,20 @@ Reference images (character views, props, plates) and shot keyframes are made by
 | `flux2_klein_edit` | FLUX.2 Klein 9B with up to 4 reference images (the default for keyframes when it is installed; otherwise keyframes use the refs model) |
 | `flux_kontext` | FLUX.1 Kontext dev, with one reference image |
 
+| audio target | what it is |
+|---|---|
+| `ltx2_voice` | LTX-2.5 audio-only: one speaking voice from the character's `voice` line and a line from the script (the default for voices) |
+
 The editor can choose per episode (kept in `overrides.json`, not here) and per ref, and a
-generate request can name one; most specific wins. `python h3.py targets --kind image` says
-which are installed and what to download for the rest. A ref is worded the same whichever
-model draws it.
+generate request can name one; most specific wins. `python h3.py targets --kind image`
+(or `--kind audio`) says which are installed and what to download for the rest. A ref is
+worded the same whichever model makes it.
+
+A character with no `voice_sample` still has a voice ref: generating one and picking it
+writes `refs/voices/<id>.wav` **and** adds the `voice_sample` line to `series.json` for
+you (the only thing the editor writes there). `python h3.py refs <ep> --voices` does the
+same from the command line, and `--from-take sh020:3:1.2-6.4` makes a sample out of a
+line the model already spoke in a take, with no model at all.
 
 ### Negative prompts
 

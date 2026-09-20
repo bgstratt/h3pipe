@@ -46,7 +46,8 @@ class LoadingTest(unittest.TestCase):
                                ("video", "minimax_h3_fl2va"), ("video", "wan22_i2v"),
                                ("video", "wan22_ti2v"), ("video", "wan22_vace"), ("image", "krea2"),
                                ("image", "z_image_turbo"), ("image", "flux2_klein"),
-                               ("image", "flux2_klein_edit"), ("image", "flux_kontext")})
+                               ("image", "flux2_klein_edit"), ("image", "flux_kontext"),
+                               ("audio", "ltx2_voice")})
         self.assertEqual([t.id for t in TG.list_targets("video")],
                          ["ltx2", "ltx2_ingredients", "minimax_h3_fl2va", H3, "wan22_i2v",
                           "wan22_ti2v", "wan22_vace"])
@@ -397,7 +398,8 @@ class TargetsRouteTest(ApiTest):
         by = {t["id"]: t for t in data["targets"]}
         self.assertEqual(set(by), {H3, "ltx2", "ltx2_ingredients", "minimax_h3_fl2va", "krea2",
                                    "wan22_i2v", "wan22_ti2v", "wan22_vace", "z_image_turbo",
-                                   "flux2_klein", "flux2_klein_edit", "flux_kontext"})
+                                   "flux2_klein", "flux2_klein_edit", "flux_kontext",
+                                   "ltx2_voice"})
         for tid, label, short in (("wan22_i2v", "Wan 2.2 14B I2V", "Wan I2V"),
                                   ("wan22_ti2v", "Wan 2.2 5B TI2V", "Wan 5B"),
                                   ("wan22_vace", "Wan 2.2 14B VACE (refs)", "Wan+refs")):
@@ -431,7 +433,8 @@ class TargetsRouteTest(ApiTest):
         self.assertEqual(lt["template"]["frames"], {"step": 8, "base": 1, "max": 481})
         self.assertEqual(lt["template"]["fps"], "series")
         self.assertEqual(lt["presets"]["proxy"]["width"], 448)
-        self.assertEqual(data["default"], {"video": H3, "image": "krea2"})
+        self.assertEqual(data["default"],
+                         {"video": H3, "image": "krea2", "audio": "ltx2_voice"})
         images = self.ok(A.get_targets(self.ctx, {"kind": "image"}))["targets"]
         self.assertEqual([t["id"] for t in images],
                          ["flux2_klein", "flux2_klein_edit", "flux_kontext", "krea2",
@@ -445,7 +448,10 @@ class TargetsRouteTest(ApiTest):
         self.assertEqual(caps["z_image_turbo"]["mode"], "t2i")
         self.assertTrue(by["wan22_i2v"]["capabilities"]["requires_first"])
         self.assertFalse(lt["capabilities"]["requires_first"])
-        self.err(A.get_targets(self.ctx, {"kind": "audio"}), 400)
+        # Phase 9c-B: audio is a kind of its own (test_phase9c_voice)
+        audio = self.ok(A.get_targets(self.ctx, {"kind": "audio"}))["targets"]
+        self.assertEqual([t["id"] for t in audio], ["ltx2_voice"])
+        self.err(A.get_targets(self.ctx, {"kind": "sound"}), 400)
         self.assertIn(("GET", "/h3pipe/targets"), {(m, p) for m, p, _f, _t in A.ROUTES})
 
     def test_target_in_status_detail_and_sidecar(self):

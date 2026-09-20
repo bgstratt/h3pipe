@@ -893,8 +893,8 @@ def delete_override(ctx: Context, query: dict):
 
 @handler
 def get_targets(ctx: Context, query: dict):
-    """Every video and image target: id, kind, label, presets, and the widgets
-    its binding exposes (for pickers). `kind` narrows to one kind."""
+    """Every video, image and audio target: id, kind, label, presets, and the
+    widgets its binding exposes (for pickers). `kind` narrows to one kind."""
     kind = query.get("kind") or None
     if kind is not None and kind not in TG.KINDS:
         raise ApiError(400, f"kind must be one of {', '.join(TG.KINDS)}, not {kind!r}")
@@ -909,9 +909,7 @@ def get_targets(ctx: Context, query: dict):
             d["readiness"] = rd.get(d["id"]) or {"status": "unknown", "missing": [],
                                                  "resolved": {}, "features_off": [],
                                                  "nodes_missing": []}
-    return 200, {"targets": out,
-                 "default": {"video": TG.DEFAULT_VIDEO_TARGET,
-                             "image": TG.DEFAULT_IMAGE_TARGET}}
+    return 200, {"targets": out, "default": dict(TG.DEFAULT_TARGETS)}
 
 
 READY_TTL = 30.0                                          # seconds a readiness answer is kept
@@ -1114,24 +1112,26 @@ def get_refs(ctx: Context, query: dict):
 
 @handler
 def put_refs_defaults(ctx: Context, body):
-    """The episode's image-target choices (overrides.json's
-    episode.refs_target / episode.keyframe_target): `target` for series refs,
-    `keyframe_target` for shot keyframes; null clears one, a key left out is
-    kept. Never writes series.json. Returns the defaults as GET
+    """The episode's ref-target choices (overrides.json's
+    episode.refs_target / episode.keyframe_target / episode.voice_target):
+    `target` for series refs, `keyframe_target` for shot keyframes,
+    `voice_target` for voices (an audio target); null clears one, a key left
+    out is kept. Never writes series.json. Returns the defaults as GET
     /h3pipe/refs gives them."""
     body = body_dict(body)
     ep = check_ep(ctx, body.get("ep"))
     s = _series(ep)
     fields = {}
-    for k in ("target", "keyframe_target"):
+    for k, kind in (("target", "image"), ("keyframe_target", "image"),
+                    ("voice_target", "audio")):
         if k in body:
             v = body[k]
             if v is not None and (not isinstance(v, str)):
-                raise ApiError(400, f"{k} must be an image target id or null")
+                raise ApiError(400, f"{k} must be an {kind} target id or null")
             fields[k] = v or None
     if not fields:
-        raise ApiError(400, "give target and/or keyframe_target (an image target id, or null "
-                            "to clear it)")
+        raise ApiError(400, "give target, keyframe_target and/or voice_target (a target id "
+                            "of that kind, or null to clear it)")
     try:
         R.set_image_defaults(ep, fields)
         d = R.image_defaults(s, image_ready(ctx))
@@ -1178,24 +1178,32 @@ def post_refs_generate(ctx: Context, body):
     prompt = body.get("prompt")
     if prompt is not None and not isinstance(prompt, str):
         raise ApiError(400, "prompt must be text or null")
+    kind = R.ref_target_kind(ref)
     target = body.get("target")
     if target is not None and (not isinstance(target, str) or not target):
-        raise ApiError(400, "target must be an image target id or null")
+        raise ApiError(400, f"target must be an {kind} target id or null")
     if target:
         try:
-            TG.load_target(target, "image")
+            TG.load_target(target, kind)
         except TG.TargetError as e:
             raise ApiError(400, str(e))
     negative = body.get("negative")
     if negative is not None and not isinstance(negative, str):
         raise ApiError(400, "negative must be text or null")
+    seconds = body.get("seconds")
+    if seconds is not None:
+        if isinstance(seconds, bool) or not isinstance(seconds, (int, float)):
+            raise ApiError(400, "seconds must be a number of seconds, or null")
+        if kind != "audio":
+            raise ApiError(400, f"seconds is only for a voice ref, not {ref.id}")
     pass_ = check_pass(body.get("pass"), "final")
     req = R.GenRequest(ref=ref.id, view=view, count=count, seed_mode=seed_mode,
                        seed=seed_in(body.get("seed")), prompt=prompt or None,
                        model=_opt_str(body, "model") or None,
                        loras=_opt_loras(body.get("loras")),
                        steps=_opt_steps(body.get("steps")), note=_opt_str(body, "note") or "",
-                       target=target or None, negative=negative, pass_=pass_)
+                       target=target or None, negative=negative, pass_=pass_,
+                       seconds=seconds)
     why = R.can_generate(s, ref)
     if why:
         raise ApiError(400, why)
@@ -1224,6 +1232,10 @@ def post_refs_generate(ctx: Context, body):
 
 @handler
 def put_refs_pick(ctx: Context, body):
+    """Make a candidate the live file. A voice whose character has no
+    `voice_sample` yet is written to refs/voices/<id>.wav and the series
+    config gains that line through the Phase 9a save path: the answer then
+    carries `series_changed: true` and `path`."""
     body = body_dict(body)
     ep = check_ep(ctx, body.get("ep"))
     s = _series(ep)
@@ -1234,7 +1246,7 @@ def put_refs_pick(ctx: Context, body):
     if not isinstance(force, bool):
         raise ApiError(400, "force must be true or false")
     try:
-        R.pick_take(s, ref, view, take, force=force)
+        res = R.pick_take(s, ref, view, take, force=force)
     except R.NotUsable as e:
         raise ApiError(409, f"{e}; pick it anyway with \"force\": true")
     except R.UnknownRef as e:
@@ -1247,7 +1259,12 @@ def put_refs_pick(ctx: Context, body):
         raise ApiError(500, f"picked, but the sheet could not be stitched: {e}")
     ref_event(ctx, ep, ref.id, view, take, "picked")
     episode_event(ctx, ep)
-    return 200, seeds_out(R.ref_json(s, ref, R.used_by(s, [ref])))
+    if res.series_changed:
+        s = _series(ep)                                   # series.json gained voice_sample
+        ref = _ref(s, ref.id)
+    out = seeds_out(R.ref_json(s, ref, R.used_by(s, [ref])))
+    out["series_changed"] = res.series_changed
+    return 200, out
 
 
 MAX_UPLOAD = 64 * 1024 * 1024        # POST /h3pipe/refs/import as multipart
@@ -1453,6 +1470,64 @@ def post_refs_keyframe(ctx: Context, body):
         ref_event(ctx, ep, res.ref.id, None, res.take.take, "picked")
     episode_event(ctx, ep)
     return 200, seeds_out(R.ref_json(s, res.ref, R.used_by(s, [res.ref])))
+
+
+def _span(body: dict, key: str):
+    """One end of a span in seconds, or None (`start` then means 0, `end` the
+    end of the take)."""
+    v = body.get(key)
+    if v is None:
+        return None
+    if isinstance(v, str):
+        try:
+            v = float(v)
+        except ValueError:
+            raise ApiError(400, f"{key} must be a number of seconds") from None
+    if isinstance(v, bool) or not isinstance(v, (int, float)):
+        raise ApiError(400, f"{key} must be a number of seconds")
+    return float(v)
+
+
+@handler
+def post_refs_voice_from_take(ctx: Context, body):
+    """A line the model already spoke becomes a voice sample: cut
+    `start`..`end` seconds out of a shot take's sound into a new candidate of
+    the voice ref (h3refs.voice_from_take, source "from_take"). No model
+    runs. Picked when the voice has no live file yet (`pick` forces or
+    forbids it); picking a voice whose character has no `voice_sample` also
+    writes the series config."""
+    body = body_dict(body)
+    ep = check_ep(ctx, body.get("ep"))
+    s = _series(ep)
+    ref = _ref(s, body.get("ref"))
+    shot = check_shot(body.get("shot"))
+    take = check_take(body.get("take"))
+    pass_ = check_pass(body.get("pass"))
+    start = _span(body, "start") or 0.0
+    end = _span(body, "end")
+    pick = body.get("pick")
+    if pick is not None and not isinstance(pick, bool):
+        raise ApiError(400, "pick must be true, false or null")
+    try:
+        res = R.voice_from_take(s, ref, shot, take, pass_, start, end, pick=pick,
+                                note=_opt_str(body, "note") or "")
+    except R.RefError as e:
+        raise ApiError(400, str(e))
+    except R.UnknownRef as e:
+        raise ApiError(404, str(e))
+    except R.NotUsable as e:
+        raise ApiError(409, str(e))
+    except R.FfmpegMissing as e:
+        raise ApiError(500, str(e))
+    ref_event(ctx, ep, ref.id, None, res.take.take, res.take.status)
+    if res.picked:
+        ref_event(ctx, ep, ref.id, None, res.take.take, "picked")
+        s = _series(ep)                                   # a pick may have written series.json
+        ref = _ref(s, ref.id)
+    episode_event(ctx, ep)
+    out = seeds_out(R.ref_json(s, ref, R.used_by(s, [ref])))
+    out.update(picked=res.picked, take=res.take.take, source=res.source)
+    return 200, out
 
 
 REF_OVERRIDE_FIELDS = ("prompt", "seed", "model", "loras", "steps", "note", "target")
@@ -1724,6 +1799,7 @@ ROUTES = [
     ("POST", "/h3pipe/refs/discard", post_refs_discard, "body"),
     ("POST", "/h3pipe/refs/generate-missing", post_refs_generate_missing, "body"),
     ("POST", "/h3pipe/refs/keyframe", post_refs_keyframe, "body"),
+    ("POST", "/h3pipe/refs/voice-from-take", post_refs_voice_from_take, "body"),
     ("PUT", "/h3pipe/refs/override", put_refs_override, "body"),
     ("DELETE", "/h3pipe/refs/override", delete_refs_override, "query"),
     ("GET", "/h3pipe/source", get_source, "query"),

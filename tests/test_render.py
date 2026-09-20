@@ -262,6 +262,27 @@ def png_bytes(w: int, h: int, rgb=(128, 128, 128)) -> bytes:
             + chunk(b"IDAT", zlib.compress(row * h, 6)) + chunk(b"IEND", b""))
 
 
+def wav_bytes(seconds: float = 1.0, rate: int = 48000, freq: float = 220.0) -> bytes:
+    """A mono 16-bit PCM wav of a sine tone, stdlib only."""
+    import array
+    import io
+    import math
+    import wave
+
+    n = max(1, int(round(seconds * rate)))
+    a = array.array("h", (int(12000 * math.sin(2 * math.pi * freq * i / rate))
+                          for i in range(n)))
+    if sys.byteorder == "big":
+        a.byteswap()
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(rate)
+        w.writeframes(a.tobytes())
+    return buf.getvalue()
+
+
 class FakeComfy:
     """Just enough of ComfyUI's API. Each /prompt runs 'instantly' and does what
     the save node does, according to `mode`: 'node' (writes mp4 and closes the
@@ -273,11 +294,17 @@ class FakeComfy:
     flat PNG (its colour from the seed) beside the sidecar and closes it; a
     graph that kept SaveImage gets its PNG in the job's outputs, served by
     /view. `nodes` is what /object_info knows (drop "H3SaveRefTake" to play a
-    ComfyUI whose node pack predates it)."""
+    ComfyUI whose node pack predates it).
+
+    A voice-reference graph (an audio target) is played the same way:
+    H3SaveRefAudio writes a wav of the requested length beside the sidecar
+    and closes it; a graph that kept SaveAudio gets a flac in the job's
+    outputs (as ComfyUI's own SaveAudio writes), served by /view."""
 
     def __init__(self):
         self.mode = "node"
-        self.nodes = {"H3SaveRefTake", "H3SaveShot", "H3ShotListLoader", "SaveImage"}
+        self.nodes = {"H3SaveRefTake", "H3SaveRefAudio", "H3SaveShot", "H3ShotListLoader",
+                      "SaveImage", "SaveAudio"}
         self.info: dict[str, dict] = {}           # /object_info/<class> in full, when set
         self.predicted_frames = 199               # what a duration predictor "chooses"
         self.files: dict[str, bytes] = {}         # /view filename -> bytes
@@ -376,6 +403,8 @@ class FakeComfy:
                                             "messages": [["execution_error",
                                                           {"exception_message": "boom"}]]}}
             return pid
+        if any(v["class_type"] in ("H3SaveRefAudio", "SaveAudio") for v in graph.values()):
+            return self.run_audio(graph, pid)
         if not any(v["class_type"] == J.SAVER for v in graph.values()):
             return self.run_image(graph, pid)
         si = next(v["inputs"] for v in graph.values() if v["class_type"] == J.SAVER)
@@ -427,6 +456,34 @@ class FakeComfy:
                 self.files[name] = png
                 outputs[nid] = {"images": [{"filename": name, "subfolder": "",
                                             "type": "output"}]}
+        self.history[pid] = {"status": {"status_str": "success", "completed": True},
+                             "outputs": outputs}
+        return pid
+
+    def run_audio(self, graph: dict, pid: str) -> str:
+        """A voice-reference job: what H3SaveRefAudio (or SaveAudio) does."""
+        lat = next((v["inputs"] for v in graph.values()
+                    if v["class_type"] == "LTXVEmptyLatentAudio"), None)
+        seconds = ((lat["frames_number"] / float(lat["frame_rate"] or 24))
+                   if lat else 1.0)
+        wav = wav_bytes(seconds)
+        outputs = {}
+        for nid, v in graph.items():
+            if v["class_type"] == "H3SaveRefAudio":
+                sc = v["inputs"]["sidecar"]
+                data = T.read_json(sc) or {}
+                name = data.get("image") or os.path.basename(sc)[:-5] + ".wav"
+                with open(os.path.join(os.path.dirname(sc), name), "wb") as fh:
+                    fh.write(wav)
+                T.update_sidecar(sc, status="ok", finished=T.now(), image=name,
+                                 duration=round(seconds, 3), sample_rate=48000,
+                                 channels=1, save_notes="fake")
+            elif v["class_type"] == "SaveAudio":
+                # ComfyUI's own SaveAudio writes flac, not wav
+                name = f"{v['inputs']['filename_prefix'].replace('/', '_')}_{pid[:8]}.flac"
+                self.files[name] = wav
+                outputs[nid] = {"audio": [{"filename": name, "subfolder": "",
+                                           "type": "output"}]}
         self.history[pid] = {"status": {"status_str": "success", "completed": True},
                              "outputs": outputs}
         return pid

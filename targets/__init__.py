@@ -5,8 +5,9 @@ targets — everything model-specific, one folder per model.
     targets/<kind>/<id>/*.py          code: the prompt writer and the compile
     targets/<kind>/<id>/workflow.json the ComfyUI graph the binding patches
 
-`kind` is "video" (a shot model: story IR -> shotlist entries) or "image" (a
-reference model: a ref request -> a picture). The core (h3core, h3build,
+`kind` is "video" (a shot model: story IR -> shotlist entries), "image" (a
+reference model: a ref request -> a picture) or "audio" (a voice model: a
+voice ref -> a wav). The core (h3core, h3build,
 h3jobs, h3refs, the routes) only talks to a target through this module:
 
     load_target(id)            -> Target            (cached; TargetError if unknown)
@@ -47,6 +48,13 @@ or, for an image target:
 
     ref_prompt(request, series_cfg)                 -> the wording of one ref
 
+or, for an audio target:
+
+    voice_prompt(name, voice, design, line, seconds) -> the brief for one voice
+    patch_graph(graph, job, inputs)                 (optional) the reference-audio
+                                                    chain, when the ref has a
+                                                    sample to copy
+
 Render settings (model, LoRAs, steps, target) layer, later wins:
 
     target preset -> the series config's pass block (`series` / `proxy`)
@@ -73,10 +81,13 @@ from dataclasses import dataclass, field
 from . import modelid
 
 HERE =os.path.dirname(os.path.abspath(__file__))
-KINDS = ("video", "image")
+KINDS = ("video", "image", "audio")
 TIERS = ("required", "accelerator", "optional")
 DEFAULT_VIDEO_TARGET = "minimax_h3_ref2va"
 DEFAULT_IMAGE_TARGET = "krea2"
+DEFAULT_AUDIO_TARGET = "ltx2_voice"
+DEFAULT_TARGETS = {"video": DEFAULT_VIDEO_TARGET, "image": DEFAULT_IMAGE_TARGET,
+                   "audio": DEFAULT_AUDIO_TARGET}
 PASSES = ("final", "proxy")
 
 
@@ -588,12 +599,21 @@ class Target:
     def capabilities(self) -> dict:
         """What a picker or the core may need to know without asking which
         model this is (GET /h3pipe/targets). An image target: {"mode": "t2i"
-        | "edit", "max_refs", "negative_prompt"}."""
+        | "edit", "max_refs", "negative_prompt"}. An audio target:
+        {"mode": "t2a" | "voice_clone", "reference_audio", "max_seconds",
+        "negative_prompt"}."""
         r = self.recipe
         if self.kind == "image":
             caps = self.spec.get("capabilities") or {}
             return {"mode": caps.get("mode") or "t2i",
                     "max_refs": int(caps.get("max_refs") or 0),
+                    "negative_prompt": bool(self.binding.specs("negative"))}
+        if self.kind == "audio":
+            caps = self.spec.get("capabilities") or {}
+            return {"mode": caps.get("mode") or "t2a",
+                    "reference_audio": bool(caps.get("reference_audio")),
+                    "max_seconds": float(caps.get("max_seconds")
+                                         or self.seconds_range()[1]),
                     "negative_prompt": bool(self.binding.specs("negative"))}
         return {"policies": self.policies, "duration": self.duration,
                 # the first keyframe is required (Wan 14B I2V: the picture it animates)
@@ -612,6 +632,44 @@ class Target:
     # image
     def ref_prompt(self, req: RefRequest, series_cfg: dict) -> str:
         return self._need("ref_prompt")(self, req, series_cfg)
+
+    # audio
+    def voice_prompt(self, name: str, voice: str = "", design: str = "",
+                     line: str = "", seconds: float | None = None) -> str:
+        """The brief for one generated voice sample (targets/audio/common.py's
+        wording unless the target writes its own)."""
+        return self._need("voice_prompt")(name, voice, design, line, seconds)
+
+    def voice_line(self, story, subject: str) -> tuple[str, str]:
+        """(the line a voice sample should say, "script" | "neutral")."""
+        return self._need("voice_line")(story, subject)
+
+    def seconds_range(self) -> tuple[float, float, float]:
+        """(default, maximum, minimum) seconds an audio target generates: its
+        template's, else its `final` preset's, else 8 / 20 / 2."""
+        tpl = self.spec.get("template") or {}
+        p = self.presets.get("final")
+        extra = p.extra if p is not None else {}
+
+        def val(key, default):
+            v = tpl.get(key, extra.get(key, default))
+            return float(v if v is not None else default)
+        return val("default_seconds", 8.0), val("max_seconds", 20.0), \
+            val("min_seconds", 2.0)
+
+    def snap_seconds(self, seconds: float) -> tuple[float, int, float]:
+        """(the length actually rendered, its frame count, the frame rate) for
+        a request of `seconds` on this audio target: clamped into
+        seconds_range, then snapped onto the template's frame grid."""
+        default, hi, lo = self.seconds_range()
+        s = float(default if seconds is None else seconds)
+        s = min(max(s, lo), hi)
+        fps = self.template.fps_for(None)
+        p = self.presets.get("final")
+        if p is not None and p.extra.get("fps"):
+            fps = float(p.extra["fps"])
+        frames = self.template.snap(max(1, round(s * fps)))
+        return frames / fps, frames, fps
 
     # -- presets -----------------------------------------------------------
 
@@ -648,8 +706,7 @@ class Target:
 
     def describe(self) -> dict:
         return {"id": self.id, "kind": self.kind, "label": self.label,
-                "default": self.id == (DEFAULT_VIDEO_TARGET if self.kind == "video"
-                                       else DEFAULT_IMAGE_TARGET),
+                "default": self.id == DEFAULT_TARGETS.get(self.kind),
                 "presets": {k: p.to_json() for k, p in self.presets.items()},
                 "widgets": self.binding.widgets(),
                 "workflow": self.binding.workflow_name,
@@ -718,21 +775,27 @@ def video_target(series_cfg: dict | None = None) -> Target:
 DEFAULT_KEYFRAME_TARGET = "flux2_klein_edit"   # when it is ready, else the refs target
 
 
+REFS_TARGET_KINDS = {"target": "image", "keyframe_target": "image",
+                     "voice_target": "audio"}
+
+
 def refs_block(series_cfg: dict | None) -> dict:
-    """The series config's `refs` block ({"target", "keyframe_target"}),
-    validated: each must name an image target. ValueError otherwise."""
+    """The series config's `refs` block ({"target", "keyframe_target",
+    "voice_target"}), validated: the first two must name an image target,
+    `voice_target` an audio one. ValueError otherwise."""
     raw = (series_cfg or {}).get("refs") or {}
     if not isinstance(raw, dict):
         raise ValueError("series.json `refs` must be an object: {\"target\": \"<image target>\", "
-                         "\"keyframe_target\": \"<image target>\"}")
+                         "\"keyframe_target\": \"<image target>\", "
+                         "\"voice_target\": \"<audio target>\"}")
     out = {}
-    known = [t.id for t in list_targets("image")]
-    for k in ("target", "keyframe_target"):
+    for k, kind in REFS_TARGET_KINDS.items():
         v = raw.get(k)
         if v in (None, ""):
             continue
+        known = [t.id for t in list_targets(kind)]
         if not isinstance(v, str) or v not in known:
-            raise ValueError(f"series.json refs.{k}: {v!r} is not an image target "
+            raise ValueError(f"series.json refs.{k}: {v!r} is not an {kind} target "
                              f"(known: {', '.join(known)})")
         out[k] = v
     return out
@@ -742,6 +805,13 @@ def image_target(series_cfg: dict | None = None) -> Target:
     """The image target that makes this series' refs: the series config's
     `refs.target`, else krea2."""
     return load_target(refs_block(series_cfg).get("target") or DEFAULT_IMAGE_TARGET, "image")
+
+
+def audio_target(series_cfg: dict | None = None) -> Target:
+    """The audio target that makes this series' voice samples: the series
+    config's `refs.voice_target`, else ltx2_voice."""
+    return load_target(refs_block(series_cfg).get("voice_target") or DEFAULT_AUDIO_TARGET,
+                       "audio")
 
 
 def keyframe_target(series_cfg: dict | None = None, ready=None) -> Target:

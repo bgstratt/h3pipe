@@ -71,11 +71,14 @@ def _norm(p: str) -> str:
     return os.path.normcase(os.path.normpath(p))
 
 
-def collect(s: R.Series, todo: list | None, only: set[str] | None) -> list[dict]:
+def collect(s: R.Series, todo: list | None, only: set[str] | None,
+            voices: bool = False) -> list[dict]:
     """One entry per ref to consider, most-blocking first. `todo` is
-    refs_todo.json (None: every image ref in the series config)."""
+    refs_todo.json (None: every image ref in the series config). `voices`
+    adds the voice refs (an audio target generates them: --voices)."""
     refs = [r for r in R.series_refs(s) if not r.is_audio]
-    usage = R.used_by(s, refs)
+    heard = [r for r in R.series_refs(s) if r.is_audio] if voices else []
+    usage = R.used_by(s, refs + heard)
     by_path = {_norm(r.path): r for r in refs if r.path}
     picked: list[tuple[R.Ref, int]] = []
     if todo is None:
@@ -89,6 +92,7 @@ def collect(s: R.Series, todo: list | None, only: set[str] | None) -> list[dict]
                 print(f"  ! nothing in series.json names {item['path']} — skipping it")
                 continue
             picked.append((r, len(item.get("blocks_shots", []))))
+    picked += [(r, len(usage[r.id]["final"])) for r in heard]
     out = []
     for r, blocks in picked:
         why = R.can_generate(s, r)
@@ -99,6 +103,7 @@ def collect(s: R.Series, todo: list | None, only: set[str] | None) -> list[dict]
                 print(f"  ! {why} — skipping {r.path or r.id}")
             continue
         name = r.subject if r.kind == "character" else \
+            f"voice:{r.subject}" if r.is_audio else \
             os.path.splitext(os.path.basename(r.path))[0] if r.path else r.id
         out.append({"ref": r, "name": name, "blocks": blocks})
     out.sort(key=lambda j: -j["blocks"])            # most-blocking first
@@ -111,12 +116,56 @@ def collect(s: R.Series, todo: list | None, only: set[str] | None) -> list[dict]
 def request(j: dict, args, negative: str | None) -> R.GenRequest:
     """One ref's generate request. `negative` is --negative-file's text (it
     beats negative.txt, the series config and the preset for this run), or
-    None."""
+    None. A voice ref takes the audio target (--voice-target) and its own
+    length (--voice-seconds); the image flags are not its."""
+    if j["ref"].is_audio:
+        return R.GenRequest(ref=j["ref"].id, steps=args.steps, cfg=args.cfg,
+                            negative=negative, target=args.voice_target or None,
+                            seconds=args.voice_seconds)
     loras = ([{"name": args.lora, "strength": args.lora_strength}] if args.lora else None)
     return R.GenRequest(ref=j["ref"].id, model=args.unet or None, loras=loras,
                         steps=args.steps, cfg=args.cfg, negative=negative,
                         view_size=parse_size(args.view_size, R.VIEW_SIZE),
                         target=args.target or None)
+
+
+def parse_from_take(spec: str) -> tuple[str, int, float, float]:
+    """SHOT:TAKE:START-END -> (shot, take, start, end) in seconds
+    (--from-take). ValueError if malformed."""
+    m = re.fullmatch(r"\s*([^:]+):[tT]?(\d+):(\d+(?:\.\d+)?)\s*-\s*(\d+(?:\.\d+)?)\s*", spec or "")
+    if not m:
+        raise ValueError(f"--from-take takes SHOT:TAKE:START-END in seconds "
+                         f"(e.g. sh020:3:1.2-6.4), not {spec!r}")
+    return m.group(1), int(m.group(2)), float(m.group(3)), float(m.group(4))
+
+
+def from_take(s: R.Series, ep: str, jobs: list[dict], spec: str, pass_: str,
+              pick: bool | None) -> int:
+    """kreagen --from-take: cut a span out of a shot take's sound into a new
+    voice candidate. Exactly one voice ref must be selected (--only)."""
+    try:
+        shot, take, start, end = parse_from_take(spec)
+    except ValueError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 1
+    voices = [j for j in jobs if j["ref"].is_audio]
+    if len(voices) != 1:
+        which = ", ".join(j["ref"].id for j in voices) or "none"
+        print(f"error: --from-take makes one voice sample: narrow the run to one voice ref "
+              f"with --only (selected: {which})", file=sys.stderr)
+        return 1
+    ref = voices[0]["ref"]
+    try:
+        res = R.voice_from_take(s, ref, shot, take, pass_, start, end, pick=pick,
+                                note=f"{start:g}-{end:g}s of {shot} {pass_} t{take:02d}")
+    except (R.RefError, R.UnknownRef, R.NotUsable, R.FfmpegMissing) as e:
+        print(f"  !! {ref.id}: {e}")
+        return 1
+    print(f"  {ref.id}: t{res.take.take:02d} <- {start:g}-{end:g}s of {shot} {pass_} "
+          f"t{take:02d}")
+    if res.picked:
+        print(f"  -> picked: {R.ep_rel(ep, ref.file)}")
+    return 0
 
 
 def job_name(j: dict, job: R.GenJob) -> str:
@@ -188,6 +237,19 @@ def main() -> int:
                     help="the image target (z_image_turbo, flux2_klein, flux_kontext, ...; "
                          "default: each ref's override, the episode's choice, the series "
                          "config's refs.target, else krea2)")
+    ap.add_argument("--voices", action="store_true",
+                    help="also generate the voice refs (voice:<subject>) on the audio "
+                         "target; off by default, so an image run is unchanged")
+    ap.add_argument("--voice-target", default="",
+                    help="audio target for the voice refs (default: the episode's, then "
+                         "series.json's refs.voice_target, then ltx2_voice)")
+    ap.add_argument("--voice-seconds", type=float, default=None,
+                    help="how long a generated voice sample is (default: the target's)")
+    ap.add_argument("--from-take", metavar="SHOT:TAKE:START-END", default="",
+                    help="no model: cut START-END seconds out of a rendered take's sound "
+                         "into a voice candidate (narrow to one voice ref with --only)")
+    ap.add_argument("--pass", dest="pass_", choices=("final", "proxy"), default="proxy",
+                    help="which pass --from-take reads (default proxy)")
     ap.add_argument("--clear", metavar="REF[:VIEW]", action="append",
                     help="unpick a ref (e.g. location:kitchen, subject:ada:02_side): its file "
                          "goes, the takes stay, and nothing re-picks it until you pick; "
@@ -229,6 +291,7 @@ def main() -> int:
     if args.discard:
         return discard(s, ep, args.discard)
 
+    voices = bool(args.voices or args.from_take)
     todo = None
     if not args.all and not args.clear:
         todo_p = os.path.join(root, "refs_todo.json")
@@ -269,7 +332,10 @@ def main() -> int:
 
     vw, vh = parse_size(args.view_size, R.VIEW_SIZE)
     only = {k.strip() for k in args.only.split(",")} if args.only else None
-    jobs = collect(s, todo, only)
+    jobs = collect(s, todo, only, voices)
+    if args.from_take:
+        return from_take(s, ep, jobs, args.from_take, args.pass_,
+                         True if args.pick else None)
 
     base, wf = None, ""
     if not args.no_workflow:
@@ -301,20 +367,33 @@ def main() -> int:
         except Exception as e:
             graph = f"{tgt.id}: its workflow could not be read ({e})"
 
+    voice_line = ""
+    if voices:
+        try:
+            vt = R.TG.load_target(args.voice_target or R.image_defaults(s)["voice_target"],
+                                  "audio")
+            voice_line = f"  voices on {vt.id}\n"
+        except (R.RefError, R.TG.TargetError, ValueError) as e:
+            print(f"error: {e}", file=sys.stderr)
+            return 1
     print(f"\n  {len(jobs)} asset(s) · comfy {args.comfy} · "
           f"{args.steps or 'preset'} steps · cfg "
           f"{args.cfg if args.cfg is not None else 'preset'} · {tgt.id}\n"
-          f"  graph {graph}\n"
+          f"  graph {graph}\n" + voice_line +
           f"  {'-' * 62}")
     todo_now = []
     for j in jobs:
         r = j["ref"]
-        j["out"] = os.path.join(root, os.path.relpath(r.file, ep)) if r.file else r.id
+        live = r.file or (R.ref_file(r.home, R.voice_sample_path(r)) if r.is_audio else None)
+        j["out"] = os.path.join(root, os.path.relpath(live, ep)) if live else r.id
         have = bool(r.file) and os.path.isfile(r.file)
         j["had"] = have
         mark = "have" if have and not args.redo else ("redo" if have else " -- ")
-        w, h = R.gen_size(r, (vw, vh))
-        size = f"{vw}x{vh} x4" if r.has_views else f"{w}x{h}"
+        if r.is_audio:
+            size = f"{args.voice_seconds:g}s" if args.voice_seconds else "preset s"
+        else:
+            w, h = R.gen_size(r, (vw, vh))
+            size = f"{vw}x{vh} x4" if r.has_views else f"{w}x{h}"
         print(f"  [{mark}] {j['out']:<44} {size:>12}  blocks {j['blocks']}")
         if not have or args.redo:
             todo_now.append(j)
@@ -366,6 +445,7 @@ def main() -> int:
                                                                       job.target)
                     g0 = graphs[job.target.id]
                     R.stage_references(s, job, comfy)
+                    R.stage_voice_reference(s, job, comfy)
                 take = R.start_gen(s, job)
                 try:
                     pid = comfy.queue(R.graph_for(g0, job, take, save_node=use_node,

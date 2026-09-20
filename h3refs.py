@@ -9,7 +9,11 @@ from refs_todo, so a character nobody uses yet can still be generated:
     subject:<id>            a character (four views, stitched into its sheet),
                             prop or vehicle: the series config's `sheet` path
     location:<id>           the location's `plate`
-    voice:<id>              a subject's `voice_sample` (imported takes only)
+    voice:<id>              a character's voice sample: the series config's
+                            `voice_sample`, else refs/voices/<id>.wav once one
+                            is picked. Imported, generated on an audio target
+                            (targets/audio/), or cut out of a take's sound
+                            (voice_from_take)
     shot:<shot>:first|last  a shot's first / last keyframe, at
                             refs/shots/<shot>/<first|last>.png: imported, or
                             cut out of another shot's take (keyframe_from_take:
@@ -227,10 +231,25 @@ def series_refs(s: Series) -> list[Ref]:
         out.append(Ref(f"location:{lid}", "series", "location", e.get("name", lid),
                        e.get("plate") or "", s.home, e))
     for sid, e in book.items():
-        if e.get("voice_sample"):
+        # A voice ref for every character, not only those the series config
+        # already gives a `voice_sample`: an audio target generates one
+        # (targets/audio/), and picking a candidate for a character with no
+        # sample writes VOICE_DIR/<id>.wav and the series config's line
+        # (pick_take). A prop or a vehicle never speaks.
+        if e.get("voice_sample") or e.get("kind", "character") == "character":
             out.append(Ref(f"voice:{sid}", "series", "voice", e.get("name", sid),
-                           e["voice_sample"], s.home, e, sid))
+                           e.get("voice_sample") or "", s.home, e, sid))
     return out
+
+
+VOICE_DIR = "refs/voices"               # where a picked voice with no `voice_sample` goes
+
+
+def voice_sample_path(ref: Ref) -> str:
+    """Where a voice ref's live file belongs: the series config's
+    `voice_sample`, else refs/voices/<subject>.wav (which picking it writes
+    into the series config). Relative to the ref's home, forward slashes."""
+    return ref.path or f"{VOICE_DIR}/{T.safe_id(ref.subject or ref.id)}.wav"
 
 
 KEYFRAME_ENDS = ("first", "last")
@@ -299,14 +318,30 @@ def keyframe_refs(ep: str, needs: dict | None = None) -> list[Ref]:
 KEYFRAME_METHODS = ("continuity", "generate", "import", "none")
 
 
+_STORY: dict = {}               # (path, size, mtime) -> the parsed story IR
+
+
 def episode_story(ep: str):
-    """The story IR of a built episode (shotlist/shots.json), or None."""
+    """The story IR of a built episode (shotlist/shots.json), or None. Cached
+    per (path, size, mtime): a refs listing asks for it once per voice ref."""
+    path = os.path.join(ep, "shotlist", "shots.json")
+    try:
+        st = os.stat(path)
+        key = (os.path.normcase(os.path.abspath(path)), st.st_size, st.st_mtime_ns)
+    except OSError:
+        return None
+    if key in _STORY:
+        return _STORY[key]
     try:
         from h3core import ir
-        with open(os.path.join(ep, "shotlist", "shots.json"), encoding="utf-8") as fh:
-            return ir.Episode.loads(fh.read())
+        with open(path, encoding="utf-8") as fh:
+            story = ir.Episode.loads(fh.read())
     except (OSError, ValueError, KeyError):
         return None
+    if len(_STORY) > 8:
+        _STORY.clear()
+    _STORY[key] = story
+    return story
 
 
 def shot_ir(ep: str, shot: str):
@@ -422,13 +457,15 @@ def ref_shot(ref: Ref) -> tuple[str, str]:
 
 
 def image_defaults(s: Series, ready=None) -> dict:
-    """The episode's image-target defaults (GET /h3pipe/refs `defaults`):
-    {"target", "target_source", "keyframe_target", "keyframe_target_source"},
-    each source "editor" (overrides.json's episode.refs_target /
-    episode.keyframe_target, PUT /h3pipe/refs/defaults), "series" (the
-    series config's `refs` block) or "default" (krea2; flux2_klein_edit for
+    """The episode's ref-target defaults (GET /h3pipe/refs `defaults`):
+    {"target", "target_source", "keyframe_target", "keyframe_target_source",
+    "voice_target", "voice_target_source"}, each source "editor"
+    (overrides.json's episode.refs_target / episode.keyframe_target /
+    episode.voice_target, PUT /h3pipe/refs/defaults), "series" (the series
+    config's `refs` block) or "default" (krea2; flux2_klein_edit for
     keyframes when `ready(target)` says it can render here, else the refs
-    target). RefError for a name that isn't an image target."""
+    target; ltx2_voice for voices). RefError for a name that isn't a target
+    of the right kind."""
     ov = T.load_overrides(s.ep)
     try:
         block = TG.refs_block(s.series_cfg)
@@ -451,50 +488,71 @@ def image_defaults(s: Series, ready=None) -> dict:
             t = TG.load_target(TG.DEFAULT_KEYFRAME_TARGET, "image")
             kt = t.id if (ready is None or ready(t)) else out["target"]
             out.update(keyframe_target=kt, keyframe_target_source="default")
+        heard = {t.id for t in TG.list_targets("audio")}
+        ev = T.episode_field(ov, "voice_target")
+        if ev and ev in heard:
+            out.update(voice_target=ev, voice_target_source="editor")
+        elif block.get("voice_target"):
+            out.update(voice_target=block["voice_target"], voice_target_source="series")
+        else:
+            out.update(voice_target=TG.DEFAULT_AUDIO_TARGET, voice_target_source="default")
         return out
     except (TG.TargetError, ValueError) as e:
         raise RefError(str(e)) from None
 
 
+def ref_target_kind(ref: Ref) -> str:
+    """The kind of target that generates this ref: "audio" for a voice,
+    "image" for everything else."""
+    return "audio" if ref.kind == "voice" else "image"
+
+
 def image_target_for(s: Series, ref: Ref, requested: str | None = None,
                      ov_data: dict | None = None, ready=None, defaults: dict | None = None):
-    """The image target a generate of `ref` uses: the request's `target`,
-    else the ref's override (`target` in refs/_overrides.json), else the
-    episode's defaults (image_defaults: the editor's episode choice, the
-    series config's `refs` block, the built-in rule): `keyframe_target` for a
-    shot keyframe, `target` for anything else. RefError for a name that
-    isn't an image target."""
+    """The target a generate of `ref` uses: the request's `target`, else the
+    ref's override (`target` in refs/_overrides.json), else the episode's
+    defaults (image_defaults: the editor's episode choice, the series
+    config's `refs` block, the built-in rule): `voice_target` for a voice
+    (an audio target), `keyframe_target` for a shot keyframe, `target` for
+    anything else. RefError for a name that isn't a target of that kind."""
+    kind = ref_target_kind(ref)
+    key = {"voice": "voice_target", "keyframe": "keyframe_target"}.get(ref.kind, "target")
     try:
         if requested:
-            return TG.load_target(requested, "image")
+            return TG.load_target(requested, kind)
         ov = ref_override(ov_data if ov_data is not None else load_overrides(ref.home), ref.id)
         if ov.get("target"):
-            return TG.load_target(ov["target"], "image")
+            return TG.load_target(ov["target"], kind)
         d = defaults if defaults is not None else image_defaults(s, ready)
-        return TG.load_target(d["keyframe_target"] if ref.kind == "keyframe" else d["target"],
-                              "image")
+        return TG.load_target(d[key], kind)
     except (TG.TargetError, ValueError) as e:
         raise RefError(str(e)) from None
 
 
+DEFAULT_FIELDS = (("target", "refs_target", "image"),
+                  ("keyframe_target", "keyframe_target", "image"),
+                  ("voice_target", "voice_target", "audio"))
+
+
 def set_image_defaults(ep: str, fields: dict) -> dict:
-    """Set (or with None clear) the episode's image-target choices in
+    """Set (or with None clear) the episode's ref-target choices in
     overrides.json (episode.refs_target from `target`, episode.keyframe_target
-    from `keyframe_target`). RefError for a name that isn't an image target.
-    series.json is never written."""
+    from `keyframe_target`, episode.voice_target from `voice_target`).
+    RefError for a name that isn't a target of that kind. series.json is
+    never written."""
     ov = T.load_overrides(ep)
     name = ""
     for ps in T.PASSES:
         if os.path.isfile(os.path.join(ep, J.shotlist_rel(ps))):
             name = J.load_shotlist(ep, ps).get("episode", "")
             break
-    for key, field_ in (("target", "refs_target"), ("keyframe_target", "keyframe_target")):
+    for key, field_, kind in DEFAULT_FIELDS:
         if key not in fields:
             continue
         v = fields[key]
         if v:
             try:
-                TG.load_target(v, "image")
+                TG.load_target(v, kind)
             except TG.TargetError as e:
                 raise RefError(str(e)) from None
         T.set_episode_field(ov, field_, v or None, name or os.path.basename(os.path.normpath(ep)))
@@ -634,7 +692,7 @@ def built_prompt(s: Series, ref: Ref, view: str | None = None,
         except RefError:
             return None
     if ref.kind == "voice":
-        return voice_prompt(e.get("name", ref.subject), e.get("voice", "as written in series.json"))
+        return voice_brief(s, ref, target)[0]
     if ref.kind == "location":
         return plate_prompt(s.look, e["description"]) if e.get("description") else None
     if not e.get("design"):
@@ -644,6 +702,29 @@ def built_prompt(s: Series, ref: Ref, view: str | None = None,
             return sheet_prompt(e["design"], s.look)
         return view_prompt(view, e["design"], s.look, *view_size)
     return object_prompt(e["design"], s.look)
+
+
+def voice_brief(s: Series, ref: Ref, target=None, seconds: float | None = None
+                ) -> tuple[str, str, str]:
+    """(the brief a voice generate uses, the line it asks for, where the line
+    came from: "script" | "neutral") for a voice ref, from the audio target
+    (targets/audio/common.py's wording unless it writes its own). Without an
+    audio target the old refs_todo note is returned with no line: that is
+    what a person recording one reads."""
+    e = ref.entry
+    name = e.get("name", ref.subject)
+    voice = e.get("voice", "as written in series.json")
+    try:
+        target = target or image_target_for(s, ref)
+    except RefError:
+        target = None
+    if target is None or target.kind != "audio":
+        return voice_prompt(name, voice), "", "none"
+    line, source = target.voice_line(episode_story(s.ep), ref.subject or "")
+    if seconds is None:
+        seconds = target.seconds_range()[0]
+    return (target.voice_prompt(name, e.get("voice", ""), e.get("design", ""), line, seconds),
+            line, source)
 
 
 def gen_size(ref: Ref, view_size: tuple[int, int] | None = None, target=None,
@@ -706,7 +787,13 @@ def stable_seed(ref: Ref) -> int:
 def can_generate(s: Series, ref: Ref) -> str | None:
     """None if a generate can run; else why not, for a person."""
     if ref.kind == "voice":
-        return "nothing generates voices yet: import a recording"
+        try:
+            t = image_target_for(s, ref)
+        except RefError as e:
+            return str(e)
+        if t.kind != "audio":
+            return "no audio target generates voices: import a recording"
+        return None
     if ref.kind == "keyframe":
         shot, _ = ref_shot(ref)
         if shot_ir(s.ep, shot)[0] is None:
@@ -850,10 +937,15 @@ def image_size(path: str) -> tuple[int, int] | None:
     return None
 
 
-def close_take(take: RefTake, data: bytes | None = None, notes: str = "") -> str:
-    """Close a take from outside the save node: write `data` as its image (if
-    given) and set ok, or failed when there is no image. For kreagen's
-    SaveImage fallback and for a job whose saver didn't update the sidecar."""
+def close_take(take: RefTake, data: bytes | None = None, notes: str = "",
+               ext: str | None = None) -> str:
+    """Close a take from outside the save node: write `data` as its file (if
+    given) and set ok, or failed when there is none. For kreagen's SaveImage
+    fallback and for a job whose saver didn't update the sidecar. `ext` (an
+    extension including the dot) renames the take's file: ComfyUI's own
+    SaveAudio writes flac, not the wav H3SaveRefAudio would have made."""
+    if ext and os.path.splitext(take.paths.image)[1].lower() != ext.lower():
+        take.paths.image = os.path.splitext(take.paths.image)[0] + ext
     if data is not None:
         _atomic_write(take.paths.image, data)
     if os.path.isfile(take.paths.image):
@@ -956,10 +1048,11 @@ def set_ref_override(data: dict, ref: Ref, view: str | None, fields: dict,
     if ref.has_views and view is None and fields.get("prompt") is not None:
         raise RefError(f"{ref.id} is a character: a prompt override is per view")
     if fields.get("target") is not None:
+        kind = ref_target_kind(ref)                       # audio for a voice, else image
         if view:
-            raise RefError("an image target override is per ref, not per view")
+            raise RefError(f"an {kind} target override is per ref, not per view")
         try:
-            TG.load_target(fields["target"], "image")
+            TG.load_target(fields["target"], kind)
         except TG.TargetError as e:
             raise RefError(str(e)) from None
     refs = data.setdefault("refs", {})
@@ -1052,6 +1145,39 @@ class PickResult:
     live: str | None = None          # the file written, if any
     stitched: bool = False
     report: str = ""
+    series_changed: bool = False     # a voice: series.json gained `voice_sample`
+
+
+def set_voice_sample(s: Series, subject: str, rel: str) -> bool:
+    """Write `subjects.<subject>.voice_sample` into the series config through
+    the Phase 9a save path (a _history copy, then an atomic write keeping the
+    file's line endings and BOM). The JSON is rewritten as a promote writes
+    it (h3promote.dump_series: 2-space indent, key order kept). False when
+    the line was already that. RefError when the file can't be read as JSON
+    or names no such subject."""
+    import json
+
+    import h3promote as P
+    import h3source as H
+    try:
+        src = H.read_source(s.ep, "series")
+    except H.SourceError as e:
+        raise RefError(str(e)) from None
+    try:
+        raw = json.loads(src.text)
+    except ValueError as e:
+        raise RefError(f"{os.path.basename(src.path)} is not valid JSON ({e}): fix it "
+                       f"before picking a voice") from None
+    book = raw.get("subjects")
+    if not isinstance(book, dict) or subject not in book \
+            or not isinstance(book[subject], dict):
+        raise RefError(f"{os.path.basename(src.path)} has no subject {subject!r} to give a "
+                       f"voice_sample to")
+    if book[subject].get("voice_sample") == rel:
+        return False
+    book[subject]["voice_sample"] = rel
+    H.write_source(src, P.dump_series(raw, src.text))
+    return True
 
 
 def pick_take(s: Series, ref: Ref, view: str | None, take: int,
@@ -1061,13 +1187,19 @@ def pick_take(s: Series, ref: Ref, view: str | None, take: int,
     recorded, and the sheet stitched once all four views are picked) and write
     _picks.json. Raises UnknownRef, NotUsable (unless `force` for a finished
     take whose status isn't ok), RefError, StitchError (after the pick is
-    saved)."""
+    saved).
+
+    A voice whose character has no `voice_sample` yet is copied to
+    refs/voices/<id>.wav and the series config gains that line, through the
+    Phase 9a save path (set_voice_sample); the result says `series_changed`."""
     view = check_view(ref, view, required=True)
     t = get_take(ref, view, take)
     if not os.path.isfile(t.paths.image):
         raise NotUsable(f"{ref.id}{' ' + view if view else ''} t{take:02d} has no file")
     if t.status != "ok" and not force:
         raise NotUsable(f"{ref.id}{' ' + view if view else ''} t{take:02d} is {t.status}")
+    if ref.is_audio and not ref.path:
+        return _pick_new_voice(s, ref, t)
     if not ref.path:
         raise RefError(f"{os.path.basename(s.config_file) if ref.scope == 'series' else 'the episode'}"
                        f" names no file for {ref.id}")
@@ -1098,6 +1230,29 @@ def pick_take(s: Series, ref: Ref, view: str | None, take: int,
     save_picks(ref.home, picks)
     res.live = ref.file
     return res
+
+
+def _pick_new_voice(s: Series, ref: Ref, t: RefTake) -> PickResult:
+    """Pick a voice candidate for a character the series config gives no
+    `voice_sample`: the wav goes to refs/voices/<id>.wav under the ref's home
+    (keeping the candidate's own extension), _picks.json records the pick,
+    and the series config gains the line."""
+    rel = voice_sample_path(ref)
+    ext = os.path.splitext(t.paths.image)[1].lower()
+    if ext and os.path.splitext(rel)[1].lower() != ext:
+        rel = os.path.splitext(rel)[0] + ext
+    live = ref_file(ref.home, rel)
+    _atomic_copy(t.paths.image, live)
+    picks = load_picks(ref.home)
+    block = picks["refs"].setdefault(ref.id, {})
+    block.pop("cleared", None)
+    block.update(take=t.take, sha1=T.file_sha1(live), picked=T.now())
+    save_picks(ref.home, picks)
+    changed = set_voice_sample(s, ref.subject or "", rel)
+    # the Ref was built from the series config as it was: keep it truthful
+    ref.path = rel
+    ref.entry["voice_sample"] = rel
+    return PickResult(t, live=live, series_changed=changed)
 
 
 def auto_pick(s: Series, ref: Ref, mksheet: str | None = None) -> list[PickResult]:
@@ -1145,11 +1300,12 @@ def clear_pick(s: Series, ref: Ref, view: str | None = None) -> ClearResult:
     no longer uses a keyframe (a required one blocks it again). A
     character's view: that view is unpicked and the stitched sheet (which
     showed it) removed; a character with no view: every view and the sheet.
-    RefError for a voice or a ref with no file named; UnknownRef never (a
-    ref with nothing picked is cleared all the same)."""
+    A voice: its live sample is removed and the clear recorded; the series
+    config's `voice_sample` line is left alone (the editor never unwrites
+    it), so the ref still lists and a later pick puts a file back.
+    RefError for a ref with no file named; UnknownRef never (a ref with
+    nothing picked is cleared all the same)."""
     view = check_view(ref, view)
-    if ref.is_audio:
-        raise RefError(f"{ref.id} is a voice sample: imported audio isn't picked")
     if not ref.path:
         raise RefError(f"{ref.id} names no file to clear")
     picks = load_picks(ref.home)
@@ -1196,7 +1352,7 @@ def discard_take(s: Series, ref: Ref, view: str | None, take: int) -> DiscardRes
         raise T.StillQueued(f"{ref.id}{' ' + view if view else ''} t{take:02d} is queued: "
                             f"let it finish first")
     cleared = None
-    if not ref.is_audio and picked_take(load_picks(ref.home), ref.id, view) == take:
+    if picked_take(load_picks(ref.home), ref.id, view) == take and (ref.path or not ref.is_audio):
         cleared = clear_pick(s, ref, view)
     files = set(T.stem_files(takes_dir(ref), f"{take_base(ref, view)}_t{take:02d}"))
     for p in (t.paths.sidecar, t.paths.image):
@@ -1235,6 +1391,112 @@ def stitch_sheet(views: list[str], out: str, panel_height: int = 1024,
             except OSError:
                 pass
     return so
+
+
+# ---------------------------------------------------------------------------
+# a voice sample out of a video take (the no-model path)
+# ---------------------------------------------------------------------------
+#
+# A line the model already spoke in a take is the best voice reference there
+# is: it is already the character. `voice_from_take` cuts `start..end` seconds
+# out of that take's sound (h3peaks.clip_audio picks the file, as the cut
+# does: the mp4 when it carries sound, else the take's _h3.wav) and adds the
+# clip as a voice-ref candidate with source "from_take".
+
+MIN_CLIP = 0.2                      # a shorter span is a click, not a voice
+MAX_CLIP = 30.0
+
+
+@dataclass
+class VoiceClipResult:
+    ref: Ref
+    take: RefTake
+    picked: bool
+    source: dict                     # shot, take, pass, start, end, file
+
+
+def voice_from_take(s: Series, ref: Ref, shot: str, take: int, pass_: str = "proxy",
+                    start: float = 0.0, end: float | None = None,
+                    pick: bool | None = None, note: str = "") -> VoiceClipResult:
+    """Cut `start..end` seconds out of a video take's sound into a new
+    candidate of voice ref `ref` (source "from_take"; the sidecar records the
+    shot, take, pass and span). Picked when the voice has no live file yet
+    (or always with pick=True; never with pick=False) — and picking a voice
+    whose character has no `voice_sample` writes the series config
+    (pick_take). Raises RefError, UnknownRef, NotUsable, FfmpegMissing."""
+    if not ref.is_audio:
+        raise RefError(f"{ref.id} is not a voice ref: a take's audio can only become a "
+                       f"voice sample")
+    if pass_ not in T.PASSES:
+        raise RefError(f"pass must be final or proxy, not {pass_!r}")
+    src = T.get_take(s.ep, pass_, shot, take)
+    if src is None:
+        raise UnknownRef(f"{shot} has no {pass_} take {take}")
+    import h3peaks
+    sound = h3peaks.clip_audio(src.paths.mp4, src.paths.h3_wav)
+    if not sound:
+        raise NotUsable(f"{shot} {pass_} t{take:02d} has no sound to take a voice from")
+    dur = h3peaks.media_info(sound).get("duration")
+    start = float(start or 0.0)
+    if end is None:
+        end = dur if dur else start + 5.0
+    end = float(end)
+    if start < 0:
+        raise RefError("start must be 0 or more")
+    if end - start < MIN_CLIP:
+        raise RefError(f"the span must be at least {MIN_CLIP:g}s long "
+                       f"(got {end - start:.2f}s)")
+    if end - start > MAX_CLIP:
+        raise RefError(f"the span must be at most {MAX_CLIP:g}s long "
+                       f"(got {end - start:.2f}s)")
+    if dur and start >= dur:
+        raise RefError(f"{shot} {pass_} t{take:02d} is {dur:.2f}s long: the span starts "
+                       f"after it ends")
+    d = takes_dir(ref)
+    os.makedirs(d, exist_ok=True)
+    tmp = os.path.join(d, f".tmp_{uuid.uuid4().hex}.wav")
+    try:
+        extract_audio(sound, start, end, tmp)
+        rel = ep_rel(s.ep, sound)
+        t = reserve_take(ref, None, {
+            "status": "queued", "queued": T.now(), "ep": s.ep, "source": "from_take",
+            "source_shot": shot, "source_take": take, "source_pass": pass_,
+            "source_start": start, "source_end": end, "source_file": rel,
+            "source_sha1": T.file_sha1(sound), "seconds": round(end - start, 3),
+            "comfy_prompt_id": None, "seed": None, "seed_source": None,
+            "prompt": None, "model": None, "loras": None, "steps": None,
+            "width": None, "height": None, "note": note}, ext=".wav")
+        os.replace(tmp, t.paths.image)
+    finally:
+        if os.path.isfile(tmp):
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+    t.sidecar = T.update_sidecar(
+        t.paths.sidecar, status="ok", finished=T.now(),
+        save_notes=f"{start:.2f}-{end:.2f}s of {shot} {pass_} t{take:02d}")
+    source = {"shot": shot, "take": take, "pass": pass_, "start": start, "end": end,
+              "file": rel}
+    picked = False
+    live = ref.file
+    if pick or (pick is None and not (live and os.path.isfile(live))
+                and not is_cleared(load_picks(ref.home), ref.id)):
+        pick_take(s, ref, None, t.take)
+        picked = True
+    return VoiceClipResult(ref, t, picked, source)
+
+
+def extract_audio(src: str, start: float, end: float, out: str, timeout: int = 300) -> None:
+    """`start..end` seconds of `src`'s sound as a 16-bit PCM wav at `out`
+    (ffmpeg, a subprocess, as h3assemble runs it). Mono is left alone: what
+    the file has is what the sample gets."""
+    rc, log = _run([_ffmpeg("ffmpeg"), "-v", "error", "-nostdin", "-y",
+                    "-ss", f"{start:.3f}", "-to", f"{end:.3f}", "-i", src,
+                    "-vn", "-c:a", "pcm_s16le", out], timeout)
+    if rc != 0 or not os.path.isfile(out):
+        raise NotUsable(f"ffmpeg could not cut {start:.2f}-{end:.2f}s out of "
+                        f"{os.path.basename(src)}: {log.strip()[-300:]}")
 
 
 # ---------------------------------------------------------------------------
@@ -1490,6 +1752,7 @@ class GenRequest:
     target: str | None = None        # the image target (None: image_target_for)
     pass_: str = "final"             # a keyframe's size: this pass's render size
     negative_source: str = "request"  # what an explicit `negative` is (kreagen: "file")
+    seconds: float | None = None     # a voice ref's length (None: the audio target's default)
 
 
 @dataclass
@@ -1520,6 +1783,17 @@ class GenJob:
     resolved: dict = field(default_factory=dict)  # resolve_models' answer, per param
     inputs: dict = field(default_factory=dict)    # {"references": [names ComfyUI reads]}
     base: bool = False               # an accelerator is missing: the base preset renders
+    # a voice ref (an audio target): how long, on the target's frame grid,
+    # and the line it is asked to say
+    seconds: float | None = None
+    frames: int | None = None
+    fps: float | None = None
+    line: str = ""
+    line_source: str = ""            # script | neutral | request
+
+    @property
+    def is_audio(self) -> bool:
+        return self.target is not None and self.target.kind == "audio"
 
     @property
     def name(self) -> str:
@@ -1534,14 +1808,17 @@ class GenJob:
 # shift, guidance, text encoders, VAE) is patched from `values`.
 IMAGE_JOB_PARAMS = ("model", "loras", "steps", "seed", "cfg", "prompt", "negative",
                     "width", "height")
+# an audio target's own: the job works out how many frames at what rate
+AUDIO_JOB_PARAMS = ("length", "fps")
 
 
 def _preset_values(target) -> dict:
     p = target.presets.get("final")
     if p is None:
         return {}
+    skip = IMAGE_JOB_PARAMS + AUDIO_JOB_PARAMS
     return {k: v for k, v in p.extra.items()
-            if k not in IMAGE_JOB_PARAMS and target.binding.specs(k)}
+            if k not in skip and target.binding.specs(k)}
 
 
 def plan_generate(s: Series, req: GenRequest, overrides: dict | None = None,
@@ -1587,7 +1864,23 @@ def plan_generate(s: Series, req: GenRequest, overrides: dict | None = None,
     has_usable = any(t.usable for v in views for t in list_takes(ref, v))
     preset = target.presets.get("final")
     render_size, video_target, refs = None, "", []
-    if ref.kind == "keyframe":
+    seconds = frames = fps = None
+    line = line_source = ""
+    if ref.kind == "voice":
+        if target.kind != "audio":
+            raise RefError(f"{target.id} is a {target.kind} target: a voice ref needs an "
+                           f"audio one ({', '.join(t.id for t in TG.list_targets('audio'))})")
+        want = req.seconds
+        if want is not None:
+            if isinstance(want, bool) or not isinstance(want, (int, float)) or want <= 0:
+                raise RefError("seconds must be a positive number")
+            lo, hi = target.seconds_range()[2], target.seconds_range()[1]
+            if not lo <= float(want) <= hi:
+                raise RefError(f"seconds must be between {lo:g} and {hi:g} on "
+                               f"{target.short}, not {float(want):g}")
+        seconds, frames, fps = target.snap_seconds(want)
+        w = h = 0
+    elif ref.kind == "keyframe":
         gw, gh, rw, rh, video_target = keyframe_size(s, ref, target, req.pass_)
         w, h, render_size = gw, gh, (rw, rh)
         shot, _ = ref_shot(ref)
@@ -1649,11 +1942,15 @@ def plan_generate(s: Series, req: GenRequest, overrides: dict | None = None,
 
             if ref.kind == "keyframe":
                 base_prompt = keyframe_prompt(s, ref, target, refs)
+            elif ref.kind == "voice":
+                base_prompt, line, line_source = voice_brief(s, ref, target, seconds)
             else:
                 base_prompt = built_prompt(s, ref, v, view_size, target)
             prompt = pick("prompt", base_prompt, req.prompt)
             stale = ("prompt" in used and bool(ov.get("base_hash"))
                      and ov["base_hash"] != prompt_hash(base_prompt))
+            if ref.kind == "voice" and prompt != base_prompt:
+                line_source = "request" if req.prompt is not None else "override"
             jobs.append(GenJob(
                 ref=ref, view=v, candidate=c, prompt=prompt, seed=seed, seed_source=source,
                 model=pick("model", "", req.model) or "",
@@ -1663,7 +1960,9 @@ def plan_generate(s: Series, req: GenRequest, overrides: dict | None = None,
                 note=req.note or "", overridden=sorted(set(used)), override_stale=stale,
                 target=target, negative_source=neg_source, values=_preset_values(target),
                 references=[dict(r) for r in refs], render_size=render_size,
-                video_target=video_target, notes=list(notes)))
+                video_target=video_target, notes=list(notes),
+                seconds=seconds, frames=frames, fps=fps, line=line,
+                line_source=line_source))
     return jobs
 
 
@@ -1712,22 +2011,29 @@ def start_gen(s: Series, job: GenJob) -> RefTake:
         extra["base"] = True
     if job.notes:
         extra["notes"] = list(job.notes)
+    if job.is_audio:
+        # a voice sample: no picture, a length and the line it was asked to say
+        extra.update(seconds=job.seconds, frames=job.frames, fps=job.fps,
+                     line=job.line, line_source=job.line_source,
+                     width=None, height=None)
     return reserve_take(job.ref, job.view, {
         "status": "queued", "queued": T.now(), "ep": s.ep, "comfy_prompt_id": None,
         "source": "generated", "seed": job.seed, "seed_source": job.seed_source,
         "prompt": job.prompt, "model": job.model, "loras": job.loras, "steps": job.steps,
         "cfg": job.cfg, "width": job.width, "height": job.height,
         "overrides": job.overridden, "override_stale": job.override_stale,
-        "note": job.note, **extra})
+        "note": job.note, **extra}, ext=".wav" if job.is_audio else ".png")
 
 
 def image_graph(base: dict, job: GenJob, sidecar: str | None) -> dict:
-    """The API graph of one take on an image target other than krea2: `base`
-    (the target's workflow) with its SaveImage replaced by H3SaveRefTake
-    (binding.saver.replace) writing into the take, the binding's widgets set
-    from the job (model, LoRAs, steps, seed, cfg, prompt, negative, size and
-    the preset's other params), the reference images in (the target's
-    patch_graph: job.inputs["references"]), then pruned to the saver."""
+    """The API graph of one take on an image target other than krea2, or on
+    any audio target: `base` (the target's workflow) with its SaveImage /
+    SaveAudio replaced by the binding's saver (H3SaveRefTake, H3SaveRefAudio)
+    writing into the take, the binding's widgets set from the job (model,
+    LoRAs, steps, seed, cfg, prompt, negative, the picture's size or the
+    voice's length and frame rate, and the preset's other params), then the
+    target's own graph code (an edit target's reference images, an audio
+    target's reference-audio chain: job.inputs), then pruned to the saver."""
     t = job.target
     b = t.binding
     g = copy.deepcopy(base)
@@ -1745,6 +2051,8 @@ def image_graph(base: dict, job: GenJob, sidecar: str | None) -> dict:
         J.remove_loras(g, specs[0])
     vals = {"steps": job.steps, "seed": job.seed, "cfg": job.cfg, "prompt": job.prompt,
             "width": job.width, "height": job.height}
+    if job.is_audio:
+        vals.update(width=None, height=None, length=job.frames, fps=job.fps)
     if job.negative_source != "none":
         vals["negative"] = job.negative
     vals.update(job.values)
@@ -1766,8 +2074,8 @@ def graph_for(base: dict | None, job: GenJob, take: RefTake, save_node: bool = T
     writing into the take (the sidecar path is absolute); without, SaveImage
     stays (prefix PREFIX) and the caller fetches the image (kreagen on an
     older node pack). The graph code is the image target's
-    (targets/image/krea2/graph.py). Any other image target: image_graph
-    (its workflow is required)."""
+    (targets/image/krea2/graph.py). Any other image target, and every audio
+    target: image_graph (its workflow is required)."""
     if not job.is_krea2:
         if base is None:
             raise ValueError(f"{job.target.id} needs its workflow ({job.target.binding.workflow_name})")
@@ -1786,11 +2094,16 @@ def graph_for(base: dict | None, job: GenJob, take: RefTake, save_node: bool = T
 
 
 def resolve_workflow(comfy_url: str | None, explicit: str | None = None, target=None):
-    """(the image target's graph, or None, where). krea2 (the default):
+    """(the target's graph, or None, where). krea2 (the default):
     krea2_refs_t2i as saved in ComfyUI or the repo's, None meaning the
-    built-in graph. Any other image target: its binding's workflow (required)."""
+    built-in graph. Any other image target, and every audio target: its
+    binding's workflow (required). An audio target's workflow is the repo's
+    first: no saved canvas has an audio-only LTX graph, and a canvas of that
+    name would be someone's experiment."""
     t = target or IMAGE_TARGET
     b = t.binding
+    if t.kind == "audio":
+        return J.target_workflow(t, explicit, comfy_url, required=True, prefer_repo=True)
     if t.id == TG.DEFAULT_IMAGE_TARGET:
         return J.resolve_workflow(explicit, b.workflow_name, comfy_url, env=b.env,
                                   required=False)
@@ -1955,6 +2268,28 @@ def stage_references(s: Series, job: GenJob, comfy=None) -> dict:
     return job.inputs
 
 
+def stage_voice_reference(s: Series, job: GenJob, comfy=None) -> dict:
+    """Upload the voice sample an audio target copies (its speaker identity)
+    to ComfyUI's input folder and record its name in job.inputs
+    ({"reference_audio": "h3pipe/<sha1>.wav"}). Only for a target whose
+    `capabilities.reference_audio` is true and a ref whose live file is on
+    disk; otherwise nothing is staged and the target generates the voice
+    from the wording alone. Without `comfy` (a dry run) only the name is
+    worked out."""
+    if not job.is_audio or not job.target.capabilities().get("reference_audio"):
+        return job.inputs
+    path = job.ref.file
+    if not path or not os.path.isfile(path):
+        return job.inputs
+    name = J.input_name(path)
+    if comfy is not None:
+        comfy.upload_input(path, name)
+    job.inputs = dict(job.inputs, reference_audio=name)
+    job.references = [{"role": "voice", "subject": job.ref.subject,
+                       "name": job.ref.name, "kind": "voice", "path": path}]
+    return job.inputs
+
+
 def queue_generate(s: Series, req: GenRequest, comfy, base=None,
                    save_node: bool = True, lora_clip: bool = True,
                    rng: random.Random | None = None, listing=None, resolve=None,
@@ -2004,7 +2339,9 @@ def queue_generate(s: Series, req: GenRequest, comfy, base=None,
             continue
         try:
             g0 = graph_base(job.target)
-            stage_references(s, job, comfy if hasattr(comfy, "upload_input") else None)
+            up = comfy if hasattr(comfy, "upload_input") else None
+            stage_references(s, job, up)
+            stage_voice_reference(s, job, up)
             take = start_gen(s, job)
         except Exception as e:
             out["errors"].append({"ref": job.ref.id, "view": job.view, "error": str(e)[:800]})
@@ -2036,12 +2373,19 @@ def finish_from_history(take: RefTake, entry: dict | None, comfy=None) -> str:
     if err is not None:
         mark_failed(take, err)
         return "failed"
-    imgs = [i for o in ((entry or {}).get("outputs") or {}).values()
-            for i in (o.get("images") or [])]
+    outs = list(((entry or {}).get("outputs") or {}).values())
+    imgs = [i for o in outs for i in (o.get("images") or [])]
+    auds = [a for o in outs for a in (o.get("audio") or [])]
     if imgs and comfy is not None and hasattr(comfy, "view"):
         return close_take(take, comfy.view(imgs[0]),
                           "fetched from ComfyUI's output folder: the graph's SaveImage "
                           f"wrote {imgs[0].get('filename')}")
+    if auds and comfy is not None and hasattr(comfy, "view"):
+        name = auds[0].get("filename") or ""
+        return close_take(take, comfy.view(auds[0]),
+                          "fetched from ComfyUI's output folder: the graph's SaveAudio "
+                          f"wrote {name}",
+                          ext=os.path.splitext(name)[1].lower() or None)
     return close_take(take, None, "closed by h3refs: the saver did not update the sidecar")
 
 
@@ -2485,7 +2829,15 @@ def take_json(ep: str, ref: Ref, t: RefTake) -> dict:
             **({"from": {"shot": sc.get("source_shot"), "take": sc.get("source_take"),
                          "pass": sc.get("source_pass"), "frame": sc.get("source_frame"),
                          "frames": sc.get("source_frames")}}
-               if sc.get("source") == "frame" else {})}
+               if sc.get("source") == "frame" else {}),
+            # a voice candidate: how long it was asked to be and what it says
+            **({"seconds": sc.get("seconds"), "line": sc.get("line"),
+                "line_source": sc.get("line_source")} if ref.is_audio else {}),
+            # a voice sample cut out of a video take (source "from_take")
+            **({"from": {"shot": sc.get("source_shot"), "take": sc.get("source_take"),
+                         "pass": sc.get("source_pass"), "start": sc.get("source_start"),
+                         "end": sc.get("source_end")}}
+               if sc.get("source") == "from_take" else {})}
 
 
 def effective(s: Series, ref: Ref, view: str | None, ov_data: dict,
@@ -2500,10 +2852,15 @@ def effective(s: Series, ref: Ref, view: str | None, ov_data: dict,
                                   defaults=defaults)
     except (RefError, UnknownRef):
         return None
-    return {"prompt": job.prompt, "seed": job.seed if job.seed_source != "new" else None,
-            "seed_source": job.seed_source, "model": job.model, "loras": job.loras,
-            "steps": job.steps, "width": job.width, "height": job.height,
-            "target": job.target.id if job.target is not None else None}
+    out = {"prompt": job.prompt, "seed": job.seed if job.seed_source != "new" else None,
+           "seed_source": job.seed_source, "model": job.model, "loras": job.loras,
+           "steps": job.steps, "width": job.width, "height": job.height,
+           "target": job.target.id if job.target is not None else None}
+    if job.is_audio:
+        out.update(width=None, height=None, seconds=job.seconds, line=job.line,
+                   line_source=job.line_source,
+                   max_seconds=job.target.seconds_range()[1])
+    return out
 
 
 def edit_refs(s: Series, ref: Ref, target) -> list[dict]:

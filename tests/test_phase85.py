@@ -584,8 +584,9 @@ class ClearTest(Episode):
         self.assertEqual(R.picked_take(picks, ref.id, "01_threequarter"), 1)
         # auto-pick leaves the cleared view alone
         self.assertEqual(R.auto_pick(self.s, ref), [])
+        # Phase 9c-B: a voice can be cleared too, but only one with a file named
         with self.assertRaises(R.RefError):
-            R.clear_pick(self.s, R.find_ref(self.s, "voice:ada"))
+            R.clear_pick(self.s, R.find_ref(self.s, "voice:rex"))
 
     def test_cli_clear(self):
         ref = R.find_ref(self.s, "shot:sh010:first")

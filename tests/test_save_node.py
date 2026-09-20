@@ -300,5 +300,106 @@ class SaveNodeTest(unittest.TestCase):
         sent.assert_not_called()
 
 
+class SaveRefAudioTest(unittest.TestCase):
+    """H3SaveRefAudio (docs/API.md "Phase 9c-B"): the wav a voice-ref take
+    gets, and the sidecar it closes."""
+
+    RATE = 48000
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = self._tmp.name
+        self.sidecar = os.path.join(self.root, "voice__ada_t01.json")
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def audio(self, seconds=1.5, channels=1, batch=1):
+        n = int(self.RATE * seconds)
+        t = torch.arange(n, dtype=torch.float32) / self.RATE
+        wave = torch.sin(2 * torch.pi * 220.0 * t) * 0.5
+        return {"waveform": wave.expand(batch, channels, n).clone(),
+                "sample_rate": self.RATE}
+
+    def write_sidecar(self, **fields):
+        data = {"version": 1, "ref": "voice:ada", "view": None, "take": 1,
+                "ep": self.root, "status": "queued", "image": "voice__ada_t01.wav"}
+        data.update(fields)
+        with open(self.sidecar, "w", encoding="utf-8") as fh:
+            json.dump(data, fh)
+        return self.sidecar
+
+    def save(self, audio=None, sidecar=None):
+        return N.H3SaveRefAudio().save(audio if audio is not None else self.audio(),
+                                       self.sidecar if sidecar is None else sidecar)
+
+    def test_writes_a_wav_and_closes_the_sidecar(self):
+        import wave
+        self.write_sidecar()
+        out = self.save()
+        self.assertIn("ok", out["result"][0])
+        wav = os.path.join(self.root, "voice__ada_t01.wav")
+        self.assertTrue(os.path.isfile(wav))
+        with wave.open(wav, "rb") as w:
+            self.assertEqual((w.getnchannels(), w.getsampwidth(), w.getframerate()),
+                             (1, 2, self.RATE))
+            self.assertEqual(w.getnframes(), int(self.RATE * 1.5))
+            frames = w.readframes(w.getnframes())
+        self.assertGreater(max(abs(v) for v in
+                               np.frombuffer(frames, dtype="<i2")[:2000]), 1000)
+        data = json.loads(open(self.sidecar, encoding="utf-8").read())
+        self.assertEqual((data["status"], data["image"]), ("ok", "voice__ada_t01.wav"))
+        self.assertAlmostEqual(data["duration"], 1.5, places=3)
+        self.assertEqual((data["sample_rate"], data["channels"]), (self.RATE, 1))
+        self.assertIn("voice__ada_t01.wav 1.50s", data["save_notes"])
+        # every other field is left alone
+        self.assertEqual(data["ref"], "voice:ada")
+
+    def test_stereo_and_a_batch(self):
+        self.write_sidecar()
+        self.save(self.audio(0.5, channels=2, batch=3))
+        data = json.loads(open(self.sidecar, encoding="utf-8").read())
+        self.assertEqual((data["status"], data["channels"]), ("ok", 2))
+        self.assertIn("3 clips in the batch; kept the first", data["save_notes"])
+
+    def test_extension_and_missing_sidecar(self):
+        # the sidecar's `image` always becomes .wav
+        self.write_sidecar(image="voice__ada_t01.png")
+        self.save()
+        self.assertTrue(os.path.isfile(os.path.join(self.root, "voice__ada_t01.wav")))
+        self.assertEqual(json.loads(open(self.sidecar, encoding="utf-8").read())["image"],
+                         "voice__ada_t01.wav")
+        # no sidecar at all: nothing is written, nothing is raised
+        out = N.H3SaveRefAudio().save(self.audio(), "")
+        self.assertIn("no sidecar given", out["result"][0])
+        # a sidecar that isn't there yet is created
+        os.remove(self.sidecar)
+        self.save()
+        data = json.loads(open(self.sidecar, encoding="utf-8").read())
+        self.assertEqual(data["status"], "ok")
+        self.assertIn("sidecar was missing; created", data["save_notes"])
+
+    def test_failure_is_recorded_not_raised(self):
+        self.write_sidecar()
+        with mock.patch.object(N, "save_audio", side_effect=RuntimeError("no disk")):
+            out = self.save()
+        self.assertIn("failed", out["result"][0])
+        data = json.loads(open(self.sidecar, encoding="utf-8").read())
+        self.assertEqual((data["status"], data["image"]), ("failed", None))
+        self.assertIn("no disk", data["save_notes"])
+        self.assertFalse([f for f in os.listdir(self.root) if f.endswith(".wav")])
+
+    def test_ref_event(self):
+        self.write_sidecar()
+        sent = mock.Mock()
+        server = type(sys)("server")
+        server.PromptServer = type("PromptServer", (), {})
+        server.PromptServer.instance = mock.Mock(send_sync=sent)
+        with mock.patch.dict(sys.modules, {"server": server}):
+            self.save()
+        sent.assert_called_once_with("h3pipe.ref", {
+            "ep": self.root, "ref": "voice:ada", "view": None, "take": 1, "status": "ok"})
+
+
 if __name__ == "__main__":
     unittest.main()

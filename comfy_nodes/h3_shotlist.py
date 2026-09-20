@@ -16,6 +16,8 @@ H3SaveShot         writes frames / audio / mp4 under a strict shot naming
                    convention, honouring the shot's audio policy
 H3SaveRefTake      writes one reference-image take (h3refs) and closes its
                    sidecar
+H3SaveRefAudio     the same for a voice-reference take: writes its wav and
+                   closes its sidecar
 
 Project layout expected
 -----------------------
@@ -1064,12 +1066,124 @@ class H3SaveRefTake:
 
 
 # ---------------------------------------------------------------------------
+# H3SaveRefAudio
+# ---------------------------------------------------------------------------
+
+class H3SaveRefAudio:
+    """Write one voice-reference take and close its sidecar (h3refs.py).
+
+    The audio twin of H3SaveRefTake: an audio target (targets/audio/) puts
+    this in its workflow's SaveAudio's place, and it writes the take's wav
+    beside its sidecar, named by the sidecar's `image` field (else <sidecar
+    stem>.wav; always given a .wav extension, because that is what the
+    pipeline reads and what a voice sample is handed to a video model as).
+    A 16-bit PCM wav is written with the stdlib (save_audio), not
+    torchaudio: the same reason H3SaveShot does.
+
+    The sidecar then gets status, finished, image, duration, sample_rate,
+    channels and save_notes; every other field is left alone, and it is
+    rewritten atomically. Then the `h3pipe.ref` event goes to open editors.
+    Only the first clip of a batch is kept. A failure is reported in the
+    sidecar and the status string, never raised, so a queue of refs keeps
+    going.
+    """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {"audio": ("AUDIO",),
+                             "sidecar": ("STRING", {"default": ""})}}
+
+    RETURN_TYPES = ("STRING",)
+    RETURN_NAMES = ("status",)
+    FUNCTION = "save"
+    OUTPUT_NODE = True
+    CATEGORY = "H3/refs"
+
+    def save(self, audio, sidecar):
+        path = os.path.abspath((sidecar or "").strip())
+        if not (sidecar or "").strip() or not path.lower().endswith(".json"):
+            status = f"no sidecar given (got {sidecar!r}): nothing saved"
+            return {"ui": {"text": [status]}, "result": (status,)}
+        notes: list[str] = []
+        data = None
+        try:
+            with open(path, encoding="utf-8") as fh:
+                data = json.load(fh)
+            if not isinstance(data, dict):
+                notes.append("sidecar was not a JSON object; rewritten")
+                data = None
+        except FileNotFoundError:
+            notes.append("sidecar was missing; created")
+        except (OSError, ValueError) as exc:
+            notes.append(f"sidecar unreadable ({exc.__class__.__name__}); rewritten")
+        data = data or {}
+        stem = os.path.splitext(os.path.basename(path))[0]
+        name = os.path.basename(data.get("image") or f"{stem}.wav")
+        if os.path.splitext(name)[1].lower() != ".wav":
+            name = os.path.splitext(name)[0] + ".wav"
+        out = os.path.join(os.path.dirname(path), name)
+        clip, rate, channels, seconds = self._one(audio, notes)
+        try:
+            fd, tmp = tempfile.mkstemp(prefix=".tmp_", suffix=".wav",
+                                       dir=os.path.dirname(out))
+            os.close(fd)
+            try:
+                save_audio(clip, tmp)
+                os.replace(tmp, out)
+            except BaseException:
+                try:
+                    os.remove(tmp)
+                except OSError:
+                    pass
+                raise
+            status = "ok"
+            notes.insert(0, f"{name} {seconds:.2f}s, {rate} Hz, "
+                            f"{'mono' if channels == 1 else f'{channels} ch'}")
+        except Exception as exc:
+            status = "failed"
+            rate = channels = None
+            seconds = None
+            notes.insert(0, f"audio not written: {exc}")
+        data.update(status=status, finished=_now(), image=name if status == "ok" else None,
+                    duration=(round(seconds, 3) if seconds is not None else None),
+                    sample_rate=rate, channels=channels,
+                    save_notes=f"{stem}: " + "; ".join(notes))
+        try:
+            _write_json_atomic(path, data)
+        except Exception as exc:
+            notes.append(f"sidecar update failed: {exc}")
+        else:
+            H3SaveRefTake._notify(data, status)
+        text = f"{stem}: {status}; " + "; ".join(notes)
+        return {"ui": {"text": [text]}, "result": (text,)}
+
+    @staticmethod
+    def _one(audio, notes: list) -> tuple:
+        """(one clip as save_audio takes it, sample rate, channels, seconds).
+        A batch keeps its first clip."""
+        wav = audio["waveform"]
+        rate = int(audio["sample_rate"])
+        if wav.dim() == 3:
+            if int(wav.shape[0]) > 1:
+                notes.append(f"{int(wav.shape[0])} clips in the batch; kept the first")
+            wav = wav[:1]
+            channels, samples = int(wav.shape[1]), int(wav.shape[2])
+        elif wav.dim() == 2:
+            channels, samples = int(wav.shape[0]), int(wav.shape[1])
+        else:
+            channels, samples = 1, int(wav.shape[0])
+        return ({"waveform": wav, "sample_rate": rate}, rate, channels,
+                (samples / rate) if rate else 0.0)
+
+
+# ---------------------------------------------------------------------------
 
 NODE_CLASS_MAPPINGS = {
     "H3ShotListLoader": H3ShotListLoader,
     "H3ShotInfo": H3ShotInfo,
     "H3SaveShot": H3SaveShot,
     "H3SaveRefTake": H3SaveRefTake,
+    "H3SaveRefAudio": H3SaveRefAudio,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -1077,4 +1191,5 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "H3ShotInfo": "H3 Shot Info",
     "H3SaveShot": "H3 Save Shot",
     "H3SaveRefTake": "H3 Save Ref Take",
+    "H3SaveRefAudio": "H3 Save Ref Audio",
 }

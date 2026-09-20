@@ -1,0 +1,561 @@
+{
+ "CLIPLoader": {
+  "input": {
+   "optional": {
+    "device": [
+     [
+      "gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors",
+      "gemma_3_12B_it_fp8_scaled.safetensors",
+      "clip_l.safetensors"
+     ]
+    ]
+   },
+   "required": {
+    "clip_name": [
+     [
+      "gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors",
+      "gemma_3_12B_it_fp8_scaled.safetensors",
+      "clip_l.safetensors"
+     ]
+    ],
+    "type": [
+     [
+      "gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors",
+      "gemma_3_12B_it_fp8_scaled.safetensors",
+      "clip_l.safetensors"
+     ]
+    ]
+   }
+  },
+  "name": "CLIPLoader",
+  "output": [
+   "CLIP"
+  ]
+ },
+ "CLIPTextEncode": {
+  "input": {
+   "required": {
+    "clip": [
+     "CLIP"
+    ],
+    "text": [
+     "STRING"
+    ]
+   }
+  },
+  "name": "CLIPTextEncode",
+  "output": [
+   "CONDITIONING"
+  ]
+ },
+ "H3SaveRefAudio": {
+  "input": {
+   "required": {
+    "audio": [
+     "AUDIO"
+    ],
+    "sidecar": [
+     "STRING",
+     {
+      "default": ""
+     }
+    ]
+   }
+  },
+  "name": "H3SaveRefAudio",
+  "output": [
+   "STRING"
+  ]
+ },
+ "KSamplerSelect": {
+  "input": {
+   "required": {
+    "sampler_name": [
+     "COMBO",
+     {
+      "options": [
+       "euler",
+       "euler_cfg_pp",
+       "euler_ancestral",
+       "euler_ancestral_cfg_pp",
+       "heun",
+       "heunpp2",
+       "exp_heun_2_x0",
+       "exp_heun_2_x0_sde",
+       "dpm_2",
+       "dpm_2_ancestral",
+       "lms",
+       "dpm_fast",
+       "dpm_adaptive",
+       "dpmpp_2s_ancestral",
+       "dpmpp_2s_ancestral_cfg_pp",
+       "dpmpp_sde",
+       "dpmpp_sde_gpu",
+       "dpmpp_2m",
+       "dpmpp_2m_cfg_pp",
+       "dpmpp_2m_sde",
+       "dpmpp_2m_sde_gpu",
+       "dpmpp_2m_sde_heun",
+       "dpmpp_2m_sde_heun_gpu",
+       "dpmpp_3m_sde",
+       "dpmpp_3m_sde_gpu",
+       "ddpm",
+       "lcm",
+       "ipndm",
+       "ipndm_v",
+       "deis",
+       "cfgpp_ud10_ab",
+       "res_multistep",
+       "res_multistep_cfg_pp",
+       "res_multistep_ancestral",
+       "res_multistep_ancestral_cfg_pp",
+       "gradient_estimation",
+       "gradient_estimation_cfg_pp",
+       "er_sde",
+       "seeds_2",
+       "seeds_3",
+       "sa_solver",
+       "sa_solver_pece",
+       "ddim",
+       "uni_pc",
+       "uni_pc_bh2"
+      ]
+     }
+    ]
+   }
+  },
+  "name": "KSamplerSelect",
+  "output": [
+   "SAMPLER"
+  ]
+ },
+ "LTXVAudioOnlyEmptyVideoLatent": {
+  "input": {},
+  "name": "LTXVAudioOnlyEmptyVideoLatent",
+  "output": [
+   "LATENT"
+  ]
+ },
+ "LTXVAudioOnlyModel": {
+  "input": {
+   "required": {
+    "model": [
+     "MODEL"
+    ]
+   }
+  },
+  "name": "LTXVAudioOnlyModel",
+  "output": [
+   "MODEL"
+  ]
+ },
+ "LTXVAudioVAEDecode": {
+  "input": {
+   "required": {
+    "audio_vae": [
+     "VAE"
+    ],
+    "samples": [
+     "LATENT"
+    ]
+   }
+  },
+  "name": "LTXVAudioVAEDecode",
+  "output": [
+   "AUDIO"
+  ]
+ },
+ "LTXVConcatAVLatent": {
+  "input": {
+   "required": {
+    "audio_latent": [
+     "LATENT"
+    ],
+    "video_latent": [
+     "LATENT"
+    ]
+   }
+  },
+  "name": "LTXVConcatAVLatent",
+  "output": [
+   "LATENT"
+  ]
+ },
+ "LTXVConditioning": {
+  "input": {
+   "required": {
+    "frame_rate": [
+     "FLOAT",
+     {
+      "default": 25.0,
+      "max": 1000.0,
+      "min": 0.0,
+      "step": 0.01
+     }
+    ],
+    "negative": [
+     "CONDITIONING"
+    ],
+    "positive": [
+     "CONDITIONING"
+    ]
+   }
+  },
+  "name": "LTXVConditioning",
+  "output": [
+   "CONDITIONING",
+   "CONDITIONING"
+  ]
+ },
+ "LTXVDualCFGGuider": {
+  "input": {
+   "required": {
+    "audio_cfg": [
+     "FLOAT",
+     {
+      "default": 7.0,
+      "max": 100.0,
+      "min": 0.0,
+      "step": 0.1
+     }
+    ],
+    "model": [
+     "MODEL"
+    ],
+    "negative": [
+     "CONDITIONING"
+    ],
+    "positive": [
+     "CONDITIONING"
+    ],
+    "video_cfg": [
+     "FLOAT",
+     {
+      "default": 3.0,
+      "max": 100.0,
+      "min": 0.0,
+      "step": 0.1
+     }
+    ]
+   }
+  },
+  "name": "LTXVDualCFGGuider",
+  "output": [
+   "GUIDER"
+  ]
+ },
+ "LTXVEmptyLatentAudio": {
+  "input": {
+   "required": {
+    "audio_vae": [
+     "VAE"
+    ],
+    "batch_size": [
+     "INT",
+     {
+      "default": 1,
+      "max": 4096,
+      "min": 1
+     }
+    ],
+    "frame_rate": [
+     "FLOAT,INT",
+     {
+      "default": 25.0,
+      "max": 1000.0,
+      "min": 1.0,
+      "step": 0.01
+     }
+    ],
+    "frames_number": [
+     "INT",
+     {
+      "default": 97,
+      "max": 1000,
+      "min": 1,
+      "step": 1
+     }
+    ]
+   }
+  },
+  "name": "LTXVEmptyLatentAudio",
+  "output": [
+   "LATENT"
+  ]
+ },
+ "LTXVReferenceAudio": {
+  "input": {
+   "required": {
+    "audio_vae": [
+     "VAE"
+    ],
+    "end_percent": [
+     "FLOAT",
+     {
+      "default": 1.0,
+      "max": 1.0,
+      "min": 0.0,
+      "step": 0.001
+     }
+    ],
+    "identity_guidance_scale": [
+     "FLOAT",
+     {
+      "default": 3.0,
+      "max": 100.0,
+      "min": 0.0,
+      "step": 0.01
+     }
+    ],
+    "model": [
+     "MODEL"
+    ],
+    "negative": [
+     "CONDITIONING"
+    ],
+    "positive": [
+     "CONDITIONING"
+    ],
+    "reference_audio": [
+     "AUDIO"
+    ],
+    "start_percent": [
+     "FLOAT",
+     {
+      "default": 0.0,
+      "max": 1.0,
+      "min": 0.0,
+      "step": 0.001
+     }
+    ]
+   }
+  },
+  "name": "LTXVReferenceAudio",
+  "output": [
+   "MODEL",
+   "CONDITIONING",
+   "CONDITIONING"
+  ]
+ },
+ "LTXVScheduler": {
+  "input": {
+   "optional": {
+    "latent": [
+     "LATENT"
+    ]
+   },
+   "required": {
+    "base_shift": [
+     "FLOAT",
+     {
+      "default": 0.95,
+      "max": 100.0,
+      "min": 0.0,
+      "step": 0.01
+     }
+    ],
+    "max_shift": [
+     "FLOAT",
+     {
+      "default": 2.05,
+      "max": 100.0,
+      "min": 0.0,
+      "step": 0.01
+     }
+    ],
+    "steps": [
+     "INT",
+     {
+      "default": 20,
+      "max": 10000,
+      "min": 1
+     }
+    ],
+    "stretch": [
+     "BOOLEAN",
+     {
+      "default": true
+     }
+    ],
+    "terminal": [
+     "FLOAT",
+     {
+      "default": 0.1,
+      "max": 0.99,
+      "min": 0.0,
+      "step": 0.01
+     }
+    ]
+   }
+  },
+  "name": "LTXVScheduler",
+  "output": [
+   "SIGMAS"
+  ]
+ },
+ "LTXVSeparateAVLatent": {
+  "input": {
+   "required": {
+    "av_latent": [
+     "LATENT"
+    ]
+   }
+  },
+  "name": "LTXVSeparateAVLatent",
+  "output": [
+   "LATENT",
+   "LATENT"
+  ]
+ },
+ "LoadAudio": {
+  "input": {
+   "required": {
+    "audio": [
+     "COMBO",
+     {
+      "options": [
+       "sample.wav"
+      ]
+     }
+    ]
+   }
+  },
+  "name": "LoadAudio",
+  "output": [
+   "AUDIO"
+  ]
+ },
+ "LoraLoaderModelOnly": {
+  "input": {
+   "required": {
+    "lora_name": [
+     [
+      "ltx_2.3_22b_distilled_1.1_lora_dynamic_fro09_avg_rank_111_bf16.safetensors"
+     ]
+    ],
+    "model": [
+     "MODEL"
+    ],
+    "strength_model": [
+     "FLOAT",
+     {
+      "default": 1.0,
+      "max": 100.0,
+      "min": -100.0,
+      "step": 0.01
+     }
+    ]
+   }
+  },
+  "name": "LoraLoaderModelOnly",
+  "output": [
+   "MODEL"
+  ]
+ },
+ "RandomNoise": {
+  "input": {
+   "required": {
+    "noise_seed": [
+     "INT",
+     {
+      "control_after_generate": true,
+      "default": 0,
+      "max": 18446744073709551615,
+      "min": 0
+     }
+    ]
+   }
+  },
+  "name": "RandomNoise",
+  "output": [
+   "NOISE"
+  ]
+ },
+ "SamplerCustomAdvanced": {
+  "input": {
+   "required": {
+    "guider": [
+     "GUIDER"
+    ],
+    "latent_image": [
+     "LATENT"
+    ],
+    "noise": [
+     "NOISE"
+    ],
+    "sampler": [
+     "SAMPLER"
+    ],
+    "sigmas": [
+     "SIGMAS"
+    ]
+   }
+  },
+  "name": "SamplerCustomAdvanced",
+  "output": [
+   "LATENT",
+   "LATENT"
+  ]
+ },
+ "SaveAudio": {
+  "input": {
+   "required": {
+    "audio": [
+     "AUDIO"
+    ],
+    "filename_prefix": [
+     "STRING",
+     {
+      "default": "audio/ComfyUI"
+     }
+    ]
+   }
+  },
+  "name": "SaveAudio",
+  "output": [
+   "AUDIO"
+  ]
+ },
+ "UNETLoader": {
+  "input": {
+   "required": {
+    "unet_name": [
+     [
+      "ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors",
+      "ltx-2.3-22b-dev_transformer_only_int8_convrot.safetensors",
+      "krea2_turbo_fp8_scaled.safetensors"
+     ]
+    ],
+    "weight_dtype": [
+     [
+      "ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors",
+      "ltx-2.3-22b-dev_transformer_only_int8_convrot.safetensors",
+      "krea2_turbo_fp8_scaled.safetensors"
+     ]
+    ]
+   }
+  },
+  "name": "UNETLoader",
+  "output": [
+   "MODEL"
+  ]
+ },
+ "VAELoader": {
+  "input": {
+   "required": {
+    "vae_name": [
+     [
+      "ltx-2.5-audio-vae-bf16.safetensors",
+      "ltx-2.5-video-vae-bf16.safetensors",
+      "LTX23_audio_vae_bf16.safetensors",
+      "wan_2.1_vae.safetensors"
+     ]
+    ]
+   }
+  },
+  "name": "VAELoader",
+  "output": [
+   "VAE"
+  ]
+ }
+}

@@ -1866,3 +1866,156 @@ contract named changes shape except where marked [differs].
   failure, a hang, the command line), and the real `h3align` driven by a **hand-made
   `<recording>.words.json` beside a generated wav** — no Whisper anywhere, since none is
   installed on this machine. The last group needs ffmpeg and numpy and skips without them.
+### Phase 9c-B as built
+
+Everything in **B. Voice refs, generated** is implemented. Each point is marked
+**[differs]** (the contract said otherwise), **[added]** (the contract said nothing) or
+**[settled]** (the contract left it open). Part A (recordings, `/track`, `/align`) writes
+its own section.
+
+**The `audio` target kind**
+- **[settled]** `targets/audio/<id>/`, built exactly like the image targets: `TG.KINDS`
+  gains `"audio"`, `TG.DEFAULT_AUDIO_TARGET` is `ltx2_voice`, and `GET /h3pipe/targets`'s
+  `default` is now `{"video", "image", "audio"}` (it was `{"video", "image"}`).
+  `GET /h3pipe/targets?kind=audio[&ready=1]` works as for the other kinds; `kind` must be
+  one of the three, else 400. Readiness, requirement tiers, family resolution, `downloads`
+  and `nodes` are the video/image code unchanged (`h3edit.readiness`).
+- **[settled] `capabilities`** for an audio target: `{"mode": "t2a" | "voice_clone",
+  "reference_audio": bool, "max_seconds": float, "negative_prompt": bool}`
+  (`negative_prompt` **[added]**, as for the image targets).
+- **[added]** `Target.seconds_range()` → `(default, max, min)` seconds and
+  `Target.snap_seconds(s)` → `(seconds, frames, fps)`: an audio target declares a frame
+  grid (`template.frames`) and a length range (`template.default_seconds` /
+  `min_seconds` / `max_seconds`), and a request in seconds is clamped into the range and
+  snapped onto the grid. `Target.voice_prompt()` / `Target.voice_line()` are the audio
+  kind's code hooks, as `ref_prompt` is the image kind's.
+- **[added] `series.json` `refs.voice_target`** joins `target` and `keyframe_target`
+  (`targets.refs_block`, `targets.audio_target`); each key is validated against targets of
+  its own kind, so `refs.target: "ltx2_voice"` is an error and so is
+  `refs.voice_target: "krea2"`. `overrides.json`'s `episode` gains `voice_target`
+  (`h3takes.EPISODE_FIELDS`). A per-ref `target` override on a voice ref must be an audio
+  target (`PUT /h3pipe/refs/override`), and the same for an image ref.
+
+**The `ltx2_voice` target**
+- **[settled]** LTX-2.5 audio-only, on the same stack as the `ltx2` video target: the
+  distilled 22B transformer through `LTXVAudioOnlyModel`, the LTX-2.5 gemma text encoder,
+  `LTXVAudioOnlyEmptyVideoLatent` + `LTXVEmptyLatentAudio` concatenated
+  (`LTXVConcatAVLatent`), `LTXVDualCFGGuider`, `LTXVScheduler` + `SamplerCustomAdvanced`,
+  then `LTXVSeparateAVLatent` → `LTXVAudioVAEDecode`. `H3SaveRefAudio` takes `SaveAudio`'s
+  place. No saved canvas has an audio-only LTX graph, so the workflow was written for this
+  target (`targets/audio/ltx2_voice/workflow.json`, an API graph with titled nodes, known
+  as `h3pipe_ltx2_voice.json`) and is resolved repo-first.
+- **[settled] The model is the accelerator**, as the contract asks: the preset is the
+  distilled transformer at 8 steps and audio cfg 1; `presets.final.base` is the LTX-2.5
+  **dev** transformer at 30 steps and audio cfg 6 (both have real download records in
+  ComfyUI-Manager's model list). A substitute must keep the wanted file's `distilled` /
+  `dev` word. The text encoder and the audio VAE are required. `LTXVAudioVAELoader` is
+  **not** used: it reads `models/checkpoints`, and the audio VAEs are installed in
+  `models/vae`, which `VAELoader` lists.
+- **[differs] `capabilities.reference_audio` is `false`.** The contract expected
+  `LTXVReferenceAudio` to be used "when the ref has a sample to copy". The node is
+  installed and the graph code wires it in (`targets/audio/ltx2_voice/target.py`
+  `patch_graph`: `LoadAudio` + `LTXVReferenceAudio` between the model/conditioning and the
+  guider, `identity_guidance_scale` from the preset), but **with the installed LTX-2.5
+  transformers it produces silence**. Three live runs on 2026-09-19, identical to a run
+  that gave 6.0 s of speech at peak 211/255, came back at peak 4/255 and 0/255 with no
+  energy above the noise floor: a mono 5 s reference at `identity_guidance_scale` 3.0, the
+  same at 0.0 (which only sets `ref_audio` on the conditioning, no extra pass), and a
+  stereo 5 s reference at 3.0. ComfyUI's node is named "LTXV Reference Audio (ID-LoRA)"
+  and only attaches reference tokens; the model has to carry the audio ID-LoRA weights to
+  use them, and no such file is installed or recorded in ComfyUI-Manager's model list on
+  this machine. So the path ships off, the two node classes are declared `optional` with
+  the feature `"voice cloning (LTXVReferenceAudio)"` (a ComfyUI without them is
+  `degraded`, not blocked), and turning it on is one `capabilities` flag plus a `models`
+  entry for the weights.
+- **[added] Live validation.** The repo's workflow was queued on the running ComfyUI
+  0.36.0 (`POST /prompt`, polled on `/history`) with `SaveAudio` in the saver's place,
+  because the live ComfyUI runs main's node pack. An 8.0 s request produced
+  `h3voice/t8_00001.flac`, 402455 bytes, 8.01 s at 48 kHz, peak 216/255, 39 % of the
+  envelope above the noise floor, median spectral centroid 4.1 kHz and ~6 envelope
+  mean-crossings a second (a speech-shaped envelope). A control run with a "complete
+  silence" prompt at the same settings gave peak 1/255. The graph `h3refs` itself builds
+  (planned through `plan_generate` / `graph_for` on a scratch copy of the kitchen_sink
+  fixture, its `H3SaveRefAudio` swapped back to `SaveAudio`) passed `check_graph` against
+  the live `/object_info` and produced 6.01 s at peak 186/255.
+
+**Generating**
+- **[settled] `POST /h3pipe/refs/generate` on a voice ref** takes `seconds` as well as
+  `count`, `seed_mode`, `seed`, `prompt`, `target` and `note`; `seconds` on anything but a
+  voice ref is 400, and so is a length outside the target's range or a `target` of the
+  wrong kind. The take is a wav under `refs/_takes/voice__<id>/`, and `h3pipe.ref` reports
+  it as usual.
+- **[settled] The brief** (`targets/audio/common.py voice_prompt`): "A clean voice
+  recording of one speaker, close to the microphone, in a quiet room: one voice only, no
+  music, no background noise, no other voices, no sound effects." then `<Name> is
+  <the first sentence of their design>.`, `Voice: <the series config's voice line>.`,
+  `About N seconds of speech.` (whole seconds, however the grid snapped it) and
+  `<Name> says: "<line>"`. The line is the character's **longest** line in this episode's
+  script (`longest_line`), else `NEUTRAL_LINE`.
+- **[added] The sidecar** of a voice take records `seconds`, `frames`, `fps`, `line` and
+  `line_source` (`"script"` | `"neutral"` | `"request"` | `"override"`), `target`, and
+  `width`/`height` null. `GET /h3pipe/refs` take entries carry `seconds`, `line` and
+  `line_source` beside the existing `audio` path; a ref's `effective` carries `seconds`,
+  `line`, `line_source` and `max_seconds`.
+- **[added] A voice ref for every character.** `GET /h3pipe/refs` used to list
+  `voice:<id>` only for subjects the series config already gave a `voice_sample`; it now
+  lists one for every subject of kind `character` (props and vehicles never speak). A
+  character with no sample has `path: null` and `exists: false` and can still generate.
+- **[added]** A generated voice is closed by `H3SaveRefAudio` (below). When a graph keeps
+  ComfyUI's own `SaveAudio` instead, `finish_from_history` fetches the file and **keeps
+  its extension** (ComfyUI writes flac, not wav), renaming the take.
+
+**Picking**
+- **[settled]** `PUT /h3pipe/refs/pick` on a voice copies the candidate to the series
+  config's `voice_sample` path. When the character has none it writes
+  `refs/voices/<id>.wav` (under the ref's home, keeping the candidate's own extension)
+  **and** sets `subjects.<id>.voice_sample` in the series config through the Phase 9a save
+  path — a `_history/` copy, then an atomic write keeping the file's line endings and BOM,
+  the JSON rewritten as a promote writes it (`h3promote.dump_series`: 2-space indent, key
+  order kept). The answer adds `series_changed: true` beside the usual ref JSON (whose
+  `path` is the new one).
+- **[added]** `h3refs.set_voice_sample` is that write, and it is a no-op returning `False`
+  when the line is already what it would set. It is the only thing outside
+  `PUT /h3pipe/source` and the promote that writes `series.json`.
+- **[differs] Clearing a voice** used to be 400 ("imported audio isn't picked"). A voice
+  with a sample named can now be cleared like any ref: its live file goes, `_picks.json`
+  records the clear, and the series config's `voice_sample` line is **left alone** (the
+  editor never unwrites it), so the ref still lists and a later pick puts a file back. A
+  voice the series config names no sample for is still 400 (there is nothing to clear).
+  Discarding a voice candidate that is the pick clears it, as for images.
+- **[settled] Auto-pick still skips voices.** Picking one can write the series config, so
+  it is never automatic; `GET /h3pipe/refs` leaves voice candidates waiting.
+
+**`POST /h3pipe/refs/voice-from-take`** (the no-model path)
+- **[settled]** `{ep, ref, shot, take, pass, start, end, pick?, note?}`. `h3peaks.clip_audio`
+  picks the file (the mp4 when it carries sound, else the take's `_h3.wav`), ffmpeg cuts
+  `start..end` into a 16-bit PCM wav, and it becomes a candidate with `source:
+  "from_take"`. The sidecar records `source_shot`, `source_take`, `source_pass`,
+  `source_start`, `source_end`, `source_file`, `source_sha1` and `seconds`; the take JSON
+  shows them as `from: {shot, take, pass, start, end}`.
+- **[added]** The span must be between 0.2 s and 30 s and must start inside the take
+  (400); a take with no sound at all is 409; a ref that isn't a voice is 400; ffmpeg
+  missing is 500. The answer is the ref as `GET /h3pipe/refs` lists it plus `picked`,
+  `take` and `source`. `pick` defaults to "only if the voice has no live file", as
+  `/refs/keyframe` does — and that pick can write the series config, as above.
+
+**`H3SaveRefAudio`** (`comfy_nodes/h3_shotlist.py`)
+- **[settled]** The audio twin of `H3SaveRefTake`: inputs `audio` (AUDIO) and `sidecar`
+  (STRING). It writes a 16-bit PCM wav with the stdlib (`save_audio`, not torchaudio, for
+  the reason `H3SaveShot` gives) beside the sidecar, named by the sidecar's `image` field
+  and always given a `.wav` extension, then sets `status`, `finished`, `image`,
+  `duration`, `sample_rate`, `channels` and `save_notes` atomically and sends `h3pipe.ref`.
+  Only the first clip of a batch is kept; a failure is recorded, never raised.
+
+**Defaults and the CLI**
+- **[settled]** `GET /h3pipe/refs`'s `defaults` and `PUT /h3pipe/refs/defaults` gain
+  `voice_target` / `voice_target_source` (`"editor"` | `"series"` | `"default"`), stored
+  in `overrides.json` as `episode.voice_target`. `PUT /h3pipe/refs/defaults` with none of
+  the three keys is 400, and a target of the wrong kind is 400.
+- **[settled] `kreagen` (and `h3.py refs`)**: `--voices` includes the voice refs in a run
+  (**[differs]**: off by default, so an existing image run is unchanged),
+  `--voice-target <id>`, `--voice-seconds N`, and `--from-take SHOT:TAKE:START-END` with
+  `--pass final|proxy` (default proxy). `--from-take` needs the run narrowed to exactly
+  one voice ref with `--only voice:<id>`, and says so otherwise; `--pick` forces the pick.
+  A voice's row in the listing shows its length instead of a picture size, and the banner
+  names the audio target on its own line.
