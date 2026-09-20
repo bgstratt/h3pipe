@@ -568,9 +568,138 @@ def set_override(data: dict, shot_id: str, pass_: str | None = None,
 #
 # An entry's `take` may be omitted or null: latest usable take. `pass` defaults
 # to the list it is in; naming the other pass makes it a placeholder.
+#
+# An entry may also carry `audio` (Phase 9d): where the clip's sound comes
+# from, absent or null meaning "this take's own" (h3peaks.clip_audio).
+#
+#   {"shot": "sh020", "take": 3,
+#    "audio": {"source": "take", "shot": "sh020", "take": 1, "pass": "final",
+#              "start": 0.0, "offset": 0.0, "gain": 1.0}}
+#   {"shot": "sh030", "audio": {"source": "file", "path": "audio/line.wav"}}
+#   {"shot": "sh040", "audio": {"source": "none"}}
+#
+# `start` is seconds into the source, `offset` seconds the sound is shifted
+# against the picture (positive = later), `gain` a linear multiplier. The
+# audio is cut or padded with silence to the clip's length, so a clip's
+# length never changes. See audio_spec (the shape), audio_source_file (which
+# file it plays) and audio_label (the editor's badge).
 
 CUT_FILE = "cut.json"
-ENTRY_FIELDS = ("shot", "take", "pass", "trim_in", "trim_out", "locked", "note")
+ENTRY_FIELDS = ("shot", "take", "pass", "trim_in", "trim_out", "locked", "note", "audio")
+
+AUDIO_SOURCES = ("take", "file", "none")
+AUDIO_FIELDS = ("source", "shot", "take", "pass", "path", "start", "offset", "gain")
+GAIN_MAX = 4.0
+# a sanity bound on `start` and |offset|, not a clamp to the clip: the editor
+# keeps an offset inside the clip's own length, and a source that starts after
+# the clip ends is simply silence
+SECONDS_MAX = 86400.0
+
+
+def _audio_num(v, what: str, lo: float | None = None, hi: float | None = None,
+               default: float = 0.0) -> float:
+    if v is None:
+        return default
+    if isinstance(v, bool) or not isinstance(v, (int, float)):
+        raise ValueError(f"audio {what} must be a number, not {v!r}")
+    f = float(v)
+    if f != f or f in (float("inf"), float("-inf")):
+        raise ValueError(f"audio {what} must be a number, not {v!r}")
+    if (lo is not None and f < lo) or (hi is not None and f > hi):
+        span = f"{lo:g} or more" if hi is None else (
+            f"between {lo:g} and {hi:g}" if lo is not None else f"{hi:g} or less")
+        raise ValueError(f"audio {what} must be {span}, not {f:g}")
+    return round(f, 6)
+
+
+def audio_spec(raw, list_pass: str = PASSES[0]) -> dict | None:
+    """A cut entry's `audio` in its stored form, or None for "its own sound".
+
+    Checks the shape (nothing on disk): ValueError for an unknown key, an
+    unknown source, a missing shot/take/path, a negative `start`, a `gain`
+    outside 0..GAIN_MAX, and a `start` or `offset` past SECONDS_MAX (an
+    offset may be negative: the sound is pulled earlier). Defaults are
+    dropped, so what comes back is what cut.json holds. `list_pass` is the
+    pass whose list the entry is in: the default of a take source's `pass`.
+    """
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise ValueError("audio must be an object or null")
+    unknown = set(raw) - set(AUDIO_FIELDS)
+    if unknown:
+        raise ValueError(f"unknown audio field(s) {', '.join(sorted(unknown))}: one of "
+                         f"{', '.join(AUDIO_FIELDS)}")
+    src = raw.get("source")
+    if src not in AUDIO_SOURCES:
+        raise ValueError(f"audio source must be one of {', '.join(AUDIO_SOURCES)}, "
+                         f"not {src!r}")
+    out: dict = {"source": src}
+    if src == "none":
+        for k in ("shot", "take", "pass", "path"):
+            if raw.get(k) is not None:
+                raise ValueError(f"silent audio (source \"none\") takes no {k}")
+        return out
+    if src == "take":
+        shot = raw.get("shot")
+        if not isinstance(shot, str) or not shot.strip():
+            raise ValueError("audio from a take needs the shot it comes from")
+        n = raw.get("take")
+        if isinstance(n, bool) or not isinstance(n, int) or n < 1:
+            raise ValueError(f"audio take must be a take number (1 or more), not {n!r}")
+        p = raw.get("pass") or list_pass
+        if p not in PASSES:
+            raise ValueError(f"audio pass must be one of {', '.join(PASSES)}, "
+                             f"not {raw.get('pass')!r}")
+        if raw.get("path") is not None:
+            raise ValueError("audio from a take takes no path")
+        out.update({"shot": shot.strip(), "take": n, "pass": p})
+    else:                                                  # file
+        path = raw.get("path")
+        if not isinstance(path, str) or not path.strip():
+            raise ValueError("audio from a file needs its path, relative to the episode")
+        for k in ("shot", "take", "pass"):
+            if raw.get(k) is not None:
+                raise ValueError(f"audio from a file takes no {k}")
+        out["path"] = path.strip().replace("\\", "/")
+    start = _audio_num(raw.get("start"), "start", lo=0.0, hi=SECONDS_MAX)
+    offset = _audio_num(raw.get("offset"), "offset", lo=-SECONDS_MAX, hi=SECONDS_MAX)
+    gain = _audio_num(raw.get("gain"), "gain", lo=0.0, hi=GAIN_MAX, default=1.0)
+    if start:
+        out["start"] = start
+    if offset:
+        out["offset"] = offset
+    if gain != 1.0:
+        out["gain"] = gain
+    return out
+
+
+def audio_source_file(root: str, spec: dict | None, list_pass: str = PASSES[0]) -> str | None:
+    """The file a cut entry's audio source plays, absolute, or None: silence
+    (`source: none`), no source at all, or a source that isn't there. A take's
+    sound follows the h3peaks.clip_audio rule (its mp4, else its `_h3.wav`),
+    from its pass's standard folder."""
+    if not spec or spec.get("source") == "none":
+        return None
+    if spec.get("source") == "file":
+        p = os.path.normpath(os.path.join(root, *str(spec["path"]).split("/")))
+        return p if os.path.isfile(p) else None
+    import h3peaks                                    # sibling, imported on demand
+    tp = take_paths(root, spec.get("pass") or list_pass, spec["shot"], spec["take"])
+    return h3peaks.clip_audio(tp.mp4, tp.h3_wav)
+
+
+def audio_label(spec: dict | None, list_pass: str = PASSES[0]) -> str:
+    """Short text for the editor's badge: "sh020 t01", "line_sh030.wav",
+    "silent" (or "" for no source)."""
+    if not spec:
+        return ""
+    if spec["source"] == "none":
+        return "silent"
+    if spec["source"] == "file":
+        return os.path.basename(spec["path"]) or spec["path"]
+    p = spec.get("pass") or list_pass
+    return f"{spec['shot']} t{spec['take']:02d}" + ("" if p == list_pass else f" ({p})")
 
 
 def load_cut(root: str) -> dict:
@@ -593,6 +722,7 @@ class CutEntry:
     trim_out: int = 0
     locked: bool = False
     note: str = ""
+    audio: dict | None = None       # where the clip's sound comes from (audio_spec)
     in_cut_file: bool = True        # False: not listed, placed by script order
     orphan: bool = False            # listed, but no longer in the script
     placeholder: bool = False       # take comes from the other pass
@@ -616,10 +746,14 @@ def resolve_cut(data: dict, pass_: str, script_order: list[str]) -> list[CutEntr
             continue
         seen.add(sid)
         src = raw.get("pass") or pass_
+        try:
+            audio = audio_spec(raw.get("audio"), pass_)
+        except ValueError:
+            audio = None                        # a hand-edited file: ignored, not kept
         entries.append(CutEntry(
             shot=sid, pass_=src, take=raw.get("take"),
             trim_in=int(raw.get("trim_in") or 0), trim_out=int(raw.get("trim_out") or 0),
-            locked=bool(raw.get("locked")), note=raw.get("note") or "",
+            locked=bool(raw.get("locked")), note=raw.get("note") or "", audio=audio,
             orphan=sid not in in_script, placeholder=src != pass_,
             extra={k: v for k, v in raw.items() if k not in ENTRY_FIELDS}))
     for i, sid in enumerate(script_order):
@@ -650,6 +784,8 @@ def cut_entry_to_json(e: CutEntry, list_pass: str) -> dict:
         out["locked"] = True
     if e.note:
         out["note"] = e.note
+    if e.audio:
+        out["audio"] = e.audio
     out.update(e.extra)
     return out
 

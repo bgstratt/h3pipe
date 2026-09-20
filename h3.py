@@ -31,8 +31,12 @@ your projects, with the pipeline scripts beside it (see the README).
     python h3.py cut      Shows\\ep05 [--proxy] --move sh050 --before sh020
                                                     # edit the cut: --show, --order, --move,
                                                     # --trim SH IN OUT, --lock/--unlock SH,
-                                                    # --reset order|trims|all,
-                                                    # --copy-from final|proxy [order|trims|all]
+                                                    # --reset order|trims|audio|all,
+                                                    # --copy-from final|proxy
+                                                    #     [order|trims|audio|all],
+                                                    # --audio SH take SH:N | file PATH
+                                                    #     | none | own
+                                                    #     [--from S] [--at S] [--gain G]
     (see h3edit.py for every takes/pick/override/keyframe/discard/cut flag)
 
     python h3.py promote  Shows\\ep05 [sh020]        # the plan: which overrides can move into

@@ -24,8 +24,10 @@ cut, set per-shot overrides. The command-line face of what the editor does;
     python h3.py cut      Shows\\ep05 --order sh010,sh030,sh020  # these first, the rest after
     python h3.py cut      Shows\\ep05 --trim sh020 4 2           # frames off the head / tail
     python h3.py cut      Shows\\ep05 --lock sh020 | --unlock sh020
-    python h3.py cut      Shows\\ep05 --reset order|trims|all
-    python h3.py cut      Shows\\ep05 --proxy --copy-from final [order|trims|all]
+    python h3.py cut      Shows\\ep05 --reset order|trims|audio|all
+    python h3.py cut      Shows\\ep05 --proxy --copy-from final [order|trims|audio|all]
+    python h3.py cut      Shows\\ep05 --audio sh020 take sh020:1 --at 0.2 --gain 1.5
+    python h3.py cut      Shows\\ep05 --audio sh030 file audio/line.wav | none | own
     python h3.py targets  [Shows\\ep05] [--json]               # readiness of every target
 
 `takes` shows every take with its status, why it is stale (script / ref /
@@ -48,9 +50,14 @@ deleted, and nothing lists the trash); a cut entry that picked it goes back
 to the latest usable take. A queued take must be cancelled first.
 `cut` edits a pass's cut.json (the old one goes to _history/): reorder, trims
 (in the cut's frames; at least one frame of the take stays), locks (a locked
-shot refuses picks, moves and trims without --force), reset to script order
-or no trims, and copying the other pass's order/trims (converted when the
-passes' frame rates differ).
+shot refuses picks, moves, trims and audio sources without --force), reset to
+script order, no trims or no audio sources, and copying the other pass's
+order/trims/audio (trims converted when the passes' frame rates differ).
+`--audio` says where one clip's sound comes from: another shot's take, a file
+in the episode, or silence (`none`); `own` puts it back on its own take's
+sound. `--from` starts that many seconds into the source, `--at` shifts it
+against the picture and `--gain` scales it. The sound is cut or padded to the
+clip, whose length never changes.
 `keyframe` cuts a frame out of another shot's take and adds it as the shot's
 first (or last) keyframe: by default the previous shot's last frame, from the
 take that shot's cut entry uses (continuity). It is picked when the shot has no
@@ -63,6 +70,7 @@ from __future__ import annotations
 import argparse
 import copy
 import os
+import re
 import subprocess
 import sys
 
@@ -367,7 +375,10 @@ def episode_status(root: str, pass_: str, folder: str | None = None) -> dict:
                     # an orphan); out of order when a move took it off the
                     # script's order
                     "order": order, "script_index": script_idx.get(e.shot),
-                    "out_of_order": moved[order]},
+                    "out_of_order": moved[order],
+                    # where this clip's sound comes from (Phase 9d): the
+                    # stored source, the file that will play, the badge
+                    "audio": e.audio, **cut_audio(root, e, pass_)},
             # the shot's dialogue window on the recording (`track`), seconds
             **({"audio_in": shot["audio_in"], "audio_out": shot["audio_out"]}
                if shot and "audio_in" in shot and "audio_out" in shot else {}),
@@ -409,6 +420,20 @@ def episode_status(root: str, pass_: str, folder: str | None = None) -> dict:
             "height": d.get("height"), "folder": folder or T.pass_subfolder(pass_),
             "track": track,
             "shots": out}
+
+
+def cut_audio(root: str, e: T.CutEntry, pass_: str) -> dict:
+    """{"audio_file", "audio_why"} for one cut entry: the file its audio
+    source will actually play (relative to the episode; null for `none`, for
+    no source, and for a source that isn't there) and the badge's text
+    (h3takes.audio_label, with " (missing)" when the file is gone)."""
+    if not e.audio:
+        return {"audio_file": None, "audio_why": None}
+    f = T.audio_source_file(root, e.audio, pass_)
+    why = T.audio_label(e.audio, pass_)
+    if f is None and e.audio["source"] != "none":
+        why += " (missing)"
+    return {"audio_file": rel(root, f) if f else None, "audio_why": why}
 
 
 def take_audio(root: str, t: T.Take) -> str | None:
@@ -722,14 +747,16 @@ def pick_take(root: str, pass_: str, shot_id: str, take: int | None,
 
 
 def replace_cut(root: str, pass_: str, entries: list[dict]) -> dict:
-    """Replace one pass's list in cut.json (reorder, trims, locks). Entries are
-    cut.json entries; shots not in the script are allowed (they become orphans).
-    CutError for trims that aren't whole frames >= 0, or that leave less than
-    one frame of the take the entry uses (when its frame count is known). The
-    old cut.json goes to _history/ (write_cut)."""
+    """Replace one pass's list in cut.json (reorder, trims, locks, audio
+    sources). Entries are cut.json entries; shots not in the script are allowed
+    (they become orphans). CutError for trims that aren't whole frames >= 0, or
+    that leave less than one frame of the take the entry uses (when its frame
+    count is known), and for an audio source that can't be played (check_audio).
+    The old cut.json goes to _history/ (write_cut)."""
     T.pass_subfolder(pass_)                               # validates the pass
     entries = [dict(e) for e in entries]
     check_trims(root, pass_, entries)
+    check_audio(root, pass_, entries)
     return write_cut(root, pass_, entries)
 
 
@@ -843,6 +870,70 @@ def check_trims(root: str, pass_: str, entries: list[dict]) -> None:
                            f"{which} ({span} frames): at least one frame must stay")
 
 
+def _inside(path: str, root: str) -> bool:
+    try:
+        return os.path.commonpath([os.path.normcase(os.path.realpath(path)),
+                                   os.path.normcase(os.path.realpath(root))]) \
+            == os.path.normcase(os.path.realpath(root))
+    except ValueError:                                    # another drive
+        return False
+
+
+def episode_file(root: str, path: str) -> str:
+    """A media file an audio source names, as a full path. It must be relative
+    to the episode and stay inside it — or inside the folder of a
+    parent-folder series config, where the series' own audio lives (the rule
+    /h3pipe/file and /h3pipe/peaks follow). CutError otherwise, and for a file
+    that isn't there."""
+    parts = [p for p in str(path).replace("\\", "/").split("/") if p not in ("", ".")]
+    if (str(path).startswith(("/", "\\")) or re.match(r"^[A-Za-z]:", str(path))
+            or "\x00" in str(path) or not parts):
+        raise CutError(f"{path!r}: an audio path is relative to the episode")
+    full = os.path.normpath(os.path.join(root, *parts))
+    cfg = episode_series_config(root)
+    home = os.path.dirname(os.path.abspath(cfg)) if cfg else root
+    if not (_inside(full, root) or _inside(full, home)):
+        raise CutError(f"{path}: an audio path must stay inside the episode")
+    if not os.path.isfile(full):
+        raise CutError(f"no audio file {path} in the episode")
+    return full
+
+
+def check_audio(root: str, pass_: str, entries: list[dict]) -> None:
+    """Check each entry's `audio` and rewrite it in its stored form (in
+    place). CutError for a bad shape (h3takes.audio_spec: an unknown key, a
+    negative `start`, a gain outside 0..4), a take that doesn't exist or has
+    no sound, or a file outside the episode, missing, or with no audio
+    stream."""
+    for raw in entries:
+        if "audio" not in raw:
+            continue
+        sid = raw.get("shot")
+        try:
+            spec = T.audio_spec(raw.get("audio"), pass_)
+        except ValueError as e:
+            raise CutError(f"{sid}: {e}")
+        if spec is None:
+            raw.pop("audio", None)
+            continue
+        if spec["source"] == "take":
+            label = T.audio_label(spec, pass_)
+            t = T.get_take(root, spec["pass"], spec["shot"], spec["take"])
+            if t is None:
+                raise CutError(f"{sid}: audio from {label}: there is no such take "
+                               f"in the {spec['pass']} pass")
+            if h3peaks.clip_audio(t.paths.mp4, t.paths.h3_wav) is None:
+                raise CutError(f"{sid}: audio from {label}: that take has no sound")
+        elif spec["source"] == "file":
+            try:
+                full = episode_file(root, spec["path"])
+            except CutError as e:
+                raise CutError(f"{sid}: {e}")
+            if not h3peaks.has_audio(full):
+                raise CutError(f"{sid}: {spec['path']} has no audio stream")
+        raw["audio"] = spec
+
+
 def out_of_order(script_index: list[int | None]) -> list[bool]:
     """Which cut entries aren't where script order would put them: those
     outside the longest run that is in script order (so moving one shot flags
@@ -872,45 +963,50 @@ def _entries_json(entries: list[T.CutEntry], pass_: str) -> list[dict]:
     return [T.cut_entry_to_json(e, pass_) for e in entries]
 
 
-CUT_WHAT = ("order", "trims", "all")
+CUT_WHAT = ("order", "trims", "audio", "all")
 
 
-def _what(what) -> tuple[bool, bool]:
+def _what(what) -> tuple[bool, bool, bool]:
     if what not in CUT_WHAT:
         raise CutError(f"what must be one of {', '.join(CUT_WHAT)}, not {what!r}")
-    return what in ("order", "all"), what in ("trims", "all")
+    return what in ("order", "all"), what in ("trims", "all"), what in ("audio", "all")
 
 
 def reset_cut(root: str, pass_: str, what: str) -> dict:
     """Put a pass's cut back in script order (`order`; picks, locks and notes
-    kept, orphans after the script's shots) and/or clear its trims (`trims`;
-    a locked entry keeps its trims), or both (`all`). Returns the cut."""
+    kept, orphans after the script's shots), clear its trims (`trims`) and/or
+    its audio sources (`audio`) — a locked entry keeps both — or all of it
+    (`all`). Returns the cut."""
     T.pass_subfolder(pass_)
-    order, trims = _what(what)
+    order, trims, audio = _what(what)
     idx = {sid: i for i, sid in enumerate(script_order(root, pass_))}
     entries = T.resolve_cut(T.load_cut(root), pass_, list(idx))
     if order:
         entries = (sorted((e for e in entries if not e.orphan), key=lambda e: idx[e.shot])
                    + [e for e in entries if e.orphan])
-    if trims:
-        for e in entries:
-            if not e.locked:
-                e.trim_in = e.trim_out = 0
+    for e in entries:
+        if e.locked:
+            continue
+        if trims:
+            e.trim_in = e.trim_out = 0
+        if audio:
+            e.audio = None
     return write_cut(root, pass_, _entries_json(entries, pass_))
 
 
 def copy_cut(root: str, src: str, dst: str, what: str) -> dict:
-    """Copy pass `src`'s order and/or trims onto pass `dst`'s cut. Picks, locks
-    and notes stay `dst`'s own. A shot only `dst` has stays after the shot it
-    follows now. Trims are converted when the passes' frame rates differ
-    (rounded to whole frames), and cut down (trim_out first) so that at least
-    one frame of the take stays; a locked entry keeps its trims. Returns the
-    cut."""
+    """Copy pass `src`'s order, trims and/or audio sources onto pass `dst`'s
+    cut. Picks, locks and notes stay `dst`'s own. A shot only `dst` has stays
+    after the shot it follows now. Trims are converted when the passes' frame
+    rates differ (rounded to whole frames), and cut down (trim_out first) so
+    that at least one frame of the take stays; audio sources are copied as
+    they stand (a take source keeps the pass it names). A locked entry keeps
+    its trims and its audio. Returns the cut."""
     T.pass_subfolder(src)
     T.pass_subfolder(dst)
     if src == dst:
         raise CutError("copy from the other pass: from and to are the same")
-    order, trims = _what(what)
+    order, trims, audio = _what(what)
     a = cut_entries(root, src)
     b = cut_entries(root, dst)
     if order:
@@ -943,6 +1039,13 @@ def copy_cut(root: str, src: str, dst: str, what: str) -> dict:
                     to, over = to - less, over - less
                     ti = max(0, ti - over)
             e.trim_in, e.trim_out = ti, to
+    if audio:
+        by = {e.shot: e for e in a}
+        for e in b:
+            s = by.get(e.shot)
+            if s is None or e.locked:
+                continue
+            e.audio = copy.deepcopy(s.audio)
     return write_cut(root, dst, _entries_json(b, dst))
 
 
@@ -982,17 +1085,19 @@ def reorder_cut(root: str, pass_: str, shots: list[str]) -> dict:
 
 def set_cut_entry(root: str, pass_: str, shot_id: str, force: bool = False,
                   **fields) -> dict:
-    """Change one entry's trim_in / trim_out / locked / note. Trims on a
-    locked entry are Locked unless `force`; they are checked as PUT
-    /h3pipe/cut checks them."""
+    """Change one entry's trim_in / trim_out / locked / note / audio. Trims
+    and audio sources on a locked entry are Locked unless `force`; both are
+    checked as PUT /h3pipe/cut checks them."""
     entries = cut_entries(root, pass_)
     e = entries[_find(entries, shot_id, pass_)]
-    if ({"trim_in", "trim_out"} & set(fields)) and e.locked and not force:
+    if ({"trim_in", "trim_out", "audio"} & set(fields)) and e.locked and not force:
         raise Locked(f"{shot_id} is locked in the {pass_} cut: unlock it first")
     for k, v in fields.items():
         setattr(e, k, v)
     out = _entries_json(entries, pass_)
-    check_trims(root, pass_, [x for x in out if x["shot"] == shot_id])
+    mine = [x for x in out if x["shot"] == shot_id]       # the same dicts as in `out`
+    check_trims(root, pass_, mine)
+    check_audio(root, pass_, mine)                        # rewrites `audio` in place
     return write_cut(root, pass_, out)
 
 
@@ -1644,6 +1749,7 @@ def print_cut(root: str, pass_: str) -> None:
         trim = f"{c['trim_in']}/{c['trim_out']}" if c["trim_in"] or c["trim_out"] else "-"
         flags = [f for f, on in (("locked", c["locked"]), ("picked", c["picked"]),
                                  (f"placeholder({c['pass']})", c["placeholder"]),
+                                 (f"audio: {c['audio_why']}", bool(c["audio_why"])),
                                  ("OUT OF ORDER", c["out_of_order"]),
                                  ("orphan", s["orphan"])) if on]
         print(f"  {c['order']:3}  {s['shot']:10} {take}  trim {trim:9}"
@@ -1651,6 +1757,45 @@ def print_cut(root: str, pass_: str) -> None:
               + (f"  [{', '.join(flags)}]" if flags else "")
               + (f"  {c['note']}" if c["note"] else ""))
     print()
+
+
+def audio_from_args(ap, words: list[str], pass_: str, at: float | None,
+                    start: float | None, gain: float | None) -> dict | None:
+    """`--audio SH take SHOT:TAKE[:PASS] | file PATH | none | own` (plus --at,
+    --from and --gain) as an audio source, or None for `own`. Usage errors go
+    through `ap` (exit 2)."""
+    if len(words) < 2:
+        ap.error("--audio takes a shot and then take SHOT:TAKE[:PASS], file PATH, "
+                 "none or own")
+    kind = words[1]
+    knobs = {"offset": at, "start": start, "gain": gain}
+    knobs = {k: v for k, v in knobs.items() if v is not None}
+    if kind == "own":
+        if len(words) > 2 or knobs:
+            ap.error("--audio SH own clears the source: it takes nothing else")
+        return None
+    if kind == "none":
+        if len(words) > 2:
+            ap.error("--audio SH none takes nothing else")
+        return {"source": "none"}
+    if len(words) != 3:
+        ap.error(f"--audio SH {kind} takes exactly one "
+                 + ("SHOT:TAKE[:PASS]" if kind == "take" else "path"))
+    if kind == "file":
+        return dict(knobs, source="file", path=words[2])
+    if kind != "take":
+        ap.error(f"--audio: the source is take, file, none or own, not {kind!r}")
+    bits = words[2].split(":")
+    if len(bits) not in (2, 3) or not bits[0]:
+        ap.error(f"--audio SH take: give SHOT:TAKE[:PASS], not {words[2]!r}")
+    try:
+        n = int(bits[1].lstrip("tT"))
+    except ValueError:
+        ap.error(f"--audio SH take: the take is a number, not {bits[1]!r}")
+    if len(bits) == 3 and bits[2] not in T.PASSES:
+        ap.error(f"--audio SH take: the pass is final or proxy, not {bits[2]!r}")
+    return dict(knobs, source="take", shot=bits[0], take=n,
+                **{"pass": bits[2] if len(bits) == 3 else pass_})
 
 
 def cmd_cut(root: str, argv: list[str]) -> int:
@@ -1670,14 +1815,26 @@ def cmd_cut(root: str, argv: list[str]) -> int:
     g.add_argument("--lock", metavar="SH", help="lock a shot (picks, moves and trims refuse)")
     g.add_argument("--unlock", metavar="SH")
     g.add_argument("--reset", choices=CUT_WHAT,
-                   help="script order (picks, locks, notes kept) and/or no trims")
+                   help="script order (picks, locks, notes kept), no trims and/or no "
+                        "audio sources")
     g.add_argument("--copy-from", nargs="+", metavar=("PASS", "WHAT"),
-                   help="copy the other pass's order and/or trims (default all); "
-                        "picks stay this pass's own")
+                   help="copy the other pass's order, trims and/or audio sources "
+                        "(default all); picks stay this pass's own")
+    g.add_argument("--audio", nargs="+", metavar=("SH", "SOURCE"),
+                   help="where a clip's sound comes from: 'SH take SHOT:TAKE[:PASS]', "
+                        "'SH file PATH', 'SH none' (silence) or 'SH own' (its own take's "
+                        "sound again)")
+    ap.add_argument("--at", type=float, metavar="SECONDS", default=None,
+                    help="--audio: shift the sound against the picture (positive = later)")
+    ap.add_argument("--from", dest="from_s", type=float, metavar="SECONDS", default=None,
+                    help="--audio: start this many seconds into the source")
+    ap.add_argument("--gain", type=float, metavar="G", default=None,
+                    help=f"--audio: a linear multiplier, 0 to {T.GAIN_MAX:g} (1 unchanged)")
     where = ap.add_mutually_exclusive_group()
     where.add_argument("--before", metavar="SH")
     where.add_argument("--after", metavar="SH")
-    ap.add_argument("--force", action="store_true", help="move or trim a locked shot")
+    ap.add_argument("--force", action="store_true",
+                    help="move, trim or re-sound a locked shot")
     args = ap.parse_args(argv)
     pass_ = _pass(args)
     J.load_shotlist(root, pass_)                     # no build: say so
@@ -1698,6 +1855,9 @@ def cmd_cut(root: str, argv: list[str]) -> int:
             except ValueError:
                 raise CutError(f"trims are whole numbers of frames, not {a!r} {b!r}")
             set_cut_entry(root, pass_, sh, force=args.force, trim_in=ti, trim_out=to)
+        elif args.audio:
+            spec = audio_from_args(ap, args.audio, pass_, args.at, args.from_s, args.gain)
+            set_cut_entry(root, pass_, args.audio[0], force=args.force, audio=spec)
         elif args.lock or args.unlock:
             set_cut_entry(root, pass_, args.lock or args.unlock, locked=bool(args.lock))
         elif args.reset:

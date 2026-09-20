@@ -33,6 +33,11 @@ cut.json (next to shotlist/) holds one ordered list per pass:
   in for a final that isn't rendered yet. It is scaled to this cut's size.
 - `trim_in`/`trim_out` drop frames from the head/tail, after the dialogue-window
   trim below.
+- `audio` lays another take's sound, a file's, or silence under the clip
+  (Phase 9d; see h3takes). It is cut or padded to the clip, so the clip's
+  length never changes. `--audio master` overrides it (and says so);
+  `--audio none` silences it; `--audio auto`/`mp4`/`h3` apply to the clips
+  that have no source of their own.
 
 Shots timed against recorded dialogue (`audio_in`/`audio_out` in the
 shotlist, written by h3align) are trimmed to their exact window, because H3
@@ -55,6 +60,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import wave
 
 # Sibling modules: ComfyUI's embedded Python (a ._pth install) doesn't put a
 # script's own folder on sys.path, so do it here.
@@ -127,8 +133,60 @@ def video_size(path: str) -> tuple[int, int] | None:
         return None
 
 
+def audio_format(path: str) -> tuple[int, int] | None:
+    """(sample rate, channels) of a file's first audio stream, or None."""
+    r = run(["ffprobe", "-v", "error", "-select_streams", "a:0", "-show_entries",
+             "stream=sample_rate,channels", "-of", "csv=p=0", path], timeout=60)
+    try:
+        rate, ch = r.stdout.decode().strip().splitlines()[0].split(",")[:2]
+        return (int(rate), int(ch)) if int(rate) > 0 and int(ch) > 0 else None
+    except (ValueError, IndexError, AttributeError):
+        return None
+
+
+def silence_wav(path: str, seconds: float, rate: int, channels: int) -> None:
+    """A PCM wav of exactly `seconds` of silence, in the cut's own sample rate
+    and channel layout, so the clips the concat demuxer copies and the ones it
+    doesn't still carry the same audio parameters."""
+    with wave.open(path, "wb") as w:
+        w.setnchannels(channels)
+        w.setsampwidth(2)
+        w.setframerate(rate)
+        w.writeframes(b"\0" * (max(0, round(seconds * rate)) * 2 * channels))
+
+
+def clip_track(src: str | None, dst: str, spec: dict, seconds: float,
+               rate: int, channels: int) -> None:
+    """Write one clip's audio source (cut.json's `audio`) as a wav of exactly
+    `seconds`: the source from `start`, shifted by `offset` (negative shifts
+    it earlier, which eats into the source), at `gain`, then cut or padded
+    with silence. The clip's length never changes, whatever the source does.
+    `src` None (silence, or a source that isn't there) writes silence."""
+    if not src:
+        silence_wav(dst, seconds, rate, channels)
+        return
+    offset = float(spec.get("offset") or 0.0)
+    start = float(spec.get("start") or 0.0) + max(0.0, -offset)
+    gain = float(spec.get("gain", 1.0))
+    af = []
+    if start > 0:
+        af += [f"atrim=start={start:.6f}", "asetpts=PTS-STARTPTS"]
+    if abs(gain - 1.0) > 1e-9:
+        af.append(f"volume={gain:g}")
+    if offset > 0:
+        af.append(f"adelay={round(offset * 1000)}:all=1")
+    # apad is bounded by -t, never by -shortest (see normalise)
+    af.append("apad")
+    r = run(["ffmpeg", "-y", "-v", "error", "-i", src, "-vn", "-map", "0:a:0",
+             "-af", ",".join(af), "-t", f"{seconds:.6f}",
+             "-ar", str(rate), "-ac", str(channels), "-c:a", "pcm_s16le", dst])
+    if r.returncode != 0:
+        raise RuntimeError(f"audio source {os.path.basename(src)} could not be read: "
+                           f"{r.stderr.decode('utf-8', 'replace')[-300:]}")
+
+
 def normalise(src: str, dst: str, audio_wav: str | None, fps: float,
-              frames: int = 0) -> None:
+              frames: int = 0, layout: tuple[int, int] | None = None) -> None:
     """Give every clip an audio track so the concat demuxer can copy streams.
 
     The concat demuxer refuses a mixed set where some inputs have audio and
@@ -136,12 +194,18 @@ def normalise(src: str, dst: str, audio_wav: str | None, fps: float,
     real episode is always mixed. Muxing in the shot's own `_h3.wav`, or
     silence, makes the set uniform without re-encoding the video.
 
+    `layout` is (sample rate, channels) of the clips that keep their own sound
+    and are copied whole: the made-up track is written to match, so the set
+    the concat demuxer sees is uniform. None (nothing is copied) keeps
+    ffmpeg's own choice, which is then the same for every clip anyway.
+
     The silence is bounded with `-t`. `anullsrc` is an infinite source and
     ffmpeg has no reason to stop reading it, so without a duration this hangs
     forever instead of writing a file. `-shortest` would also stop it, but that
     is the flag that silently drops the last video frame when H3's audio runs a
     few milliseconds short, so it is not welcome anywhere in this pipeline.
     """
+    rate, ch = layout or (44100, 1)
     cmd = ["ffmpeg", "-y", "-v", "error", "-i", src]
     if audio_wav and os.path.isfile(audio_wav):
         cmd += ["-i", audio_wav]
@@ -149,10 +213,13 @@ def normalise(src: str, dst: str, audio_wav: str | None, fps: float,
         if frames <= 0:
             frames = frame_count(src)
         cmd += ["-f", "lavfi", "-t", f"{max(1, frames) / fps:.6f}",
-                "-i", "anullsrc=channel_layout=mono:sample_rate=44100"]
+                "-i", f"anullsrc=channel_layout={'stereo' if ch == 2 else 'mono'}"
+                      f":sample_rate={rate}"]
     cmd += ["-map", "0:v:0", "-map", "1:a:0",
-            "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
-            "-fps_mode", "passthrough", dst]
+            "-c:v", "copy", "-c:a", "aac", "-b:a", "192k"]
+    if layout:
+        cmd += ["-ar", str(rate), "-ac", str(ch)]
+    cmd += ["-fps_mode", "passthrough", dst]
     r = run(cmd)
     if r.returncode != 0:
         raise RuntimeError(f"normalise failed for {os.path.basename(src)}: "
@@ -161,7 +228,7 @@ def normalise(src: str, dst: str, audio_wav: str | None, fps: float,
 
 def conform(src: str, dst: str, audio: str | None, fps: float, frames: int,
             start: int = 0, size: tuple[int, int] | None = None,
-            src_fps: float | None = None) -> None:
+            src_fps: float | None = None, ready: bool = False) -> None:
     """Re-encode one clip to exactly `frames` frames with a matching audio track.
 
     `audio` is the clip itself (use its own sound), a wav path, or None for
@@ -174,6 +241,12 @@ def conform(src: str, dst: str, audio: str | None, fps: float, frames: int,
     differs: a placeholder from the other pass has the other pass's size, and
     the concat demuxer needs one size for the whole cut. `-frames:v` and the
     bounded, padded audio keep the exact-frame-count guarantee either way.
+
+    `ready` says `audio` is already the finished clip's sound — a cut entry's
+    audio source (clip_track), cut and padded to exactly this many frames —
+    so the head trim must not cut it again. It lines up with the picture the
+    same way whatever the clip is, because both are counted in the cut's
+    frames: a placeholder and a clip converted from another rate included.
 
     `src_fps`, when it isn't `fps` (a Wan 14B take is 16 fps in a 24 fps cut),
     converts the clip first with ffmpeg's `fps` filter: frames are repeated
@@ -204,7 +277,7 @@ def conform(src: str, dst: str, audio: str | None, fps: float, frames: int,
         # the same duration.
         vf += [f"trim=start_frame={start}:end_frame={start + frames}",
                "setpts=PTS-STARTPTS"]
-        if not silent:
+        if not silent and not ready:
             af = [f"atrim=start={start / fps:.6f}", "asetpts=PTS-STARTPTS", "apad"]
     if size:
         w, h = size
@@ -283,7 +356,9 @@ def main() -> int:
     ap.add_argument("--audio", choices=["auto", "mp4", "h3", "none", "master"], default="auto",
                     help="auto: the mp4's own audio, falling back to the shot's "
                          "_h3.wav when the mp4 is mute. master: the recorded dialogue "
-                         "track from the shotlist, laid under the whole cut")
+                         "track from the shotlist, laid under the whole cut. A clip "
+                         "with its own audio source in cut.json keeps it, except "
+                         "under none and master")
     ap.add_argument("--no-trim", action="store_true",
                     help="keep the grid padding on shots that have an audio window")
     ap.add_argument("--partial", action="store_true",
@@ -408,10 +483,18 @@ def main() -> int:
             missing.append((e.shot, why))
             rows.append(("missing", e, why))
             continue
+        # where this clip's sound comes from (cut.json's `audio`): the file it
+        # plays, or None when there is nothing to play (it goes silent)
+        audio_src = h3takes.audio_source_file(root, e.audio, pass_)
+        if audio_src and not h3peaks.has_audio(audio_src):
+            audio_src = None
         p = {"id": e.shot, "take": t.take, "src": e.pass_, "path": t.paths.mp4,
              "placeholder": e.pass_ != pass_, "listed": e.in_cut_file,
              "keep": keep, "trim_in": trim_in, "trim_out": trim_out,
              "frames": n, "used": used, "audio_in": s.get("audio_in"),
+             # this clip's audio source (cut.json's `audio`), and the file it
+             # plays: None for silence, or for a source that isn't there
+             "audio_spec": e.audio, "audio_src": audio_src,
              "wav": t.paths.h3_wav if os.path.isfile(t.paths.h3_wav) else None,
              "expected": s["length"], "policy": s.get("audio_policy", "?"),
              "src_fps": src_fps, "convert": convert,
@@ -479,12 +562,25 @@ def main() -> int:
     if resized:
         print(f"  {len(resized)} clip(s) at another size, scaled to {width}x{height}: "
               + ", ".join(f"{p['id']} {p['size'][0]}x{p['size'][1]}" for p in resized[:8]))
+    sourced = [p for p in plan if p["audio_spec"]]
+    if sourced and args.audio not in ("none", "master"):
+        print(f"  {len(sourced)} clip(s) take their sound from elsewhere: "
+              + ", ".join(f"{p['id']} <- {h3takes.audio_label(p['audio_spec'], pass_)}"
+                          for p in sourced[:8]))
+        gone = [p for p in sourced
+                if p["audio_src"] is None and p["audio_spec"]["source"] != "none"]
+        for p in gone:
+            print(f"    ! {p['id']}: {h3takes.audio_label(p['audio_spec'], pass_)} "
+                  f"is not there or has no sound; the clip is silent")
     if bad:
         print("  frame-count mismatches (the edit will drift):")
         for b in bad:
             print(f"    ! {b}")
         print()
     if args.audio == "master":
+        if sourced:
+            print(f"  ! --audio master: the recorded track overrides the audio source on "
+                  f"{', '.join(p['id'] for p in sourced)}")
         drift = [p["id"] for p in trimmed if p["audio_in"] is not None]
         if drift:
             print(f"  ! --audio master: {', '.join(drift)} have a dialogue window and a "
@@ -517,6 +613,10 @@ def main() -> int:
                 flags.append(f"{p['src_fps']:g}fps->{fps:g}")
             if has_cut and not p["listed"]:
                 flags.append("not in cut.json")
+            if p["audio_spec"]:
+                flags.append("audio " + h3takes.audio_label(p["audio_spec"], pass_)
+                             + ("" if p["audio_src"] or
+                                p["audio_spec"]["source"] == "none" else " MISSING"))
             if not p["wav"]:
                 flags.append("no _h3.wav")
             trim = f"{p['trim_in']}/{p['trim_out']}" if (p["trim_in"] or p["trim_out"]) else "-"
@@ -550,27 +650,45 @@ def main() -> int:
             if size is None:
                 print("  ! no width/height in the shotlist to scale placeholders to")
 
+    # what each clip's sound is, before anything is written: a cut entry's
+    # audio source (Phase 9d) beats --audio auto/mp4/h3, and `none`/`master`
+    # beat everything.
+    for p in plan:
+        if args.audio in ("none", "master"):
+            p["sound"], p["sourced"] = None, False
+        elif p["audio_spec"]:
+            p["sound"], p["sourced"] = p["audio_src"], True
+        elif args.audio == "h3":
+            p["sound"], p["sourced"] = p["wav"], False
+        else:                                       # auto, mp4
+            # the mp4's own sound, else its _h3.wav, else silence
+            # (h3peaks.clip_audio: the editor's take `audio` is the same rule)
+            p["sound"], p["sourced"] = h3peaks.clip_audio(p["path"], p["wav"]), False
+    # the clips that keep their own sound are copied whole; a track made up
+    # for any other clip is written in their sample rate and channel layout,
+    # so the concat demuxer still sees one set of stream parameters
+    copied = next((p for p in plan if not reencode and p["sound"] == p["path"]), None)
+    layout = audio_format(copied["path"]) if copied else None
+    lay = layout or (44100, 1)
+
     with tempfile.TemporaryDirectory(prefix="h3asm_") as tmp:
         listing = os.path.join(tmp, "concat.txt")
         with open(listing, "w", encoding="utf-8") as fh:
             for i, p in enumerate(plan):
-                src = p["path"]
-                if args.audio in ("none", "master"):
-                    sound = None
-                elif args.audio == "h3":
-                    sound = p["wav"]
-                else:                                   # auto, mp4
-                    # the mp4's own sound, else its _h3.wav, else silence
-                    # (h3peaks.clip_audio: the editor's take `audio` is the same rule)
-                    sound = h3peaks.clip_audio(src, p["wav"])
+                src, sound = p["path"], p["sound"]
+                if p["sourced"]:
+                    # cut or padded to the clip, so its length never changes
+                    sound = os.path.join(tmp, f"{i:04d}.wav")
+                    clip_track(p["audio_src"], sound, p["audio_spec"],
+                               p["used"] / fps, *lay)
                 norm = os.path.join(tmp, f"{i:04d}.mp4")
                 if reencode:
                     conform(src, norm, sound,
                             fps, p["used"], start=p["trim_in"],
                             size=size if (p["placeholder"] or p in resized) else None,
-                            src_fps=p["src_fps"])
+                            src_fps=p["src_fps"], ready=p["sourced"])
                 elif sound != src:
-                    normalise(src, norm, sound, fps, p.get("frames", 0))
+                    normalise(src, norm, sound, fps, p.get("frames", 0), layout=layout)
                 else:
                     shutil.copy(src, norm)
                 fh.write(f"file '{norm.replace(os.sep, '/')}'\n")
@@ -615,6 +733,8 @@ def main() -> int:
                      + (f"  from {p['src_fps']:g}fps" if p["convert"] else "")
                      + (f"  trim {p['trim_in']}/{p['trim_out']}"
                         if p["trim_in"] or p["trim_out"] else "")
+                     + (f"  audio {h3takes.audio_label(p['audio_spec'], pass_)}"
+                        if p["audio_spec"] else "")
                      + "\n")
 
     got = frame_count(out_path)

@@ -2082,3 +2082,136 @@ behaviour):
 - A clip whose audio isn't its own shows a small speaker badge with `audio_why`; the
   Inspector's Cut section shows and clears it.
 - In recording mode the badge is dimmed and the toggle says per-clip audio is ignored.
+
+### Phase 9d as built
+
+The backend parts above are implemented (`h3takes`: the `audio` field, its shape and what it
+resolves to; `h3edit`: the checks, the status fields, reset/copy and `h3.py cut --audio`;
+`h3assemble`: the sound under the clip; the routes stay thin). Each point is **[differs]**,
+**[added]** or **[settled]**, as for 9b. No field the contract named changes shape. The
+"which file is a take's sound" rule stays in `h3peaks.clip_audio`, which assemble, the status
+and the checks all call.
+
+**`cut.json`**
+- **[settled] The stored form is normalised** (`h3takes.audio_spec`): defaults are dropped, so
+  `start`, `offset` and `gain` only appear when they aren't 0, 0 and 1. A take source always
+  carries its `pass` (the entry's list pass when the writer left it out), so a copy between
+  passes stays pointed where it was. `source: "none"` keeps nothing else: the knobs mean
+  nothing under silence, and a picker may still send them.
+- **[settled] `offset` may be negative** (only `start` is refused below 0): the sound is pulled
+  earlier, which eats into the source exactly as a larger `start` would.
+- **[added] The bounds on the numbers.** `gain` is 0–4 (`GAIN_MAX`), as the contract says.
+  `start` is 0 to `SECONDS_MAX` (86400, a day) and `offset` is −`SECONDS_MAX` to
+  `SECONDS_MAX`; NaN and infinity are 400. **That is a sanity bound, not a clamp to the
+  clip**: the backend does not know or care how long the clip is, and an `offset` or `start`
+  past the clip's end simply leaves silence there — the clip's length never changes either
+  way. The editor's own clamp (|`offset`| ≤ the clip's length) is a nicety on top, and the
+  backend will accept a source the UI would not have offered.
+- **[settled] `shot` is required on a take source** (with `take`); `pass` is optional and
+  defaults to the entry's list pass. A `shot` on a file or `none` source is 400.
+- **[settled] `audio` is a known entry field** (`h3takes.ENTRY_FIELDS`), not an `extra`, and
+  `resolve_cut` / `cut_entry_to_json` round-trip it. An `audio` in a hand-edited `cut.json`
+  that `audio_spec` won't take is ignored, and dropped by the next write.
+- **[settled] A take source is read from its pass's standard folder** (`renders/`,
+  `renders_proxy/`); `h3assemble --subfolder` moves the pictures, not the audio sources.
+
+**`PUT /h3pipe/cut`**
+- **[settled] Every check is in `h3edit.check_audio`**, which `replace_cut` (the route) and
+  `set_cut_entry` (the CLI) both run, so the CLI refuses exactly what the route refuses; it
+  rewrites each entry's `audio` into its stored form as it goes. The 400s: an unknown key, an
+  unknown `source`, a take source without a shot or a take, a `take` that isn't a number ≥ 1,
+  an unknown `pass`, a key that belongs to another source (a `path` on a take source, a `take`
+  on a file source, anything on `none`), a take that doesn't exist, a take with no sound
+  (`clip_audio` finds neither an mp4 with an audio stream nor a `_h3.wav`), a path that isn't
+  relative or climbs out of the episode, a file that isn't there, a file with no audio stream,
+  a negative `start`, a `gain` outside 0–4, and a number that is NaN or infinite. Each names
+  the shot.
+- **[settled] `../` into a parent-folder series config's folder is allowed**, as for
+  `/h3pipe/file` and `/h3pipe/peaks`; anything else that leaves the episode (including through
+  a link) is 400. The path is stored with forward slashes.
+- **[added] A locked entry** refuses an audio change the way it refuses a trim: `Locked` from
+  `set_cut_entry` (`h3.py cut --audio` without `--force`). As in 9b the server doesn't refuse
+  it in a `PUT` — the UI does.
+- **[settled] History** is the 9b one: a PUT that changes the audio copies the old `cut.json`
+  to `_history/` and emits `h3pipe.episode`.
+
+**`POST /h3pipe/cut/reset` and `/cut/copy`**
+- **[settled] `what` gained `"audio"`** (`E.CUT_WHAT` is now `order, trims, audio, all`), and
+  `"all"` clears or copies it with the rest. A **locked entry keeps its audio**, as it keeps
+  its trims.
+- **[settled] `/cut/copy` carries `audio` only under `"all"`** (and under the added
+  `"audio"`): `what: "order"` and `what: "trims"` leave the target pass's audio sources
+  exactly as they were.
+- **[added] `/cut/copy` takes `what: "audio"` too**, copying only the audio sources; the
+  contract only promised them inside `"all"`.
+- **[settled] A copied source is copied as it stands** — a take source keeps the pass it
+  names, so "sh020's final t01" is still that in the proxy cut. Nothing is re-checked: both
+  passes see the same files.
+
+**`GET /h3pipe/episode`**
+- **[settled]** Each shot's `cut` carries `audio` (the stored object, or null), `audio_file`
+  (relative to the episode, forward slashes) and `audio_why`. With no source all three are
+  null. `audio_why` is `"sh020 t01"`, `"sh020 t01 (proxy)"` when the take is from the other
+  pass, the file's base name, or `"silent"`.
+- **[added] `" (missing)"`** is appended to `audio_why`, and `audio_file` is null, when the
+  source's file has gone (a discarded take, a deleted file). Nothing rewrites the entry: the
+  badge says so, and assemble warns and lays silence.
+- **[settled]** `audio_file` is exactly what `/h3pipe/peaks` takes as its `path`, so the
+  editor can draw the source without resolving anything itself.
+
+**`h3assemble`**
+- **[settled] The order of precedence**: `--audio none` and `--audio master` ignore every
+  source (master says which clips it is overriding, naming them); otherwise a clip with a
+  source uses it, and `auto` / `mp4` / `h3` apply to the clips without one.
+- **[settled] The clip's length never changes.** The source is written to a wav of exactly the
+  clip's length first (`clip_track`): `atrim` for `start` (plus any negative `offset`),
+  `volume` for `gain`, `adelay` for a positive `offset`, then `apad` bounded by `-t` — never
+  `-shortest`, which drops a video frame. A source shorter than the clip is padded, a longer
+  one cut. The wav is then muxed in (`normalise`) or fed to the re-encode (`conform`, with the
+  new `ready` flag so a `trim_in` doesn't cut the sound a second time — it is already cut to
+  the finished clip). Because both the wav and the picture are counted in the cut's frames, a
+  placeholder from the other pass and a clip converted from another rate (a 16 fps take in a
+  24 fps cut) line up like any other clip; both are tested.
+- **[added] The made-up track matches the clips that are copied.** `normalise` takes a
+  `layout` — the sample rate and channel count of the first clip that keeps its own sound and
+  is stream-copied — and writes the silence, the wav and the encode at it (`-ar`/`-ac`). With
+  nothing copied (a re-encoded cut, or `--audio h3`) there is no layout and ffmpeg's own choice
+  applies to every clip alike, as before. This is what lets a sourced clip sit in a cut the
+  concat demuxer still copies; it also fixes a latent mismatch that predates 9d.
+- **[settled] An audio source does not force a re-encode.** Only the 9b reasons do (dialogue
+  windows, trims, placeholders, rate or size changes).
+- **[added] A source whose file is gone or has no sound is a warning, not a failure**: the clip
+  goes silent and assemble prints `sh010: line.wav is not there or has no sound`. The run also
+  lists which clips take their sound from elsewhere.
+- **[added] `--check` and the `_shots.txt`** name the source (`audio sh020 t01`,
+  `audio line.wav MISSING`, `audio silent`).
+
+**`POST /h3pipe/audio/import`** (added after the contract, for the editor's file picker)
+- **[added]** `{ep, source_path}` (a file on this machine) or multipart (`ep` + `file`), the
+  same plumbing as `/refs/import` and `/track`. It saves the media into `<ep>/audio/` through
+  `h3track.import_audio` (a thin wrapper on `place_recording`, so the naming rules are the
+  track's: the name sanitised to `[A-Za-z0-9 ._()-]` and the extension lower-cased, `-2`,
+  `-3`… on a clash, identical bytes reused rather than copied again, and a file already in the
+  episode left where it is). It answers `{"path", "copied"}`, where `path` is relative to the
+  episode with forward slashes and goes straight into a cut entry's `audio.path`.
+- **[added]** The same allow-list as `/track` (`h3track.AUDIO_EXT`: `.wav .mp3 .flac .ogg
+  .m4a .aac .opus`) and the same failures: 400 for another extension, a name that is only an
+  extension, or neither `source_path` nor a multipart `file`; 403 for an episode outside the
+  roots; 404 for a `source_path` that isn't there; 413 over `MAX_UPLOAD` (64 MB).
+- **[added] The file is only a file.** It does **not** become the episode's dialogue
+  recording (the series config isn't touched) and it is **not** a ref candidate; nothing is
+  rebuilt and no event is sent, because nothing in the episode points at it until a
+  `PUT /h3pipe/cut` does.
+
+**`h3.py cut --audio`**
+- **[settled]** `--audio SH take SHOT:TAKE[:PASS]`, `--audio SH file PATH`, `--audio SH none`
+  and `--audio SH own` (clear), with `--from SECONDS` (`start`), `--at SECONDS` (`offset`) and
+  `--gain G`. The take may be written `3` or `t03`; the pass defaults to the cut's. `own` takes
+  no knobs. A usage error exits 2, a refusal (no such take, no sound, a path outside the
+  episode, a locked entry) exits 1. After the edit it shows the cut, where a clip with a source
+  carries an `audio: <why>` flag.
+
+**Known, not changed**
+- **Discarding a take doesn't clear an audio source that names it** (it clears a *pick* of it,
+  as before). The source then reads as `"… (missing)"` in the status, and assemble warns and
+  lays silence, which is visible; rewriting other shots' entries on a discard is not.

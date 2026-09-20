@@ -683,6 +683,10 @@ def _cut_entry(raw) -> dict:
             raise ApiError(400, f"{raw['shot']}: note must be text")
         if raw["note"]:
             e["note"] = raw["note"]
+    if raw.get("audio") is not None:
+        # the shape and what it points at are checked together, in
+        # h3edit.check_audio (E.replace_cut), so the CLI checks them too
+        e["audio"] = raw["audio"]
     unknown = set(raw) - set(T.ENTRY_FIELDS)
     if unknown:
         raise ApiError(400, f"{raw['shot']}: unknown cut field(s) {', '.join(sorted(unknown))}")
@@ -719,7 +723,8 @@ def _cut_what(v) -> str:
 
 @handler
 def post_cut_reset(ctx: Context, body):
-    """Script order (picks, locks, notes kept) and/or no trims (h3edit.reset_cut)."""
+    """Script order (picks, locks, notes kept), no trims and/or no audio
+    sources (h3edit.reset_cut)."""
     body = body_dict(body)
     ep = check_ep(ctx, body.get("ep"))
     pass_ = check_pass(body.get("pass"))
@@ -735,7 +740,8 @@ def post_cut_reset(ctx: Context, body):
 
 @handler
 def post_cut_copy(ctx: Context, body):
-    """One pass's order and/or trims onto the other (h3edit.copy_cut)."""
+    """One pass's order, trims and/or audio sources onto the other
+    (h3edit.copy_cut)."""
     body = body_dict(body)
     ep = check_ep(ctx, body.get("ep"))
     for k in ("from", "to"):
@@ -1727,6 +1733,34 @@ def post_track(ctx: Context, body):
 
 
 @handler
+def post_audio_import(ctx: Context, body):
+    """A media file into <ep>/audio/, for a cut entry's `audio.path`
+    (h3track.import_audio): `source_path` (a file on this machine) or `file`
+    (multipart, as /refs/import and /track). The answer's `path` is relative
+    to the episode and goes straight into PUT /h3pipe/cut.
+
+    It is only a file in the episode: it does not become the episode's
+    dialogue recording and it is not a ref candidate, so nothing is rebuilt
+    and no event is sent."""
+    body = body_dict(body)
+    ep = check_ep(ctx, body.get("ep"))
+    up = body.get("file")
+    src = body.get("source_path")
+    if isinstance(up, Upload):
+        if up.size > MAX_UPLOAD:
+            raise ApiError(413, f"the file is over {MAX_UPLOAD // (1024 * 1024)} MB")
+        res = K.import_audio(ep, up.path, up.filename or "")
+    elif up is not None:
+        raise ApiError(400, "file must be sent as multipart/form-data")
+    elif isinstance(src, str) and src.strip():
+        res = K.import_audio(ep, src.strip())
+    else:
+        raise ApiError(400, "source_path must be the file's absolute path on this "
+                            "machine (or upload it as multipart `file`)")
+    return 200, res
+
+
+@handler
 def post_align(ctx: Context, body):
     """Run h3align on the episode (a subprocess), sending `h3pipe.align` as it
     goes. 409 with `missing` when a dependency isn't installed; `dry_run`
@@ -1809,5 +1843,6 @@ ROUTES = [
     ("POST", "/h3pipe/promote", post_promote, "body"),
     ("GET", "/h3pipe/align/ready", get_align_ready, "query"),
     ("POST", "/h3pipe/track", post_track, "form"),
+    ("POST", "/h3pipe/audio/import", post_audio_import, "form"),
     ("POST", "/h3pipe/align", post_align, "body"),
 ]
