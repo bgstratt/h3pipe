@@ -31,7 +31,7 @@ export function TrackButton() {
     : "No dialogue recording. Click to attach one and time the script against it (h3align).";
   return (
     <button className={`h3-btn h3-icon${t ? " h3-on" : ""}`} title={title} onClick={() => openTrackPanel()}>
-      <i className="pi pi-microphone" />
+      <i className="pi pi-volume-up" />
     </button>
   );
 }
@@ -47,7 +47,7 @@ export function TrackLine() {
   const bad = !!build && !build.ok;
   return (
     <div className={`h3-row h3-small h3-wrap${t.problem ? " h3-err" : " h3-muted"}`} style={{ gap: 6 }}>
-      <i className="pi pi-microphone" />
+      <i className="pi pi-volume-up" />
       <span className="h3-ell" title={st?.track?.path ?? ""}>{t.text}</span>
       {t.problem && <span className="h3-err">{t.problem}</span>}
       <span>· {alignedText(t.aligned, pass)}</span>
@@ -226,7 +226,7 @@ export function TrackWindow() {
       {t ? (
         <div className="h3-col" style={{ gap: 3 }}>
           <div className="h3-row h3-wrap">
-            <i className="pi pi-microphone" />
+            <i className="pi pi-volume-up" />
             <b className="h3-ell" title={st?.track?.path ?? ""}>{t.text}</b>
             {t.problem && <span className="h3-badge h3-b-failed" title={t.problem}>missing</span>}
             <span className="h3-badge" title={t.words
