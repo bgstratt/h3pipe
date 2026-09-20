@@ -108,7 +108,12 @@ describe("mock refs", () => {
       const cy = (await api.refs(ep)).refs.find((r) => r.id === "subject:cy")!;
       expect(cy.views!.every((v) => v.takes.length === 2 && v.takes.every((t) => t.status === "ok" && t.image))).toBe(true);
       expect(events.some(([e, d]) => e === "h3pipe.ref" && (d as { status: string }).status === "ok" && (d as { ep: string }).ep === ep)).toBe(true);
-      await expect(api.refsGenerate({ ep, ref: "voice:ada", view: null, count: 1, seed_mode: "auto", seed: null, prompt: null, model: null, loras: null, steps: null, note: "" })).rejects.toMatchObject({ status: 400 });
+      // Phase 9c-B: a voice generates too (an audio target), and `seconds` is
+      // only for a voice — a keyframe's is 400
+      const v = await api.refsGenerate({ ep, ref: "voice:ada", view: null, count: 1, seed_mode: "auto", seed: null, prompt: null, model: null, loras: null, steps: null, note: "", seconds: 6 });
+      expect(v.queued).toHaveLength(1);
+      expect(v.queued[0].target).toBe("ltx2_voice");
+      await expect(api.refsGenerate({ ep, ref: "subject:cy", view: "02_side", count: 1, seed_mode: "auto", seed: null, prompt: null, model: null, loras: null, steps: null, note: "", seconds: 6 })).rejects.toMatchObject({ status: 400 });
     } finally {
       vi.useRealTimers();
     }

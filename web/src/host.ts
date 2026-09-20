@@ -13,7 +13,9 @@ export type HostEvent =
   | "execution_interrupted"
   | "h3pipe.take"
   | "h3pipe.episode"
-  | "h3pipe.ref";
+  | "h3pipe.ref"
+  /** Phase 9c-A: an h3align run's stages (transcribe / match / write) */
+  | "h3pipe.align";
 
 export type Severity = "success" | "info" | "warn" | "error";
 /** Docked surfaces (sidebar tabs and the bottom panel). The inspector and the

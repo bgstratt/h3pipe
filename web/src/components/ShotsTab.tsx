@@ -15,6 +15,7 @@ import { MissingRefsSummary } from "./MissingRefs";
 import { EpisodeTarget } from "./Readiness";
 import { useTargets } from "./Targets";
 import { Badges, Progress, Thumb, statusClass } from "./Thumb";
+import { TrackButton, TrackLine } from "./Track";
 
 const BROWSE = "__browse__";
 
@@ -125,6 +126,7 @@ function BuildBar() {
         </button>
       </div>
       {st && <MissingRefsSummary shots={st.shots} />}
+      <TrackLine />
       {(b.result || b.error) && (
         <div className={`h3-note ${failed || b.error ? "h3-note-err" : "h3-note-info"}`}>
           <div className="h3-row">
@@ -363,6 +365,7 @@ export function ShotsTab() {
           <span className="h3-row">
             <button className="h3-btn h3-icon" title="Edit the episode's script" onClick={() => openSource("script")}><i className="pi pi-file-edit" /></button>
             <button className="h3-btn h3-icon" title="Edit the series config (series.json)" onClick={() => openSource("series")}><i className="pi pi-book" /></button>
+            <TrackButton />
             <button className="h3-btn h3-icon" title="Inspect the selected shot" onClick={() => openInspector()}><i className="pi pi-sliders-h" /></button>
             <button className="h3-btn h3-icon" title="Play all: the cut from its takes" onClick={() => playAll()}><i className="pi pi-play" /></button>
             <button className="h3-btn h3-icon" title="Open the timeline" onClick={() => host().show("timeline")}><i className="h3-ico-film" /></button>

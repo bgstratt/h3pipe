@@ -15,13 +15,15 @@ import seriesCfgRaw from "../../../tests/fixtures/kitchen_sink/series.json?raw";
 import { VIEWS } from "../lib/refs";
 import type {
   EditRef, Lora, MissingRef, Override, OverrideFields, Pass, Ref, RefDefaultSource, RefDefaults, RefEffective, RefGenerateRequest,
-  RefGenerateResult, RefFrameSource, RefImportRequest, RefPickRequest, RefTake, RefView, SeedMode,
+  RefGenerateResult, RefFrameSource, RefImportRequest, RefPickRequest, RefPickResult, RefTake, RefView, SeedMode,
+  VoiceFromTakeResult, VoiceLineSource,
 } from "../types";
 import { fsFileExists } from "./mockFs";
+import { makeVoice } from "./mockAudio";
 
 interface SeriesConfig {
   style?: { look?: string };
-  subjects: Record<string, { kind?: string; name?: string; design?: string; sheet?: string; voice_sample?: string } | string>;
+  subjects: Record<string, { kind?: string; name?: string; design?: string; sheet?: string; voice_sample?: string; voice?: string } | string>;
   locations: Record<string, { description?: string; plate?: string } | string>;
 }
 
@@ -44,6 +46,8 @@ interface MRef extends Ref {
   /** views cleared by Clear (a character) */
   vcleared: Record<string, boolean>;
   why?: string;
+  /** a voice: the length the last generate asked for (the `effective` default) */
+  seconds?: number;
 }
 
 const MODEL = "flux2_krea_dev_fp8.safetensors";
@@ -127,15 +131,33 @@ const IMAGE_MODELS: Record<string, { model: string; steps: number; edit?: number
   flux_kontext: { model: "flux1-kontext-dev-fp8.safetensors", steps: 20, edit: 1 },
   illustrious_sdxl: { model: "illustriousXL_v01.safetensors", steps: 8 },
 };
+/** Phase 9c-B: the audio targets that generate voice samples. */
+const AUDIO_MODELS: Record<string, { model: string; steps: number; defaultSeconds: number; minSeconds: number; maxSeconds: number }> = {
+  ltx2_voice: { model: "ltx-2.5-22b-distilled-fp8.safetensors", steps: 8, defaultSeconds: 8, minSeconds: 2, maxSeconds: 20 },
+};
 /** the built-in defaults (series.json has no `refs` block in the mock) */
-export const MOCK_REF_DEFAULTS = { target: "krea2", keyframe_target: "flux2_klein_edit" };
+export const MOCK_REF_DEFAULTS = { target: "krea2", keyframe_target: "flux2_klein_edit", voice_target: "ltx2_voice" };
+
+/** targets/audio/common.py's fixed sentence, for a character this episode gives no line. */
+export const NEUTRAL_LINE = "The quick brown fox jumps over the lazy dog, and then says hello to everyone in the room.";
 
 export interface MockRefs {
   list(): Ref[];
   /** GET /h3pipe/refs `defaults` */
   defaults(): RefDefaults;
   /** PUT /h3pipe/refs/defaults: null clears; a key left out is kept */
-  setDefaults(fields: { target?: string | null; keyframe_target?: string | null }): RefDefaults;
+  setDefaults(fields: { target?: string | null; keyframe_target?: string | null; voice_target?: string | null }): RefDefaults;
+  /** Phase 9c-B: a voice candidate's playable wav (an object URL) */
+  audio(path: string): string | undefined;
+  /** Phase 9c-B: how long a voice candidate is, for GET /h3pipe/peaks */
+  audioSeconds(path: string): number | undefined;
+  /** Phase 9c-B: a voice candidate's peaks at 200 a second */
+  audioPeaks(path: string): number[] | undefined;
+  /** Phase 9c-B: POST /h3pipe/refs/voice-from-take */
+  voiceFromTake(req: {
+    ref: string; shot: string; take: number; pass: Pass; start: number; end: number;
+    pick?: boolean | null; note?: string; duration: number | null; sourceFile: string | null;
+  }): VoiceFromTakeResult;
   /** a ref's file state, for refs_used */
   info(id: string): { path: string | null; exists: boolean; kind: string; sha1: string | null } | undefined;
   /** the keyframes a shot needs now */
@@ -148,7 +170,7 @@ export interface MockRefs {
   usedByShot(index: number): string[];
   image(path: string): string | undefined;
   generate(req: RefGenerateRequest): RefGenerateResult;
-  pick(req: RefPickRequest): Ref;
+  pick(req: RefPickRequest): RefPickResult;
   import(req: RefImportRequest): RefTake & { view: string | null };
   /** the multipart import (Phase 8.6): a file by name, picked with `pick` */
   upload(req: { ref: string; view: string | null; name: string; pick: boolean }): RefTake & { view: string | null; original_name: string };
@@ -181,8 +203,13 @@ export function createMockRefs(opts: {
   const look = seriesCfg.style?.look ?? "";
   const refs: MRef[] = [];
   const images = new Map<string, string>();
-  /** the episode's image targets (overrides.json episode.refs_target / keyframe_target) */
-  const chosen: { target: string | null; keyframe_target: string | null } = { target: null, keyframe_target: null };
+  /** Phase 9c-B: a voice candidate's sound, by path (a synthetic wav) */
+  const audios = new Map<string, ReturnType<typeof makeVoice>>();
+  /** what the series config says about each subject (its voice line, design) */
+  const subjectCfg = new Map<string, { name: string; design: string; voice: string }>();
+  /** the episode's ref targets (overrides.json episode.refs_target / keyframe_target / voice_target) */
+  const chosen: { target: string | null; keyframe_target: string | null; voice_target: string | null } =
+    { target: null, keyframe_target: null, voice_target: null };
 
   const key = (id: string) => id.replace(/:/g, "__");
   const takePath = (r: MRef, view: string | null, take: number, ext = "png") =>
@@ -205,9 +232,13 @@ export function createMockRefs(opts: {
       ...(voiceOnly ? { why: `the series config names no sheet for ${name} (a voice-only character)` } : {}),
       ...(kind === "character" ? { views: VIEWS.map((v) => ({ view: v.view, picked: null, takes: [] })) } : {}),
     }));
-    if (raw.voice_sample) {
+    // Phase 9c-B: a voice ref for EVERY character, not only the ones the
+    // series config already gives a `voice_sample` (props never speak). One
+    // with no sample has `path: null` and can still generate.
+    if (kind === "character") {
+      subjectCfg.set(id, { name, design: raw.design ?? "", voice: raw.voice ?? "" });
       refs.push(base(`voice:${id}`, "voice", {
-        name: `${name}'s voice`, path: raw.voice_sample, subject: id, why: "nothing generates voices yet: import a recording",
+        name: `${name}'s voice`, path: raw.voice_sample ?? null, subject: id,
       }));
     }
   }
@@ -229,12 +260,44 @@ export function createMockRefs(opts: {
       target_source: src(chosen.target),
       keyframe_target: chosen.keyframe_target ?? MOCK_REF_DEFAULTS.keyframe_target,
       keyframe_target_source: src(chosen.keyframe_target),
+      voice_target: chosen.voice_target ?? MOCK_REF_DEFAULTS.voice_target,
+      voice_target_source: src(chosen.voice_target),
     };
   }
 
+  /** The target a generate of this ref uses: its own override, else the
+   * episode's default for its kind (a voice takes an audio target). */
   function imageTarget(r: MRef): string {
     const d = defaults();
+    if (r.kind === "voice") return r.ov.target ?? d.voice_target!;
     return r.ov.target ?? (r.kind === "keyframe" ? d.keyframe_target! : d.target!);
+  }
+
+  /** The brief targets/audio/common.py writes, and the line it asks for. */
+  function voiceBrief(r: MRef, seconds: number): { prompt: string; line: string; line_source: VoiceLineSource } {
+    const cfg = subjectCfg.get(r.subject ?? "") ?? { name: r.name, design: "", voice: "" };
+    // the character's longest line in this episode's script, else the neutral one
+    const speaks = (r.used_by?.proxy ?? []).length > 0 || (r.used_by?.final ?? []).length > 0;
+    const line = speaks ? `${cfg.name} says this in the episode: come on, everyone, we have work to do before supper!` : NEUTRAL_LINE;
+    const line_source: VoiceLineSource = speaks ? "script" : "neutral";
+    const design = cfg.design ? `${cfg.name} is ${cfg.design.split(/(?<=\.)\s/)[0]}` : `${cfg.name} is a character.`;
+    const prompt = [
+      "A clean voice recording of one speaker, close to the microphone, in a quiet room: one voice only, "
+      + "no music, no background noise, no other voices, no sound effects.",
+      design,
+      cfg.voice ? `Voice: ${cfg.voice}.` : "",
+      `About ${Math.round(seconds)} seconds of speech.`,
+      `${cfg.name} says: "${line}"`,
+    ].filter(Boolean).join("\n");
+    return { prompt, line, line_source };
+  }
+
+  /** The length a request snaps to on an audio target (clamped, then the grid). */
+  function snapSeconds(target: string, want: number | null | undefined): number {
+    const m = AUDIO_MODELS[target] ?? AUDIO_MODELS.ltx2_voice;
+    const s = Math.min(Math.max(want ?? m.defaultSeconds, m.minSeconds), m.maxSeconds);
+    // 8-frame grid at 24 fps, as the target template has it
+    return Math.round((Math.round((s * 24 - 1) / 8) * 8 + 1) / 24 * 1000) / 1000;
   }
 
   /** the override a generate of (r, view) uses: the ref's fields, then the view's */
@@ -243,6 +306,28 @@ export function createMockRefs(opts: {
   }
 
   function effective(r: MRef, view: string | null = null, target = imageTarget(r)): RefEffective {
+    const ov0 = merged(r, view);
+    if (r.kind === "voice") {
+      const a = AUDIO_MODELS[target] ?? AUDIO_MODELS.ltx2_voice;
+      const seconds = snapSeconds(target, r.seconds ?? null);
+      const brief = voiceBrief(r, seconds);
+      const spoken = r.takes.some((t) => t.source === "generated");
+      return {
+        prompt: typeof ov0.prompt === "string" ? ov0.prompt : brief.prompt,
+        seed: ov0.seed ?? (spoken ? null : stableSeed(r.id)),
+        seed_source: ov0.seed != null ? "override" : spoken ? "new" : "stable",
+        model: ov0.model ?? a.model,
+        loras: ov0.loras !== undefined ? ov0.loras ?? null : null,
+        steps: ov0.steps ?? a.steps,
+        width: null,
+        height: null,
+        target,
+        seconds,
+        line: typeof ov0.prompt === "string" ? ov0.prompt : brief.line,
+        line_source: typeof ov0.prompt === "string" ? "override" : brief.line_source,
+        max_seconds: a.maxSeconds,
+      };
+    }
     const m = IMAGE_MODELS[target] ?? IMAGE_MODELS.krea2;
     const ov = merged(r, view);
     const prompt = view ? `${r.base_prompt} View: ${view.replace(/^\d+_/, "")}.` : r.base_prompt;
@@ -295,11 +380,16 @@ export function createMockRefs(opts: {
     }
   }
 
-  function addTake(r: MRef, view: string | null, o: { status: RefTake["status"]; seed: string; source?: RefTake["source"]; note?: string; ext?: string; sourceName?: string; target?: string | null }): RefTake {
+  function addTake(r: MRef, view: string | null, o: {
+    status: RefTake["status"]; seed: string; source?: RefTake["source"]; note?: string; ext?: string; sourceName?: string;
+    target?: string | null;
+    /** a voice candidate: how long, and what it says */
+    seconds?: number; line?: string | null; line_source?: VoiceLineSource | null;
+  }): RefTake {
     const list = view ? r.views!.find((v) => v.view === view)!.takes : r.takes;
     const take = Math.max(0, ...list.map((t) => t.take), ...(trash.get(`${r.id}|${view ?? ""}`) ?? [])) + 1;
     const eff = effective(r, view, o.target ?? imageTarget(r));
-    const gen = o.source !== "imported" && o.source !== "frame";
+    const gen = o.source !== "imported" && o.source !== "frame" && o.source !== "from_take";
     const t: RefTake = {
       take, view, status: o.status, usable: false, seed: gen ? o.seed : null, seed_source: gen ? "stable" : null,
       image: null, audio: null, source: o.source ?? "generated", note: o.note ?? "", prompt: gen ? eff.prompt : null,
@@ -307,6 +397,10 @@ export function createMockRefs(opts: {
       overrides: gen ? Object.keys(merged(r, view)).filter((k) => k !== "target") : [],
       queued: new Date().toISOString(), finished: null, comfy_prompt_id: null, save_notes: "",
       ...(gen ? { target: eff.target } : {}),
+      // a voice candidate's sidecar records its length and the line it says
+      ...(r.kind === "voice"
+        ? { seconds: o.seconds ?? null, line: o.line ?? null, line_source: o.line_source ?? null }
+        : {}),
     };
     list.push(t);
     if (o.status === "ok") finishTake(r, view, t, o.ext, o.sourceName);
@@ -319,8 +413,11 @@ export function createMockRefs(opts: {
     t.finished = new Date().toISOString();
     const file = takePath(r, view, t.take, ext ?? (r.kind === "voice" ? "wav" : "png"));
     // a voice's candidate is audio: `image` stays null
-    if (r.kind === "voice") t.audio = file;
-    else t.image = file;
+    if (r.kind === "voice") {
+      t.audio = file;
+      const secs = t.seconds ?? 6;
+      audios.set(file, makeVoice(`${r.id}#${t.take}#${t.seed ?? sourceName ?? ""}`, secs));
+    } else t.image = file;
     if (r.kind === "keyframe") {
       const sub = sourceName ? `imported: ${sourceName}` : `still · t${String(t.take).padStart(2, "0")} · ${t.target ?? ""}`;
       images.set(file, svgImage(r.name, sub, `${t.seed ?? sourceName}`, "location", 448, 256));
@@ -511,8 +608,12 @@ export function createMockRefs(opts: {
     return { list: r.takes };
   }
 
-  function doPick(r: MRef, view: string | null, take: number) {
+  /** Picking a candidate. Returns whether the series config was written: a
+   * voice whose character has no `voice_sample` gets refs/voices/<id>.wav and
+   * that line in series.json (Phase 9c-B). */
+  function doPick(r: MRef, view: string | null, take: number): boolean {
     const { rv } = listOf(r, view);
+    let seriesChanged = false;
     if (rv) {
       rv.picked = take;
       r.vcleared[rv.view] = false;
@@ -520,12 +621,20 @@ export function createMockRefs(opts: {
     } else {
       r.picked = take;
       if (r.kind === "voice") {
+        if (!r.path) {
+          r.path = `refs/voices/${(r.subject ?? r.id.split(":")[1] ?? "voice")}.wav`;
+          seriesChanged = true;
+        }
+        const t = r.takes.find((x) => x.take === take);
+        const src = t?.audio ? audios.get(t.audio) : undefined;
+        if (src) audios.set(r.path, src);
         r.exists = true;
         r.cleared = false;
         r.sha1 = hash(`${r.id}${Date.now()}`).toString(16);
       } else setLive(r);
     }
     opts.onLiveChange(r.id);
+    return seriesChanged;
   }
 
   function doClear(r: MRef, view: string | null) {
@@ -539,14 +648,19 @@ export function createMockRefs(opts: {
     }
     r.exists = false;
     r.sha1 = null;
-    if (r.path) images.delete(r.path);
+    if (r.path) {
+      images.delete(r.path);
+      audios.delete(r.path);
+    }
     opts.onLiveChange(r.id);
   }
 
   function importFile(r: MRef, view: string | null, name: string) {
     listOf(r, view);
     const audio = r.kind === "voice";
-    if (!r.path) throw new RefError(`${r.id}: the series config names no file for it`, 400);
+    // a voice with no `voice_sample` yet still takes candidates: picking one
+    // writes refs/voices/<id>.wav and the series config's line (Phase 9c-B)
+    if (!r.path && !audio) throw new RefError(`${r.id}: the series config names no file for it`, 400);
     if (audio ? !/\.(wav|mp3|flac|ogg|m4a)$/i.test(name) : !/\.(png|jpe?g|webp)$/i.test(name)) {
       throw new RefError(audio ? `${name}: a voice takes wav, mp3, flac, ogg or m4a` : `${name}: an image must be png, jpg, jpeg or webp`, 400);
     }
@@ -571,7 +685,49 @@ export function createMockRefs(opts: {
         if (v != null && !IMAGE_MODELS[v]) throw new RefError(`${v} isn't an image target`, 400);
         chosen[k] = v;
       }
+      if ("voice_target" in fields) {
+        const v = fields.voice_target ?? null;
+        if (v != null && !AUDIO_MODELS[v]) throw new RefError(`${v} isn't an audio target`, 400);
+        chosen.voice_target = v;
+      }
       return defaults();
+    },
+    audio: (path) => audios.get(path)?.url() ?? undefined,
+    audioSeconds: (path) => audios.get(path)?.duration,
+    audioPeaks: (path) => audios.get(path)?.peaks(),
+    voiceFromTake(req) {
+      const r = byId(req.ref);
+      if (r.kind !== "voice") throw new RefError(`${r.id} is not a voice ref: a take's audio can only become a voice sample`, 400);
+      if (!req.sourceFile) throw new RefError(`${req.shot} ${req.pass} t${String(req.take).padStart(2, "0")} has no sound to take a voice from`, 409);
+      const len = req.end - req.start;
+      if (req.start < 0) throw new RefError("start must be 0 or more", 400);
+      if (len < 0.2) throw new RefError(`the span must be at least 0.2s long (got ${len.toFixed(2)}s)`, 400);
+      if (len > 30) throw new RefError(`the span must be at most 30s long (got ${len.toFixed(2)}s)`, 400);
+      if (req.duration && req.start >= req.duration) {
+        throw new RefError(`${req.shot} ${req.pass} t${String(req.take).padStart(2, "0")} is ${req.duration.toFixed(2)}s long: the span starts after it ends`, 400);
+      }
+      const seconds = Math.round(len * 1000) / 1000;
+      const t = addTake(r, null, {
+        status: "ok", seed: "", source: "from_take", ext: "wav", note: req.note ?? "",
+        seconds, line: null, line_source: null,
+        sourceName: `${req.shot}-t${req.take}-${req.start.toFixed(2)}`,
+      });
+      t.from = { shot: req.shot, take: req.take, pass: req.pass, start: req.start, end: req.end };
+      t.save_notes = `${req.start.toFixed(2)}-${req.end.toFixed(2)}s of ${req.shot} ${req.pass} t${String(req.take).padStart(2, "0")}`;
+      opts.emit("h3pipe.ref", { ep: opts.ep, ref: r.id, view: null, take: t.take, status: "ok" });
+      // picked when the voice has no live file yet (as /refs/keyframe does)
+      const pick = req.pick ?? (!r.exists && !r.cleared);
+      let seriesChanged = false;
+      if (pick) {
+        seriesChanged = doPick(r, null, t.take);
+        opts.emit("h3pipe.ref", { ep: opts.ep, ref: r.id, view: null, take: t.take, status: "picked" });
+      }
+      // as built: `picked` is a boolean here, overwriting the listing's own,
+      // and `source` is an object (the shot, take, span and the file)
+      return {
+        ...view(r), picked: pick, take: t.take, series_changed: seriesChanged,
+        source: { shot: req.shot, take: req.take, pass: req.pass, start: req.start, end: req.end, file: req.sourceFile },
+      };
     },
     info(id) {
       const r = refs.find((x) => x.id === id);
@@ -581,7 +737,11 @@ export function createMockRefs(opts: {
     addImage: (path, url) => void images.set(path, url),
     unpick(ref, v) {
       const r = byId(ref);
-      if (r.kind === "voice") throw new RefError("A voice can't be cleared", 400);
+      // Phase 9c-B: a voice with a sample named can be cleared like any ref
+      // (series.json's `voice_sample` line is left alone); one with none can't
+      if (r.kind === "voice" && !r.path) {
+        throw new RefError(`${r.id}: the series config names no voice sample, so there is nothing to clear`, 400);
+      }
       const prev = v ? r.views?.find((x) => x.view === v)?.picked ?? null : r.picked;
       doClear(r, v);
       opts.emit("h3pipe.ref", { ep: opts.ep, ref: r.id, view: v, take: prev, status: "cleared" });
@@ -604,9 +764,36 @@ export function createMockRefs(opts: {
     image: (path) => images.get(path),
     generate(req) {
       const r = refFor(req.ref);
-      if (r.kind === "voice") throw new RefError("Nothing generates voices yet: import a recording.", 400);
       if (r.why) throw new RefError(r.why, 400);
       if (req.count < 1 || req.count > 16) throw new RefError("count is 1 to 16", 400);
+      if (req.seconds != null && r.kind !== "voice") throw new RefError(`seconds is only for a voice ref, not ${r.id}`, 400);
+      if (r.kind === "voice") {
+        const tid = req.target ?? imageTarget(r);
+        if (!AUDIO_MODELS[tid]) throw new RefError(`${tid} isn't an audio target`, 400);
+        const a = AUDIO_MODELS[tid];
+        if (req.seconds != null && (req.seconds < a.minSeconds || req.seconds > a.maxSeconds)) {
+          throw new RefError(`seconds must be between ${a.minSeconds} and ${a.maxSeconds} on ${tid}`, 400);
+        }
+        const out: RefGenerateResult = { queued: [], errors: [] };
+        r.seconds = req.seconds ?? r.seconds;
+        for (let c = 0; c < req.count; c++) {
+          const seconds = snapSeconds(tid, req.seconds ?? null);
+          const brief = voiceBrief(r, seconds);
+          const seed = pickSeed(r, null, r.takes, req.seed_mode, req.seed, c > 0);
+          const line = req.prompt ?? brief.line;
+          const t = addTake(r, null, {
+            status: "queued", seed, note: req.note, target: tid, seconds,
+            line, line_source: req.prompt != null ? "request" : brief.line_source,
+          });
+          if (req.prompt != null) t.prompt = req.prompt;
+          const pid = opts.nextPrompt();
+          t.comfy_prompt_id = pid;
+          out.queued.push({ ref: r.id, view: null, take: t.take, prompt_id: pid, seed, target: tid });
+          opts.emit("h3pipe.ref", { ep: opts.ep, ref: r.id, view: null, take: t.take, status: "queued" });
+          simulate(r, null, t, pid);
+        }
+        return out;
+      }
       if (req.target != null && !IMAGE_MODELS[req.target]) throw new RefError(`${req.target} isn't an image target`, 400);
       if (req.prompt != null && r.views?.length && !req.view) throw new RefError(`${r.id} is a character: a prompt is per view`, 400);
       const views: (string | null)[] = r.views?.length ? (req.view ? [req.view] : VIEWS.map((v) => v.view)) : [null];
@@ -639,8 +826,8 @@ export function createMockRefs(opts: {
       const t = list.find((x) => x.take === req.take);
       if (!t) throw new RefError(`No take ${req.take}`, 404);
       if (t.status !== "ok") throw new RefError(`t${String(req.take).padStart(2, "0")} is ${t.status}; only a finished candidate can be picked`, 409);
-      doPick(r, req.view ?? null, req.take);
-      return view(r);
+      const seriesChanged = doPick(r, req.view ?? null, req.take);
+      return { ...view(r), series_changed: seriesChanged };
     },
     import(req) {
       const r = refFor(req.ref);
@@ -673,8 +860,9 @@ export function createMockRefs(opts: {
       const [gone] = list.splice(i, 1);
       const tk = `${r.id}|${req.view ?? ""}`;
       trash.set(tk, [...(trash.get(tk) ?? []), gone.take]);
-      // a voice is never cleared: its picked take is only moved (the live file stays)
-      const live = r.kind !== "voice" && (rv ? rv.picked : r.picked) === req.take;
+      // Phase 9c-B: a voice's live candidate is cleared too, unless the
+      // series config names no sample for it (there is nothing to clear)
+      const live = (r.kind !== "voice" || !!r.path) && (rv ? rv.picked : r.picked) === req.take;
       if (live) doClear(r, req.view);
       opts.emit("h3pipe.ref", { ep: opts.ep, ref: r.id, view: req.view, take: req.take, status: "discarded" });
       if (live) opts.emit("h3pipe.ref", { ep: opts.ep, ref: r.id, view: req.view, take: req.take, status: "cleared" });

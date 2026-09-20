@@ -5,8 +5,8 @@ import { useSyncExternalStore } from "react";
 import type { ToastAction } from "./host";
 import type { RefFilter } from "./lib/refs";
 import type {
-  BuildResult, Config, EpisodeStatus, EpisodeSummary, ModelList, Pass, Ref, RefDefaults, RefGenerateMissingResult, ShotDetail, SourceFile,
-  TakeRef, TargetList,
+  AlignReady, AlignResult, BuildResult, Config, EpisodeStatus, EpisodeSummary, ModelList, Pass, Ref, RefDefaults,
+  RefGenerateMissingResult, ShotDetail, SourceFile, TakeRef, TargetList,
 } from "./types";
 
 // ---------------------------------------------------------------------------
@@ -95,14 +95,15 @@ export interface CutPlayState {
 /** Phase 9b: what Play all sounds like: each clip's own audio, or the recorded dialogue. */
 export type CutAudio = "clips" | "recording";
 
-export type BrowsePurpose = "roots" | "import";
+/** Phase 9c-A: "track" picks the episode's dialogue recording. */
+export type BrowsePurpose = "roots" | "import" | "track";
 
 export interface BrowseState {
   purpose: BrowsePurpose;
   /** import: which ref (and view) the file becomes a candidate of */
   ref?: string;
   view?: string | null;
-  /** import: images, or audio for a voice */
+  /** import: images, or audio for a voice (and for a recording) */
   files?: "image" | "audio";
 }
 
@@ -165,6 +166,31 @@ export interface UploadState {
 /** The key of a ref slot's upload: the ref, and a character's view. */
 export function uploadKey(ref: string, view?: string | null): string {
   return `${ref}|${view ?? ""}`;
+}
+
+/** Phase 9c-A: the Recording window (attach a recording, align the script). */
+export interface TrackPanelState {
+  /** the episode it was opened for */
+  ep: string;
+}
+
+/** Phase 9c-A: an h3align run, from the `h3pipe.align` events. */
+export interface AlignRun {
+  ep: string;
+  busy: boolean;
+  dryRun: boolean;
+  stage: string;
+  pct: number;
+  text: string;
+  error: string | null;
+}
+
+/** Phase 9c-B: the "use a line from a take" window, for one voice ref. */
+export interface VoiceClipState {
+  ref: string;
+  shot: string | null;
+  take: number | null;
+  pass: Pass;
 }
 
 export interface AppState {
@@ -261,6 +287,20 @@ export interface AppState {
   cutUndo: Record<string, { undo: string | null; redo: string | null }>;
   /** Phase 9b: the timeline's Cut menu, open at (x, y) */
   cutMenu: { x: number; y: number } | null;
+  /** Phase 9c-A: the Recording window (null: closed) */
+  trackPanel: TrackPanelState | null;
+  /** Phase 9c-A: GET /h3pipe/align/ready, once loaded (null: not asked yet) */
+  alignReady: AlignReady | null;
+  alignReadyError: string | null;
+  /** Phase 9c-A: the run going now, with its live progress (null: none) */
+  alignRun: AlignRun | null;
+  /** Phase 9c-A: the last run's answer, by episode */
+  alignResult: Record<string, AlignResult>;
+  /** Phase 9c-A: the build the last attach/clear answered with, by episode
+   * (it fails until the script has `audio:` windows: "align to finish") */
+  trackBuild: Record<string, BuildResult | null>;
+  /** Phase 9c-B: the "use a line from a take" window (null: closed) */
+  voiceClip: VoiceClipState | null;
 }
 
 export const ZOOM_MIN = 8;
@@ -332,6 +372,13 @@ export function initialState(prefs: Prefs = {}): AppState {
     waves: prefs.waves ?? false,
     cutUndo: {},
     cutMenu: null,
+    trackPanel: null,
+    alignReady: null,
+    alignReadyError: null,
+    alignRun: null,
+    alignResult: {},
+    trackBuild: {},
+    voiceClip: null,
   };
 }
 

@@ -12,6 +12,9 @@ import { trackSlice, trackState } from "../lib/recording";
 import { useApp } from "../store";
 import type { EpisodeStatus, ShotStatus, TakeSummary } from "../types";
 
+/** a stable empty list, so a canvas with nothing to draw doesn't re-render */
+const EMPTY: number[] = [];
+
 /** What a clip's lane draws: the query, and what it is (for the tooltip and colour). */
 export function waveSource(
   ep: string, item: PlayItem | undefined, take: TakeSummary | undefined, st: EpisodeStatus, recording: boolean, zoom: number,
@@ -64,12 +67,69 @@ function subscribeTheme(fn: () => void): () => void {
   };
 }
 
-function useThemeN(): number {
+export function useThemeN(): number {
   return useSyncExternalStore(subscribeTheme, () => themeN, () => themeN);
 }
 
+/**
+ * Peaks for one query, from the shared cache (Phase 9c: the voice refs draw
+ * their candidates with this too). `enabled` false holds the request back
+ * until the box is on screen.
+ */
+export function usePeaks(q: PeaksQuery | null, enabled = true): PeaksEntry | undefined {
+  const key = q ? peaksKey(q) : "";
+  const [entry, setEntry] = useState<PeaksEntry | undefined>(() => (q ? peaksCache.peek(q) : undefined));
+  useEffect(() => {
+    if (!q) return setEntry(undefined);
+    const hit = peaksCache.peek(q);
+    setEntry(hit);
+    if (hit || !enabled) return;
+    let live = true;
+    void peaksCache.get(q).then((e) => live && setEntry(e));
+    return () => {
+      live = false;
+    };
+    // (the key says everything the query does)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key, enabled]);
+  return entry;
+}
+
+/**
+ * A canvas of peaks (0..255), themed and device-pixel-ratio aware. The
+ * timeline's lane and the voice refs' players both draw with it.
+ */
+export const PeaksCanvas = memo(function PeaksCanvas({ peaks, width, height, kind = "take", step = 1, className }: {
+  peaks: ArrayLike<number>;
+  width: number;
+  height: number;
+  /** which themed colour: a clip's own sound, or the recording's */
+  kind?: "take" | "recording";
+  step?: number;
+  className?: string;
+}) {
+  const canvas = useRef<HTMLCanvasElement>(null);
+  const theme = useThemeN();
+  useLayoutEffect(() => {
+    const c = canvas.current;
+    if (!c) return;
+    const dpr = typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1;
+    const w = Math.max(1, Math.round(width));
+    c.width = Math.round(w * dpr);
+    c.height = Math.round(height * dpr);
+    const ctx = c.getContext("2d");
+    if (!ctx) return;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    // themed: ComfyUI's variables, through the editor's (resolved on the element)
+    const css = getComputedStyle(c);
+    const color = (kind === "recording" ? css.getPropertyValue("--h3-wave-rec") : css.getPropertyValue("--h3-wave")).trim() || "#8a8a8a";
+    drawPeaks(ctx, peaks, w, height, color, step);
+  }, [peaks, width, height, kind, step, theme]);
+  return <canvas ref={canvas} className={className} style={{ width, height }} />;
+});
+
 /** Starts false; true once the element has been on screen (IntersectionObserver; always true without one). */
-function useSeen(ref: React.RefObject<HTMLElement>): boolean {
+export function useSeen(ref: React.RefObject<HTMLElement>): boolean {
   const [seen, setSeen] = useState(typeof IntersectionObserver === "undefined");
   useEffect(() => {
     const el = ref.current;
@@ -92,43 +152,9 @@ export const WaveLane = memo(function WaveLane({ ep, s, item, take, st, width, h
 }) {
   const recording = useApp((x) => x.cutAudio === "recording");
   const box = useRef<HTMLDivElement>(null);
-  const canvas = useRef<HTMLCanvasElement>(null);
   const seen = useSeen(box);
-  const theme = useThemeN();
   const src = waveSource(ep, item, take, st, recording, zoom);
-  const key = src ? peaksKey(src.q) : "";
-  const [entry, setEntry] = useState<PeaksEntry | undefined>(() => (src ? peaksCache.peek(src.q) : undefined));
-
-  useEffect(() => {
-    if (!src) return setEntry(undefined);
-    const hit = peaksCache.peek(src.q);
-    setEntry(hit);
-    if (hit || !seen) return;
-    let live = true;
-    void peaksCache.get(src.q).then((e) => live && setEntry(e));
-    return () => {
-      live = false;
-    };
-    // (the key says everything the query does)
-  }, [key, seen]);
-
-  useLayoutEffect(() => {
-    const c = canvas.current;
-    if (!c) return;
-    const dpr = typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1;
-    const w = Math.max(1, Math.round(width));
-    c.width = Math.round(w * dpr);
-    c.height = Math.round(height * dpr);
-    const ctx = c.getContext("2d");
-    if (!ctx) return;
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    // themed: ComfyUI's variables, through the editor's (resolved on the element)
-    const css = getComputedStyle(c);
-    const color = (src?.kind === "recording" ? css.getPropertyValue("--h3-wave-rec") : css.getPropertyValue("--h3-wave")).trim() || "#8a8a8a";
-    const peaks = entry?.ok ? entry.data.peaks : [];
-    if (entry?.ok) drawPeaks(ctx, peaks, w, height, color, 1);
-    else ctx.clearRect(0, 0, w, height);
-  }, [entry, width, height, src?.kind, theme]);
+  const entry = usePeaks(src?.q ?? null, seen);
 
   const title = !src
     ? item ? (take ? `${s.shot}: no audio for this take` : `${s.shot}: no take`) : `${s.shot}: not in Play all`
@@ -137,7 +163,7 @@ export const WaveLane = memo(function WaveLane({ ep, s, item, take, st, width, h
         : `${s.shot}: ${src.label}`;
   return (
     <div ref={box} className={`h3-wave${src?.kind === "recording" ? " h3-wave-rec" : ""}`} style={{ width, height }} title={title}>
-      {src && <canvas ref={canvas} style={{ width, height }} />}
+      {src && <PeaksCanvas peaks={entry?.ok ? entry.data.peaks : EMPTY} width={width} height={height} kind={src.kind} />}
       {src && !entry && seen && <span className="h3-wave-note">…</span>}
       {entry && !entry.ok && <span className="h3-wave-note h3-err">!</span>}
     </div>
