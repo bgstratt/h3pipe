@@ -2,7 +2,8 @@
 
 import { ApiError, UPLOAD_LIMIT, errText } from "./api";
 import { api, host } from "./host";
-import { reachable, sameDir } from "./lib/browse";
+import { audioOf } from "./lib/audioSource";
+import { epRelative, reachable, sameDir } from "./lib/browse";
 import { absPath, promptText, sameEp, tn } from "./lib/format";
 import { normPath, splitByMissingRefs } from "./lib/missingRefs";
 import { buildPlaylist, startOf, totalDuration, type PlayItem } from "./lib/playlist";
@@ -16,13 +17,13 @@ import { folderPath, isMissingFileSkip, readinessOf, skipMissingFiles } from "./
 import { overrideTargetValue, seriesDefaultTarget, shotTarget } from "./lib/targets";
 import { buildError, changedShots, needsAlignBuild, resultSummary, scriptClash, trackFileProblem, trackName } from "./lib/track";
 import {
-  detailKey, persistPrefs, statusKey, store, uploadKey, type AppState, type BrowseState, type CompareMode,
-  type RefTakeRef, type VoiceClipState,
+  detailKey, persistPrefs, statusKey, store, uploadKey, type AppState, type BrowseState, type ClipAudioState,
+  type CompareMode, type RefTakeRef, type VoiceClipState,
 } from "./store";
 import type {
-  AlignEvent, AlignMissing, AlignRequest, BuildResult, EpisodeStatus, Lora, SourceFile, OverrideFields, Pass, ProgressEvent,
-  PromptEvent, Ref, RefEvent, RefGenerateRequest, RefTake, RenderRequest, RenderResult, RenderSkip, Seed, SeedMode, ShotDetail,
-  TakeEvent, TakeRef, TrackResult, VoiceFromTakeRequest,
+  AlignEvent, AlignMissing, AlignRequest, BuildResult, CutAudioSource, EpisodeStatus, Lora, SourceFile, OverrideFields, Pass,
+  ProgressEvent, PromptEvent, Ref, RefEvent, RefGenerateRequest, RefTake, RenderRequest, RenderResult, RenderSkip, Seed,
+  SeedMode, ShotDetail, TakeEvent, TakeRef, TrackResult, VoiceFromTakeRequest,
 } from "./types";
 
 const set = store.set;
@@ -2001,6 +2002,99 @@ export function updateVoiceClip(patch: Partial<VoiceClipState>) {
 
 export function closeVoiceClip() {
   set({ voiceClip: null });
+}
+
+// ---------------------------------------------------------------------------
+// Phase 9d: a shot's audio from elsewhere
+// ---------------------------------------------------------------------------
+
+/** Open "Audio from…" for one clip, starting from what it plays now. */
+export function openClipAudio(shot: string, pass: Pass = get().pass) {
+  const s = get();
+  const cut = s.ep ? s.status[statusKey(s.ep, pass)]?.shots.find((x) => x.shot === shot)?.cut : undefined;
+  set({ clipAudio: { shot, pass, draft: audioOf(cut), upload: null }, menu: null });
+}
+
+export function updateClipAudio(patch: Partial<ClipAudioState>) {
+  const c = get().clipAudio;
+  if (c) set({ clipAudio: { ...c, ...patch } });
+}
+
+/** Change the draft source (null: the clip's own sound). */
+export function setClipAudioDraft(draft: CutAudioSource | null) {
+  updateClipAudio({ draft });
+}
+
+export function closeClipAudio() {
+  set({ clipAudio: null });
+}
+
+/** The browse dialog, filtered to audio, for this clip's file source. */
+export function browseClipAudio(shot: string) {
+  set({ browse: { purpose: "clip-audio", files: "audio", shot } });
+}
+
+/**
+ * A file chosen in the browser becomes the draft's path: it has to be inside
+ * the episode (or beside a parent-folder series config), which is what
+ * PUT /h3pipe/cut takes.
+ */
+export function useClipAudioFile(chosen: string): boolean {
+  const s = get();
+  const c = s.clipAudio;
+  if (!s.ep || !c) return false;
+  const absolute = /^([a-zA-Z]:|[\\/])/.test(chosen);
+  // a path typed relative to the episode is already what cut.json wants
+  const rel = absolute ? epRelative(chosen, s.ep) : chosen.replace(/\\/g, "/");
+  if (!rel) {
+    host().toast(
+      "warn",
+      "That file is outside the episode",
+      `A clip's audio has to live inside ${s.ep} (or beside a parent-folder series config). Copy it into the episode's audio/ folder first, or upload it.`,
+    );
+    return false;
+  }
+  setClipAudioDraft({ ...(c.draft?.source === "file" ? c.draft : {}), source: "file", path: rel });
+  return true;
+}
+
+/**
+ * Upload a media file from this computer into the episode and use it as this
+ * clip's audio (POST /h3pipe/audio/import; see the contract gap in api.ts).
+ */
+export async function uploadClipAudio(file: File): Promise<boolean> {
+  const ep = get().ep;
+  const c = get().clipAudio;
+  if (!ep || !c) return false;
+  const problem = fileKindProblem(file, "audio")
+    || (file.size > UPLOAD_LIMIT ? `${file.name} is ${(file.size / 1024 / 1024).toFixed(0)} MB: the limit is ${UPLOAD_LIMIT / 1024 / 1024} MB.` : "");
+  if (problem) {
+    updateClipAudio({ upload: { name: file.name, sent: 0, total: file.size, error: problem } });
+    return false;
+  }
+  updateClipAudio({ upload: { name: file.name, sent: 0, total: file.size } });
+  try {
+    const r = await api().uploadClipAudio({ ep, file, name: file.name }, (sent, total) => {
+      const cur = get().clipAudio;
+      if (cur?.upload && !cur.upload.error) updateClipAudio({ upload: { ...cur.upload, sent, total: total || cur.upload.total } });
+    });
+    const path = r?.path;
+    if (!path) throw new Error("the server didn't say where the file landed");
+    updateClipAudio({ upload: null, draft: { source: "file", path } });
+    host().toast("success", `${file.name} is in the episode`, `${path} — it is this clip's audio once you save.`);
+    return true;
+  } catch (e) {
+    const gone = e instanceof ApiError && (e.status === 404 || e.status === 405);
+    updateClipAudio({
+      upload: {
+        name: file.name, sent: 0, total: file.size,
+        error: gone
+          ? "This ComfyUI has no upload route for clip audio yet (POST /h3pipe/audio/import). Copy the file into the episode and use Browse instead."
+          : errText(e),
+      },
+    });
+    return false;
+  }
 }
 
 /**

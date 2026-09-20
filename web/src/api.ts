@@ -14,6 +14,11 @@
 //  - TODO(contract): there is no prompt override per target: a retargeted
 //    shot's per-pass prompt override is ignored, so the inspector shows its
 //    `effective.prompt` read-only.
+//  - TODO(contract): Phase 9d asks the editor's file picker to "upload as
+//    /refs/import does", but no route puts a media file inside the episode
+//    without making it a ref candidate. `uploadClipAudio` posts to
+//    POST /h3pipe/audio/import (ep + file, answering {path}); until a server
+//    serves it the window says so and offers Browse instead.
 //  - TODO(contract): a character view's `override.values` in `GET /h3pipe/refs`
 //    are the character's own fields merged with the view's, and a view has no
 //    `built_prompt`. The per-view editor can't tell a view's own field from an
@@ -63,6 +68,10 @@ export interface Api {
   cutCopy(ep: string, from: Pass, to: Pass, what: CutWhat): Promise<{ cut: CutFile }>;
   /** Phase 9b: GET /h3pipe/peaks: `bins` peaks (0..255) of a media file over start..end seconds. */
   peaks(ep: string, path: string, bins: number, start?: number | null, end?: number | null): Promise<PeaksResult>;
+  /** Phase 9d: POST /h3pipe/audio/import as multipart: a media file from this
+   * computer into the episode, to be one clip's audio source. Answers where it
+   * landed, relative to the episode. See the contract gap above. */
+  uploadClipAudio(req: ClipAudioUploadRequest, onProgress?: UploadProgress): Promise<{ path: string }>;
   putOverride(req: OverrideRequest): Promise<OverrideResult>;
   deleteOverride(ep: string, shot: string, pass?: Pass): Promise<OverrideResult>;
   assemble(ep: string, pass: Pass, partial: boolean): Promise<AssembleResult>;
@@ -149,6 +158,14 @@ export interface RefDefaultFields {
   target?: string | null;
   keyframe_target?: string | null;
   voice_target?: string | null;
+}
+
+/** Phase 9d: POST /h3pipe/audio/import as multipart/form-data. */
+export interface ClipAudioUploadRequest {
+  ep: string;
+  file: Blob;
+  /** the file's name (a File has its own) */
+  name?: string;
 }
 
 /** POST /h3pipe/track as multipart/form-data (drag and drop, a file picker). */
@@ -338,6 +355,13 @@ export function createHttpApi(t: Transport): Api {
         duration: typeof r?.duration === "number" ? r.duration : 0, bins: peaks.length, peaks, silent: !!r?.silent,
         start: typeof r?.start === "number" ? r.start : null, end: typeof r?.end === "number" ? r.end : null,
       };
+    },
+    uploadClipAudio: (req, onProgress) => {
+      const form = new FormData();
+      form.append("ep", req.ep);
+      const name = req.name ?? (typeof File !== "undefined" && req.file instanceof File ? req.file.name : "audio.wav");
+      form.append("file", req.file, name);
+      return postForm("/h3pipe/audio/import", form, onProgress);
     },
     putOverride: (req) => {
       const s = req.fields.seed;

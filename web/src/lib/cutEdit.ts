@@ -7,7 +7,8 @@
 // h3takes.cut_entry_to_json would (a take only when picked, a pass only for a
 // placeholder, zero trims and empty notes left out), so nothing else moves.
 
-import type { CutEntry, EpisodeStatus, Pass, ShotStatus } from "../types";
+import type { CutAudioSource, CutEntry, EpisodeStatus, Pass, ShotStatus } from "../types";
+import { audioOf, normalizeAudio, resolveAudioFile, sameAudio, audioWhy } from "./audioSource";
 
 /** The cut.json entry a shot's status stands for, in `listPass`'s list. */
 export function entryOf(s: ShotStatus, listPass: Pass): CutEntry {
@@ -21,6 +22,9 @@ export function entryOf(s: ShotStatus, listPass: Pass): CutEntry {
   if (b) e.trim_out = b;
   if (c?.locked) e.locked = true;
   if (c?.note) e.note = c.note;
+  // Phase 9d: the clip's audio source, as cut.json holds it
+  const au = normalizeAudio(audioOf(c), s.shot);
+  if (au) e.audio = au;
   return e;
 }
 
@@ -215,13 +219,18 @@ export interface CutFields {
   trim_in: number;
   trim_out: number;
   locked: boolean;
+  /** Phase 9d: the clip's audio source (null: its own take's sound) */
+  audio: CutAudioSource | null;
 }
 
 export function fieldsOf(e: CutEntry | undefined): CutFields {
-  return { trim_in: frameInt(e?.trim_in), trim_out: frameInt(e?.trim_out), locked: !!e?.locked };
+  return {
+    trim_in: frameInt(e?.trim_in), trim_out: frameInt(e?.trim_out), locked: !!e?.locked,
+    audio: normalizeAudio(audioOf(e), e?.shot),
+  };
 }
 
-/** `entries` with one shot's trims / lock changed (zero trims and false left out). */
+/** `entries` with one shot's trims / lock / audio changed (defaults left out). */
 export function withFields(entries: CutEntry[], shot: string, patch: Partial<CutFields>): CutEntry[] {
   return entries.map((e) => {
     if (e.shot !== shot) return e;
@@ -231,12 +240,20 @@ export function withFields(entries: CutEntry[], shot: string, patch: Partial<Cut
     delete out.trim_out;
     delete out.locked;
     delete out.note;
+    delete out.audio;
     if (f.trim_in > 0) out.trim_in = Math.floor(f.trim_in);
     if (f.trim_out > 0) out.trim_out = Math.floor(f.trim_out);
     if (f.locked) out.locked = true;
     if (e.note) out.note = e.note;
+    const au = normalizeAudio(f.audio, shot);
+    if (au) out.audio = au;
     return out;
   });
+}
+
+/** Every clip back to its own sound, except a locked one's (as the lock protects trims). */
+export function clearAudio(entries: CutEntry[]): CutEntry[] {
+  return entries.reduce((list, e) => (audioOf(e) && !e.locked ? withFields(list, e.shot, { audio: null }) : list), entries);
 }
 
 /** Every trim set to zero, except a locked entry's (the lock protects them, as the server's reset does). */
@@ -263,8 +280,17 @@ export function applyEntries(st: EpisodeStatus, entries: CutEntry[]): EpisodeSta
     ...st,
     shots: shots.map((s, i) => {
       const e = by.get(s.shot);
-      const f = e ? fieldsOf(e) : { trim_in: s.cut.trim_in, trim_out: s.cut.trim_out, locked: s.cut.locked };
+      const f = e
+        ? fieldsOf(e)
+        : { trim_in: s.cut.trim_in, trim_out: s.cut.trim_out, locked: s.cut.locked, audio: audioOf(s.cut) };
       const cut = { ...s.cut, trim_in: f.trim_in, trim_out: f.trim_out, locked: f.locked, in_cut_file: e ? true : s.cut.in_cut_file };
+      // Phase 9d: the badge and the inspector follow at once; the server sends
+      // its own `audio_file` / `audio_why` with the next status
+      if (!sameAudio(audioOf(s.cut), f.audio)) {
+        cut.audio = f.audio;
+        cut.audio_file = resolveAudioFile(f.audio, s.shot, st.pass, shots);
+        cut.audio_why = f.audio ? audioWhy(f.audio, s.shot) : null;
+      }
       if (s.cut.order != null || hasIdx) cut.order = i;
       if (ooo) cut.out_of_order = ooo[i];
       return { ...s, cut };
@@ -282,6 +308,7 @@ export function sameEntries(a: CutEntry[], b: CutEntry[]): boolean {
     const fx = fieldsOf(x);
     const fy = fieldsOf(y);
     if (fx.trim_in !== fy.trim_in || fx.trim_out !== fy.trim_out || fx.locked !== fy.locked || (x.note ?? "") !== (y.note ?? "")) return false;
+    if (!sameAudio(fx.audio, fy.audio)) return false;
   }
   return true;
 }

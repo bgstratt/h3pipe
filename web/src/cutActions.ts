@@ -6,14 +6,15 @@
 import { ApiError } from "./api";
 import { currentPlaylist, playAll, refreshEpisode, report, seekCut, setCutPlaying, setStatusHook } from "./actions";
 import { api, host } from "./host";
+import { audioOf, audioWhy, normalizeAudio, sameAudio } from "./lib/audioSource";
 import {
-  applyEntries, clampTrim, clearTrims, entriesOf, fieldsOf, moveTo, nudge, sameEntries, scriptOrder, withFields,
+  applyEntries, clampTrim, clearAudio, clearTrims, entriesOf, fieldsOf, moveTo, nudge, sameEntries, scriptOrder, withFields,
 } from "./lib/cutEdit";
 import { PeaksCache } from "./lib/peaks";
 import { locate, totalDuration } from "./lib/playlist";
 import { UndoStack, applyEdit, diffEdit, type CutEdit } from "./lib/undo";
 import { statusKey, store, type CutAudio } from "./store";
-import type { CutEntry, CutWhat, EpisodeStatus, Pass } from "./types";
+import type { CutAudioSource, CutEntry, CutWhat, EpisodeStatus, Pass } from "./types";
 
 const set = store.set;
 const get = store.get;
@@ -216,6 +217,43 @@ export function setTrims(shot: string, trimIn: number, trimOut: number, label = 
   });
 }
 
+// ---------------------------------------------------------------------------
+// Phase 9d: a clip's audio from elsewhere
+// ---------------------------------------------------------------------------
+
+/**
+ * Set (or, with null, clear) a clip's audio source. One more cut edit, so it
+ * is optimistic, undoable and part of the history like a trim.
+ */
+export function setClipAudio(shot: string, audio: CutAudioSource | null, label?: string): Promise<boolean> {
+  const c = ctx();
+  if (!c) return Promise.resolve(false);
+  if (isLocked(c.st, shot)) {
+    refuseLocked(shot, "given another audio source");
+    return Promise.resolve(false);
+  }
+  const want = normalizeAudio(audio, shot);
+  const text = label ?? (want ? `Audio of ${shot} from ${audioWhy(want, shot)}` : `${shot} back to its own audio`);
+  return editCut(text, (list) => withFields(list, shot, { audio: want }));
+}
+
+/** The Inspector's and the menu's Clear: back to the clip's own take's sound. */
+export function clearClipAudio(shot: string): Promise<boolean> {
+  return setClipAudio(shot, null);
+}
+
+/** Whether a clip already plays something other than its own sound. */
+export function clipAudioOf(shot: string, pass: Pass = get().pass): CutAudioSource | null {
+  const s = get();
+  if (!s.ep) return null;
+  return audioOf(s.status[statusKey(s.ep, pass)]?.shots.find((x) => x.shot === shot)?.cut);
+}
+
+/** True when `audio` is what the clip already plays (the window's Save is then idle). */
+export function clipAudioUnchanged(shot: string, audio: CutAudioSource | null): boolean {
+  return sameAudio(clipAudioOf(shot), audio);
+}
+
 export function toggleLock(shot: string, locked?: boolean): Promise<boolean> {
   const c = ctx();
   if (!c) return Promise.resolve(false);
@@ -283,25 +321,40 @@ async function serverEdit(label: string, run: (c: Ctx) => Promise<unknown>, fall
   return true;
 }
 
+const RESET_LABEL: Record<CutWhat, string> = {
+  order: "Reset order",
+  trims: "Clear trims",
+  audio: "Clear audio sources",
+  all: "Reset order, trims and audio",
+};
+
 export function resetCut(what: CutWhat): Promise<boolean> {
-  const label = what === "order" ? "Reset order" : what === "trims" ? "Clear trims" : "Reset order and trims";
-  return serverEdit(label, (c) => api().cutReset(c.ep, c.pass, what), (list, st) => {
+  return serverEdit(RESET_LABEL[what] ?? "Reset the cut", (c) => api().cutReset(c.ep, c.pass, what), (list, st) => {
     let out = list;
-    if (what !== "trims") {
+    if (what === "order" || what === "all") {
       const order = scriptOrder(st);
       if (!order) return null;
       const orphans = list.filter((e) => !order.includes(e.shot));
       out = [...order.map((s) => out.find((e) => e.shot === s)!).filter(Boolean), ...orphans];
     }
-    return what === "order" ? out : clearTrims(out);
+    if (what === "trims" || what === "all") out = clearTrims(out);
+    if (what === "audio" || what === "all") out = clearAudio(out);
+    return out;
   });
 }
+
+const COPY_LABEL: Record<CutWhat, string> = {
+  order: "order",
+  trims: "trims",
+  audio: "audio sources",
+  all: "order, trims and audio",
+};
 
 export function copyCut(what: CutWhat): Promise<boolean> {
   const c = ctx();
   if (!c) return Promise.resolve(false);
   const from: Pass = c.pass === "proxy" ? "final" : "proxy";
-  const label = `Copy ${what === "all" ? "order and trims" : what} from ${from}`;
+  const label = `Copy ${COPY_LABEL[what] ?? what} from ${from}`;
   return serverEdit(label, (x) => api().cutCopy(x.ep, from, x.pass, what), null);
 }
 

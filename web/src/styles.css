@@ -598,3 +598,25 @@
 .h3-span-h { position: absolute; top: 0; bottom: 0; width: 7px; cursor: ew-resize; background: color-mix(in srgb, var(--h3-accent) 55%, transparent); }
 .h3-span-h.h3-l { left: -3px; }
 .h3-span-h.h3-r { right: -3px; }
+
+/* ---- Phase 9d: a clip's audio from elsewhere ---- */
+.h3-b-audio { color: var(--h3-accent); cursor: help; display: inline-flex; align-items: center; gap: 3px; }
+.h3-b-audio .pi { font-size: 9px; }
+.h3-b-audio-none { color: var(--h3-muted); border-style: dashed; }
+.h3-b-audio.h3-dim { opacity: 0.45; }
+.h3-clip-bottom .h3-b-audio { background: rgba(0, 0, 0, 0.6); border-color: color-mix(in srgb, var(--h3-accent) 60%, transparent); }
+.h3-clipaudio-lane, .h3-clipaudio-src { cursor: default; touch-action: none; }
+.h3-audio-place { cursor: grab; }
+.h3-audio-place:active { cursor: grabbing; }
+.h3-audio-picture {
+  position: absolute; top: 0; bottom: 0; cursor: grab; border: 1px dashed var(--h3-accent); border-radius: 2px;
+  background: color-mix(in srgb, var(--h3-accent) 9%, transparent);
+}
+.h3-audio-picture:active { cursor: grabbing; }
+.h3-audio-used {
+  position: absolute; top: 0; bottom: 0; pointer-events: none;
+  background: color-mix(in srgb, var(--h3-accent) 16%, transparent);
+  border-left: 1px solid var(--h3-accent); border-right: 1px solid var(--h3-accent);
+}
+.h3-clipaudio-video { width: 100%; max-height: 190px; background: #000; border-radius: 3px; }
+.h3-seg-row { align-items: center; }

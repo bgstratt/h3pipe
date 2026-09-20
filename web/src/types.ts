@@ -82,6 +82,14 @@ export interface CutInfo {
   script_index?: number | null;
   /** Phase 9b: not where script order would put it (the timeline badges it). */
   out_of_order?: boolean;
+  /** Phase 9d: the clip's audio source, as cut.json stores it (null / absent:
+   * the clip's own take's sound). */
+  audio?: CutAudioSource | null;
+  /** Phase 9d: what will actually play, relative to the episode (null for
+   * `none`, and for a source the server couldn't resolve). */
+  audio_file?: string | null;
+  /** Phase 9d: short text for the speaker badge ("sh020 t01", "line.wav"). */
+  audio_why?: string | null;
 }
 
 export interface ShotStatus {
@@ -192,8 +200,39 @@ export interface PeaksResult {
   end?: number | null;
 }
 
-/** Phase 9b: what POST /h3pipe/cut/reset and /cut/copy touch. */
-export type CutWhat = "order" | "trims" | "all";
+/** Phase 9b: what POST /h3pipe/cut/reset and /cut/copy touch. Phase 9d adds
+ * "audio" (and "all" clears it too). */
+export type CutWhat = "order" | "trims" | "audio" | "all";
+
+// ---------------------------------------------------------------------------
+// Phase 9d: a shot's audio from elsewhere
+// ---------------------------------------------------------------------------
+
+/** Where a clip's sound comes from: another take, a file, or silence. */
+export type CutAudioKind = "take" | "file" | "none";
+
+/**
+ * A cut entry's `audio` (absent or null: the clip's own take's sound). The
+ * audio is cut or padded with silence to the clip's length on the cut's
+ * clock, so a clip's length never changes.
+ */
+export interface CutAudioSource {
+  source: CutAudioKind;
+  /** take: the shot it comes from (absent: this entry's own shot) */
+  shot?: string;
+  /** take: which take (its mp4's sound, else its `_h3.wav`) */
+  take?: number;
+  /** take: which pass the take is in */
+  pass?: Pass;
+  /** file: a media file inside the episode (`../` beside a parent-folder series config) */
+  path?: string;
+  /** seconds into the source where the audio begins (0 or more) */
+  start?: number;
+  /** seconds it is shifted against the picture (positive = later; the gap is silence) */
+  offset?: number;
+  /** a linear multiplier, 1.0 unchanged (0–4) */
+  gain?: number;
+}
 
 // ---------------------------------------------------------------------------
 // Phase 9c-A: attaching and aligning a recording
@@ -531,6 +570,8 @@ export interface CutEntry {
   trim_out?: number;
   locked?: boolean;
   note?: string;
+  /** Phase 9d: this clip's audio from elsewhere (absent / null: its own). */
+  audio?: CutAudioSource | null;
 }
 
 export interface CutFile {

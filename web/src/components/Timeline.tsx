@@ -21,6 +21,8 @@ import { aspectOf, useSize, useStatus } from "./hooks";
 import { PassToggle } from "./ShotsTab";
 import { useTargets } from "./Targets";
 import { Badges, Progress, mediaStyle, useScrub } from "./Thumb";
+import { AudioBadge } from "./ClipAudio";
+import { audioBadgeOf } from "../lib/audioSource";
 import { WaveLane } from "./Waveform";
 
 const MIN_CLIP = 26;
@@ -140,11 +142,13 @@ function TrimGhost({ ep, take, item, preview, zoom, fps, height }: {
 
 const Clip = memo(function Clip({
   ep, pass, s, other, width, height, aspect, selected, rendering, progress, targets, seriesDefault, fps, trimmable, dragging,
-  onBodyDown, onEdgeDown, suppress,
+  recording, onBodyDown, onEdgeDown, suppress,
 }: {
   ep: string; pass: Pass; s: ShotStatus; other: EpisodeStatus | undefined; width: number; height: number;
   aspect: number; selected: boolean; rendering: Set<number>; progress?: { value: number; max: number };
   targets: TargetList | null; seriesDefault: string; fps: number; trimmable: boolean; dragging: boolean;
+  /** Phase 9d: Play all is on the recording, so per-clip audio is ignored */
+  recording: boolean;
   onBodyDown: (e: RPointerEvent<HTMLDivElement>, s: ShotStatus) => void;
   onEdgeDown: (e: RPointerEvent<HTMLDivElement>, s: ShotStatus, side: "in" | "out") => void;
   suppress: RefObject<boolean>;
@@ -169,6 +173,7 @@ const Clip = memo(function Clip({
   const title = [
     `${s.shot} · ${fmtShotSeconds(s, secs)}${s.size ? ` · ${s.size}` : ""}${lengthEstimated(s) ? `\n≈ ${ESTIMATE_TITLE}` : ""}`,
     take ? `${s.cut.placeholder ? `${s.cut.pass} ` : ""}${tn(take.take)} (${take.status})` : "no take in the cut",
+    audioBadgeOf(s.cut, s.shot)?.title ?? "",
     trimIn || trimOut ? `trimmed: ${framesLabel(trimIn, fps)} off the head, ${framesLabel(trimOut, fps)} off the tail` : "",
     locked ? "locked: it can't be moved, trimmed or re-picked (unlock from its menu)" : "",
     ...badges.map((b) => b.title),
@@ -212,6 +217,8 @@ const Clip = memo(function Clip({
         <b>{s.shot}</b>
         {lengthEstimated(s) && <span className="h3-est" title={ESTIMATE_TITLE}>≈</span>}
         {take && width > 60 && <span>{tn(take.take)}</span>}
+        <span className="h3-grow" />
+        {width > 70 && <AudioBadge shot={s.shot} cut={s.cut} dim={recording} />}
       </div>
       {progress && <Progress value={progress.value} max={progress.max} />}
       {trimmable && !locked && (
@@ -252,6 +259,8 @@ export function Timeline() {
   const progress = useApp((s) => s.progress);
   const asm = useApp((s) => s.assemble);
   const waves = useApp((s) => s.waves);
+  // Phase 9d: the recording overrides every clip's own audio source
+  const recording = useApp((s) => s.cutAudio === "recording");
   const undo = useApp((s) => (s.ep ? s.cutUndo[statusKey(s.ep, s.pass)] : undefined));
   const err = useApp((s) => (s.ep ? s.statusError[statusKey(s.ep, s.pass)] : undefined));
   const playing = useApp((s) => s.viewer?.kind === "cut" && s.cutPlay.playing);
@@ -529,6 +538,7 @@ export function Timeline() {
                             fps={fps}
                             trimmable={!!it && it.total != null && !s.orphan}
                             dragging={dragged === s.shot}
+                            recording={recording}
                             onBodyDown={onBodyDown}
                             onEdgeDown={onEdgeDown}
                             suppress={suppress}

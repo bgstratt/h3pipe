@@ -9,6 +9,7 @@ import { ContextMenu } from "./components/ContextMenu";
 import { CutMenu } from "./components/CutMenu";
 import { RedoDialog, SidecarDialog } from "./components/Dialogs";
 import { BrowseDialog } from "./components/Browse";
+import { ClipAudioWindow } from "./components/ClipAudio";
 import { InspectorWindow } from "./components/Inspector";
 import { PromoteDialog } from "./components/Promote";
 import { MissingWindow } from "./components/Readiness";
@@ -135,6 +136,7 @@ function Overlay() {
       <SourceWindows />
       <TrackWindow />
       <VoiceClipWindow />
+      <ClipAudioWindow />
       <ContextMenu />
       <CutMenu />
       <RedoDialog />

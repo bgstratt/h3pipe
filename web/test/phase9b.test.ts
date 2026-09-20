@@ -179,7 +179,13 @@ describe("undo", () => {
     expect(move.fields).toEqual({});
     const trim = diffEdit("Trim b", before, withFields(before, "b", { trim_in: 4 }))!;
     expect(trim.order).toBeNull();
-    expect(trim.fields).toEqual({ b: { before: { trim_in: 0, trim_out: 0, locked: false }, after: { trim_in: 4, trim_out: 0, locked: false } } });
+    // Phase 9d added `audio` to the fields an edit carries
+    expect(trim.fields).toEqual({
+      b: {
+        before: { trim_in: 0, trim_out: 0, locked: false, audio: null },
+        after: { trim_in: 4, trim_out: 0, locked: false, audio: null },
+      },
+    });
   });
   it("undoing doesn't undo a pick made since", () => {
     const trim = diffEdit("Trim b", before, withFields(before, "b", { trim_in: 4 }))!;

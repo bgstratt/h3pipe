@@ -4,6 +4,7 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { copyCut, redoCut, resetCut, toggleWaves, undoCut } from "../cutActions";
+import { clipsWithAudio } from "../lib/audioSource";
 import { statusKey, store, useApp } from "../store";
 
 const close = () => store.set({ cutMenu: null });
@@ -54,6 +55,7 @@ export function CutMenu() {
   };
   const trimmed = (st?.shots ?? []).filter((s) => (s.cut?.trim_in ?? 0) > 0 || (s.cut?.trim_out ?? 0) > 0).length;
   const moved = (st?.shots ?? []).filter((s) => s.cut?.out_of_order).length;
+  const withAudio = clipsWithAudio(st?.shots ?? []).length;
   return (
     <div ref={ref} className="h3-menu" style={pos ?? { left: menu.x, top: menu.y, visibility: "hidden" }} onContextMenu={(e) => e.preventDefault()}>
       <div className="h3-menu-head">The {pass} cut</div>
@@ -70,8 +72,17 @@ export function CutMenu() {
       <button onClick={run(() => resetCut("trims"))} title="Every trim back to zero">
         <i className="pi pi-arrows-h" /> Clear trims{trimmed ? ` (${trimmed} trimmed)` : ""}
       </button>
+      <button
+        disabled={!withAudio}
+        onClick={run(() => resetCut("audio"))}
+        title={withAudio
+          ? `${withAudio} clip${withAudio > 1 ? "s play" : " plays"} someone else's sound: put every one back to its own take's`
+          : "Every clip already plays its own take's sound"}
+      >
+        <i className="pi pi-volume-up" /> Clear audio sources{withAudio ? ` (${withAudio})` : ""}
+      </button>
       <button onClick={run(() => resetCut("all"))}>
-        <i className="pi pi-replay" /> Reset order and trims
+        <i className="pi pi-replay" /> Reset order, trims and audio
       </button>
       <div className="h3-menu-sep" />
       <button onClick={run(() => copyCut("order"))} title={`The ${other} cut's order onto this one (picks are never copied)`}>
@@ -80,8 +91,8 @@ export function CutMenu() {
       <button onClick={run(() => copyCut("trims"))} title={`The ${other} cut's trims onto this one, converted when the frame rates differ`}>
         <i className="pi pi-copy" /> Copy trims from {other}
       </button>
-      <button onClick={run(() => copyCut("all"))}>
-        <i className="pi pi-copy" /> Copy order and trims from {other}
+      <button onClick={run(() => copyCut("all"))} title={`Order, trims and audio sources from the ${other} cut (picks are never copied)`}>
+        <i className="pi pi-copy" /> Copy order, trims and audio from {other}
       </button>
       <div className="h3-menu-sep" />
       <button onClick={run(() => toggleWaves())}>

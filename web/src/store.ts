@@ -5,8 +5,8 @@ import { useSyncExternalStore } from "react";
 import type { ToastAction } from "./host";
 import type { RefFilter } from "./lib/refs";
 import type {
-  AlignReady, AlignResult, BuildResult, Config, EpisodeStatus, EpisodeSummary, ModelList, Pass, Ref, RefDefaults,
-  RefGenerateMissingResult, ShotDetail, SourceFile, TakeRef, TargetList,
+  AlignReady, AlignResult, BuildResult, Config, CutAudioSource, EpisodeStatus, EpisodeSummary, ModelList, Pass, Ref,
+  RefDefaults, RefGenerateMissingResult, ShotDetail, SourceFile, TakeRef, TargetList,
 } from "./types";
 
 // ---------------------------------------------------------------------------
@@ -95,8 +95,9 @@ export interface CutPlayState {
 /** Phase 9b: what Play all sounds like: each clip's own audio, or the recorded dialogue. */
 export type CutAudio = "clips" | "recording";
 
-/** Phase 9c-A: "track" picks the episode's dialogue recording. */
-export type BrowsePurpose = "roots" | "import" | "track";
+/** Phase 9c-A: "track" picks the episode's dialogue recording.
+ * Phase 9d: "clip-audio" picks a media file for one clip's sound. */
+export type BrowsePurpose = "roots" | "import" | "track" | "clip-audio";
 
 export interface BrowseState {
   purpose: BrowsePurpose;
@@ -105,6 +106,8 @@ export interface BrowseState {
   view?: string | null;
   /** import: images, or audio for a voice (and for a recording) */
   files?: "image" | "audio";
+  /** clip-audio: the clip whose audio the chosen file becomes */
+  shot?: string;
 }
 
 export interface RenderAsk {
@@ -191,6 +194,18 @@ export interface VoiceClipState {
   shot: string | null;
   take: number | null;
   pass: Pass;
+}
+
+/**
+ * Phase 9d: the "Audio from…" window. `draft` is the source being edited,
+ * null meaning the clip's own sound; nothing is saved until Use this audio.
+ */
+export interface ClipAudioState {
+  shot: string;
+  pass: Pass;
+  draft: CutAudioSource | null;
+  /** a file being uploaded into the episode for this clip (null: none) */
+  upload?: { name: string; sent: number; total: number; error?: string } | null;
 }
 
 export interface AppState {
@@ -301,6 +316,8 @@ export interface AppState {
   trackBuild: Record<string, BuildResult | null>;
   /** Phase 9c-B: the "use a line from a take" window (null: closed) */
   voiceClip: VoiceClipState | null;
+  /** Phase 9d: the "Audio from…" window for one clip (null: closed) */
+  clipAudio: ClipAudioState | null;
 }
 
 export const ZOOM_MIN = 8;
@@ -379,6 +396,7 @@ export function initialState(prefs: Prefs = {}): AppState {
     alignResult: {},
     trackBuild: {},
     voiceClip: null,
+    clipAudio: null,
   };
 }
 
