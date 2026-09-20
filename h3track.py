@@ -122,11 +122,43 @@ def probe(python: str) -> dict:
     return found
 
 
+def has_deps(pkgs: dict) -> bool:
+    """numpy and one of the whispers, from a `probe` result."""
+    return pkgs.get("numpy") is not None and any(
+        pkgs.get(n) is not None for n in WHISPER_NAMES)
+
+
+def candidates() -> list[str]:
+    """Interpreters that could run h3align, best first: H3PIPE_ALIGN_PYTHON,
+    the one running this (ComfyUI's embedded Python in the editor), then a
+    `python` on PATH. The editor's Python often has no Whisper while the
+    system one does, and h3align is a subprocess either way."""
+    out = [os.environ.get("H3PIPE_ALIGN_PYTHON") or "", sys.executable]
+    out += [shutil.which(n) or "" for n in ("python", "python3")]
+    seen, keep = set(), []
+    for p in out:
+        real = os.path.normcase(os.path.abspath(p)) if p else ""
+        if p and real not in seen and os.path.isfile(p):
+            seen.add(real)
+            keep.append(p)
+    return keep or [sys.executable]
+
+
+def align_python() -> str:
+    """The interpreter h3align runs in: the first candidate that has numpy and
+    a Whisper, else the first (so readiness reports against it)."""
+    cands = candidates()
+    for py in cands:
+        if has_deps(probe(py)):
+            return py
+    return cands[0]
+
+
 def align_ready(python: str | None = None) -> dict:
     """GET /h3pipe/align/ready: ffmpeg, numpy and a Whisper, checked against
-    the Python that would run h3align, with the pip line for what is
-    missing."""
-    py = python or sys.executable
+    the Python that would run h3align (`align_python`), with the pip line for
+    what is missing."""
+    py = python or align_python()
     pkgs = probe(py)
     ffmpeg = shutil.which("ffmpeg")
     missing = []
@@ -387,7 +419,7 @@ def align(ep: str, track: str | None = None, model: str | None = None, snap: boo
     (h3align --json). `progress(event)` is called per stage. TrackError 409
     with `missing` when a dependency isn't installed (a Whisper isn't one
     when the recording already has a transcript), 500 when h3align fails."""
-    py = python or sys.executable
+    py = python or align_python()
     timeout = ALIGN_TIMEOUT if timeout is None else timeout
     if check_deps:
         ready = align_ready(py)

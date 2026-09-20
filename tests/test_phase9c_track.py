@@ -122,6 +122,32 @@ class ReadyTest(unittest.TestCase):
         r = self.ready(faster="1.0", ffmpeg=None)
         self.assertEqual((r["ready"], r["missing"], r["install"]), (False, ["ffmpeg"], ""))
 
+    def test_picks_an_interpreter_that_has_the_packages(self):
+        """The editor runs in ComfyUI's embedded Python, which usually has no
+        Whisper while the system one does. h3align is a subprocess, so the
+        ready check and the run use the first interpreter that has them."""
+        this, other = sys.executable, os.path.join(os.sep, "py", "system.exe")
+        pkgs = {this: {"numpy": "1.26", "faster-whisper": None, "openai-whisper": None},
+                other: {"numpy": "1.26", "faster-whisper": "1.2.1", "openai-whisper": None}}
+        with mock.patch.object(K, "candidates", lambda: [this, other]), \
+                mock.patch.object(K, "probe", lambda py: dict(pkgs[py])):
+            self.assertEqual(K.align_python(), other)
+            with mock.patch.object(K.shutil, "which", lambda n: "ffmpeg"):
+                self.assertTrue(K.align_ready()["ready"])
+        # none of them has it: readiness reports against the first, as before
+        with mock.patch.object(K, "candidates", lambda: [this, other]), \
+                mock.patch.object(K, "probe",
+                                  lambda py: dict(pkgs[this])):
+            self.assertEqual(K.align_python(), this)
+
+    def test_candidates_are_real_files_without_repeats(self):
+        cands = K.candidates()
+        self.assertTrue(all(os.path.isfile(p) for p in cands))
+        self.assertEqual(len({os.path.normcase(os.path.abspath(p)) for p in cands}),
+                         len(cands))
+        self.assertIn(os.path.normcase(os.path.abspath(sys.executable)),
+                      {os.path.normcase(os.path.abspath(p)) for p in cands})
+
     def test_probe_asks_the_real_interpreter(self):
         K._probe_cache.clear()
         got = K.probe(sys.executable)
