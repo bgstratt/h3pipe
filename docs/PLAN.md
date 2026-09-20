@@ -941,6 +941,19 @@ as built in `docs/API.md`, "Phase 9c")
   blocked). One flag to switch on if the weights appear. A local TTS node pack is the other
   route to a steady voice.
 
+**Phase 9d — a shot's audio from elsewhere** ✅ done 2026-09-19 (contract and as built in
+`docs/API.md`, "Phase 9d")
+- A cut entry's `audio`: another take (any shot, either pass), a file in the episode, or
+  silence, with `start` / `offset` / `gain`. The clip's length never changes.
+- Honoured by `h3assemble` (a made-up track matches the stream-copied clips' layout, so
+  concat still copies), Play all and the waveform lane; `--audio master` still wins and
+  names the clips it overrides.
+- Editor: "Audio from…" on a clip (both waveforms, draggable handles, preview), a speaker
+  badge, the Inspector's Cut section, undo/redo through the usual cut path.
+  `h3.py cut --audio`; `POST /h3pipe/audio/import` puts a file in `<ep>/audio/`.
+- **Known:** discarding a take doesn't clear an audio source naming it — it reads
+  "(missing)", and assemble warns and lays silence.
+
 ## Story IR — `shotlist/shots.json` (Phase 6)
 
 Output of parsing, before any model decision. Durations are **seconds**; no frame
