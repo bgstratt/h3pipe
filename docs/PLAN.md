@@ -825,8 +825,9 @@ shared code in `targets/video/wan/`: `common.py` the compile, ref slots and grap
   matches the source frame of that time (no speed change); four clips of other sizes
   (512x288 ingredients, 640x352 Wan) scaled to 448x256.
 - **Left:** a turbo LoRA for VACE (a lightx2v T2V A14B pair) to bring its proxy near the
-  others' speed; whether the plate helps VACE as a second reference (ComfyUI's node takes
-  one image; several would need the latent-concatenating node); Wan's negative prompt
+  others' speed; ~~whether the plate helps VACE as a second reference~~ (tried 2026-09-20,
+  by hand and with Kijai's VACE ref nodes: it doesn't work without a much more specialised
+  workflow — dropped); Wan's negative prompt
   says "风格/画作" (style, painting), which may fight a cartoon look (a series-specific
   negative is a preset value away); final-quality renders (832x480 I2V/VACE, 1280x704 5B)
   not yet tried; the editor's model picker for `model_low`; `H3SaveShot` writing `fps`
@@ -956,6 +957,16 @@ as built in `docs/API.md`, "Phase 9c")
   `h3.py cut --audio`; `POST /h3pipe/audio/import` puts a file in `<ep>/audio/`.
 - **Known:** discarding a take doesn't clear an audio source naming it — it reads
   "(missing)", and assemble warns and lays silence.
+
+**Next up (2026-09-20): reference images from a video model.** The user's finding: exporting
+the first frame of a MiniMax H3 generation gives very good stills, and H3 with references
+behaves like an image edit (as Klein 9B edit does). So a ref/keyframe could be made by a
+video target's first frame instead of an image target. To work out: a video target used as
+an image target (one frame, cheapest settings), where it sits beside `targets/image`, and
+whether it replaces or joins the edit models for keyframes. Also open from the same
+conversation: seeding a character from a picture the user already has, generating each view
+as an edit of the approved one rather than independently, reusing a location across
+episodes, and fixing part of a ref instead of regenerating it.
 
 ## Story IR — `shotlist/shots.json` (Phase 6)
 

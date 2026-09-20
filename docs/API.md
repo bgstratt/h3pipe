@@ -2355,3 +2355,10 @@ Measured, same prompt, same seed, 97 frames at 768×512, 24 fps, audio present i
 The sheet's effect is unmistakable: without it the shot invented its own kitchen and its own
 version of the character; with it, the plate's kitchen (tiles, ceiling panels, floor) and
 the sheet's character (bob, glasses, apron, trousers, shoes) are both reproduced.
+
+**Verdict on the quality profile (the user, looking at the clips, 2026-09-20): distilled
+won every pairing, with a sheet and without.** So the profile stays opt-in and unused by
+default, and "dev is crisper without a sheet" (this section's earlier claim, an agent's own
+reading of the frames) is withdrawn. Keep it only as a lever to re-test if LTX ships new
+dev guidance, and change the default only on fresh side-by-sides. The sheet itself is a
+separate matter and is on by default: nobody disputed it.
