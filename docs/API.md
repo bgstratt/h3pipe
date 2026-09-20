@@ -2215,3 +2215,143 @@ and the checks all call.
 - **Discarding a take doesn't clear an audio source that names it** (it clears a *pick* of it,
   as before). The source then reads as `"… (missing)"` in the status, and assemble warns and
   lays silence, which is visible; rewriting other shots' entries on a discard is not.
+
+## LTX-2.5: the quality profile and ingredients references (as built, 2026-09-19)
+
+Two additions to the `ltx2` target. Both are decided **at queue time**, from the model file
+the job loads and the ref files on disk, so a build is byte-for-byte what it always was:
+`shotlist.ltx2[_proxy].json` gains no key, and the `tests/golden` shotlists, reports and
+`refs_todo` are unchanged. No route changed either; what the existing ones now show is
+below.
+
+### 1. The quality profile: the dev transformer
+
+`ltx2`'s presets are the **distilled** LTX-2.5 transformer, distilled for the workflow's
+fixed 8-step base schedule at `video_cfg` 1 — which is why `steps` has always been recorded
+and not patched. The **dev** (non-distilled) transformer takes real steps and guidance, so
+`target.json` `recipe.sampling` gives each transformer its own schedule and the job picks
+one by the file name (`match`, case-insensitive globs):
+
+| mode | picked by | what patch_graph does |
+|---|---|---|
+| `distilled` (the recipe's `default`) | `*distilled*`, and anything unmatched | nothing: the workflow's own 8 + 3 step ManualSigmas at cfg 1. A `steps` set for the shot earns a take note saying it can't bite. |
+| `dev` | `*dev*` | the base stage's ManualSigmas becomes an **LTXVScheduler** at the job's `steps` (30 unless the shot set another), `max_shift` 2.05 / `base_shift` 0.95 / stretch / terminal 0.1, fed the base stage's own video latent; both guiders get `video_cfg` / `audio_cfg` 4.0 and 1.0; both `KSamplerSelect`s get `euler_ancestral`. The refine keeps the workflow's 3-step 0.85 schedule at cfg 1. |
+
+- **Selecting it** needs nothing new: it is the shot's `model`. A series config profile
+  (`{"target": "ltx2", "model": "ltx-2.5-22b-dev-transformer-comfy-int8-convrot.safetensors"}`)
+  picked with `profile:` on a shot or a sequence, a `model:` line, the series config's
+  `series` block for a whole episode, `PUT /h3pipe/override` `fields.model` for one shot, or
+  `POST /h3pipe/render` `model` for one run. Precedence is the usual one.
+- **Turning it off** is naming the distilled file again (or clearing the override).
+- **The take records it.** `steps` on the sidecar is the real count, and the frozen
+  shotlist carries `cfg`, `audio_cfg`, `sampler`, `refine_cfg` and `refine_sampler`
+  (`job.values`, as the `base` preset's settings are). `notes` gets "the quality profile
+  (LTX-2.5 dev transformer): 30 steps, video_cfg 4.0, audio_cfg 4.0, euler_ancestral".
+- **Readiness**: `models.quality_model` is an **optional** param whose `default` is the dev
+  file and whose `feature` is "the quality profile (LTX-2.5 dev transformer)". It has no
+  widget of its own — `model` is the widget — so it exists only so `wanted_files` /
+  `GET /h3pipe/targets?ready=1` / `h3.py targets` can say whether the extra is installed.
+  Without it the target is `degraded`, never `not_ready`, and the distilled default renders.
+  `LTXVScheduler` is an optional node with the same feature.
+
+### 2. Reference sheets with the 2.5 ingredients IC-LoRA
+
+When a shot's subjects and plate have picked refs on disk **and**
+`ltx-2.5-22b-ic-lora-ingredients-0.9.safetensors` is installed, `ltx2` now composes the
+same reference sheet `ltx2_ingredients` composes (its `sheet_spec` / `h3_refsheet.py`, from
+`ltx2`'s own `recipe.reference_sheet`) and conditions the clip on it. Otherwise the shot
+renders exactly as `ltx2` always did.
+
+- **The panels come from the shotlist entry**, not from a new build key: the entry's
+  `subjects` (characters first, then props and vehicles) against the shotlist's `subjects`
+  map (`kind`, `sheet`), then `background` as the plate. A character contributes the face
+  panel of its 4-panel sheet on a one-character `close` / `cu` shot and the three-quarter
+  body panel otherwise, as on H3 and `ltx2_ingredients`.
+- **`GET /h3pipe/targets`**: `capabilities.reference_sheet` and `capabilities.subject_refs`
+  are now true for `ltx2`. `capabilities.prompt` stays `"prose"` — the *built* prompt is
+  prose; the two-part one is written at queue time (as `minimax_h3_fl2va` writes its
+  alignment line then).
+- **Ref slots** (`GET /h3pipe/shot`, the sidecar's `refs`): the keyframes as before, then
+  `sheet panel N` for each panel, with `subject` where there is one. **All of them are
+  `optional`**, so they never appear in `missing_refs` and never block a shot — a missing
+  file only leaves that element off the sheet. They carry no `role`, so `stage_inputs`
+  doesn't upload them one by one; their `sha1` in the sidecar is what makes a take
+  `ref`-stale when a view is re-picked.
+- **At queue time** (`h3jobs.stage_inputs` → the target's `stage_inputs`): the sheet is
+  composed at the render size, uploaded as `h3pipe/<sha1>.png`, kept in the take as
+  `<shot>_tNN_refsheet.png` (`slot: "reference sheet"`, `role: "sheet"`), and `inputs` is
+  `{"sheet": "h3pipe/<sha1>.png"}`. The take's frozen shotlist gains `panels` (what was
+  actually on the sheet) and its `prompt` becomes the IC-LoRA's two labelled parts,
+  written by `ltx2_ingredients`' prompt writer: `Reference sheet: …\n\nGenerated video: …`,
+  with a subject that is on the sheet named but no longer described. A **prompt override is
+  never rewritten**. If the build is out of date the built prose prompt renders with the
+  sheet and a note says so.
+- **Nothing here can stop a render.** Unlike `ltx2_ingredients`, where composing is fatal,
+  a ref that isn't a readable image, or a Python without PIL, leaves the shot rendering
+  from the prompt alone with a note.
+- **The graph**, wired as ComfyUI's LTX-2.5 ingredients template wires it: `LoadImage` →
+  `ResizeAndPadImage` (**the stage's own size** — the base stage samples at half the output,
+  so the guide must match) → `RepeatImageBatch` (the clip's frame count) →
+  `LTXAddVideoICLoRAGuide` at `frame_idx` 0, whose `latent_downscale_factor` is the second
+  output of `LTXICLoRALoaderModelOnly` (the IC-LoRA at strength 1.0, the model card's
+  default). Only the guided stage's guider reads the patched model, and one `LTXVCropGuides`
+  per stage takes the guide frames back off (shared with the last-keyframe patch, so a shot
+  with both gets one crop per stage, not two).
+- **Length**: the reference video is exactly the clip's length. The model card asks for
+  ≥ 121 frames, but `LTXAddVideoICLoRAGuide` refuses a guide longer than the latent
+  ("Conditioning frames exceed the length of the latent sequence"), so a shorter shot
+  renders with a note that identity may weaken. A 121-frame (5.04 s) shot is the bucket.
+- **Turning it off** is `lora: none` on the shot, the sequence, a profile (`"loras":
+  ["none"]`) or the series config's pass block — an empty LoRA list means no sheet. That is
+  the opposite of `ltx2_ingredients`, where the IC-LoRA is put *back* into a list that
+  doesn't name it, because that target is pointless without it.
+- **Readiness**: `models.reference_lora` is an **optional** param (family
+  `ltx2.5-ic-lora-ingredients`, folder `loras`, loader `LTXICLoRALoaderModelOnly`) whose
+  `default` is the IC-LoRA and whose `feature` is "reference sheets (LTX-2.5 ingredients
+  IC-LoRA)"; `LTXICLoRALoaderModelOnly`, `LTXAddVideoICLoRAGuide`, `RepeatImageBatch` and
+  `ResizeAndPadImage` are optional nodes with the same feature. Missing → `degraded`, and
+  the shot renders without a sheet. When `resolve_models` hasn't run (a dry run, or ComfyUI
+  not asked) the target's own file is assumed, as every other unresolved param is.
+- **`ltx2_ingredients` is untouched.** It still renders LTX-2.3 with the 2.3 IC-LoRA, its
+  panels are still required, and its sheet still blocks a shot that is missing one. The two
+  functions `ltx2` reuses from it, `panel_view` and `sheet_spec`, took an optional
+  `sheet` argument so each target reads its own `reference_sheet` recipe.
+
+### Where the numbers came from (live, 2026-09-19)
+
+About twenty 97-frame (4.04 s) 768×512 runs of one scratch shot on this machine's ComfyUI,
+one job at a time, seed 12345 throughout. Two settings are **not** in any published template
+and were decided here:
+
+1. **`scheduler.latent`.** `LTXVScheduler` assumes 4096 tokens when nothing feeds its
+   optional `latent`, and shifts as if the latent were far bigger than a 384×256×97 base
+   latent (1248 tokens) really is. Unwired, every dev run came out soft and painterly with
+   mangled hands at cfg 3 and 4. Wired to the base stage's video latent **before any guide
+   widens it** (a reference sheet doubles the sequence), it is right.
+2. **`euler_ancestral`.** ComfyUI's LTX-2 dev templates use plain `euler`, but they run the
+   dev checkpoint with the distilled LoRA on it. On the bare 2.5 dev transformer `euler`
+   stayed soft at every cfg tried; `euler_ancestral` — which the distilled 2.5 workflow
+   itself uses — came out crisp. cfg 3, 4 and 5 were all good; 4 is the shipped middle.
+   20 steps was flatter than 30 for 6 s less, so 30 stands.
+
+With a reference sheet the dev transformer wants other settings again
+(`recipe.sampling.modes.dev.with_sheet`): the IC-LoRA reads the sheet as frames *in context*
+with the clip, and an ancestral sampler re-injects noise over those frames too — on the dev
+model at real guidance that speckled the figure and made it come and go over three runs.
+Plain `euler` holds it, and guidance comes down to 3.0 (ComfyUI's ingredients graph advises
+cfg near 1; the dev model needs more than 1 to resolve at all, and at cfg 1 it was a blur).
+**Distilled + sheet is still the cleaner picture of the two**, and the take says which it
+used.
+
+Measured, same prompt, same seed, 97 frames at 768×512, 24 fps, audio present in all four:
+
+| what | model | steps / cfg / sampler | time | mp4 |
+|---|---|---|---|---|
+| today's default, no sheet | distilled | 8 / 1 / euler_ancestral | 39 s | 1.06 MB |
+| the quality profile, no sheet | dev | 30 / 4 / euler_ancestral | 39 s | 1.30 MB |
+| the new default, with a sheet | distilled | 8 / 1 / euler_ancestral | 30 s | 0.59 MB |
+| the quality profile with a sheet | dev | 30 / 3 / euler | 39 s | 0.99 MB |
+
+The sheet's effect is unmistakable: without it the shot invented its own kitchen and its own
+version of the character; with it, the plate's kitchen (tiles, ceiling panels, floor) and
+the sheet's character (bob, glasses, apron, trousers, shoes) are both reproduced.

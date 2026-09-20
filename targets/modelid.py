@@ -126,6 +126,7 @@ FAMILIES: dict[str, dict] = {
     "minimax-h3-ref2v-turbo-lora": {"label": "MiniMax H3 Ref2V turbo LoRA"},
     "minimax-h3-fl2v-turbo-lora": {"label": "MiniMax H3 FL2V turbo LoRA"},
     "ltx2.3-ic-lora-ingredients": {"label": "LTX 2.3 ingredients IC-LoRA"},
+    "ltx2.5-ic-lora-ingredients": {"label": "LTX 2.5 ingredients IC-LoRA"},
     "wan2.2-i2v-lightx2v-lora": {"label": "Wan 2.2 I2V lightx2v 4-step LoRA"},
 }
 

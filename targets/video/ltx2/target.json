@@ -21,13 +21,59 @@
   },
 
   "recipe": {
-    "_note": "No identity references: subjects are written in words from the series config's `design`, the location from its `description`. Optional shot keyframes: shot:<id>:first conditions frame 0 (LTXVImgToVideoInplace), shot:<id>:last the final frame (LTXVAddGuide). A shot with neither renders text-to-video. LTX-2 makes the soundtrack with the picture and takes no voice sample or recording, so clone / dub / dub_keep_foley shots render with generate and say so.",
+    "_note": "Subjects are written in words from the series config's `design`, the location from its `description`; when the shot's refs are on disk AND the ingredients IC-LoRA is installed they are ALSO shown on a reference sheet (reference_sheet below), which is decided at queue time, never at build time, so a shotlist is what it always was. Optional shot keyframes: shot:<id>:first conditions frame 0 (LTXVImgToVideoInplace), shot:<id>:last the final frame (LTXVAddGuide). A shot with neither renders text-to-video. LTX-2 makes the soundtrack with the picture and takes no voice sample or recording, so clone / dub / dub_keep_foley shots render with generate and say so.",
     "policies": ["generate"],
     "policy_fallback": {"to": "generate", "why": "LTX-2 generates sound with the picture and takes no voice sample or recording"},
     "keyframes": ["first", "last"],
     "keyframe_path": "refs/shots/{shot}/{end}.png",
     "keyframe_strength": {"first": 0.7, "first_refine": 1.0, "last": 1.0},
     "prompt": "prose",
+    "reference_sheet": {
+      "_note": "The ltx2_ingredients sheet, on LTX-2.5: one panel per element, characters first (the face panel of a 4-panel sheet on a single-character close-up, else the three-quarter body panel), then props and vehicles, then the location plate, tiled on black at the render size (comfy_nodes/h3_refsheet.py, through targets/video/ltx2_ingredients/sheet.py). Unlike ltx2_ingredients, every panel is OPTIONAL here: a missing file drops that element from the sheet, and a shot left with none renders exactly as ltx2 always did. `min_frames` is the model card's floor for the looped reference video (121 frames): the guide can't be longer than the clip, so a shorter shot only earns a note that identity may weaken. `stages` are the sampling stages that get the guide (1 = the base pass, 2 = the refine pass). `strength` is the model card's default (the weights ship pre-scaled).",
+      "take_suffix": "_refsheet.png",
+      "background": "black",
+      "gap": 0.02,
+      "sheet_panels": 4,
+      "views": {"body": 0, "face": 3},
+      "face_sizes": ["close", "cu"],
+      "strength": 1.0,
+      "guide_strength": 1.0,
+      "min_frames": 121,
+      "stages": [1],
+      "prompt": "reference sheet + prose",
+      "refs": {
+        "character": {"kind": "character sheet", "shape": "sheet", "views": 4},
+        "object": {"kind": "{kind} reference", "shape": "object"},
+        "location": {"kind": "background plate", "shape": "plate"}
+      }
+    },
+    "sampling": {
+      "_note": "Which sampling schedule each transformer wants, chosen at queue time from the file the job loads (`match`, globs on the file name). `distilled` is the workflow's own and patches nothing: a fixed 8-step base ManualSigmas plus a 3-step refine at cfg 1, so `steps` is recorded, not used. `dev` is the quality profile: patch_graph swaps the base stage's ManualSigmas for an LTXVScheduler at the shot's `steps` and sets both stages' guiders and samplers. Where the numbers come from: ComfyUI's LTX-2 dev templates (video_ltx2_t2v.json runs the dev checkpoint through LTXVScheduler 20 / 2.05 / 0.95 / stretch / terminal 0.1 with CFGGuider 4 on the base stage and 1 on the refine), the LTX-2.5 model card (the distilled file is the fixed 8-step cfg-1 one; dev takes variable steps and guidance), and the live 97-frame runs of one shot at 768x512 on 2026-09-19 recorded in docs/API.md 'LTX-2.5: the quality profile and ingredients references'. Two of those settings are in no template and were decided there: `scheduler.latent` (the base stage's own video latent goes into LTXVScheduler, so its shift follows the shot's token count; without it the node assumes 4096 tokens, shifts as if the latent were far bigger, and the clip comes out soft and painterly) and `euler_ancestral` (plain `euler`, which the LTX-2 dev templates use on a checkpoint carrying the distilled LoRA, came out soft with mangled hands on every cfg tried; ancestral is also what the distilled 2.5 workflow uses). The refine block is the workflow's own refine, written out so the take records it.",
+      "default": "distilled",
+      "modes": {
+        "distilled": {"match": ["*distilled*"]},
+        "dev": {
+          "match": ["*dev*"],
+          "label": "the quality profile (LTX-2.5 dev transformer)",
+          "steps": 30,
+          "sampler": "euler_ancestral",
+          "video_cfg": 4.0,
+          "audio_cfg": 4.0,
+          "scheduler": {"class_type": "LTXVScheduler", "max_shift": 2.05, "base_shift": 0.95,
+                        "stretch": true, "terminal": 0.1, "latent": true},
+          "refine": {"sigmas": "0.85, 0.7250, 0.4219, 0.0", "sampler": "euler_ancestral",
+                     "video_cfg": 1.0, "audio_cfg": 1.0},
+          "with_sheet": {
+            "_note": "What changes when the same shot also draws a reference sheet. The IC-LoRA reads the sheet as frames IN CONTEXT with the clip, and an ancestral sampler re-injects noise over those frames too: on the dev transformer at real guidance that speckles the figure and makes it come and go (three live runs). Plain euler holds it. Guidance also has to come down — ComfyUI's ingredients graph advises cfg near 1, and the dev model needs more than 1 to resolve at all, so 3.0 is the live compromise. Even so, distilled + sheet is the cleaner picture of the two: the take says so.",
+            "sampler": "euler",
+            "video_cfg": 3.0,
+            "audio_cfg": 3.0,
+            "refine": {"sigmas": "0.85, 0.7250, 0.4219, 0.0", "sampler": "euler",
+                       "video_cfg": 1.0, "audio_cfg": 1.0}
+          }
+        }
+      }
+    },
     "size_hints": {
       "keyframe": "the render size (any size works: it is resized to the frame)"
     }
@@ -76,7 +122,7 @@
   },
 
   "models": {
-    "_note": "The family each model param must be (targets/modelid.py): names first, then the file's header (LTX files carry model_version; 2.5's transformer also has keyframes_abs_pos_embedding and no video feed-forward biases). The 2.3 and 2.5 upscalers share every tensor and have no metadata: only the name tells them apart. duration_head is a preset value, not a binding widget: ModelPatchLoader reads it from models/model_patches. Tiers (docs/API.md): the duration head is optional (without it `dur: model` renders the estimate); everything else is required. No base: the preset is already the distilled model with the workflow's fixed 8 + 3 step schedule, and a dev model would need another schedule, so a substitute must say `distilled` like the wanted file (`keep`).",
+    "_note": "The family each model param must be (targets/modelid.py): names first, then the file's header (LTX files carry model_version; 2.5's transformer also has keyframes_abs_pos_embedding and no video feed-forward biases). The 2.3 and 2.5 upscalers share every tensor and have no metadata: only the name tells them apart. duration_head is a preset value, not a binding widget: ModelPatchLoader reads it from models/model_patches; quality_model and reference_lora are neither — they have no preset value and no widget of their own, only a `default`, so readiness (targets.wanted_files) and `h3.py targets` can say whether the two extras are installed. Tiers (docs/API.md): the duration head, the dev transformer and the ingredients IC-LoRA are optional (without one, only its feature is off); everything else is required. No base: the preset is already the distilled model with the workflow's fixed 8 + 3 step schedule, and the dev model needs another schedule (recipe.sampling), so a substitute must say `distilled` like the wanted file (`keep`).",
     "model": {"family": "ltx2.5", "patterns": ["ltx-2.5*", "*ltx*2.5*", "*ltx*2_5*"], "tier": "required",
               "keep": ["(?<![a-z])(distilled|dev)(?![a-z])"], "exclude": ["*lora*"]},
     "text_encoder": {"family": "ltx2.5-text-encoder", "patterns": ["*gemma*4*ltx*2.5*"], "tier": "required"},
@@ -86,14 +132,35 @@
                  "keep": ["(spatial|temporal)", "[_-](x\\d+(?:\\.\\d+)?)"]},
     "duration_head": {"family": "ltx2.5-duration-head", "patterns": ["*ltx*2.5*duration*"],
                       "folder": "model_patches", "class_type": "ModelPatchLoader", "field": "name",
-                      "tier": "optional", "feature": "dur: model (duration head)"}
+                      "tier": "optional", "feature": "dur: model (duration head)"},
+    "quality_model": {"family": "ltx2.5", "patterns": ["ltx-2.5*", "*ltx*2.5*", "*ltx*2_5*"],
+                      "folder": "diffusion_models", "class_type": "UNETLoader", "field": "unet_name",
+                      "tier": "optional", "keep": ["(?<![a-z])(distilled|dev)(?![a-z])"],
+                      "exclude": ["*lora*"],
+                      "default": "ltx-2.5-22b-dev-transformer-comfy-int8-convrot.safetensors",
+                      "feature": "the quality profile (LTX-2.5 dev transformer)"},
+    "reference_lora": {"family": "ltx2.5-ic-lora-ingredients",
+                       "patterns": ["*ltx*2*5*ic*lora*ingredients*"],
+                       "folder": "loras", "class_type": "LTXICLoRALoaderModelOnly",
+                       "field": "lora_name", "tier": "optional",
+                       "default": "ltx-2.5-22b-ic-lora-ingredients-0.9.safetensors",
+                       "feature": "reference sheets (LTX-2.5 ingredients IC-LoRA)"}
   },
 
   "nodes": {
-    "_note": "Node classes beyond the workflow's own: the keyframe conditioning patch_graph adds (ComfyUI core), and the duration predictor `dur: model` adds (optional: without it the build's estimate is rendered).",
+    "_note": "Node classes beyond the workflow's own: the keyframe conditioning patch_graph adds (ComfyUI core), the duration predictor `dur: model` adds, the reference sheet adds (ComfyUI-LTXVideo's two IC-LoRA nodes, as ComfyUI's LTX-2.5 ingredients template wires them, plus two core image nodes) and the quality profile adds (LTXVScheduler, core). All four extras are optional: without their nodes only that feature is off.",
     "LoadImage": {}, "LTXVPreprocess": {}, "LTXVAddGuide": {}, "LTXVCropGuides": {},
     "ModelPatchLoader": {"tier": "optional", "feature": "dur: model (duration head)"},
-    "LTXVDurationPredictor": {"tier": "optional", "feature": "dur: model (duration head)"}
+    "LTXVDurationPredictor": {"tier": "optional", "feature": "dur: model (duration head)"},
+    "LTXVScheduler": {"tier": "optional", "feature": "the quality profile (LTX-2.5 dev transformer)"},
+    "LTXICLoRALoaderModelOnly": {"tier": "optional",
+                                 "feature": "reference sheets (LTX-2.5 ingredients IC-LoRA)"},
+    "LTXAddVideoICLoRAGuide": {"tier": "optional",
+                               "feature": "reference sheets (LTX-2.5 ingredients IC-LoRA)"},
+    "RepeatImageBatch": {"tier": "optional",
+                         "feature": "reference sheets (LTX-2.5 ingredients IC-LoRA)"},
+    "ResizeAndPadImage": {"tier": "optional",
+                          "feature": "reference sheets (LTX-2.5 ingredients IC-LoRA)"}
   },
 
   "presets": {
@@ -122,7 +189,9 @@
   },
 
   "downloads": {
-    "_note": "Where to get each file this target names (docs/API.md 'Downloads'). A url is only given when a trustworthy record has it: a ComfyUI template's or saved workflow's properties.models entry, or ComfyUI-Manager's model list; `source` says which. Otherwise url is null and source says what to search for. Never a guessed URL.",
+    "_note": "Where to get each file this target names (docs/API.md 'Downloads'). A url is only given when a trustworthy record has it: a ComfyUI template's or saved workflow's properties.models entry, ComfyUI-Manager's model list, or (the ingredients IC-LoRA, which neither lists) the file listing of the model's own Hugging Face repo, read from the Hub API; `source` says which. Otherwise url is null and source says what to search for. Never a guessed URL.",
+    "ltx-2.5-22b-dev-transformer-comfy-int8-convrot.safetensors": {"folder": "diffusion_models", "url": "https://huggingface.co/Lightricks/LTX-2.5/resolve/main/diffusion_models/ltx-2.5-22b-dev-transformer-comfy-int8-convrot.safetensors", "source": "ComfyUI-Manager model list (\"LTX-2.5 22B Dev Transformer Comfy INT8\")"},
+    "ltx-2.5-22b-ic-lora-ingredients-0.9.safetensors": {"folder": "loras", "url": "https://huggingface.co/Lightricks/LTX-2.5-22b-IC-LoRA-Ingredients/resolve/main/ltx-2.5-22b-ic-lora-ingredients-0.9.safetensors", "source": "the Hugging Face repo Lightricks/LTX-2.5-22b-IC-LoRA-Ingredients, whose file listing (Hub API, 2026-09-19) has this one weights file"},
     "ltx-2.5-audio-vae-bf16.safetensors": {"folder": "vae", "url": "https://huggingface.co/Lightricks/LTX-2.5/resolve/main/vae/ltx-2.5-audio-vae-bf16.safetensors", "source": "ComfyUI template video_ltx2_5_i2v.json (properties.models)"},
     "ltx-2.5-duration-head-bf16.safetensors": {"folder": "model_patches", "url": "https://huggingface.co/Lightricks/LTX-2.5/resolve/main/model_patches/ltx-2.5-duration-head-bf16.safetensors", "source": "ComfyUI-Manager model list (user/__manager/cache/4245046894_model-list.json: \"LTX-2.5 Duration Head BF16\")"},
     "ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors": {"folder": "diffusion_models", "url": "https://huggingface.co/Lightricks/LTX-2.5/resolve/main/diffusion_models/ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors", "source": "ComfyUI template video_ltx2_5_i2v.json (properties.models)"},

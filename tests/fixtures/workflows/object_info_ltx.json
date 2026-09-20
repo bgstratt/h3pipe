@@ -377,6 +377,83 @@
    "CLIP"
   ]
  },
+ "LTXAddVideoICLoRAGuide": {
+  "input": {
+   "required": {
+    "positive": [
+     "CONDITIONING"
+    ],
+    "negative": [
+     "CONDITIONING"
+    ],
+    "vae": [
+     "VAE"
+    ],
+    "latent": [
+     "LATENT"
+    ],
+    "image": [
+     "IMAGE"
+    ],
+    "frame_idx": [
+     "INT"
+    ],
+    "strength": [
+     "FLOAT"
+    ],
+    "latent_downscale_factor": [
+     "FLOAT"
+    ],
+    "crop": [
+     "COMBO"
+    ],
+    "use_tiled_encode": [
+     "BOOLEAN"
+    ],
+    "tile_size": [
+     "INT"
+    ],
+    "tile_overlap": [
+     "INT"
+    ]
+   },
+   "optional": {}
+  },
+  "output": [
+   "CONDITIONING",
+   "CONDITIONING",
+   "LATENT"
+  ],
+  "output_name": [
+   "positive",
+   "negative",
+   "latent"
+  ]
+ },
+ "LTXICLoRALoaderModelOnly": {
+  "input": {
+   "required": {
+    "model": [
+     "MODEL"
+    ],
+    "lora_name": [
+     "COMBO"
+    ],
+    "strength_model": [
+     "FLOAT"
+    ]
+   },
+   "optional": {}
+  },
+  "output": [
+   "MODEL",
+   "FLOAT"
+  ],
+  "output_name": [
+   "model",
+   "latent_downscale_factor"
+  ]
+ },
  "LTXVAddGuide": {
   "input": {
    "required": {
@@ -679,6 +756,38 @@
   ],
   "output_name": [
    "output_image"
+  ]
+ },
+ "LTXVScheduler": {
+  "input": {
+   "required": {
+    "steps": [
+     "INT"
+    ],
+    "max_shift": [
+     "FLOAT"
+    ],
+    "base_shift": [
+     "FLOAT"
+    ],
+    "stretch": [
+     "BOOLEAN"
+    ],
+    "terminal": [
+     "FLOAT"
+    ]
+   },
+   "optional": {
+    "latent": [
+     "LATENT"
+    ]
+   }
+  },
+  "output": [
+   "SIGMAS"
+  ],
+  "output_name": [
+   "SIGMAS"
   ]
  },
  "LTXVSeparateAVLatent": {

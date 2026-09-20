@@ -265,7 +265,8 @@ class KeyframeTest(unittest.TestCase):
     def test_a_take_rendered_without_a_keyframe_is_stale_once_there_is_one(self):
         make_take(self.root, "proxy", "sh030")
         t = self.render_take("sh040")                     # LTX, text only
-        self.assertEqual({r["role"]: r["sha1"] for r in t.sidecar["refs"]},
+        # the keyframes; the sheet panels beside them carry no role
+        self.assertEqual({r["role"]: r["sha1"] for r in t.sidecar["refs"] if r.get("role")},
                          {"first": None, "last": None})
         self.assertEqual(self.stale("sh040"), {t.take: []})
         self.kf("sh040")

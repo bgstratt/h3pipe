@@ -433,6 +433,25 @@ class TargetsRouteTest(ApiTest):
         self.assertEqual(lt["template"]["frames"], {"step": 8, "base": 1, "max": 481})
         self.assertEqual(lt["template"]["fps"], "series")
         self.assertEqual(lt["presets"]["proxy"]["width"], 448)
+        # the two optional extras a picker should see: the dev transformer
+        # (the quality profile) and the 2.5 ingredients IC-LoRA (sheets).
+        # Neither is a preset value, so the distilled presets are unchanged.
+        self.assertTrue(lt["capabilities"]["reference_sheet"])
+        self.assertTrue(lt["capabilities"]["subject_refs"])
+        self.assertEqual(lt["capabilities"]["prompt"], "prose")
+        self.assertEqual({p: m["tier"] for p, m in lt["models"].items()
+                          if m["tier"] == "optional"},
+                         {"duration_head": "optional", "quality_model": "optional",
+                          "reference_lora": "optional"})
+        self.assertEqual(lt["models"]["quality_model"]["feature"],
+                         "the quality profile (LTX-2.5 dev transformer)")
+        self.assertEqual(lt["models"]["reference_lora"]["label"], "LTX 2.5 ingredients IC-LoRA")
+        self.assertEqual(lt["presets"]["final"]["model"],
+                         "ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors")
+        self.assertEqual(lt["presets"]["final"]["steps"], 8)
+        self.assertNotIn("base", lt["presets"]["final"])          # no accelerator to lose
+        self.assertIn("ltx-2.5-22b-dev-transformer-comfy-int8-convrot.safetensors",
+                      lt["downloads"])
         self.assertEqual(data["default"],
                          {"video": H3, "image": "krea2", "audio": "ltx2_voice"})
         images = self.ok(A.get_targets(self.ctx, {"kind": "image"}))["targets"]

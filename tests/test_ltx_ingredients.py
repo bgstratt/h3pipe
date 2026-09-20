@@ -172,7 +172,10 @@ class TargetTest(unittest.TestCase):
         self.assertTrue(d["capabilities"]["reference_sheet"])
         self.assertEqual(d["capabilities"]["policies"], ["generate"])
         self.assertEqual(d["capabilities"]["policy_fallback"], "generate")
-        self.assertFalse(TG.load_target("ltx2").describe()["capabilities"]["reference_sheet"])
+        # ltx2 draws a sheet too now (its own 2.5 IC-LoRA), but only when the
+        # refs and the LoRA are there; here it is the target's whole point
+        self.assertTrue(TG.load_target("ltx2").describe()["capabilities"]["reference_sheet"])
+        self.assertEqual(TG.load_target("ltx2").describe()["capabilities"]["prompt"], "prose")
         self.assertEqual(self.t.audio_policy("clone")[0], "generate")
 
     def test_length_warning_and_too_long(self):
