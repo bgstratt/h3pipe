@@ -31,12 +31,15 @@ IR + targets). Read it before changing `h3build.py`, `h3render.py`, `kreagen.py`
 - `comfy_nodes/` — the ComfyUI custom node pack (loader, info, save)
 - `docs/AUTHORING.md` — the script/series config format (source of truth; `prompts/` is
   generated from it by `python tools/make_prompts.py`)
+- `INSTALL.md` — setting up on a fresh machine; its model list is generated from each
+  target's `downloads` by `python tools/make_models_md.py` (`--check` in `tests/test_docs.py`)
 
 ## Rules
 
 - Pipeline scripts are **stdlib only** (Python 3.10+). Only `comfy_nodes/` may use
   torch/numpy/PIL (ComfyUI provides them).
-- Never hand-edit generated files (`shotlist/`, `refs_todo.*`); change the script,
+- Never hand-edit generated files (`shotlist/`, `refs_todo.*`, `prompts/`, INSTALL.md's
+  model block); change the script,
   the series config or the code and rebuild.
 - Refactors must keep the golden outputs byte-identical (`tests/golden/`,
   `python -m pytest` or `python -m unittest discover -s tests`) unless the change is
