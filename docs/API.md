@@ -2019,3 +2019,10 @@ its own section.
   one voice ref with `--only voice:<id>`, and says so otherwise; `--pick` forces the pick.
   A voice's row in the listing shows its length instead of a picture size, and the banner
   names the audio target on its own line.
+
+### Phase 9c: fixes after merging
+
+- **[fixed] `align_report.md` is skipped when looking for the episode's script** (`h3edit.SCRIPT_SKIP`, `h3.py`). Without it, an episode whose script isn't `<folder>.md` had two `.md` files after an align, and every later build, `GET /h3pipe/source` and promote failed with "can't tell which .md".
+- **[added] Audio `capabilities`** also carry `min_seconds` and `default_seconds`, so a picker can offer the range a generate accepts (outside it is 400).
+- **[fixed] `GET /h3pipe/browse?files=audio`** lists `.aac` and `.opus` too, the same set `POST /h3pipe/track` accepts.
+- **Known, not changed:** `POST /h3pipe/refs/voice-from-take` answers `picked` as a boolean (the refs listing's `picked` is a take number) and `source` as an object `{shot, take, pass, start, end, file}`; the editor refetches `/refs` instead of using it.

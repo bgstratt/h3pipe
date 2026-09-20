@@ -81,7 +81,7 @@ def episode_files(ep: str) -> tuple[str, str]:
     md = os.path.join(ep, f"{base}.md")
     if not os.path.isfile(md):
         cands = [p for p in glob.glob(os.path.join(ep, "*.md"))
-                 if not os.path.basename(p).lower().startswith(("refs_todo", "readme", "notes"))]
+                 if not os.path.basename(p).lower().startswith(("refs_todo", "readme", "notes", "align_report"))]
         if len(cands) != 1:
             sys.exit(f"  !! can't tell which script to use in {ep}: "
                      f"{[os.path.basename(c) for c in cands] or 'no .md found'}")

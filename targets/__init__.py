@@ -610,10 +610,13 @@ class Target:
                     "negative_prompt": bool(self.binding.specs("negative"))}
         if self.kind == "audio":
             caps = self.spec.get("capabilities") or {}
+            default, hi, lo = self.seconds_range()
+            # the whole range, so a picker can offer what a generate accepts
+            # (a request outside it is 400)
             return {"mode": caps.get("mode") or "t2a",
                     "reference_audio": bool(caps.get("reference_audio")),
-                    "max_seconds": float(caps.get("max_seconds")
-                                         or self.seconds_range()[1]),
+                    "max_seconds": float(caps.get("max_seconds") or hi),
+                    "min_seconds": lo, "default_seconds": default,
                     "negative_prompt": bool(self.binding.specs("negative"))}
         return {"policies": self.policies, "duration": self.duration,
                 # the first keyframe is required (Wan 14B I2V: the picture it animates)

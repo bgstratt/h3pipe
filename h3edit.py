@@ -75,7 +75,7 @@ import h3takes as T
 # status: what the editor's shot bin shows
 # ---------------------------------------------------------------------------
 
-SCRIPT_SKIP = ("refs_todo", "readme", "notes")
+SCRIPT_SKIP = ("refs_todo", "readme", "notes", "align_report")
 
 
 def episode_script(root: str) -> str | None:
@@ -129,7 +129,7 @@ def find_episodes(roots: list[str], depth: int = 2) -> list[dict]:
 
 BROWSE_LIMIT = 1000
 BROWSE_EXTS = {"image": (".png", ".jpg", ".jpeg", ".webp"),
-               "audio": (".wav", ".mp3", ".flac", ".ogg", ".m4a")}
+               "audio": (".wav", ".mp3", ".flac", ".ogg", ".m4a", ".aac", ".opus")}
 
 
 def browse(path: str | None, files: str | None = None) -> dict:

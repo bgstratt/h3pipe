@@ -78,6 +78,10 @@ class AudioTargetTest(unittest.TestCase):
         self.assertTrue(d["default"])
         self.assertEqual(d["capabilities"]["mode"], "t2a")
         self.assertEqual(d["capabilities"]["max_seconds"], 20.0)
+        # the whole range is published: a picker must not guess the floor
+        caps, rng = d["capabilities"], TG.load_target("ltx2_voice", "audio").seconds_range()
+        self.assertEqual((caps["default_seconds"], caps["max_seconds"], caps["min_seconds"]),
+                         rng)
         self.assertTrue(d["capabilities"]["negative_prompt"])
         # reference_audio is off: the ID-LoRA weights aren't installed (target.json)
         self.assertFalse(d["capabilities"]["reference_audio"])

@@ -454,6 +454,20 @@ class AlignWritesTest(ApiTest):
                       progress=events.append, **kw)
         return res, events
 
+    def test_report_is_not_mistaken_for_the_script(self):
+        """h3align leaves align_report.md in the episode folder. An episode
+        whose script isn't <folder>.md then had two .md files, and every later
+        build, source read and promote failed with "can't tell which .md"."""
+        script = E.episode_script(self.ep)
+        renamed = os.path.join(self.ep, "ep99_other_name.md")
+        os.replace(script, renamed)
+        self.assertEqual(E.episode_script(self.ep), renamed)
+        res, _ = self.run_align()
+        self.assertTrue(res["ok"])
+        self.assertTrue(os.path.isfile(os.path.join(self.ep, "align_report.md")))
+        self.assertEqual(E.episode_script(self.ep), renamed)
+        self.assertTrue(self.ok(A.get_source(self.ctx, {"ep": self.ep, "file": "script"}))["text"])
+
     def test_writes_through_h3source(self):
         script = E.episode_script(self.ep)
         before = H.read_source(self.ep, "script")
