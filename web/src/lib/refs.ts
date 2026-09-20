@@ -120,15 +120,19 @@ export function takeUsable(t: Pick<RefTake, "status" | "image" | "audio" | "usab
   return t.usable ?? (t.status === "ok" && !!takeFile(t));
 }
 
-/** Generation isn't offered for voices (nothing generates them yet). Keyframes
- * are generated from Phase 8.5 on (a still by the keyframe image model), on a
- * server that lists them as needed refs (with `need`) or says `can_generate`. */
+/**
+ * Keyframes are generated from Phase 8.5 on (a still by the keyframe image
+ * model), and voices from Phase 9c-B (a sample by the episode's audio
+ * target), on a server that says so. A server from before either answers
+ * nothing for them, and the kind rule keeps the old behaviour.
+ */
 export function canGenerate(r: Pick<Ref, "kind" | "scope"> & { can_generate?: boolean; need?: Ref["need"] }): boolean {
   // the server knows best (a character with no sheet or no design can't be
-  // generated); the kind rule is the fallback
+  // generated; a voice needs an audio target); the kind rule is the fallback
   if (r.can_generate === false) return false;
   if (groupOf(r) === "keyframes") return r.can_generate === true || r.need !== undefined;
-  return r.kind !== "voice";
+  if (r.kind === "voice") return r.can_generate === true;
+  return true;
 }
 
 /** The Refs tab's summary line. */

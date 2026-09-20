@@ -170,6 +170,12 @@ export interface Track {
   rate?: number | null;
   /** the file is there (as built: false for a missing file; `duration` / `rate` are then null) */
   exists?: boolean;
+  /** Phase 9c: a usable transcript sits beside the recording (`<rec>.words.json`,
+   * newer than it): re-aligning then needs no Whisper, only ffmpeg. */
+  words?: boolean;
+  /** Phase 9c: how many of the pass's shots carry a dialogue window (0 until
+   * the script has `audio:` lines and the episode is rebuilt). */
+  aligned?: number;
 }
 
 /** Phase 9b: GET /h3pipe/peaks. */
@@ -188,6 +194,104 @@ export interface PeaksResult {
 
 /** Phase 9b: what POST /h3pipe/cut/reset and /cut/copy touch. */
 export type CutWhat = "order" | "trims" | "all";
+
+// ---------------------------------------------------------------------------
+// Phase 9c-A: attaching and aligning a recording
+// ---------------------------------------------------------------------------
+
+/** GET /h3pipe/align/ready: what h3align needs, in the Python that would run it. */
+export interface AlignReady {
+  ready: boolean;
+  /** the ffmpeg on PATH, or null */
+  ffmpeg: string | null;
+  /** pip names, in order: ffmpeg, numpy, faster-whisper */
+  missing: string[];
+  /** the interpreter the answer is about (ComfyUI's own) */
+  python: string;
+  /** the pip line for the missing packages ("" when only ffmpeg is missing) */
+  install: string;
+  /** as built: what to do when ffmpeg is missing */
+  ffmpeg_hint?: string;
+  /** as built: the installed version ("" without metadata), null when it isn't installed */
+  packages?: Record<string, string | null>;
+  models?: { default?: string; choices?: string[] };
+}
+
+/** POST /h3pipe/track: attach (or clear) the episode's dialogue recording. */
+export interface TrackResult {
+  track: Track | null;
+  /** the series config's hash after the write */
+  hash: string;
+  /** the rebuild; it FAILS when the script has no `audio:` windows yet — that
+   * is "align to finish", not an error (API.md "Phase 9c-A as built") */
+  build: BuildResult | null;
+  /** the recording's path relative to the episode */
+  path?: string | null;
+  /** it was copied into `<ep>/audio/` (false: used where it already was) */
+  copied?: boolean;
+  /** the whole series config was rewritten in the promote's format */
+  reformatted?: boolean;
+}
+
+export interface AlignRequest {
+  ep: string;
+  /** a path relative to the episode; without it, the series config's `audio.track` */
+  track?: string | null;
+  model?: string | null;
+  /** snap the windows to the frame grid (default true) */
+  snap?: boolean;
+  dry_run?: boolean;
+  pass?: Pass;
+}
+
+/** One shot in an align report: null times mean it keeps its `dur:`. */
+export interface AlignChange {
+  shot: string;
+  audio_in: number | null;
+  audio_out: number | null;
+  note?: string;
+}
+
+/** POST /h3pipe/align. */
+export interface AlignResult {
+  ok: boolean;
+  dry_run: boolean;
+  /** align_report.md's text (a dry run has it too) */
+  report: string;
+  /** "align_report.md", or null on a dry run */
+  report_path: string | null;
+  changes: AlignChange[];
+  notes: string[];
+  recording: string | null;
+  duration: number | null;
+  /** a cached transcript was used (no Whisper ran) */
+  words: boolean;
+  script_hash: string | null;
+  series_hash: string | null;
+  track: Track | null;
+  build: BuildResult | null;
+  /** everything h3align printed (progress lines removed) */
+  log: string;
+}
+
+/** The body of POST /h3pipe/align's 409: a dependency isn't installed. */
+export interface AlignMissing {
+  error: string;
+  missing: string[];
+  install: string;
+  python: string;
+  ffmpeg: string | null;
+  /** a transcript was found: no Whisper is needed, only what's still listed */
+  words?: boolean;
+}
+
+/** The `h3pipe.align` event, while a run is going. */
+export interface AlignEvent {
+  ep: string;
+  stage: "transcribe" | "match" | "write" | (string & {});
+  pct: number;
+  text: string;
+}
 
 /** PUT /h3pipe/episode-target: the episode's target fields, as GET /h3pipe/episode has them. */
 export interface EpisodeTargetResult {
@@ -330,6 +434,10 @@ export interface BuildPassResult {
 export interface BuildResult {
   ok: boolean;
   passes: Partial<Record<Pass, BuildPassResult>>;
+  /** As built: set (with no passes at all) when the build couldn't start —
+   * no series.json, or the folder has more than one candidate script
+   * ("can't tell which .md in the folder is the script"). */
+  error?: string;
 }
 
 export type SeedMode = "auto" | "new" | "same";
@@ -554,9 +662,10 @@ export interface RefTake {
   image: string | null;
   /** a voice's candidate recording (then `image` is null) */
   audio?: string | null;
-  /** "frame": a keyframe cut out of a video take (POST /h3pipe/refs/keyframe) */
-  source: "generated" | "imported" | "frame";
-  /** where a "frame" take came from */
+  /** "frame": a keyframe cut out of a video take (POST /h3pipe/refs/keyframe);
+   * "from_take" (Phase 9c): a voice sample cut out of a take's sound */
+  source: "generated" | "imported" | "frame" | "from_take";
+  /** where a "frame" or "from_take" take came from */
   from?: RefFrameSource;
   note: string;
   prompt?: string | null;
@@ -575,7 +684,19 @@ export interface RefTake {
   target?: string | null;
   /** an upload's file name (POST /h3pipe/refs/import, multipart) */
   original_name?: string;
+  // ---- Phase 9c-B: a voice candidate ----
+  /** how long it was asked to be (whole seconds after the grid snapped it) */
+  seconds?: number | null;
+  /** the line it says */
+  line?: string | null;
+  /** where that line came from */
+  line_source?: VoiceLineSource | null;
 }
+
+/** Where a generated voice's line comes from: the character's longest line in
+ * this episode's script, the fixed neutral sentence, this call's prompt, or
+ * the ref's prompt override. */
+export type VoiceLineSource = "script" | "neutral" | "request" | "override" | (string & {});
 
 /** A ref's override as `/refs` lists it: the field names, `stale`, and the values. */
 export interface RefOverrideInfo {
@@ -610,8 +731,16 @@ export interface RefEffective {
   steps?: number | null;
   width?: number | null;
   height?: number | null;
-  /** the image target a generate uses now */
+  /** the image target a generate uses now (an audio one for a voice) */
   target?: string | null;
+  // ---- Phase 9c-B, a voice ref ----
+  /** how long a generate would be, after the target's grid snapped it */
+  seconds?: number | null;
+  /** the line it would say, and where that line comes from */
+  line?: string | null;
+  line_source?: VoiceLineSource | null;
+  /** the audio target's longest sample */
+  max_seconds?: number | null;
 }
 
 /** Phase 8.5: whether a shot's target needs a keyframe to render. */
@@ -646,6 +775,9 @@ export interface RefDefaults {
   /** the image target keyframes generate with */
   keyframe_target?: string | null;
   keyframe_target_source?: RefDefaultSource | null;
+  /** Phase 9c-B: the audio target voice refs generate with */
+  voice_target?: string | null;
+  voice_target_source?: RefDefaultSource | null;
 }
 
 export interface Ref {
@@ -724,6 +856,9 @@ export interface RefGenerateRequest {
   /** Phase 8.5: an image target for this call, beating the ref's override and
    * the series default. Only sent when set. */
   target?: string | null;
+  /** Phase 9c-B: how many seconds of voice (a voice ref only; 400 on anything
+   * else, or outside the audio target's range). Only sent when set. */
+  seconds?: number | null;
 }
 
 export interface RefGenerateResult {
@@ -794,14 +929,65 @@ export interface RefDiscardRequest {
   take: number;
 }
 
-/** A keyframe take's source: shot, take and pass, and the frame index used. */
+/** A keyframe take's source: shot, take and pass, and the frame index used.
+ * Phase 9c: a voice cut out of a take carries `start` / `end` seconds instead
+ * of a frame. */
 export interface RefFrameSource {
   shot: string;
   take: number | null;
   pass: Pass | null;
-  frame: number | null;
+  frame?: number | null;
   frames?: number | null;
+  /** seconds into the take's sound (source "from_take") */
+  start?: number | null;
+  end?: number | null;
 }
+
+/** Where a voice sample was cut from (the answer's `source`, as built). */
+export interface VoiceClipSource {
+  shot: string;
+  take: number | null;
+  pass: Pass | null;
+  start: number;
+  end: number;
+  /** the file the sound came from, relative to the episode */
+  file?: string | null;
+}
+
+/** POST /h3pipe/refs/voice-from-take: a line a take already spoke as a sample. */
+export interface VoiceFromTakeRequest {
+  ep: string;
+  ref: string;
+  shot: string;
+  take: number;
+  pass: Pass;
+  start: number;
+  end: number;
+  /** null (the default): pick it only when the voice has no live file */
+  pick?: boolean | null;
+  note?: string;
+}
+
+/**
+ * The ref as `/refs` lists it, plus what the cut became. Careful: as built,
+ * the answer's `picked` is a BOOLEAN (whether the new candidate went live),
+ * not the ref listing's picked take number, which it overwrites — so the
+ * editor refetches the listing instead of using this as a Ref.
+ */
+export type VoiceFromTakeResult = Omit<Ref, "picked"> & {
+  picked: boolean;
+  /** the new candidate */
+  take: number;
+  /** where the sound came from. As built this is an OBJECT (the contract only
+   * said "source"): the shot, take, pass, span and the file it was cut from. */
+  source?: VoiceClipSource | null;
+  /** the pick wrote `voice_sample` into the series config */
+  series_changed?: boolean;
+};
+
+/** PUT /h3pipe/refs/pick: the ref, and whether the series config gained a
+ * `voice_sample` line (Phase 9c-B). */
+export type RefPickResult = Ref & { series_changed?: boolean };
 
 /** POST /h3pipe/refs/keyframe: a shot's first / last keyframe from a frame of a take. */
 export interface RefKeyframeRequest {
@@ -840,7 +1026,7 @@ export interface RefEvent {
 // targets (API.md "Targets (Phase 7)", "Phase 8 additions")
 // ---------------------------------------------------------------------------
 
-export type TargetKind = "video" | "image";
+export type TargetKind = "video" | "image" | "audio";
 
 /** One binding entry: a graph widget (`class_type` + `field`, or for LoRAs
  * `name`/`strength`/`input`/`chain`), or `{"via": "loader"}`. */
@@ -892,6 +1078,11 @@ export interface Target {
     max_refs?: number;
     /** Phase 8.5, video: the first keyframe is required (Wan 14B I2V) */
     requires_first?: boolean;
+    /** Phase 9c-B, audio targets: it can copy a voice from a sample
+     * (`ltx2_voice` says false: the ID-LoRA weights aren't installed) */
+    reference_audio?: boolean;
+    /** Phase 9c-B, audio targets: the longest sample it generates, seconds */
+    max_seconds?: number;
     [key: string]: unknown;
   };
   template?: { fps?: number; frames?: { step?: number; base?: number; max?: number }; size_multiple?: number };

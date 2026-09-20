@@ -581,3 +581,20 @@
 }
 .h3-cut-field { gap: 4px; }
 .h3-root input.h3-in.h3-bad { border-color: var(--h3-error); }
+
+/* ---- Phase 9c: the dialogue recording, and voice refs ---- */
+.h3-track-drop {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 4px; padding: 6px 8px;
+  border: 1px dashed var(--h3-border); border-radius: 4px; background: var(--h3-bg2);
+}
+.h3-align-changes { max-height: 180px; overflow: auto; }
+.h3-ok { color: var(--h3-ok); }
+.h3-voice-wave { margin-top: 0; }
+.h3-span-wave { cursor: crosshair; touch-action: none; }
+.h3-span {
+  position: absolute; top: 0; bottom: 0; background: color-mix(in srgb, var(--h3-accent) 22%, transparent);
+  box-shadow: inset 0 0 0 1px var(--h3-accent);
+}
+.h3-span-h { position: absolute; top: 0; bottom: 0; width: 7px; cursor: ew-resize; background: color-mix(in srgb, var(--h3-accent) 55%, transparent); }
+.h3-span-h.h3-l { left: -3px; }
+.h3-span-h.h3-r { right: -3px; }

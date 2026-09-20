@@ -14,13 +14,15 @@ import { discardRefText, discardTakeText, fileKindProblem, missingResultText } f
 import { passesFilter, usedBy, viewLabel, type RefFilter } from "./lib/refs";
 import { folderPath, isMissingFileSkip, readinessOf, skipMissingFiles } from "./lib/readiness";
 import { overrideTargetValue, seriesDefaultTarget, shotTarget } from "./lib/targets";
+import { buildError, changedShots, needsAlignBuild, resultSummary, scriptClash, trackFileProblem, trackName } from "./lib/track";
 import {
   detailKey, persistPrefs, statusKey, store, uploadKey, type AppState, type BrowseState, type CompareMode,
-  type RefTakeRef,
+  type RefTakeRef, type VoiceClipState,
 } from "./store";
 import type {
-  BuildResult, EpisodeStatus, Lora, SourceFile, OverrideFields, Pass, ProgressEvent, PromptEvent, Ref, RefEvent,
-  RefGenerateRequest, RefTake, RenderRequest, RenderResult, RenderSkip, Seed, SeedMode, ShotDetail, TakeEvent, TakeRef,
+  AlignEvent, AlignMissing, AlignRequest, BuildResult, EpisodeStatus, Lora, SourceFile, OverrideFields, Pass, ProgressEvent,
+  PromptEvent, Ref, RefEvent, RefGenerateRequest, RefTake, RenderRequest, RenderResult, RenderSkip, Seed, SeedMode, ShotDetail,
+  TakeEvent, TakeRef, TrackResult, VoiceFromTakeRequest,
 } from "./types";
 
 const set = store.set;
@@ -268,6 +270,8 @@ export function selectEpisode(ep: string | null) {
     ep, shot: null, take: null, viewer: null, menu: null, redo: null, renderAsk: null, refSel: null,
     cutPlay: { ...s.cutPlay, playing: false, pos: 0 },
     build: { busy: false, result: null, error: null },
+    // Phase 9c: the Recording and voice-clip windows belong to one episode
+    trackPanel: null, voiceClip: null, alignRun: null,
   }));
   if (ep) {
     void refreshEpisode();
@@ -576,12 +580,13 @@ export async function build() {
   }
 }
 
-function firstError(r: { passes: Partial<Record<Pass, { ok: boolean; error: string }>> }): string {
+function firstError(r: { passes: Partial<Record<Pass, { ok: boolean; error: string }>>; error?: string }): string {
   for (const p of ["final", "proxy"] as Pass[]) {
     const x = r.passes[p];
     if (x && !x.ok) return `${p}: ${x.error}`;
   }
-  return "";
+  // a build that couldn't start has no passes, only `error`
+  return r.error ?? "";
 }
 
 export function baseRender(ep: string, pass: Pass, shots: string[], allowMissingRefs = false, target: string | null = null, allowModelMismatch = false): RenderRequest {
@@ -1031,6 +1036,13 @@ export function wireEvents() {
     scheduleRefresh();
     if (get().ep && get().refs[get().ep!]) scheduleRefsRefresh();
   });
+  h.on("h3pipe.align", (d) => {
+    const a = (d ?? {}) as AlignEvent;
+    if (!sameEp(a.ep, get().ep)) return;
+    set((s) => (s.alignRun
+      ? { alignRun: { ...s.alignRun, stage: a.stage || s.alignRun.stage, pct: num(a.pct), text: a.text ?? "" } }
+      : {}));
+  });
   h.on("h3pipe.ref", (d) => {
     const r = (d ?? {}) as RefEvent;
     if (!sameEp(r.ep, get().ep)) return;
@@ -1395,16 +1407,18 @@ export async function setRefDefault(kind: RefTargetKind, target: string | null):
   if (!ep) return false;
   return withBusy(`refdefaults|${kind}`, async () => {
     try {
-      const r = await api().putRefDefaults(ep, kind === "keyframes" ? { keyframe_target: target } : { target });
+      const fields = kind === "keyframes" ? { keyframe_target: target } : kind === "voices" ? { voice_target: target } : { target };
+      const r = await api().putRefDefaults(ep, fields);
       set((s) => ({ refDefaults: { ...s.refDefaults, [ep]: r.defaults ?? null } }));
-      const what = kind === "keyframes" ? "Keyframes" : "Refs";
+      const what = kind === "keyframes" ? "Keyframes" : kind === "voices" ? "Voices" : "Refs";
       const label = (id: string | null | undefined) => get().targets?.targets.find((t) => t.id === id)?.label ?? id ?? "";
-      const now = kind === "keyframes" ? r.defaults?.keyframe_target : r.defaults?.target;
+      const now = kind === "keyframes" ? r.defaults?.keyframe_target : kind === "voices" ? r.defaults?.voice_target : r.defaults?.target;
       host().toast(
         "success",
         target ? `${what} now generate with ${label(target)}` : `${what} are back on ${label(now)}`,
         target ? "For this episode (kept in overrides.json; series.json isn't changed). A ref with its own model keeps it." : undefined,
       );
+      // the picked model changes what each ref's `effective` says
       // each ref's effective target (and a keyframe's edit_refs) follow
       await loadRefs(ep);
       return true;
@@ -1500,8 +1514,10 @@ export async function discardRefTake(ref: string, view: string | null, take: num
     host().toast("warn", `${refLabel(ref, view)} ${tn(take)} is still queued`, "It can be discarded once it has finished or failed.");
     return false;
   }
-  // a voice is never cleared: discarding its live take only moves the candidate
-  const live = !!r && r.kind !== "voice" && (view ? r.views?.find((v) => v.view === view)?.picked : r.picked) === take;
+  // Phase 9c-B: discarding a voice's live candidate clears it too, as for an
+  // image — except a voice the series config names no sample for (nothing to clear)
+  const clearable = !!r && (r.kind !== "voice" || !!r.path);
+  const live = clearable && (view ? r!.views?.find((v) => v.view === view)?.picked : r!.picked) === take;
   if (ask && !confirm(discardRefText(refLabel(ref, view), take, live, r && isKeyframeRef(r) ? "keyframe" : "ref"))) return false;
   return withBusy(`refdiscard|${ref}|${view ?? ""}|${take}`, async () => {
     try {
@@ -1586,10 +1602,21 @@ export async function pickRef(ref: string, view: string | null, take: number): P
       const isRef = !!r && typeof r === "object" && "id" in r;
       if (isRef) replaceRef(ep, r);
       const sheet = !!view && isRef && !!r.views && r.views.length >= 4 && r.views.every((v) => v.picked != null);
-      host().toast("success", `${refLabel(ref, view)}: ${tn(take)} is live`, sheet ? "All four views are picked: the sheet is stitched." : undefined);
+      // Phase 9c-B: picking a voice for a character with no `voice_sample`
+      // writes one into series.json (through the 9a save path, with a history copy)
+      const wrote = isRef && r.series_changed === true;
+      host().toast(
+        "success",
+        `${refLabel(ref, view)}: ${tn(take)} is live`,
+        wrote
+          ? `series.json now names ${r.path ?? "the sample"} as this character's voice_sample (the old file is in _history/).`
+          : sheet ? "All four views are picked: the sheet is stitched." : undefined,
+      );
       // the live file changed: missing refs and ref-stale takes follow
       scheduleRefsRefresh(0);
       scheduleRefresh(0);
+      // the series config changed on disk: an open window looks again
+      if (wrote) afterAuthoredWrite(null);
       return true;
     } catch (e) {
       report(`Couldn't pick ${refLabel(ref, view)} ${tn(take)}`, e);
@@ -1776,4 +1803,236 @@ export function afterAuthoredWrite(buildResult: BuildResult | null) {
   scheduleRefresh(0);
   const ep = get().ep;
   if (ep && get().refs[ep]) scheduleRefsRefresh(0);
+}
+
+// ---------------------------------------------------------------------------
+// Phase 9c-A: the dialogue recording (attach, clear, align)
+// ---------------------------------------------------------------------------
+
+export function openTrackPanel() {
+  const ep = get().ep;
+  if (!ep) return;
+  set({ trackPanel: { ep }, menu: null });
+  void loadAlignReady();
+}
+
+export function closeTrackPanel() {
+  set({ trackPanel: null });
+}
+
+/** GET /h3pipe/align/ready (cached; `force` asks again after an install). */
+export async function loadAlignReady(force = false): Promise<void> {
+  if (!force && get().alignReady) return;
+  try {
+    const alignReady = await api().alignReady();
+    set({ alignReady, alignReadyError: null });
+  } catch (e) {
+    // an older server has no such route: the panel says so and still offers a run
+    set({ alignReadyError: errText(e) });
+  }
+}
+
+/** What the attach / clear answer means for the rest of the editor. */
+function afterTrack(ep: string, r: TrackResult, what: string) {
+  set((s) => ({ trackBuild: { ...s.trackBuild, [ep]: r.build ?? null } }));
+  // the series config changed on disk (audio.track / audio.mode)
+  afterAuthoredWrite(null);
+  const aligned = r.track?.aligned ?? 0;
+  if (r.build && !r.build.ok) {
+    // expected while the script has no `audio:` windows: aligning writes them
+    const e = needsAlignBuild(r.build);
+    host().toast(
+      e ? "warn" : "error",
+      e ? `${what} — align to finish` : "The rebuild failed",
+      e
+        ? "With a recording attached every dialogue shot is a dub, and the build needs an `audio: in-out` window on each. Run “Align to the recording…” and it writes them."
+        : buildError(r.build),
+    );
+  } else {
+    host().toast("success", what, aligned ? `${aligned} shot${aligned === 1 ? "" : "s"} already have a dialogue window.` : undefined);
+  }
+}
+
+/** POST /h3pipe/track with a path on the ComfyUI machine. */
+export async function attachTrack(sourcePath: string): Promise<boolean> {
+  const ep = get().ep;
+  if (!ep || !sourcePath.trim()) return false;
+  return withBusy("track", async () => {
+    try {
+      const r = await api().attachTrack(ep, sourcePath.trim(), get().pass);
+      afterTrack(ep, r, r.copied === false
+        ? `Using ${r.path ?? sourcePath} where it is`
+        : `Attached ${r.path ?? sourcePath}`);
+      return true;
+    } catch (e) {
+      report("Couldn't attach the recording", e);
+      return false;
+    }
+  });
+}
+
+/** POST /h3pipe/track as multipart: a file from this computer. */
+export async function uploadTrack(file: File): Promise<boolean> {
+  const ep = get().ep;
+  if (!ep) return false;
+  const problem = trackFileProblem(file)
+    || (file.size > UPLOAD_LIMIT ? `${file.name} is ${(file.size / 1024 / 1024).toFixed(0)} MB: the limit is ${UPLOAD_LIMIT / 1024 / 1024} MB.` : "");
+  const key = uploadKey("track", null);
+  const put = (u: AppState["uploads"][string] | null) => set((s) => {
+    const uploads = { ...s.uploads };
+    if (u) uploads[key] = u;
+    else delete uploads[key];
+    return { uploads };
+  });
+  if (problem) {
+    put({ name: file.name, sent: 0, total: file.size, error: problem });
+    return false;
+  }
+  put({ name: file.name, sent: 0, total: file.size });
+  try {
+    const r = await api().uploadTrack({ ep, file, name: file.name, pass: get().pass }, (sent, total) => {
+      const cur = get().uploads[key];
+      if (cur && !cur.error) put({ ...cur, sent, total: total || cur.total });
+    });
+    put(null);
+    afterTrack(ep, r, `Attached ${r.path ?? file.name}`);
+    return true;
+  } catch (e) {
+    put({ name: file.name, sent: 0, total: file.size, error: errText(e) });
+    return false;
+  }
+}
+
+/** POST /h3pipe/track `{track: null}`: the series config forgets it (the file stays). */
+export async function clearTrack(ask = true): Promise<boolean> {
+  const ep = get().ep;
+  if (!ep) return false;
+  const st = get().status[statusKey(ep, get().pass)];
+  const name = trackName(st?.track);
+  if (ask && !confirm(`Forget ${name || "the recording"}?\n\nThe file stays on disk; series.json stops naming it and the audio mode goes back to what it was. The script's \`audio:\` windows are left alone.`)) {
+    return false;
+  }
+  return withBusy("track", async () => {
+    try {
+      const r = await api().clearTrack(ep, get().pass);
+      afterTrack(ep, r, `${name || "The recording"} is no longer the episode's track`);
+      return true;
+    } catch (e) {
+      report("Couldn't clear the recording", e);
+      return false;
+    }
+  });
+}
+
+/**
+ * POST /h3pipe/align: time the script against the recording. Progress arrives
+ * as `h3pipe.align` events while it runs; a 409 means a dependency is missing
+ * (the panel then says what to install, and into which Python).
+ */
+export async function runAlign(opts: { dryRun?: boolean; model?: string | null; snap?: boolean } = {}): Promise<boolean> {
+  const ep = get().ep;
+  if (!ep) return false;
+  const dryRun = !!opts.dryRun;
+  const req: AlignRequest = { ep, pass: get().pass, dry_run: dryRun };
+  if (opts.model) req.model = opts.model;
+  if (opts.snap === false) req.snap = false;
+  set({
+    alignRun: { ep, busy: true, dryRun, stage: "transcribe", pct: 0, text: dryRun ? "starting (dry run)" : "starting", error: null },
+  });
+  try {
+    const r = await api().align(req);
+    set((s) => ({
+      alignRun: { ep, busy: false, dryRun, stage: "write", pct: 100, text: r.ok ? "done" : "finished with problems", error: null },
+      alignResult: { ...s.alignResult, [ep]: r },
+    }));
+    const n = changedShots(r).length;
+    host().toast(
+      r.ok ? "success" : "warn",
+      dryRun ? `Dry run: ${resultSummary(r)}` : `Aligned: ${resultSummary(r)}`,
+      dryRun ? "Nothing was written. Run it for real to write the windows." : `${n} shot${n === 1 ? "" : "s"} changed; the script and series.json were written (copies in _history/).`,
+    );
+    if (!dryRun) {
+      // the script changed on disk: open windows, the episode and its refs follow
+      afterAuthoredWrite(r.build ?? null);
+      set((s) => ({ trackBuild: { ...s.trackBuild, [ep]: r.build ?? null } }));
+      // h3align leaves align_report.md beside the script: a folder whose
+      // script isn't <folder>.md then has two .md files and won't build
+      const clash = scriptClash(r.build ?? null);
+      if (clash) host().toast("warn", "Aligned, but the rebuild couldn't start", clash);
+    }
+    return r.ok;
+  } catch (e) {
+    const data = e instanceof ApiError && e.status === 409 ? (e.data as AlignMissing | undefined) : undefined;
+    set({ alignRun: { ep, busy: false, dryRun, stage: "", pct: 0, text: "", error: errText(e) } });
+    if (data) {
+      // keep the readiness panel truthful: the 409 carries the same fields
+      set((s) => ({ alignReady: { ...(s.alignReady ?? { ready: false, python: "", install: "", ffmpeg: null, missing: [] }), ...data, ready: false } }));
+      host().toast("warn", "h3align can't run yet", `${data.error}\n${data.install || ""}`.trim());
+    } else {
+      report("Align failed", e);
+    }
+    return false;
+  }
+}
+
+export function dismissAlignResult() {
+  const ep = get().ep;
+  if (!ep) return;
+  set((s) => {
+    const alignResult = { ...s.alignResult };
+    delete alignResult[ep];
+    return { alignResult, alignRun: null };
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Phase 9c-B: voice refs
+// ---------------------------------------------------------------------------
+
+/** Open "use a line from a take…" for one voice ref. */
+export function openVoiceClip(ref: string, shot?: string | null, take?: number | null) {
+  set((s) => ({ voiceClip: { ref, shot: shot ?? s.shot ?? null, take: take ?? null, pass: s.pass }, menu: null }));
+}
+
+export function updateVoiceClip(patch: Partial<VoiceClipState>) {
+  const v = get().voiceClip;
+  if (v) set({ voiceClip: { ...v, ...patch } });
+}
+
+export function closeVoiceClip() {
+  set({ voiceClip: null });
+}
+
+/**
+ * POST /h3pipe/refs/voice-from-take: `start..end` of a take's sound becomes a
+ * voice candidate (no model runs). It is picked when the voice has no live
+ * file yet — and that pick can write the series config's `voice_sample`.
+ */
+export async function voiceFromTake(req: Omit<VoiceFromTakeRequest, "ep">): Promise<boolean> {
+  const ep = get().ep;
+  if (!ep) return false;
+  return withBusy(`voiceclip|${req.ref}`, async () => {
+    try {
+      const r = await api().refsVoiceFromTake({ ...req, ep });
+      // the answer's `picked` is a boolean, not the listing's picked take
+      // (TODO(contract): it overwrites the ref's own `picked`), so the
+      // listing is refetched rather than patched from it
+      const span = `${req.start.toFixed(2)}–${req.end.toFixed(2)} s of ${req.shot} ${tn(req.take)}`;
+      host().toast(
+        "success",
+        `${refLabel(req.ref)}: ${tn(r?.take)} from a take`,
+        r?.picked
+          ? `${span} is now the live voice sample.${r.series_changed ? " series.json gained the voice_sample line (a copy of the old file is in _history/)." : ""}`
+          : `${span} added as a candidate. Pick it to make it live.`,
+      );
+      selectRefTake(req.ref, null, r?.take ?? null);
+      await loadRefs(ep);
+      if (r?.picked) scheduleRefresh(0);
+      if (r?.series_changed) afterAuthoredWrite(null);
+      return true;
+    } catch (e) {
+      report(`Couldn't cut a voice out of ${req.shot} ${tn(req.take)}`, e);
+      return false;
+    }
+  });
 }

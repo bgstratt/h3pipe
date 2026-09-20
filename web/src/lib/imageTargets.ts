@@ -1,17 +1,20 @@
-// Image targets for refs (docs/API.md "Phase 8.5 as built": image defaults):
-// which image model series refs and keyframes generate with (the episode's
-// choice, the series config's `refs` block, the built-in default, or a per-ref
-// override), and which reference images an edit target gets with a keyframe.
-// Pure functions.
+// The targets refs generate with (docs/API.md "Phase 8.5 as built": image
+// defaults; "Phase 9c-B as built": `voice_target`): which model series refs,
+// shot keyframes and voices generate with (the episode's choice, the series
+// config's `refs` block, the built-in default, or a per-ref override), and
+// which reference images an edit target gets with a keyframe. Pure functions.
 
 import type { EditRef, Ref, RefDefaultSource, RefDefaults, Target, TargetList } from "../types";
 import { isKeyframeRef } from "./keyframes";
 import { targetLabel } from "./targets";
+import { VOICE_DEFAULT } from "./voice";
 
 /** The built-in refs target (Phase 7). */
 export const REFS_DEFAULT = "krea2";
 
-export type RefTargetKind = "refs" | "keyframes";
+/** The three kinds of ref target: series refs and keyframes take an image
+ * target, a voice takes an audio one (Phase 9c-B). */
+export type RefTargetKind = "refs" | "keyframes" | "voices";
 
 export function imageTargets(list: TargetList | null | undefined): Target[] {
   return (list?.targets ?? []).filter((t) => t.kind === "image");
@@ -33,9 +36,19 @@ export function imageModeText(t: Pick<Target, "capabilities"> | undefined): stri
 export interface ResolvedRefDefaults {
   refs: string;
   keyframes: string;
+  /** Phase 9c-B: the audio target voices generate with */
+  voices: string;
   /** where each comes from: set in the editor for this episode, the series config, built in */
   refsSource: RefDefaultSource;
   keyframesSource: RefDefaultSource;
+  voicesSource: RefDefaultSource;
+}
+
+/** The field of ResolvedRefDefaults a kind reads. */
+export function defaultOf(d: ResolvedRefDefaults, kind: RefTargetKind): { target: string; source: RefDefaultSource } {
+  if (kind === "keyframes") return { target: d.keyframes, source: d.keyframesSource };
+  if (kind === "voices") return { target: d.voices, source: d.voicesSource };
+  return { target: d.refs, source: d.refsSource };
 }
 
 function source(s: string | null | undefined): RefDefaultSource {
@@ -49,12 +62,18 @@ function source(s: string | null | undefined): RefDefaultSource {
  */
 export function refDefaults(list: TargetList | null | undefined, served?: RefDefaults | null): ResolvedRefDefaults {
   const fallback = list?.default?.image || imageTargets(list).find((t) => t.default)?.id || REFS_DEFAULT;
+  const voiceFallback = list?.default?.audio
+    || (list?.targets ?? []).find((t) => t.kind === "audio" && t.default)?.id
+    || (list?.targets ?? []).find((t) => t.kind === "audio")?.id
+    || VOICE_DEFAULT;
   const refs = served?.target || fallback;
   return {
     refs,
     keyframes: served?.keyframe_target || refs,
+    voices: served?.voice_target || voiceFallback,
     refsSource: source(served?.target_source),
     keyframesSource: source(served?.keyframe_target_source),
+    voicesSource: source(served?.voice_target_source),
   };
 }
 
@@ -64,6 +83,7 @@ export function refDefaultSourceLabel(s: RefDefaultSource): string {
 }
 
 export function refTargetKind(r: Pick<Ref, "id" | "kind" | "scope">): RefTargetKind {
+  if (r.kind === "voice") return "voices";
   return isKeyframeRef(r) ? "keyframes" : "refs";
 }
 
@@ -78,12 +98,13 @@ export function refTargetOf(
   const own = r.override_values?.target;
   if (own) return { target: own, source: "override" };
   if (r.effective?.target) return { target: r.effective.target, source: "effective" };
-  return { target: refTargetKind(r) === "keyframes" ? defaults.keyframes : defaults.refs, source: "default" };
+  return { target: defaultOf(defaults, refTargetKind(r)).target, source: "default" };
 }
 
 /** The series.json snippet that makes a choice permanent. */
 export function refsSnippet(kind: RefTargetKind, id: string): string {
-  return `"refs": {${JSON.stringify(kind === "keyframes" ? "keyframe_target" : "target")}: ${JSON.stringify(id)}}`;
+  const key = kind === "keyframes" ? "keyframe_target" : kind === "voices" ? "voice_target" : "target";
+  return `"refs": {${JSON.stringify(key)}: ${JSON.stringify(id)}}`;
 }
 
 // ---------------------------------------------------------------------------

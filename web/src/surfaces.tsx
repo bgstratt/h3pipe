@@ -17,6 +17,8 @@ import { RenderDialog } from "./components/RenderDialog";
 import { ShotsTab } from "./components/ShotsTab";
 import { SourceWindows } from "./components/SourceWindow";
 import { Timeline } from "./components/Timeline";
+import { TrackWindow } from "./components/Track";
+import { VoiceClipWindow } from "./components/VoiceRef";
 import { Viewer } from "./components/Viewer";
 import type { Surface } from "./host";
 import { useApp } from "./store";
@@ -131,6 +133,8 @@ function Overlay() {
       <Viewer />
       <MissingWindow />
       <SourceWindows />
+      <TrackWindow />
+      <VoiceClipWindow />
       <ContextMenu />
       <CutMenu />
       <RedoDialog />

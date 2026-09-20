@@ -21,11 +21,12 @@
 //    config's text.
 
 import type {
-  AssembleResult, BrowseFiles, BrowseResult, BuildResult, CancelResult, ComfyQueue, Config, CutEntry,
+  AlignReady, AlignRequest, AlignResult, AssembleResult, BrowseFiles, BrowseResult, BuildResult, CancelResult, ComfyQueue, Config, CutEntry,
   CutFile, CutWhat, DiscardResult, EpisodeStatus, EpisodeSummary, EpisodeTargetResult, ModelList, OverrideRequest, OverrideResult, Pass,
   PeaksResult, PickRequest, Ref, RefDefaults, RefDiscardRequest, RefGenerateMissingRequest, RefGenerateMissingResult, RefGenerateRequest,
-  RefGenerateResult, RefImportRequest, RefKeyframeRequest, RefList, RefOverrideInfo, RefOverrideRequest, RefPickRequest,
-  RefTake, RefUploadRequest, RenderRequest, RenderResult, Seed, ShotDetail, TakeRef, TargetKind, TargetList,
+  RefGenerateResult, RefImportRequest, RefKeyframeRequest, RefList, RefOverrideInfo, RefOverrideRequest, RefPickRequest, RefPickResult,
+  RefTake, RefUploadRequest, RenderRequest, RenderResult, Seed, ShotDetail, TakeRef, TargetKind, TargetList, TrackResult,
+  VoiceFromTakeRequest, VoiceFromTakeResult,
   PromoteHashes, PromotePlan, PromoteResult, SourceCheck, SourceDoc, SourceFile, SourceHash, SourceSaveRequest, SourceSaveResult,
 } from "./types";
 import { comboChoices } from "./lib/targets";
@@ -76,7 +77,9 @@ export interface Api {
   /** POST /h3pipe/refs/generate-missing: one candidate for every missing series
    * ref, and every needed keyframe filled (continuity, a still, or the script's file). */
   refsGenerateMissing(req: RefGenerateMissingRequest): Promise<RefGenerateMissingResult>;
-  refsPick(req: RefPickRequest): Promise<Ref>;
+  /** PUT /h3pipe/refs/pick. Phase 9c-B: picking a voice may write the series
+   * config's `voice_sample` (`series_changed: true` in the answer). */
+  refsPick(req: RefPickRequest): Promise<RefPickResult>;
   refsImport(req: RefImportRequest): Promise<ImportedTake>;
   /** POST /h3pipe/refs/import as multipart (drag and drop, a file picker), with
    * upload progress where the transport can report it. */
@@ -90,8 +93,21 @@ export interface Api {
   /** DELETE /h3pipe/refs/pick: unpick a ref (its live file is removed; its takes
    * stay). For a keyframe this is Clear: the shot renders without one. */
   refsUnpick(ep: string, ref: string, view?: string | null): Promise<Ref>;
-  /** PUT /h3pipe/refs/defaults: the episode's image targets (null clears one; a key left out is kept). */
-  putRefDefaults(ep: string, fields: { target?: string | null; keyframe_target?: string | null }): Promise<{ defaults: RefDefaults }>;
+  /** PUT /h3pipe/refs/defaults: the episode's ref targets (null clears one; a
+   * key left out is kept). `voice_target` is an audio target (Phase 9c-B). */
+  putRefDefaults(ep: string, fields: RefDefaultFields): Promise<{ defaults: RefDefaults }>;
+  /** POST /h3pipe/refs/voice-from-take: a span of a take's sound as a voice candidate. */
+  refsVoiceFromTake(req: VoiceFromTakeRequest): Promise<VoiceFromTakeResult>;
+  /** Phase 9c-A: GET /h3pipe/align/ready: what h3align needs, and in which Python. */
+  alignReady(): Promise<AlignReady>;
+  /** POST /h3pipe/track: attach a recording by its path on the ComfyUI machine. */
+  attachTrack(ep: string, sourcePath: string, pass?: Pass): Promise<TrackResult>;
+  /** POST /h3pipe/track as multipart: upload a recording from this computer. */
+  uploadTrack(req: TrackUploadRequest, onProgress?: UploadProgress): Promise<TrackResult>;
+  /** POST /h3pipe/track `{track: null}`: forget the recording (the file stays). */
+  clearTrack(ep: string, pass?: Pass): Promise<TrackResult>;
+  /** POST /h3pipe/align: run h3align (a 409's ApiError.data is an AlignMissing). */
+  align(req: AlignRequest): Promise<AlignResult>;
   putRefOverride(req: RefOverrideRequest): Promise<{ override: RefOverrideResult }>;
   deleteRefOverride(ep: string, ref: string, view?: string | null): Promise<{ override: RefOverrideResult }>;
   /** ComfyUI's own lists (not h3pipe routes). */
@@ -127,6 +143,22 @@ export interface Api {
 
 /** A ref override route's answer: the (effective) override values, plus `stale`. */
 export type RefOverrideResult = NonNullable<RefOverrideInfo["values"]> & { stale?: boolean };
+
+/** PUT /h3pipe/refs/defaults: any of the three; null clears one. */
+export interface RefDefaultFields {
+  target?: string | null;
+  keyframe_target?: string | null;
+  voice_target?: string | null;
+}
+
+/** POST /h3pipe/track as multipart/form-data (drag and drop, a file picker). */
+export interface TrackUploadRequest {
+  ep: string;
+  file: Blob;
+  /** the file's name (a File has its own) */
+  name?: string;
+  pass?: Pass;
+}
 
 export interface TargetsQuery {
   kind?: TargetKind;
@@ -323,9 +355,13 @@ export function createHttpApi(t: Transport): Api {
       if (req.seed !== null && !isSeed(req.seed)) {
         return Promise.reject(new Error(`Seed must be a string of digits, got ${String(req.seed)}`));
       }
-      // `target` only when set (an older server may reject an unknown field's null)
-      const { target, ...rest } = req;
-      return call("POST", "/h3pipe/refs/generate", target ? { ...rest, target } : rest);
+      // `target` and `seconds` only when set (an older server may reject an
+      // unknown field's null, and `seconds` is 400 on anything but a voice ref)
+      const { target, seconds, ...rest } = req;
+      const body: Record<string, unknown> = { ...rest };
+      if (target) body.target = target;
+      if (seconds != null) body.seconds = seconds;
+      return call("POST", "/h3pipe/refs/generate", body);
     },
     refsGenerateMissing: (req) => {
       // only what's set: the server's defaults apply to the rest
@@ -335,6 +371,41 @@ export function createHttpApi(t: Transport): Api {
       return call("POST", "/h3pipe/refs/generate-missing", body);
     },
     refsPick: (req) => call("PUT", "/h3pipe/refs/pick", req),
+    refsVoiceFromTake: (req) => call("POST", "/h3pipe/refs/voice-from-take", req),
+    alignReady: async () => {
+      const r = await get<Partial<AlignReady>>("/h3pipe/align/ready");
+      return {
+        ready: !!r?.ready,
+        ffmpeg: r?.ffmpeg ?? null,
+        missing: Array.isArray(r?.missing) ? r.missing.filter((x): x is string => typeof x === "string") : [],
+        python: r?.python ?? "",
+        install: r?.install ?? "",
+        ...(r?.ffmpeg_hint ? { ffmpeg_hint: r.ffmpeg_hint } : {}),
+        ...(r?.packages ? { packages: r.packages } : {}),
+        ...(r?.models ? { models: r.models } : {}),
+      };
+    },
+    attachTrack: (ep, sourcePath, pass) =>
+      call("POST", "/h3pipe/track", pass ? { ep, source_path: sourcePath, pass } : { ep, source_path: sourcePath }),
+    uploadTrack: (req, onProgress) => {
+      const form = new FormData();
+      form.append("ep", req.ep);
+      if (req.pass) form.append("pass", req.pass);
+      const name = req.name ?? (typeof File !== "undefined" && req.file instanceof File ? req.file.name : "recording.wav");
+      form.append("file", req.file, name);
+      return postForm("/h3pipe/track", form, onProgress);
+    },
+    clearTrack: (ep, pass) => call("POST", "/h3pipe/track", pass ? { ep, track: null, pass } : { ep, track: null }),
+    align: (req) => {
+      // only what's set: the server's own defaults (snap true, dry_run false) apply
+      const body: Record<string, unknown> = { ep: req.ep };
+      if (req.track) body.track = req.track;
+      if (req.model) body.model = req.model;
+      if (req.snap === false) body.snap = false;
+      if (req.dry_run) body.dry_run = true;
+      if (req.pass) body.pass = req.pass;
+      return call("POST", "/h3pipe/align", body);
+    },
     refsImport: ({ pick, ...req }) => call("POST", "/h3pipe/refs/import", pick ? { ...req, pick: true } : req),
     refsUpload: (req, onProgress) => {
       const form = new FormData();

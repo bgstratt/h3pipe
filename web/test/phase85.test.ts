@@ -126,11 +126,13 @@ describe("image targets for refs", () => {
 
   it("reads the episode's defaults and their sources from /refs", () => {
     const served = { target: "krea2", target_source: "default" as const, keyframe_target: "flux2_klein_edit", keyframe_target_source: "default" as const };
-    expect(refDefaults(list, served)).toEqual({ refs: "krea2", keyframes: "flux2_klein_edit", refsSource: "default", keyframesSource: "default" });
+    // (Phase 9c-B: `voices` joins them; this list has no audio target, so it
+    // falls back to the built-in one)
+    expect(refDefaults(list, served)).toMatchObject({ refs: "krea2", keyframes: "flux2_klein_edit", refsSource: "default", keyframesSource: "default" });
     expect(refDefaults(list, { target: "z_image_turbo", target_source: "editor", keyframe_target: "flux_kontext", keyframe_target_source: "series" }))
-      .toEqual({ refs: "z_image_turbo", keyframes: "flux_kontext", refsSource: "editor", keyframesSource: "series" });
+      .toMatchObject({ refs: "z_image_turbo", keyframes: "flux_kontext", refsSource: "editor", keyframesSource: "series" });
     // a series config whose refs block the server can't read: `defaults: null`
-    expect(refDefaults(list, null)).toEqual({ refs: "krea2", keyframes: "krea2", refsSource: "default", keyframesSource: "default" });
+    expect(refDefaults(list, null)).toMatchObject({ refs: "krea2", keyframes: "krea2", refsSource: "default", keyframesSource: "default" });
     expect(imageModeText(list.targets[1])).toBe("edit, up to 2 references");
     expect(imageModeText(list.targets[0])).toBe("text to image");
   });
@@ -276,7 +278,11 @@ describe("mock: Phase 8.5", () => {
     const api = createMockApi(() => {}, { latency: 0 });
     const ep = (await api.episodes())[0].ep;
     const { refs, defaults } = await api.refs(ep);
-    expect(defaults).toEqual({ target: "krea2", target_source: "default", keyframe_target: "flux2_klein_edit", keyframe_target_source: "default" });
+    expect(defaults).toEqual({
+      target: "krea2", target_source: "default", keyframe_target: "flux2_klein_edit", keyframe_target_source: "default",
+      // Phase 9c-B: the audio target voices generate with
+      voice_target: "ltx2_voice", voice_target_source: "default",
+    });
     const k = (id: string) => refs.find((r) => r.id === id)!;
     expect(k("shot:sh060:first")).toMatchObject({ need: "required", method: "continuity", target: "wan22_i2v", exists: false, can_generate: true });
     expect(k("shot:sh070:first")).toMatchObject({ need: "required", exists: true, picked: 1 });

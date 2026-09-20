@@ -17,6 +17,8 @@ export const FLUX2 = "flux2_klein";
 export const FLUX2_EDIT = "flux2_klein_edit";
 export const KONTEXT = "flux_kontext";
 export const SDXL = "illustrious_sdxl";
+/** Phase 9c-B: the audio target that generates voice samples. */
+export const LTX_VOICE = "ltx2_voice";
 
 export const MOCK_TARGETS: TargetList = {
   targets: [
@@ -172,8 +174,27 @@ export const MOCK_TARGETS: TargetList = {
         loras: { family: "sdxl-dmd2", label: "DMD2 4-step LoRA", patterns: ["*dmd2*"], folder: "loras", tier: "accelerator" },
       },
     },
+    // ---- audio targets (Phase 9c-B) ----
+    {
+      id: LTX_VOICE, kind: "audio", label: "LTX-2.5 audio-only (voice sample)", short: "LTX-2 voice", default: true,
+      // as built: reference_audio is FALSE on purpose (the ID-LoRA weights
+      // aren't installed, so it can't copy a voice; the wording makes it)
+      capabilities: { mode: "t2a", reference_audio: false, max_seconds: 20, negative_prompt: true },
+      presets: {
+        final: { model: "ltx-2.5-22b-distilled-fp8.safetensors", steps: 8, cfg: 1 },
+        proxy: { model: "ltx-2.5-22b-distilled-fp8.safetensors", steps: 8, cfg: 1 },
+      },
+      widgets: { model: { class_type: "UNETLoader", field: "unet_name" }, steps: { via: "loader" }, seed: { via: "loader" } },
+      workflow: "h3pipe_ltx2_voice.json", loader: "H3ShotListLoader", saver: "H3SaveRefAudio",
+      template: { fps: 24, frames: { step: 8, base: 1, max: 481 } },
+      models: {
+        model: { family: "ltx2.5-distilled", label: "LTX-2.5 distilled", patterns: ["ltx-2.5*distilled*"], folder: "diffusion_models", tier: "accelerator" },
+        text_encoder: { family: "gemma3-12b", label: "Gemma 3 12B", patterns: ["gemma*3*12b*"], folder: "text_encoders", tier: "required" },
+        audio_vae: { family: "ltx2-audio-vae", label: "LTX-2 audio VAE", patterns: ["*audio*vae*"], folder: "vae", tier: "required" },
+      },
+    },
   ],
-  default: { video: H3, image: "krea2" },
+  default: { video: H3, image: "krea2", audio: LTX_VOICE },
 };
 
 /** ComfyUI's /object_info choices for the combo widgets the targets bind. */
@@ -320,6 +341,13 @@ const MOCK_MISSING: Record<string, MissingFile[]> = {
     param: "loras", tier: "accelerator", want: "dmd2_sdxl_4step_lora.safetensors",
     family: "sdxl-dmd2", folder: "loras", url: null, source: "DMD2 SDXL 4-step LoRA",
   }],
+  // the audio target: voice cloning is off (the ID-LoRA weights aren't installed)
+  [LTX_VOICE]: [{
+    param: "id_lora", tier: "optional", want: "ltx-2.5-audio-id-lora.safetensors",
+    family: "ltx2.5-audio-id-lora", folder: "loras", url: null,
+    feature: "voice cloning (LTXVReferenceAudio)",
+    source: "no such file is recorded in ComfyUI-Manager's model list on this machine",
+  }],
 };
 
 const MOCK_RESOLVED: Record<string, Record<string, Resolution>> = {
@@ -336,7 +364,10 @@ const MOCK_RESOLVED: Record<string, Record<string, Resolution>> = {
   },
 };
 
-const FEATURES: Record<string, string> = { duration_head: "dur: model (duration head)" };
+const FEATURES: Record<string, string> = {
+  duration_head: "dur: model (duration head)",
+  id_lora: "voice cloning (LTXVReferenceAudio)",
+};
 const NODES: Record<string, string[]> = { duration_head: ["LTXVDurationPredictor"] };
 
 /** Files "downloaded" since the mock started (the dev page's h3mockInstall). */

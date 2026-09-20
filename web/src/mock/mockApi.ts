@@ -11,16 +11,18 @@ import type { HostEvent } from "../host";
 import { reachable } from "../lib/browse";
 import { promptText } from "../lib/format";
 import type {
-  CutEntry, EpisodeStatus, EpisodeSummary, Lora, MissingRef, Override, OverrideResult, Pass, RefGenerateMissingResult, RefUsed,
-  RenderResult, ShotDetail, ShotStatus, ShotTargetSource, SourceCheck, SourceFile, TakeDetail, TakeSummary,
+  BuildResult, CutEntry, EpisodeStatus, EpisodeSummary, Lora, MissingRef, Override, OverrideResult, Pass,
+  RefGenerateMissingResult, RefUsed, RenderResult, ShotDetail, ShotStatus, ShotTargetSource, SourceCheck, SourceFile,
+  TakeDetail, TakeSummary, Track, TrackResult,
 } from "../types";
 import { localShotSpans } from "../lib/source";
 import { buildScript, buildSeries, checkScript, checkSeries, jsonErrorAt, mockHash, planPromote, type MockShotSource } from "./mockSource";
 import { keyframeWanted } from "../lib/keyframes";
 import { hasViews } from "../lib/refs";
 import fixturesRaw from "./fixtures.json?raw";
-import { FsError, browse as fsBrowse, fsExists } from "./mockFs";
+import { FsError, browse as fsBrowse, fsExists, fsFileExists } from "./mockFs";
 import { TRACK_RATE, makeTrack, slicePeaks, takePeaks, type MockWindow } from "./mockAudio";
+import { AlignError, createMockAlign } from "./mockTrack";
 import { CutError, applyCut, checkEntries, copyEntries, materialize, resetEntries } from "./mockCut";
 import { RefError, createMockRefs } from "./mockRefs";
 import { svgImage, type KeyframeNeedSpec } from "./mockRefs";
@@ -76,7 +78,7 @@ const clone = <T>(x: T): T => JSON.parse(JSON.stringify(x));
 /** Phase 9a: the dev page's hook for "edited in another editor" (see dev.tsx). */
 export type OutsideEdit = (file: SourceFile, edit: (text: string) => string) => void;
 
-export function createMockApi(emit: Emit, opts: MockOptions = {}): Api & { outsideEdit: OutsideEdit } {
+export function createMockApi(emit: Emit, opts: MockOptions = {}): Api & { outsideEdit: OutsideEdit; unalign: () => void } {
   // seeds must survive: parse with the seed-safe parser, like the real client
   const fx = parseJsonSeedSafe<Fixtures>(fixturesRaw);
   const EP = fx.ep;
@@ -265,7 +267,7 @@ export function createMockApi(emit: Emit, opts: MockOptions = {}): Api & { outsi
   const SILENT = new Set(["sh040", "sh100", "sh230", "sh330"]);
   const TRACK_PATH = "audio/ep05_dialogue.wav";
   /** windows laid end to end in script order from 1 s, as h3align would time them */
-  const windows: Record<string, MockWindow> = {};
+  let windows: Record<string, MockWindow> = {};
   let trackEnd = 1;
   for (const sh of (status.proxy ?? status.final)!.shots) {
     const secs = (sh.length ?? Math.round((sh.seconds ?? 3) * 24)) / 24;
@@ -273,6 +275,10 @@ export function createMockApi(emit: Emit, opts: MockOptions = {}): Api & { outsi
     trackEnd += secs;
   }
   const track = makeTrack(Object.values(windows), round3(trackEnd + 1.5));
+  // Phase 9c-A: the series config's `audio.track` — attachable and clearable
+  let trackPath: string | null = TRACK_PATH;
+  /** a transcript sits beside the recording (re-aligning then needs no Whisper) */
+  let trackWords = true;
 
   function round3(n: number) {
     return Math.round(n * 1000) / 1000;
@@ -280,7 +286,12 @@ export function createMockApi(emit: Emit, opts: MockOptions = {}): Api & { outsi
 
   /** Phase 9b fields on a status copy: the track, windows, take audio and frames. */
   function with9b(e: EpisodeStatus): EpisodeStatus {
-    e.track = { path: TRACK_PATH, duration: track.duration, rate: TRACK_RATE };
+    e.track = trackPath
+      ? {
+        path: trackPath, duration: track.duration, rate: TRACK_RATE, exists: true, words: trackWords,
+        aligned: e.shots.filter((s) => windows[s.shot]).length,
+      }
+      : null;
     for (const sh of e.shots) {
       const w = windows[sh.shot];
       if (w) {
@@ -310,15 +321,27 @@ export function createMockApi(emit: Emit, opts: MockOptions = {}): Api & { outsi
     return frames ? [frames, t?.fps || status[src]?.fps || 24] : null;
   }
 
-  /** The files the peaks route knows: takes' audio and the track, with their length. */
+  /** The files the peaks route knows: takes' audio, voice candidates and the
+   * track, with their length. */
   function mediaSeconds(path: string): number | null {
     if (path === TRACK_PATH) return track.duration;
+    const voice = refs.audioSeconds(path);
+    if (voice != null) return voice;
     for (const p of ["final", "proxy"] as Pass[]) {
       for (const sh of status[p]?.shots ?? []) {
         for (const t of sh.takes) if (t.mp4 === path) return (t.frames ?? sh.length ?? 72) / (t.fps || status[p]!.fps || 24);
       }
     }
     return null;
+  }
+
+  /** The sound of one take, for voice-from-take (h3peaks.clip_audio's rule:
+   * the mp4 when it carries sound, else the take's `_h3.wav`). */
+  function takeAudio(pass: Pass, shot: string, take: number): { path: string; seconds: number } | null {
+    const sh = status[pass]?.shots.find((x) => x.shot === shot);
+    const t = sh?.takes.find((x) => x.take === take);
+    if (!sh || !t || t.status !== "ok" || !t.has_video || !t.mp4) return null;
+    return { path: t.mp4, seconds: (t.frames ?? sh.length ?? 72) / (t.fps || status[pass]!.fps || 24) };
   }
   // the smoke episode's cut.json picks sh020 t01 in proxy
   for (const pass of ["final", "proxy"] as Pass[]) {
@@ -568,6 +591,96 @@ export function createMockApi(emit: Emit, opts: MockOptions = {}): Api & { outsi
     syncEpisodeTarget();
   }
 
+  // -------------------------------------------------------------------------
+  // Phase 9c-A: attaching a recording, and running h3align
+  // -------------------------------------------------------------------------
+
+  /** `track` as GET /h3pipe/episode and the track routes send it. */
+  function trackInfo(pass: Pass): Track | null {
+    if (!trackPath) return null;
+    const shots = status[pass]?.shots ?? [];
+    return {
+      path: trackPath, duration: track.duration, rate: TRACK_RATE, exists: true, words: trackWords,
+      aligned: shots.filter((s) => windows[s.shot]).length,
+    };
+  }
+
+  /** POST /h3pipe/track: the file lands in <ep>/audio/ (or is used in place). */
+  function attach(source: string, pass: Pass, upload: boolean): TrackResult {
+    const name = source.replace(/\\/g, "/").split("/").pop() ?? "recording.wav";
+    if (!/\.(wav|mp3|flac|ogg|m4a|aac|opus)$/i.test(name)) {
+      throw new MockError(`${name} is not a recording: the track must be one of .wav, .mp3, .flac, .ogg, .m4a, .aac, .opus`, 400);
+    }
+    const inEp = /^audio[\\/]/i.test(source);
+    if (!upload && !inEp && !fsFileExists(source)) {
+      throw new MockError(`${source} doesn't exist on the ComfyUI machine`, 404);
+    }
+    // h3track.audio_name: anything outside A-Za-z0-9 ._()- becomes _, at most
+    // 120 characters, and only the extension is lowercased (spaces are kept)
+    const dot = name.lastIndexOf(".");
+    const safe = name.slice(0, dot).replace(/[^A-Za-z0-9 ._()-]+/g, "_").slice(0, 120) + name.slice(dot).toLowerCase();
+    // already inside the episode: used where it is
+    const inside = !upload && inEp;
+    const path = inside ? source.replace(/\\/g, "/") : `audio/${safe}`;
+    const same = path === trackPath;
+    trackPath = path;
+    // a recording the editor just attached has no transcript beside it yet
+    if (!same) trackWords = false;
+    emit("h3pipe.episode", { ep: EP });
+    return {
+      track: trackInfo(pass),
+      hash: mockHash(`${files.series.text}|${path}`),
+      build: buildNow(),
+      path,
+      copied: !inside,
+      reformatted: false,
+    };
+  }
+
+  /**
+   * The build after a track change. With a recording attached, every dialogue
+   * shot is a dub, so the FINAL build fails while the script has no `audio:`
+   * windows — the editor shows that as "align to finish".
+   */
+  function buildNow(): BuildResult {
+    const report = `  ep05.md -> shotlist/shotlist.json\n  ${fx.summary.shots} shots, 0 warnings\n`;
+    const spoken = (status.proxy ?? status.final)!.shots.filter((s) => !s.orphan && !SILENT.has(s.shot));
+    const missing = trackPath && spoken.every((s) => !windows[s.shot]) ? spoken[0] : null;
+    if (missing) {
+      const error = `shot ${missing.shot}: policy dub_keep_foley needs an \`audio: in-out\` window (run h3align)`;
+      return { ok: false, passes: { final: { ok: false, report: "", error }, proxy: { ok: false, report: "", error } } };
+    }
+    return {
+      ok: true,
+      passes: {
+        final: { ok: true, report, error: "" },
+        proxy: { ok: true, report: report.replace("shotlist.json", "shotlist_proxy.json"), error: "" },
+      },
+    };
+  }
+
+  const align = createMockAlign({
+    ep: EP,
+    emit: (event, detail) => emit(event, detail),
+    wait: (ms) => wait(ms),
+    shots: () => (status.proxy ?? status.final)!.shots
+      .filter((s) => !s.orphan)
+      .map((s) => ({ shot: s.shot, seconds: (s.length ?? 72) / 24, dialogue: !SILENT.has(s.shot) })),
+    track: () => (trackPath ? { path: trackPath, duration: track.duration, words: trackWords } : null),
+    write: (w) => {
+      windows = Object.fromEntries(Object.entries(w).map(([shot, x]) => [shot, { shot, ...x }]));
+    },
+    cached: (w) => {
+      trackWords = w;
+    },
+  });
+
+  /** The dev page's `h3mockUnalign()`: the script loses its `audio:` windows,
+   * so attaching a recording shows the "align to finish" build. */
+  function unalign() {
+    windows = {};
+  }
+
   /** the promote plan's inputs, now */
   function promoteInput(only: string | null) {
     const shots = shotIds.map((shot) => ({
@@ -627,6 +740,9 @@ export function createMockApi(emit: Emit, opts: MockOptions = {}): Api & { outsi
       if (pic) return pic;
       // Phase 9b: the synthetic dialogue track (a real clip's sound outside a browser)
       if (path === TRACK_PATH) return track.url() ?? media + "sh010_t01.mp4";
+      // Phase 9c-B: a voice candidate's synthetic wav
+      const wav = refs.audio(path);
+      if (wav) return wav;
       const real = alias.get(path) ?? path;
       return media + real.split("/").pop();
     },
@@ -842,7 +958,9 @@ export function createMockApi(emit: Emit, opts: MockOptions = {}): Api & { outsi
       if (/^([\\/]|[a-zA-Z]:)/.test(path) || path.split(/[\\/]/).includes("..")) throw new MockError(`${path} is outside the episode`, 400);
       const secs = mediaSeconds(path);
       if (secs == null) throw new MockError(`No such file: ${path}`, 404);
-      const full = path === TRACK_PATH ? track.peaks() : takePeaks(path, secs);
+      // the track and a voice candidate have real peaks (their wav is synthetic
+      // but playable); a video take's are made up from its path
+      const full = path === TRACK_PATH ? track.peaks() : refs.audioPeaks(path) ?? takePeaks(path, secs);
       return slicePeaks(full, secs, bins, start, end);
     },
     async putOverride(req) {
@@ -898,7 +1016,9 @@ export function createMockApi(emit: Emit, opts: MockOptions = {}): Api & { outsi
     async putRefDefaults(ep, fields) {
       await wait();
       need(ep);
-      if (!("target" in fields) && !("keyframe_target" in fields)) throw new MockError("give target and/or keyframe_target", 400);
+      if (!("target" in fields) && !("keyframe_target" in fields) && !("voice_target" in fields)) {
+        throw new MockError("give target, keyframe_target and/or voice_target", 400);
+      }
       const defaults = refs.setDefaults(fields);
       emit("h3pipe.episode", { ep: EP });
       return { defaults };
@@ -1008,7 +1128,7 @@ export function createMockApi(emit: Emit, opts: MockOptions = {}): Api & { outsi
       return r;
     },
     refFileUrl(_ep, path) {
-      return refs.image(path) ?? media + path.split("/").pop();
+      return refs.image(path) ?? refs.audio(path) ?? media + path.split("/").pop();
     },
     async refsGenerate(req) {
       await wait();
@@ -1201,6 +1321,58 @@ export function createMockApi(emit: Emit, opts: MockOptions = {}): Api & { outsi
       const after = planPromote(promoteInput(null));
       return { promoted: r.promoted, left: after.left, hashes: { script: files.script.hash, series: files.series.hash }, build };
     },
+    // ---- Phase 9c-A: the recording and h3align ----
+    async alignReady() {
+      await wait(60);
+      return align.ready();
+    },
+    async attachTrack(ep, sourcePath, pass) {
+      await wait(300);
+      need(ep);
+      return attach(sourcePath, pass ?? "proxy", false);
+    },
+    async uploadTrack(req, onProgress) {
+      need(req.ep);
+      const name = req.name ?? "recording.wav";
+      const total = req.file.size;
+      if (total > UPLOAD_LIMIT) throw new MockError(`${name} is over 64 MB`, 413);
+      for (let q = 1; q <= 4; q++) {
+        await wait(80);
+        onProgress?.(Math.round((total * q) / 4), total);
+      }
+      return attach(name, req.pass ?? "proxy", true);
+    },
+    async clearTrack(ep) {
+      await wait(250);
+      need(ep);
+      if (!trackPath) throw new MockError("the series config names no recording", 400);
+      trackPath = null;
+      trackWords = false;
+      emit("h3pipe.episode", { ep: EP });
+      return { track: null, hash: mockHash(files.series.text + "|no-track"), build: await api.build(ep), path: null, copied: false, reformatted: false };
+    },
+    async align(req) {
+      need(req.ep);
+      const r = await align.run(req);
+      const build = req.dry_run ? null : await api.build(req.ep);
+      if (!req.dry_run) emit("h3pipe.episode", { ep: EP });
+      return { ...r, track: trackInfo(req.pass ?? "proxy"), build };
+    },
+    // ---- Phase 9c-B: a line from a take as a voice sample ----
+    async refsVoiceFromTake(req) {
+      await wait(400);
+      need(req.ep);
+      const src = takeAudio(req.pass, req.shot, req.take);
+      if (!status[req.pass]?.shots.some((s) => s.shot === req.shot)) {
+        throw new MockError(`${req.shot} is not in the ${req.pass} shotlist`, 404);
+      }
+      const r = refs.voiceFromTake({
+        ref: req.ref, shot: req.shot, take: req.take, pass: req.pass, start: req.start, end: req.end,
+        pick: req.pick ?? null, note: req.note ?? "", duration: src?.seconds ?? null, sourceFile: src?.path ?? null,
+      });
+      emit("h3pipe.episode", { ep: EP });
+      return r;
+    },
     async comfyQueue() {
       await wait();
       return { running: [], pending: [] };
@@ -1215,10 +1387,12 @@ export function createMockApi(emit: Emit, opts: MockOptions = {}): Api & { outsi
         return await fn(...a);
       } catch (e) {
         if (e instanceof MockError) throw new ApiError(e.message, e.status, `/mock/${k}`, e.data);
+        // an align 409 carries what is missing, as the route does
+        if (e instanceof AlignError) throw new ApiError(e.message, e.status, `/mock/${k}`, e.data ? { error: e.message, ...(e.data as object) } : undefined);
         if (e instanceof FsError || e instanceof RefError || e instanceof CutError) throw new ApiError(e.message, e.status, `/mock/${k}`);
         throw e;
       }
     };
   }
-  return Object.assign(wrapped, { outsideEdit });
+  return Object.assign(wrapped, { outsideEdit, unalign });
 }

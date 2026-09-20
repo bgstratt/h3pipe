@@ -21,7 +21,12 @@ const TREE: Record<string, Node> = {
         dirs: {
           DeanStories: {
             series_config: true,
-            dirs: { ep05: { episode: true, series_config: false, dirs: { shotlist: {}, renders_proxy: {} } }, refs: { dirs: { _bg: {}, _takes: {} } }, audio: {} },
+            dirs: {
+              ep05: { episode: true, series_config: false, dirs: { shotlist: {}, renders_proxy: {} } },
+              refs: { dirs: { _bg: {}, _takes: {} } },
+              // Phase 9c: dialogue recordings to attach (one with a space in its name)
+              audio: { files: { "ep05_dialogue.wav": 4_402_100, "ep05 take 2.wav": 4_511_880, "ep05_notes.txt": 620 } },
+            },
             files: { "series.json": 9_120 },
           },
           KitchenSink: { series_config: true, dirs: { drafts: {} }, files: { "series.json": 4_310 } },

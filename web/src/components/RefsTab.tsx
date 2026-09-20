@@ -15,9 +15,11 @@ import { errText } from "../api";
 import { api } from "../host";
 import { shortName, tn } from "../lib/format";
 import {
-  editRefsFor, editRefsText, imageModeText, imageTargets, isEditTarget, refDefaultSourceLabel, refDefaults, refTargetOf, refsSnippet,
-  type RefTargetKind, type ResolvedRefDefaults,
+  defaultOf, editRefsFor, editRefsText, imageModeText, imageTargets, isEditTarget, refDefaultSourceLabel, refDefaults,
+  refTargetKind, refTargetOf, refsSnippet, type RefTargetKind, type ResolvedRefDefaults,
 } from "../lib/imageTargets";
+import { audioTargets, voiceCapNotes, voiceModeText } from "../lib/voice";
+import { VoiceCandidate, VoiceGenerateBar, VoiceLive } from "./VoiceRef";
 import { missingResultText } from "../lib/lookback";
 import { formFromDetail, isDirty, overrideFields, type OverrideForm, type OverrideSource } from "../lib/overrideForm";
 import { pickWarning, readinessBadge, targetOptionText } from "../lib/readiness";
@@ -32,7 +34,7 @@ import { useStatus } from "./hooks";
 import { useTargets } from "./Targets";
 import { OverrideFields } from "./OverrideFields";
 import { PassToggle } from "./ShotsTab";
-import { Progress, statusClass } from "./Thumb";
+import { Progress } from "./Thumb";
 import { DropSlot, UploadButton } from "./Upload";
 
 const FILTERS: { id: RefFilter; label: string; title: string }[] = [
@@ -61,31 +63,33 @@ function useRefDefaults(): ResolvedRefDefaults {
 function ImageModelBar() {
   const { list } = useTargets();
   const defaults = useRefDefaults();
-  const busyRefs = useApp((s) => !!s.busy["refdefaults|refs"]);
-  const busyKf = useApp((s) => !!s.busy["refdefaults|keyframes"]);
+  const busy = useApp((s) => s.busy);
   const images = imageTargets(list);
-  if (!list || !images.length) return null;
+  const voices = audioTargets(list);
+  if (!list || (!images.length && !voices.length)) return null;
   const row = (kind: RefTargetKind, label: string) => {
-    const cur = kind === "keyframes" ? defaults.keyframes : defaults.refs;
-    const src = kind === "keyframes" ? defaults.keyframesSource : defaults.refsSource;
+    const choices = kind === "voices" ? voices : images;
+    if (!choices.length) return null;
+    const { target: cur, source: src } = defaultOf(defaults, kind);
     const t = findTarget(list, cur);
     const warn = pickWarning(targetLabel(list, cur), t?.readiness);
     const badge = readinessBadge(t?.readiness);
     const editor = src === "editor";
+    const what = kind === "voices" ? voiceModeText(t) || "audio model" : imageModeText(t) || "image model";
     return (
       <span className="h3-row" style={{ gap: 4 }}>
         <span className="h3-muted h3-small">{label}</span>
         <select
           className="h3-in"
           value={editor ? cur : ""}
-          disabled={kind === "keyframes" ? busyKf : busyRefs}
-          title={`${imageModeText(t) || "image model"}${badge ? ` · ${badge.title}` : ""}\nNow: ${targetLabel(list, cur)} (${refDefaultSourceLabel(src)}). A choice here is this episode's; a ref with its own model keeps it.`}
+          disabled={!!busy[`refdefaults|${kind}`]}
+          title={`${what}${badge ? ` · ${badge.title}` : ""}\nNow: ${targetLabel(list, cur)} (${refDefaultSourceLabel(src)}). A choice here is this episode's; a ref with its own model keeps it.`}
           onChange={(e) => void setRefDefault(kind, e.target.value || null)}
         >
           <option value="">{editor ? "(back to the series config's default)" : `${targetLabel(list, cur)} (${refDefaultSourceLabel(src)})`}</option>
-          {images.map((x) => (
-            <option key={x.id} value={x.id} title={imageModeText(x)}>
-              {targetOptionText(x)}{isEditTarget(x) ? " · edit" : ""}
+          {choices.map((x) => (
+            <option key={x.id} value={x.id} title={kind === "voices" ? voiceModeText(x) : imageModeText(x)}>
+              {targetOptionText(x)}{kind === "voices" ? "" : isEditTarget(x) ? " · edit" : ""}
             </option>
           ))}
         </select>
@@ -93,18 +97,26 @@ function ImageModelBar() {
       </span>
     );
   };
-  const custom = (["refs", "keyframes"] as RefTargetKind[]).filter((k) => (k === "keyframes" ? defaults.keyframesSource : defaults.refsSource) === "editor");
+  const voiceTarget = findTarget(list, defaults.voices);
+  const custom = (["refs", "keyframes", "voices"] as RefTargetKind[]).filter((k) => defaultOf(defaults, k).source === "editor");
+  const WHAT: Record<RefTargetKind, string> = { refs: "refs", keyframes: "keyframes", voices: "voice samples" };
   return (
     <div className="h3-col" style={{ gap: 3 }}>
       <div className="h3-row h3-wrap" style={{ gap: 8 }}>
         {row("refs", "Refs render with:")}
         {row("keyframes", "Keyframes with:")}
+        {row("voices", "Voices with:")}
       </div>
+      {voiceTarget && (
+        <span className="h3-small h3-muted" title={voiceCapNotes(voiceTarget).join(" ")}>
+          {targetLabel(list, voiceTarget.id)}: {voiceModeText(voiceTarget)}. {voiceCapNotes(voiceTarget)[0]}
+        </span>
+      )}
       {custom.map((k) => {
-        const id = k === "keyframes" ? defaults.keyframes : defaults.refs;
+        const id = defaultOf(defaults, k).target;
         return (
           <div key={k} className="h3-note h3-note-info h3-small">
-            This episode generates {k === "keyframes" ? "keyframes" : "refs"} with {targetLabel(list, id)} (kept in overrides.json; series.json isn't changed).
+            This episode generates {WHAT[k]} with {targetLabel(list, id)} (kept in overrides.json; series.json isn't changed).
             To make it the series default, add to series.json:{" "}
             <code className="h3-mono">{refsSnippet(k, id)}</code>{" "}
             <button className="h3-link" onClick={() => void copyText(refsSnippet(k, id), "Snippet")}>copy</button>{" "}
@@ -190,6 +202,16 @@ function KeyframeActions({ r }: { r: Ref }) {
 
 /** A ref's live file (the one renders read), or a "missing" placeholder. */
 function LiveThumb({ ep, r, size }: { ep: string; r: Ref; size: number }) {
+  if (!r.path && isAudioRef(r)) {
+    // Phase 9c-B: a character the series config gives no `voice_sample`; a
+    // pick writes refs/voices/<id>.wav and that line
+    return (
+      <div className="h3-refthumb h3-thumb h3-empty" style={{ width: size, height: size }} title="No voice sample yet: generate one (or take a line from a take) and pick it, and series.json gains the voice_sample line.">
+        <i className="pi pi-volume-off" style={{ fontSize: size / 2.6 }} />
+        <span className="h3-thumb-label">no sample</span>
+      </div>
+    );
+  }
   if (!r.path) {
     // the series config names no file for it (a voice-only character has no sheet)
     return (
@@ -257,19 +279,8 @@ const Candidate = memo(function Candidate({ ep, r, view, t, live, selected }: {
     t.save_notes && t.status === "failed" ? t.save_notes : "",
     "click: select · ctrl/⌘-click: compare with the selected · double-click: open in the viewer",
   ].filter(Boolean).join("\n");
-  if (isAudioRef(r)) {
-    return (
-      <div className={`h3-audio-take${selected ? " h3-sel" : ""}${live ? " h3-live" : ""}`} onClick={click} title={title}>
-        <span className="h3-row">
-          <span className={`h3-dot ${statusClass(t.status)}`} />
-          <b>{tn(t.take)}</b>
-          {live && <span className="h3-badge h3-b-cut">live</span>}
-          <span className="h3-muted h3-small">{t.source}</span>
-        </span>
-        {url && t.status === "ok" && <audio controls preload="none" src={url} onClick={(e) => e.stopPropagation()} />}
-      </div>
-    );
-  }
+  // Phase 9c-B: a voice candidate plays, and draws its waveform
+  if (isAudioRef(r)) return <VoiceCandidate ep={ep} r={r} t={t} live={live} selected={selected} onClick={click} />;
   return (
     <div
       className={`h3-cand${selected ? " h3-sel" : ""}${live ? " h3-live" : ""}`}
@@ -398,7 +409,8 @@ function GenerateBar({ r }: { r: Ref }) {
   const [view, setView] = useState<string>(isChar ? "" : "");
   const [count, setCount] = useState(1);
   const [seedMode, setSeedMode] = useState<SeedMode>("auto");
-  const gen = canGenerate(r);
+  // a voice generates through its own bar (count, seconds and the line)
+  const gen = canGenerate(r) && !isAudioRef(r);
   const importView = isChar ? view || null : null;
   const kind = isAudioRef(r) ? "audio" : "image";
   return (
@@ -452,30 +464,32 @@ function RefTargetOverride({ r }: { r: Ref }) {
   const { list } = useTargets();
   const defaults = useRefDefaults();
   const busy = useApp((s) => !!s.busy[`refoverride|${r.id}`]);
-  const images = imageTargets(list);
-  if (!images.length) return null;
+  const kind: RefTargetKind = refTargetKind(r);
+  // a voice's own target must be an audio one, an image ref's an image one
+  const choices = kind === "voices" ? audioTargets(list) : imageTargets(list);
+  if (!choices.length) return null;
   const own = r.override_values?.target ?? "";
-  const kind: RefTargetKind = isKeyframeRef(r) ? "keyframes" : "refs";
-  const fallback = kind === "keyframes" ? defaults.keyframes : defaults.refs;
-  const src = kind === "keyframes" ? defaults.keyframesSource : defaults.refsSource;
+  const { target: fallback, source: src } = defaultOf(defaults, kind);
   const cur = refTargetOf(r, defaults);
   const t = findTarget(list, cur.target);
+  const what = kind === "voices" ? "Voice model" : "Image model";
+  const mode = (x: typeof t) => (kind === "voices" ? voiceModeText(x) : imageModeText(x));
   return (
     <div className="h3-col" style={{ gap: 2 }}>
       <div className="h3-row">
-        <span className="h3-h">Image model</span>
+        <span className="h3-h">{what}</span>
         <select
           className="h3-in h3-grow"
           value={own}
           disabled={busy}
-          title={`This ref's own image model (kept in refs/_overrides.json). Empty: the ${kind === "keyframes" ? "keyframes'" : "refs'"} model above.`}
+          title={`This ref's own model (kept in refs/_overrides.json). Empty: the ${kind === "keyframes" ? "keyframes'" : kind === "voices" ? "voices'" : "refs'"} model above.`}
           onChange={(e) => void saveRefOverride(r.id, { target: e.target.value || null })}
         >
           <option value="">{`(${refDefaultSourceLabel(src)}: ${targetLabel(list, fallback)})`}</option>
-          {images.map((x) => <option key={x.id} value={x.id}>{targetOptionText(x)}{isEditTarget(x) ? " · edit" : ""}</option>)}
+          {choices.map((x) => <option key={x.id} value={x.id}>{targetOptionText(x)}{kind !== "voices" && isEditTarget(x) ? " · edit" : ""}</option>)}
         </select>
       </div>
-      {t && <span className="h3-small h3-muted">{targetLabel(list, cur.target)}{imageModeText(t) ? `: ${imageModeText(t)}` : ""}{cur.source === "override" ? " (this ref's own)" : ""}</span>}
+      {t && <span className="h3-small h3-muted">{targetLabel(list, cur.target)}{mode(t) ? `: ${mode(t)}` : ""}{cur.source === "override" ? " (this ref's own)" : ""}</span>}
     </div>
   );
 }
@@ -625,6 +639,7 @@ function RefDetail({ ep, r }: { ep: string; r: Ref }) {
         <div className="h3-small h3-err">Blocks {blocked.length} shot{blocked.length > 1 ? "s" : ""}: {blocked.slice(0, 12).join(", ")}{blocked.length > 12 ? "…" : ""}</div>
       )}
       {used.length > 0 && !blocked.length && <div className="h3-small h3-muted">Used by {used.slice(0, 12).join(", ")}{used.length > 12 ? "…" : ""}</div>}
+      {isAudioRef(r) && <VoiceLive ep={ep} r={r} />}
       {hasViews(r) ? (
         <>
           {missingViews.length > 0 && missingViews.length < 4 && (
@@ -655,6 +670,12 @@ function RefDetail({ ep, r }: { ep: string; r: Ref }) {
       {/* a keyframe's continuity / generate / import / clear sit on its row (KeyframeActions) */}
       {r.can_generate === false && r.why_not && (
         <div className="h3-small h3-muted">Can't generate: {r.why_not}. {isKeyframeRef(r) ? "Use a neighbouring shot's frame or import one." : "Import a file instead."}</div>
+      )}
+      {isAudioRef(r) && canGenerate(r) && <VoiceGenerateBar r={r} />}
+      {isAudioRef(r) && !canGenerate(r) && (
+        <div className="h3-small h3-muted">
+          This server doesn't generate voices{r.why_not ? `: ${r.why_not}` : ""}. Import a recording, or take a line from a take.
+        </div>
       )}
       {!isKeyframeRef(r) && <GenerateBar r={r} />}
       {canGenerate(r) && (
@@ -689,7 +710,10 @@ function RefRow({ ep, r }: { ep: string; r: Ref }) {
       refId={r.id}
       view={null}
       kind={isAudioRef(r) ? "audio" : "image"}
-      refuse={chars ? (open ? "Drop onto one of the views below" : "A character takes a picture per view: open it and drop onto a view") : !r.path ? "The series config names no file for this ref" : null}
+      refuse={chars
+        ? (open ? "Drop onto one of the views below" : "A character takes a picture per view: open it and drop onto a view")
+        // a voice with no sample yet still takes one: picking it writes the series config
+        : !r.path && !isAudioRef(r) ? "The series config names no file for this ref" : null}
       className={`h3-ref${open ? " h3-open" : ""}`}
       dataRef={r.id}
     >

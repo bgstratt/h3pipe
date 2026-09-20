@@ -2,10 +2,11 @@
 // episode, and picking a file on the ComfyUI machine to import as a ref.
 
 import { useCallback, useEffect, useState } from "react";
-import { addRoot, closeBrowse, importRef, openEpisodeAt, refLabel, removeRoot } from "../actions";
+import { addRoot, attachTrack, closeBrowse, importRef, openEpisodeAt, refLabel, removeRoot } from "../actions";
 import { errText } from "../api";
 import { api } from "../host";
 import { AUDIO_EXT, IMAGE_EXT, crumbs } from "../lib/browse";
+import { TRACK_EXT } from "../lib/track";
 import { viewLabel } from "../lib/refs";
 import { useApp, type BrowseState } from "../store";
 import type { BrowseDir, BrowseFile, BrowseResult } from "../types";
@@ -46,7 +47,11 @@ function BrowseBody({ b }: { b: BrowseState }) {
   const [err, setErr] = useState<string | null>(null);
   const [sel, setSel] = useState<Sel>(null);
   const [typed, setTyped] = useState("");
-  const importing = b.purpose === "import";
+  const forTrack = b.purpose === "track";
+  const busyTrack = useApp((s) => !!s.busy.track);
+  // Phase 9c-A: picking the episode's recording works like an import, but the
+  // file goes to POST /h3pipe/track instead of becoming a ref candidate
+  const importing = b.purpose === "import" || forTrack;
   const roots = config?.roots ?? [];
 
   const go = useCallback(async (path: string | null) => {
@@ -74,13 +79,19 @@ function BrowseBody({ b }: { b: BrowseState }) {
     if (await openEpisodeAt(d.path, parent)) closeBrowse();
   };
   const doImport = async (path: string) => {
+    if (forTrack) {
+      if (await attachTrack(path)) closeBrowse();
+      return;
+    }
     if (!b.ref) return;
     if (await importRef(b.ref, b.view ?? null, path)) closeBrowse();
   };
 
   const here = res?.path ?? "";
   const filesListed = res?.files !== undefined;
-  const ext = b.files === "audio" ? AUDIO_EXT : IMAGE_EXT;
+  // a recording may also be .aac / .opus, which the server's `files=audio`
+  // listing leaves out (see the contract gaps): the typed path takes those
+  const ext = forTrack ? TRACK_EXT : b.files === "audio" ? AUDIO_EXT : IMAGE_EXT;
   const files = (res?.files ?? []).filter((f) => ext.test(f.name));
   const selDir = sel?.kind === "dir" ? sel.d : null;
   const selFile = sel?.kind === "file" ? sel.f : null;
@@ -88,9 +99,11 @@ function BrowseBody({ b }: { b: BrowseState }) {
   const epTarget = selDir?.episode ? { path: selDir.path, parent: here || null } : res?.episode ? { path: here, parent: res.parent || null } : null;
   const rootTarget = selDir?.path ?? (here || null);
 
-  const title = importing
-    ? <>Import into {refLabel(b.ref ?? "", b.view)} {b.view ? <span className="h3-muted h3-small">{viewLabel(b.view)}</span> : null}</>
-    : "Project folders";
+  const title = forTrack
+    ? "Choose the episode's dialogue recording"
+    : importing
+      ? <>Import into {refLabel(b.ref ?? "", b.view)} {b.view ? <span className="h3-muted h3-small">{viewLabel(b.view)}</span> : null}</>
+      : "Project folders";
 
   return (
     <Dialog
@@ -101,10 +114,15 @@ function BrowseBody({ b }: { b: BrowseState }) {
         <>
           {importing ? (
             <>
-              <span className="h3-muted h3-small h3-grow h3-ell">{selFile ? selFile.path : "Pick a file"}</span>
+              <span className="h3-muted h3-small h3-grow h3-ell">{selFile ? selFile.path : forTrack ? "Pick a recording" : "Pick a file"}</span>
               <button className="h3-btn" onClick={closeBrowse}>Cancel</button>
-              <button className="h3-btn h3-primary" disabled={!selFile || busyImport} onClick={() => selFile && void doImport(selFile.path)}>
-                <i className={busyImport ? "pi pi-spin pi-spinner" : "pi pi-download"} /> Import
+              <button
+                className="h3-btn h3-primary"
+                disabled={!selFile || busyImport || busyTrack}
+                title={forTrack ? "It goes to <episode>/audio/ (a file already inside the episode is used where it is), and series.json starts naming it" : undefined}
+                onClick={() => selFile && void doImport(selFile.path)}
+              >
+                <i className={busyImport || busyTrack ? "pi pi-spin pi-spinner" : "pi pi-download"} /> {forTrack ? "Attach" : "Import"}
               </button>
             </>
           ) : (
@@ -185,7 +203,7 @@ function BrowseBody({ b }: { b: BrowseState }) {
       <div className="h3-row">
         <input
           className="h3-in h3-grow h3-mono"
-          placeholder={importing ? "or type a file path on the ComfyUI machine" : "or type a folder path"}
+          placeholder={importing ? `or type a ${forTrack ? "recording's" : "file"} path on the ComfyUI machine` : "or type a folder path"}
           value={typed}
           onChange={(e) => setTyped(e.target.value)}
           onKeyDown={(e) => {
@@ -199,7 +217,9 @@ function BrowseBody({ b }: { b: BrowseState }) {
           </button>
         )}
         {importing && (
-          <button className="h3-btn" disabled={!typed.trim() || busyImport} onClick={() => void doImport(typed.trim())}>Import typed path</button>
+          <button className="h3-btn" disabled={!typed.trim() || busyImport || busyTrack} onClick={() => void doImport(typed.trim())}>
+            {forTrack ? "Attach typed path" : "Import typed path"}
+          </button>
         )}
       </div>
       {!importing && (
