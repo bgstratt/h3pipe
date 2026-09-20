@@ -12,3 +12,8 @@ Issues and pull requests are welcome.
   before opening a PR. If it touches rendering, say what you rendered to verify it.
 - `prompts/` and the skill in `build/skill/` are generated. Edit `docs/AUTHORING.md` (and
   `docs/BREAKDOWN.md`) and run `python tools/make_prompts.py`.
+- INSTALL.md's model list is generated too. If you change a target's `models`, `presets`
+  or `downloads`, run `python tools/make_models_md.py` and commit the result;
+  `tests/test_docs.py` fails when it is out of date (`--check` does the same without
+  writing). Never add a download URL you cannot trace to a ComfyUI template, a saved
+  workflow or ComfyUI-Manager's model list — leave `url` null and say so in `source`.
