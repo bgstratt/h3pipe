@@ -201,10 +201,17 @@ export function fmtWhen(iso: string | null | undefined): string {
   return d.toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
 }
 
-/** Shorten a model/LoRA file name for a narrow column. */
-export function shortName(name: string | null | undefined, max = 36): string {
-  if (!name) return "";
-  const base = name.split(/[\\/]/).pop() ?? name;
+/**
+ * Shorten a model/LoRA file name for a narrow column. A list (the `loras`
+ * param of a take's `resolved` is one) becomes its names, comma separated;
+ * anything else is stringified rather than thrown over — this is a formatter,
+ * and a surprise from a sidecar must not take the window down.
+ */
+export function shortName(name: unknown, max = 36): string {
+  if (name == null || name === "") return "";
+  if (Array.isArray(name)) return name.map((n) => shortName(n, max)).filter(Boolean).join(", ");
+  const s = typeof name === "string" ? name : String(name);
+  const base = s.split(/[\\/]/).pop() ?? s;
   return base.length > max ? base.slice(0, max - 1) + "…" : base;
 }
 

@@ -271,6 +271,16 @@
 .h3-toast.h3-t-success { border-left-color: var(--h3-ok); }
 .h3-toast.h3-t-warn { border-left-color: var(--h3-stale); }
 
+/* an error boundary's card: one broken window, the rest of the editor alive */
+.h3-crash {
+  display: flex; flex-direction: column; gap: 4px; margin: 8px;
+  background: var(--h3-bg); color: var(--h3-fg);
+  border: 1px solid var(--h3-failed); border-left-width: 4px; border-radius: 6px;
+  padding: 6px 10px; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+}
+/* in the overlay it floats (the surfaces' cards sit in the panel's flow) */
+.h3-overlay > .h3-crash { position: fixed; right: 12px; top: 56px; z-index: 2400; max-width: 380px; margin: 0; }
+
 .h3-lora { display: grid; grid-template-columns: minmax(0, 1fr) 52px 22px; gap: 4px; align-items: center; }
 .h3-kv { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 1px 8px; font-size: 11px; }
 .h3-kv > :nth-child(odd) { color: var(--h3-muted); }

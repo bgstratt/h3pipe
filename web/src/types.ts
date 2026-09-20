@@ -1164,9 +1164,13 @@ export interface MissingFile {
 }
 
 
+/**
+ * What one model param resolved to when the take was queued (targets/__init__.py).
+ * A file name — except the `loras` param, whose want/using are LISTS of names.
+ */
 export interface Resolution {
-  want?: string | null;
-  using?: string | null;
+  want?: string | string[] | null;
+  using?: string | string[] | null;
   how: "exact" | "family" | "base" | "off" | string;
 }
 

@@ -171,18 +171,20 @@ export function searchText(m: MissingFile): string {
 /** Plain words for a resolution that isn't exact, or null for an exact one. */
 export function resolutionText(param: string, r: Resolution, target?: Pick<Target, "models"> | null): string | null {
   const what = target?.models?.[param]?.label || param.replace(/_/g, " ");
-  const want = r.want ? shortName(r.want, 60) : what;
+  // `want` / `using` are a file name, or a list of them for the `loras` param
+  const want = shortName(r.want, 60) || what;
+  const using = shortName(r.using, 60);
   switch (r.how) {
     case "exact":
       return null;
     case "family":
-      return `using ${r.using ? shortName(r.using, 60) : "another file"} instead of ${want} (same family)`;
+      return `using ${using || "another file"} instead of ${want} (same family)`;
     case "base":
       return `rendered with base settings: ${want} missing`;
     case "off":
       return `${what} off: ${want} missing`;
     default:
-      return `${what}: ${r.how}${r.using ? ` (${shortName(r.using, 60)})` : ""}`;
+      return `${what}: ${r.how}${using ? ` (${using})` : ""}`;
   }
 }
 

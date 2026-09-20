@@ -835,6 +835,7 @@ At queue time each model param resolves to an **installed** file:
 2. otherwise the best installed file of the same family (`targets/modelid.py`): a name match beats a fingerprint match; within a tie, prefer the same precision as the preset (fp8 / int8 / bf16 / fp16), then the shortest name.
 
 The sidecar records `resolved: {param: {"want", "using", "how": "exact" | "family" | "base" | "off"}}`.
+`want` / `using` are a file name, except for the `loras` param, where both are **lists** of names.
 `h3render --dry-run --check-nodes` prints the same resolution.
 
 ### Downloads (`target.json` `downloads`)

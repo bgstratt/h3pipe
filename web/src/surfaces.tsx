@@ -7,6 +7,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { dismissToast } from "./actions";
 import { ContextMenu } from "./components/ContextMenu";
 import { CutMenu } from "./components/CutMenu";
+import { Boundary } from "./components/ErrorBoundary";
 import { RedoDialog, SidecarDialog } from "./components/Dialogs";
 import { BrowseDialog } from "./components/Browse";
 import { ClipAudioWindow } from "./components/ClipAudio";
@@ -29,6 +30,12 @@ const SURFACES: Record<Surface, ComponentType> = {
   shots: ShotsTab,
   refs: RefsTab,
   timeline: Timeline,
+};
+
+const SURFACE_NAMES: Record<Surface, string> = {
+  shots: "h3 Shots",
+  refs: "h3 Refs",
+  timeline: "h3 Timeline",
 };
 
 interface Mounted {
@@ -69,7 +76,9 @@ export function mountSurface(surface: Surface, el: HTMLElement) {
   const C = SURFACES[surface];
   root.render(
     <StrictMode>
-      <C />
+      <Boundary name={SURFACE_NAMES[surface]}>
+        <C />
+      </Boundary>
     </StrictMode>,
   );
   byEl.set(el, { surface, root });
@@ -127,24 +136,36 @@ function Toasts() {
   );
 }
 
-function Overlay() {
+/**
+ * The overlay's windows, each behind its own error boundary: one that throws
+ * shows a card and leaves the others (the context menu above all) alive.
+ */
+export const OVERLAY_WINDOWS: [string, ComponentType][] = [
+  ["Inspector", InspectorWindow],
+  ["Viewer", Viewer],
+  ["What's missing", MissingWindow],
+  ["Script / series config", SourceWindows],
+  ["Dialogue track", TrackWindow],
+  ["Voice clip", VoiceClipWindow],
+  ["Clip audio", ClipAudioWindow],
+  ["Context menu", ContextMenu],
+  ["Cut menu", CutMenu],
+  ["Redo", RedoDialog],
+  ["Render", RenderDialog],
+  ["Browse", BrowseDialog],
+  ["Take details", SidecarDialog],
+  ["Promote", PromoteDialog],
+  ["Toasts", Toasts],
+];
+
+export function Overlay() {
   return (
     <>
-      <InspectorWindow />
-      <Viewer />
-      <MissingWindow />
-      <SourceWindows />
-      <TrackWindow />
-      <VoiceClipWindow />
-      <ClipAudioWindow />
-      <ContextMenu />
-      <CutMenu />
-      <RedoDialog />
-      <RenderDialog />
-      <BrowseDialog />
-      <SidecarDialog />
-      <PromoteDialog />
-      <Toasts />
+      {OVERLAY_WINDOWS.map(([name, C]) => (
+        <Boundary key={name} name={name}>
+          <C />
+        </Boundary>
+      ))}
     </>
   );
 }
