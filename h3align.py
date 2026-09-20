@@ -100,12 +100,12 @@ def shot_grids(series_cfg_path: str, script_text: str):
     resolve falls back to the series target for every shot."""
     import targets as TG
     from h3core.series_config import (character_ids, load_series_config, series_info,
-                                      subject_ids)
+                                      subject_ids, variant_of)
     cfg = load_series_config(series_cfg_path)
     default = TG.video_target(cfg)
     try:
         story = h3build.parse_story(script_text, subject_ids(cfg), character_ids(cfg),
-                                    series_info(cfg))
+                                    series_info(cfg), variant_of(cfg))
         by_shot = TG.shot_targets(story, cfg)
     except Exception:
         by_shot = {}
@@ -469,14 +469,16 @@ def main() -> int:
         rec_rel = os.path.abspath(rec_abs)
     rec_rel = rec_rel.replace("\\", "/")
 
-    # script
+    # script (series_cfg here is the raw JSON, which is written back out below,
+    # so the variant map is read off it rather than resolved into it)
+    from h3core.series_config import variant_of
     subjects = {k for k in series_cfg.get("subjects", {}) if not k.startswith("_")}
     chars = {k for k, v in series_cfg["subjects"].items()
              if not k.startswith("_") and isinstance(v, dict)
              and v.get("kind", "character") == "character"}
     script_src = HS.read_file(ep, "script", md_p)
     text = script_src.text
-    epi = h3build.parse_script(text, subjects, chars)
+    epi = h3build.parse_script(text, subjects, chars, variant_of(series_cfg))
     snap_of = shot_grids(series_cfg_p, text)
     shots, lines = [], []
     for seq in epi["sequences"]:

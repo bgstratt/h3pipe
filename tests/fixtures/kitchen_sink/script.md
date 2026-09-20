@@ -166,3 +166,14 @@ steps: 9
 lora: shot_lora.safetensors
 Bo lifts the kettle off the burner with a grin.
 BO: Too late.
+
+// a wardrobe variant (`of: ada` in series.json): the cast names ada_wet, the
+// lines still say ADA and are bound to the variant, and the design, sheet and
+// subject slot are the variant's while the voice is inherited from ada
+## sh340
+who: ada_wet
+size: close
+dur: auto
+Ada wrings the front of her soaked apron out over the sink.
+ADA (flat): Don't.
+NARRATOR (V.O.): He did anyway.

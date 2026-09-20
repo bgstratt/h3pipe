@@ -14,8 +14,9 @@ safetensors header). Keyframe continuity is in the CLI, the routes and the edito
 family (a missing turbo LoRA renders the base preset, a missing required file skips the shot with its download
 link); `GET /h3pipe/targets?ready=1` and `h3.py targets` report what each target is missing; the episode target
 (`overrides.json` `episode.target`) sits between the script and `series.target`. See **Readiness and the
-episode target (as built)** below. Open items: the per-target lists under Phase 8 / Wan / shot lengths, and the
-Phase 9 editor items.
+episode target (as built)** below. Open items: the per-target lists under Phase 8 / Wan / shot lengths, the
+Phase 9 editor items, and Phase 10b (a variant's views generated as an edit of the base's
+approved ones); Phase 10a, wardrobe as subject variants, is in.
 This is the working plan for the next round of development. `CLAUDE.md` points here.
 
 ## Goals
@@ -56,6 +57,7 @@ This is the working plan for the next round of development. `CLAUDE.md` points h
 | **Refs are driven by the series config and have takes too** | Refs belong to the series, not an episode, and you want to lock designs before a script uses them. Candidates are takes; the picked one is copied to the path the series config names. |
 | ComfyUI-Sonder-Editor is **inspiration only** | Borrow ideas (model templates, recipes, frozen job provenance, take gallery/compare). No code: it is GPL-3. |
 | Prompt formats are **code**, everything else about a target is **data** | Writing an H3 prompt is real logic; a declarative DSL would only move that complexity somewhere worse. |
+| **Wardrobe is a subject variant, not a shot field** | Wardrobe already lives in each subject's `design`, so a variant is data every target reads today; a `wear:` field would be a new IR field every target must implement and would be silently wrong in any that did not. It also forces H3's per-subject retention down from `fully_preserved`, loosening the face to change the clothes. Phase 10. |
 
 ## Project layout
 
@@ -967,6 +969,228 @@ whether it replaces or joins the edit models for keyframes. Also open from the s
 conversation: seeding a character from a picture the user already has, generating each view
 as an edit of the approved one rather than independently, reusing a location across
 episodes, and fixing part of a ref instead of regenerating it.
+
+**Phase 10a — wardrobe: subject variants** DONE 2026-09-20
+
+A character changes clothes mid-episode. `fully_preserved` against a sheet in the old
+wardrobe fights the script; loosening it to `partially_preserved` holds on most takes and
+not all.
+
+**Decision: wardrobe is a subject variant — a second subject entry with its own sheet —
+not a `wear:` field on a shot.**
+
+- Every builder already reads wardrobe out of one `design` string
+  (`targets/video/ltx2/prompt.py`, `targets/video/wan/prompt.py`, ref2va's
+  `subject_definitions`). A variant changes the id in `cast`, so ref2va gets a different
+  sheet, the word-only targets get different words and fl2va a different keyframe source:
+  no per-target work, and retargeting a shot can't silently render the default wardrobe.
+  A `wear:` field is a new IR field every present and future target must implement, whose
+  failure mode in one that doesn't is silent — against Goal 3.
+- The retention marker stays `fully_preserved`. H3's markers are per-subject, not
+  per-attribute: there is no "fully_preserved except wardrobe", so `wear:` would force
+  `partially_preserved`, loosening the *face* in order to change the *clothes*. That is
+  exactly the "doesn't hold on every take" symptom.
+- A costume change *within* one shot (a coat comes off on camera) stays prose in the
+  action line. No field for it.
+
+**Shape.** Authored in the series config only:
+
+```json
+"gina":       { "kind": "character", "name": "Gina", "design": "…",
+                "sheet": "refs/gina/gina_sheet_4panel.png",
+                "voice": "…", "voice_sample": "audio/voices/gina.wav" },
+"gina_towel": { "of": "gina", "design": "Gina in a white bath towel wrapped and tucked, "
+                "hair wet and pushed back, bare feet, …" }
+```
+
+The script names the variant where it applies; the dialogue is unchanged:
+
+```
+## sh120
+who: gina_towel
+GINA (low): Don't come in.
+```
+
+**Where the work is.** `of:` is resolved **at load**, in `h3core/series_config.py`, into a
+complete ordinary subject entry. Every other reader of `series_cfg["subjects"]` — the
+target compiles and prompt writers, `h3refs`, `h3edit`, the routes, `comfy_nodes/` — sees
+what it sees today and changes nothing. Four points:
+
+1. **`h3core/series_config.py`** — `series_config_from` resolves `of:`:
+   - inherits `kind`, `name`, `voice`, `voice_sample`, `pronoun`. The variant writes its
+     own whole `design`: splicing a wardrobe clause into the base's prose contradicts
+     itself in the word-only builders ("a red shirt … now wearing a towel").
+   - **never inherits `sheet`.** Default it from the base's path with the base id replaced
+     by the variant id (`refs/gina/gina_sheet_4panel.png` →
+     `refs/gina/gina_towel_sheet_4panel.png`); if the base's path doesn't contain its id,
+     the variant must state its own. Inheriting it verbatim renders the base's clothes
+     while every check passes.
+   - keeps `of` on the resolved entry — the marker points 2 and 3 read.
+   - rejects with `ValueError`, which the Series config window already reports at its line
+     through `h3source.check_text`: unknown base, a variant of a variant, a cycle, a
+     variant whose `kind` disagrees with its base, a variant with no `design`.
+2. **`h3core/story.py`** (dialogue, ~:188) — speaker aliasing. A `GINA:` line in a shot
+   whose cast holds a variant of `gina` binds to the variant, so ref2va labels it
+   `<Subject N>` instead of inventing an off-screen voice, and the auto-add of an
+   on-screen speaker doesn't put the base in the cast as a second entry burning a second
+   reference slot. `ScriptError`: a base and its variant, or two variants of one base, in
+   the same shot.
+3. **`h3refs.py`** (`series_refs`, :239) — a variant gets its **subject** ref (its own
+   sheet, four views) and **no voice ref**: it shares the base's. Guard `set_voice_sample`
+   so picking a voice can never write `voice_sample` into a variant entry and split one
+   character's voice in two.
+4. **Docs** — `docs/AUTHORING.md` (the source of truth), then `python tools/make_prompts.py`.
+   A short section beside "A location is one angle, not one place": the same idea for people.
+
+Nothing in `targets/`, `h3build.py`, `h3render.py`, the routes or the editor changes.
+`h3align` uses the speaker id only as a label in its report (`h3align.py:385`), so a
+variant speaker is harmless there.
+
+**Phase 10b — a variant's views from the base's.** Generating a variant cold is what makes a
+face drift; generating it as an edit of the approved sheet is what holds it. Three paths, in the
+order they are worth building.
+
+*What is already there.* Image-target choice has three slots — `target` (series refs),
+`keyframe_target`, `voice_target` — each settable per episode (the editor), per series (the
+`refs` block) or per ref (`refs/_overrides.json`), and `flux2_klein_edit` is already the default
+keyframe target when it is ready. So picking an edit target for a variant's views needs no new
+selection machinery.
+
+*The gap is one branch.* `gen_jobs` fills a job's `references` only for a keyframe
+(`h3refs.py`, `elif ref.kind == "keyframe": refs = reference_images(...)`); every series ref —
+subject views, objects, plates — falls through to the `else` that sets a size and leaves
+`references` empty. Both edit targets degrade to text-to-image when they are handed none, so
+choosing Klein edit for a variant's back view today silently generates it cold, exactly as krea2
+would. **10b is: a subject view being generated on an edit target gets its reference parts.** For
+a variant view that is the base's picked view *of the same tag* — the towel's back panel edits
+the base's back panel — which is the standing argument for keeping the side and back views (see
+the open decision above). Kontext takes one reference, so base view in, variant view out; Klein
+edit takes four, so it can also carry a second angle.
+
+*H3 as an image target.* A MiniMax H3 render with references behaves like an image edit, and its
+first frame is a clean still. The floor is **5 frames, 0.21s** — the grid is 17k+5 and
+`Template.snap` floors at `base`, so 0.1s rounds up to that, not down. Both halves already
+exist: a video target rendering with chosen references, and cutting a frame out as a take
+(`extract_frame` plus a `source: "frame"` take, which `keyframe_from_take` does today — it is
+hardwired to `shot:<id>:<first|last>` and wants generalizing to any ref). It belongs at
+`targets/image/minimax_h3_still/`, a new **image** target that drives the H3 workflow, because
+discovery is by folder kind: as an image target it appears in every dropdown, and readiness,
+overrides and the three default slots all work with nothing else changed. Two things it needs of
+its own: a still-shaped prompt (the six-section writer is shot-shaped, and prompt formats are
+code), and the `_no_plate` path, since Ref2VA puts a location in slot 4 and a sheet view has no
+location. This absorbs the "a video target used as an image target" item from **Next up**.
+
+*krea2 and the other text-to-image targets.* No edit, so identity can only be carried by the
+seed and the words — but today it carries neither. `stable_seed(ref)` returns
+`seed_for(<subject id>)`, and a variant is a different id, so its four views are a different draw
+of a different person who happens to be described similarly. **Default a variant's views to the
+base's seed** (`seed_for(entry["of"])`) and the only difference left between the two generations
+is the wardrobe sentence. It still drifts — same seed is not identity — but it is the difference
+between the same character in new clothes and a new character in the clothes. Authoring note to
+go with it: write a variant's `design` as close to the base's wording as the change allows, since
+on this path the wording *is* the identity.
+
+*Done 2026-09-20 — the seed and the derived views.* `stable_seed(ref)` returns
+`seed_for(entry["of"] or subject)`, so a variant's four views draw on the base's seed on every
+target. `variant_reference_images(s, ref, view, target)` gives a variant's view the base's
+picked take of the SAME view, else that panel cropped out of the base's live sheet, else
+nothing — the shape `_reference_parts` already returns, so staging, composing and the sidecar
+record needed no changes. `gen_jobs` computes it per view (a keyframe's references are per ref;
+a variant's are per view) and `built_prompt` words the view as an edit when it has one
+(`krea2.view_edit_prompt`: what to CHANGE, with the face, build, line quality and the view
+itself named as fixed). A subject that is not a variant, or a target that reads no references,
+generates exactly as before. 12 tests in `tests/test_variants.py`; no goldens moved.
+
+*Done 2026-09-20 — the H3 still target* (`targets/image/minimax_h3_still/`,
+`tests/test_h3_still.py`). An **image** target, so it appears in every dropdown and readiness,
+the `refs` block, the episode default and the per-ref override all work with nothing else
+changed; and because series refs are worded once by krea2 for every image target, it needed no
+prompt writer of its own — switching to it changes the picture, not the brief. The workflow is
+the Ref2VA graph with the shot-shaped parts taken out: no `H3ShotListLoader` (prompt, size,
+length, seed and steps became widgets the image job fills), no audio VAE, no
+CreateVideo/SaveVideo/H3SaveShot; `VAEDecode` feeds `ImageFromBatch` (frame 0) feeds the saver.
+It was derived from the working video graph node for node rather than authored, so the model
+chain is the one the pipeline already renders with — including the dotted autogrow input
+`ref_images.ref_image_0`, which a conversion of the production video workflow confirms is what
+the server is sent today. `patch_graph` grows that group a `LoadImage` at a time, up to nine,
+and cuts it out entirely when there is nothing to edit from. Every node of a built job was
+checked against the live `/object_info` schemas: no unknown types, no missing required inputs.
+
+**Not yet rendered.** The graph is validated, not executed. What one real generate has to show:
+that 5 frames (0.21s, the node's floor, 24x under its trained range) gives a clean frame 0, and
+how it compares with `flux2_klein_edit` on the same variant view. `length` is a target param, so
+raising it is a preset edit, not a code change.
+
+*Settled — how long an H3 still render should be.* Short: the user has run H3 near the floor
+and the first frame held, so the preset is `length` 5 with `ref_image_size` "max" (the node's
+own tooltip calls that best for identity fidelity, and it costs little over five frames). The
+`length` param stays exposed for the A/B against 124.
+
+*Read off the live node* (`/object_info/MiniMaxH3ReferenceToVideo`): Read off the live node
+(`/object_info/MiniMaxH3ReferenceToVideo`): `length` is min **5**, step 17, default 124, tooltip
+"trained range is ~124-362"; `ref_images` is an autogrow group, prefix `ref_image_`, **max 9**,
+so H3 takes up to nine reference images where the video path uses four.
+
+*Left.* One live generate of a variant view on each path — krea2 (seed + words),
+`flux2_klein_edit` (edit) and `minimax_h3_still` (5 frames, frame 0) — compared against the
+base's sheet. It is a picture judgement, so it ends in a look, not an assert. Then the same
+mechanism for a base character's own views (each view an edit of the approved
+three-quarter, the **Next up** item): the parts function is there, and what it needs is the
+rule for which view anchors the rest — a behaviour change for every character, not just
+variants, so it wants its own look first.
+
+**Found on the way — the H3 headcount sentence** (fixed 2026-09-20, `tests/test_h3_prompt.py`).
+`ref_clause` described the reference image *and* claimed how many people were in the shot, and it
+is pasted into every character's `subject_definitions` line. In a two-hander that meant the prompt
+said "Exactly one person appears in this shot" **twice** — once per subject — and with `extras:`
+it repeated the whole crowd paragraph per character. The comment two lines above it already said
+what that costs: H3 settles a contradiction like this by duplicating a referenced character, which
+is the symptom (a second Ada in frame) that the clause exists to prevent. Now the per-subject
+clause only describes its picture ("Exactly one person appears in that image"), and the shot's
+headcount is one line at the end of subject_definitions, by name: *"Exactly two characters appear
+in this shot: <Subject 1> and <Subject 2>. They are different characters, and never duplicates of
+one another."* `extras:` drops the count (a crowd has no number) and keeps "each appear exactly
+once". Props don't count; an `_unreferenced` character does. "Characters", not "people": this
+pipeline's casts include a talking terrier and a raccoon. Every H3 golden moved; **not yet proven
+on a render** — the claim is that removing the contradiction reduces duplicate figures in
+two-handers, and that wants an A/B on a real two-hander shot.
+
+**Open decision — the side and back views.** Nothing in the pipeline reads them. `_panels_for`
+in `comfy_nodes/h3_shotlist.py` picks panel 3 (face) for a single-character close-up and panel 0
+(three-quarter) for everything else; `ltx2_ingredients` and `wan22_vace` both declare
+`"views": {"body": 0, "face": 3}`; keyframes take `04_face` or `01_threequarter`
+(`h3refs._reference_parts`). Panels 1 and 2 are reachable only through the H3 node's manual
+`panel_mode: full` widget (`pair` is [0, 3] too). So half of every character's four view renders
+is generated, taken, picked and stitched for nothing the pipeline asks for.
+
+Against dropping to a body+face sheet: `sheet_panels: 4`, each target recipe's `views` map,
+krea2's `VIEWS`, the crop indices in `h3refs`, the size hints and INSTALL's wording all encode
+four — and **every sheet already on disk would be mis-cropped** (index 3 of a two-wide strip),
+so it needs a re-stitch pass over three real episodes. And Phase 10b wants the side and back:
+generating a variant as an edit of the base's sheet is panel-by-panel, so the towel's back view
+needs the base's back view. Cost is per character per series, not per shot or per take. Leaving
+it at four unless ref generation becomes the bottleneck; if it does, the change is contained
+(krea2.VIEWS + each `target.json` + h3refs' crop) plus a migration script.
+
+**Swept after the fact (2026-09-20).** Four surfaces checked against variants rather than
+assumed: **promote** still lifts a variant's `design` out of a prompt override although the
+prompt around it is now the edit wording (the design still appears exactly once, so the
+split holds — pinned by a test); **the Refs tab** showed two rows both labelled "Ada",
+because a variant inherits the character's name and that name goes into every prompt, so
+`ref_json` gained `"of"` and the row now reads "variant of ada" (bundle rebuilt);
+`h3align` uses the speaker id only as a report label; the **keyframe** path picks
+`04_face` or `01_threequarter` off the variant's own sheet like any other subject.
+`docs/API.md`, `README.md` and the authoring guide (and so the script skill) say all of it.
+
+**Open.** The id convention (`<base>_<outfit>`); whether the Refs tab groups variants under
+their base (cosmetic — leave flat until a real episode's list is actually cluttered).
+`--only ada` in kreagen sweeps the variants too, because it matches on the path: right for
+"regenerate this character", worth a flag if it ever isn't. And the ref-target default:
+a variant is the one ref that always benefits from an edit target, but `refs.target` is
+one setting for every series ref, so choosing an edit model for variants today means
+choosing it for plain characters too. A fourth default slot ("variants use the keyframe
+target when it is ready", as keyframes already do) would fix that; left alone until the
+live comparison says which model wins.
 
 ## Story IR — `shotlist/shots.json` (Phase 6)
 

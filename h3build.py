@@ -35,7 +35,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import targets as TG  # noqa: E402
 from h3core import ir  # noqa: E402,F401
-from h3core.series_config import character_ids, load_series_config, series_info, subject_ids  # noqa: E402
+from h3core.series_config import (character_ids, load_series_config,  # noqa: E402
+                                  series_info, subject_ids, variant_of)
 # Model-neutral pieces, re-exported under their old names: h3align and others
 # import them from here.
 from h3core.ir import stable_seed  # noqa: E402,F401
@@ -227,7 +228,7 @@ def main() -> int:
         with open(args.script, encoding="utf-8") as fh:
             # parse -> story IR
             story = parse_story(fh.read(), subject_ids(series_cfg), character_ids(series_cfg),
-                                series_info(series_cfg))
+                                series_info(series_cfg), variant_of(series_cfg))
         # -> the video target each shot renders on (profiles and target:
         # lines checked here) -> each target compiles its own shots
         groups = TG.episode_targets(story, series_cfg)

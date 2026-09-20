@@ -43,3 +43,6 @@ Style: a flat vector cartoon with thick even outlines and a limited pastel palet
 ## sh330
 Style: a flat vector cartoon with thick even outlines and a limited pastel palette. A medium shot of a cramped diner kitchen with steel counters, a hanging ticket rail and cold fluorescent light from overhead, the camera remains static. Bo is a stocky teenage boy with a shaved head, an oversized green bomber jacket and orange high-tops. Bo lifts the kettle off the burner with a grin. Bo talks, mouth moving with the words.
 
+## sh340
+Style: a flat vector cartoon with thick even outlines and a limited pastel palette. A close-up of a cramped diner kitchen with steel counters, a hanging ticket rail and cold fluorescent light from overhead, the camera remains static. Ada is a tall woman in her thirties with a short grey bob plastered flat and dripping, her mustard apron soaked through and clinging, and round red glasses fogged at the edges. Ada wrings the front of her soaked apron out over the sink. Ada talks, flat, mouth moving with the words.
+

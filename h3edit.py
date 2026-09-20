@@ -570,6 +570,10 @@ def refs_used(root: str, job: J.Job) -> list[dict]:
     except Exception:
         return []
     cfg = J.series_config(root) or {}
+    # a variant (`of:`) shares the subject's voice, and so its voice ref: there
+    # is no voice:<variant> to point at (h3refs.series_refs)
+    from h3core.series_config import variant_of
+    variants = variant_of(cfg)
     plates = {}
     home = next((d for d in (root, os.path.dirname(os.path.normpath(root)))
                  if os.path.isfile(os.path.join(d, "series.json"))), root)
@@ -586,7 +590,8 @@ def refs_used(root: str, job: J.Job) -> list[dict]:
             role, rid = r["role"], f"shot:{job.id}:{r['role']}"
         elif r.get("kind") == "audio":
             role = "voice" if r.get("subject") else "recording"
-            rid = f"voice:{r['subject']}" if r.get("subject") else None
+            rid = (f"voice:{variants.get(r['subject'], r['subject'])}"
+                   if r.get("subject") else None)
         elif r.get("subject"):
             role, rid = "subject", f"subject:{r['subject']}"
         elif r.get("location"):

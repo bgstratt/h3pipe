@@ -28,6 +28,19 @@ Stdlib only.
 from __future__ import annotations
 
 
+COUNT_WORDS = {2: "two", 3: "three", 4: "four", 5: "five", 6: "six"}
+
+
+def _count(n: int) -> str:
+    return COUNT_WORDS.get(n, str(n))
+
+
+def _and(items: list[str]) -> str:
+    if len(items) <= 1:
+        return "".join(items)
+    return ", ".join(items[:-1]) + (", and " if len(items) > 2 else " and ") + items[-1]
+
+
 def build_prompt(shot: dict, seq: dict, series_cfg: dict, panels: int,
                  panel_view: str = "body") -> list[str]:
     """Ref2VA six-section prompt.
@@ -93,24 +106,18 @@ def build_prompt(shot: dict, seq: dict, series_cfg: dict, panels: int,
     # A reference image containing more than one figure gets drawn as more than
     # one person. One panel = one figure = one character on screen.
     #
-    # `extras:` relaxes only the second half of that. A shot whose action puts
-    # other people in frame — a dance partner, a crowd — while the prompt still
-    # insists exactly one person appears is a contradiction, and H3 resolves it
-    # by duplicating the referenced character. Naming the extras as unnamed
-    # figures who must not resemble the subject is what stops that.
+    # The count of people in the SHOT is a separate statement, made once, at
+    # the end of subject_definitions. It used to ride along on this clause, so every
+    # character in a two-hander was defined with the sentence "Exactly one
+    # person appears in this shot" — one contradiction per subject, in exactly
+    # the shots where H3 resolves a contradiction by duplicating a referenced
+    # character.
     extras = (shot.get("extras") or "").strip()
     if panels == 1:
         vname = ("a head-and-shoulders facial close-up" if panel_view == "face"
                  else "a three-quarter view of the whole body")
         ref_clause = (f"a single reference image of ONE character, {vname}. "
                       f"Exactly one person appears in that image.")
-        if extras:
-            ref_clause += (f" This character appears exactly once in the shot. The other "
-                           f"people in frame are {extras}: unnamed background figures who "
-                           f"must look nothing like this character and are never duplicates "
-                           f"of them.")
-        else:
-            ref_clause += " Exactly one person appears in this shot."
     else:
         views = ("four views (three-quarter body, side profile, back view, and a facial "
                  "close-up)" if panels == 4 else
@@ -135,6 +142,31 @@ def build_prompt(shot: dict, seq: dict, series_cfg: dict, panels: int,
         e = book[s]
         defs.append(f"{e['name']} has no reference image and is drawn from this "
                     f"description: {e['design']}.")
+    # Who is in frame, counted once and by name. "Character", not "person":
+    # this pipeline's casts include a talking terrier and a raccoon, and the
+    # reference clause above already calls a subject ONE character. A reference image containing
+    # more than one figure gets drawn as more than one person, and a prompt
+    # that names two subjects while insisting on one person in frame is the
+    # same failure from the other end: H3 settles it by duplicating somebody.
+    # `extras:` drops the count — a crowd has no number — and keeps the part
+    # that matters, that the named people appear once each and the rest look
+    # nothing like them.
+    people = [subj[s] for s in subjects
+              if book[s].get("kind", "character") == "character"]
+    people += [book[s].get("name", s) for s in unref
+               if book[s].get("kind", "character") == "character"]
+    if people and extras:
+        defs.append(f"{_and(people)} {'appears' if len(people) == 1 else 'each appear'} "
+                    f"exactly once in this shot. The other people in frame are {extras}: "
+                    f"unnamed background figures who must look nothing like "
+                    f"{'them' if len(people) > 1 else 'that character'} and are never "
+                    f"duplicates of {'them' if len(people) > 1 else 'that character'}.")
+    elif len(people) == 1:
+        defs.append(f"Exactly one character appears in this shot: {people[0]}.")
+    elif people:
+        defs.append(f"Exactly {_count(len(people))} characters appear in this shot: "
+                    f"{_and(people)}. They are different characters, and never duplicates "
+                    f"of one another.")
     if not no_plate:
         defs.append(
             f"{bg_subj} is the location, defined by <Picture 4> — a background plate of {env}. "

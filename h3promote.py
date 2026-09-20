@@ -130,9 +130,10 @@ class State:
 
 
 def parse(text: str, cfg: dict):
-    from h3core.series_config import character_ids, series_info, subject_ids
+    from h3core.series_config import character_ids, series_info, subject_ids, variant_of
     from h3core.story import parse_story
-    return parse_story(text, subject_ids(cfg), character_ids(cfg), series_info(cfg))
+    return parse_story(text, subject_ids(cfg), character_ids(cfg), series_info(cfg),
+                       variant_of(cfg))
 
 
 # ---------------------------------------------------------------------------

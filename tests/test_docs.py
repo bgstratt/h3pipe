@@ -7,6 +7,11 @@ The generated documentation stays in step with the code.
   - The generated block is honest: every file it lists is one some target
     names, with the folder and tier that target gives it, and a URL only where
     target.json records one.
+  - prompts/ is what tools/make_prompts.py emits from docs/AUTHORING.md today,
+    so an edit to the authoring guide cannot leave the script-writing skill
+    describing the old format (`python tools/make_prompts.py`). The committed
+    copies are the skill's text (SKILL.md) and the same guide as assistant
+    instructions; build/skill/ is gitignored and rebuilt from the same source.
 """
 from __future__ import annotations
 
@@ -19,7 +24,33 @@ ROOT = os.path.dirname(HERE)
 sys.path.insert(0, ROOT)
 sys.path.insert(0, os.path.join(ROOT, "tools"))
 import make_models_md as M  # noqa: E402
+import make_prompts as P  # noqa: E402
 import targets as TG  # noqa: E402
+
+
+class TestScriptSkill(unittest.TestCase):
+    """The skill and the assistant instructions are docs/AUTHORING.md."""
+
+    def generated(self) -> dict:
+        """What `python tools/make_prompts.py --no-bundle` would write now."""
+        text = P.body()
+        return {
+            "prompts/SKILL.md": P.skill_text(text),
+            "prompts/h3-script.instructions.md":
+                "# h3pipe episode script — assistant instructions\n\nPaste this into Cursor rules, Copilot instructions, a custom GPT, or any\nsystem prompt. Generated from docs/AUTHORING.md by tools/make_prompts.py.\n\n" f"{P.PREAMBLE}\n\n{text}",
+        }
+
+    def test_up_to_date(self):
+        for rel, want in self.generated().items():
+            with self.subTest(file=rel):
+                path = os.path.join(ROOT, *rel.split("/"))
+                self.assertTrue(os.path.isfile(path), path)
+                with open(path, encoding="utf-8") as fh:
+                    got = fh.read()
+                self.assertEqual(
+                    got.replace("\r\n", "\n"), want.replace("\r\n", "\n"),
+                    f"{rel} is out of date -- run `python tools/make_prompts.py` "
+                    f"and commit the result")
 
 
 class TestModelsBlock(unittest.TestCase):

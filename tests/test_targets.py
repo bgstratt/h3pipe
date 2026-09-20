@@ -23,7 +23,8 @@ import h3pipe_api as A  # noqa: E402
 import h3refs as R  # noqa: E402
 import h3takes as T  # noqa: E402
 import targets as TG  # noqa: E402
-from h3core.series_config import character_ids, load_series_config, series_info, subject_ids  # noqa: E402
+from h3core.series_config import (character_ids, load_series_config,  # noqa: E402
+                                  series_info, subject_ids, variant_of)
 from h3core.story import parse_story  # noqa: E402
 from test_api import ApiTest  # noqa: E402
 from test_render import FIXTURE, build_episode  # noqa: E402
@@ -35,7 +36,7 @@ def kitchen_sink():
     series_cfg = load_series_config(os.path.join(FIXTURE, "series.json"))
     with open(os.path.join(FIXTURE, "script.md"), encoding="utf-8") as fh:
         story = parse_story(fh.read(), subject_ids(series_cfg), character_ids(series_cfg),
-                            series_info(series_cfg))
+                            series_info(series_cfg), variant_of(series_cfg))
     return series_cfg, story
 
 
@@ -47,7 +48,7 @@ class LoadingTest(unittest.TestCase):
                                ("video", "wan22_ti2v"), ("video", "wan22_vace"), ("image", "krea2"),
                                ("image", "z_image_turbo"), ("image", "flux2_klein"),
                                ("image", "flux2_klein_edit"), ("image", "flux_kontext"),
-                               ("audio", "ltx2_voice")})
+                               ("image", "minimax_h3_still"), ("audio", "ltx2_voice")})
         self.assertEqual([t.id for t in TG.list_targets("video")],
                          ["ltx2", "ltx2_ingredients", "minimax_h3_fl2va", H3, "wan22_i2v",
                           "wan22_ti2v", "wan22_vace"])
@@ -399,7 +400,7 @@ class TargetsRouteTest(ApiTest):
         self.assertEqual(set(by), {H3, "ltx2", "ltx2_ingredients", "minimax_h3_fl2va", "krea2",
                                    "wan22_i2v", "wan22_ti2v", "wan22_vace", "z_image_turbo",
                                    "flux2_klein", "flux2_klein_edit", "flux_kontext",
-                                   "ltx2_voice"})
+                                   "minimax_h3_still", "ltx2_voice"})
         for tid, label, short in (("wan22_i2v", "Wan 2.2 14B I2V", "Wan I2V"),
                                   ("wan22_ti2v", "Wan 2.2 5B TI2V", "Wan 5B"),
                                   ("wan22_vace", "Wan 2.2 14B VACE (refs)", "Wan+refs")):
@@ -457,7 +458,7 @@ class TargetsRouteTest(ApiTest):
         images = self.ok(A.get_targets(self.ctx, {"kind": "image"}))["targets"]
         self.assertEqual([t["id"] for t in images],
                          ["flux2_klein", "flux2_klein_edit", "flux_kontext", "krea2",
-                          "z_image_turbo"])
+                          "minimax_h3_still", "z_image_turbo"])
         caps = {t["id"]: t["capabilities"] for t in images}
         self.assertEqual(caps["krea2"], {"mode": "t2i", "max_refs": 0, "negative_prompt": False})
         self.assertEqual(caps["flux2_klein_edit"],
@@ -465,6 +466,9 @@ class TargetsRouteTest(ApiTest):
         self.assertEqual(caps["flux_kontext"],
                          {"mode": "edit", "max_refs": 1, "negative_prompt": True})
         self.assertEqual(caps["z_image_turbo"]["mode"], "t2i")
+        # the video model as an image target: nine reference slots (Phase 10b)
+        self.assertEqual(caps["minimax_h3_still"],
+                         {"mode": "edit", "max_refs": 9, "negative_prompt": False})
         self.assertTrue(by["wan22_i2v"]["capabilities"]["requires_first"])
         self.assertFalse(lt["capabilities"]["requires_first"])
         # Phase 9c-B: audio is a kind of its own (test_phase9c_voice)

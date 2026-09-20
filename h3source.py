@@ -239,7 +239,7 @@ def _shot_line(text: str, span: tuple[int, int], message: str) -> int:
     return first
 
 
-def script_spans(text: str, ids: tuple[set, set] | None) -> tuple[dict, dict]:
+def script_spans(text: str, ids: tuple[set, set, dict] | None) -> tuple[dict, dict]:
     """({shot id: (line, end_line)}, {sequence id: line}) from the parser;
     ({}, {}) when the text doesn't parse."""
     from h3core.story import ScriptError, _parse
@@ -252,11 +252,13 @@ def script_spans(text: str, ids: tuple[set, set] | None) -> tuple[dict, dict]:
     return spans, {sq["id"]: ln for sq, ln in zip(ep["sequences"], seq_lines)}
 
 
-def _ids(cfg: dict | None) -> tuple[set, set] | None:
-    from h3core.series_config import character_ids, subject_ids
+def _ids(cfg: dict | None) -> tuple[set, set, dict] | None:
+    """What the parser needs from a series config: the subject ids, the
+    character ids and {variant: base} (`_parse`)."""
+    from h3core.series_config import character_ids, subject_ids, variant_of
     if cfg is None:
         return None
-    return subject_ids(cfg), character_ids(cfg)
+    return subject_ids(cfg), character_ids(cfg), variant_of(cfg)
 
 
 def _load_cfg(ep: str) -> dict | None:
@@ -333,8 +335,9 @@ def check_text(ep: str, file: str, text: str) -> dict:
     shots = [{"id": k, "line": a, "end_line": b}
              for k, (a, b) in sorted(spans.items(), key=lambda kv: kv[1][0])]
     try:
-        from h3core.series_config import character_ids, series_info, subject_ids
-        story = parse_story(script_text, subject_ids(cfg), character_ids(cfg), series_info(cfg))
+        from h3core.series_config import series_info
+        subjects, chars, variants = _ids(cfg)
+        story = parse_story(script_text, subjects, chars, series_info(cfg), variants)
     except ScriptError as e:
         errors.append({"file": "script", "line": e.line_no, "message": e.msg})
         return result(shots)

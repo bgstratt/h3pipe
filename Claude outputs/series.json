@@ -1,0 +1,253 @@
+{
+  "series": {
+    "id": "third_floor",
+    "title": "Third Floor Walk-Up",
+    "fps": 24,
+    "width": 1344,
+    "height": 768,
+    "steps": 8
+  },
+  "proxy": {
+    "width": 448,
+    "height": 256,
+    "steps": 4,
+    "audio_mode": "generate"
+  },
+  "style": {
+    "look": "photorealistic live-action cinematography, shot on a full-frame cinema camera with a 35mm lens at f2, shallow depth of field, natural skin texture and real fabric detail, moody practical lighting with deep shadows, subtle film grain, neutral color grade"
+  },
+  "speech": {
+    "pace": "normal"
+  },
+  "subjects": {
+    "dana": {
+      "kind": "character",
+      "name": "Dana",
+      "pronoun": "her",
+      "design": "a woman in her mid-thirties with a soft, slightly heavyset build, shoulder-length light brown hair with glossy blow-dried layers, a pretty former-prom-queen face with a small upturned nose, a fitted lavender cardigan over a cream camisole, dark jeans and small gold hoop earrings",
+      "sheet": "refs/dana/dana_sheet_4panel.png",
+      "voice": "bright and a little spoiled, rising to a squeak when she is flustered"
+    },
+    "dana_towel": {
+      "kind": "character",
+      "of": "dana",
+      "name": "Dana",
+      "pronoun": "her",
+      "design": "a woman in her mid-thirties with a soft, slightly heavyset build, shoulder-length light brown hair, damp and tousled from the shower, a pretty former-prom-queen face with a small upturned nose, small gold hoop earrings, wearing only a small white terrycloth bath towel wrapped around her body from the chest to mid-thigh and tucked at the chest, bare shoulders, bare arms, bare legs and bare feet, no other clothing",
+      "sheet": "refs/dana_towel/dana_towel_sheet_4panel.png"
+    },
+    "dana_afghan": {
+      "kind": "character",
+      "of": "dana",
+      "name": "Dana",
+      "pronoun": "her",
+      "design": "a woman in her mid-thirties with a soft, slightly heavyset build, shoulder-length light brown hair, damp and tousled from the shower, a pretty former-prom-queen face with a small upturned nose, small gold hoop earrings, wrapped in a loose open-weave crocheted afghan blanket in cream and rust granny squares, pulled around her shoulders and clutched closed at her chest, hanging to her knees, bare shoulders and arms at its edges and bare feet below it, no other clothing",
+      "sheet": "refs/dana_afghan/dana_afghan_sheet_4panel.png"
+    },
+    "marty": {
+      "kind": "character",
+      "name": "Marty",
+      "pronoun": "his",
+      "design": "a man in his mid-thirties with a slightly paunchy build, short neat brown hair, a boyish round face with raised eyebrows and a smirk, a rumpled blue button-down shirt untucked over khakis and brown loafers",
+      "sheet": "refs/marty/marty_sheet_4panel.png",
+      "voice": "quick, dry and sarcastic, a stand-up comedian's rhythm with emphasis on odd words"
+    },
+    "marty_sleep": {
+      "kind": "character",
+      "of": "marty",
+      "name": "Marty",
+      "pronoun": "his",
+      "design": "a man in his mid-thirties with a slightly paunchy build, short neat brown hair mussed from the pillow, a boyish round face, wearing a faded grey t-shirt and blue plaid boxer shorts, bare legs and bare feet, no other clothing",
+      "sheet": "refs/marty_sleep/marty_sleep_sheet_4panel.png"
+    },
+    "marty_robe": {
+      "kind": "character",
+      "of": "marty",
+      "name": "Marty",
+      "pronoun": "his",
+      "design": "a man in his mid-thirties with a slightly paunchy build, short neat brown hair mussed from sleep, a boyish round face, wearing a navy terrycloth bathrobe tied at the waist over a white t-shirt, bare shins and bare feet, no other clothing",
+      "sheet": "refs/marty_robe/marty_robe_sheet_4panel.png"
+    },
+    "skye": {
+      "kind": "character",
+      "name": "Skye",
+      "pronoun": "her",
+      "design": "a woman in her mid-thirties with a slightly plump build, long tangled straw-blonde hair with a few thin braids, a dreamy wide-eyed face, a baggy moth-eaten green sweater over a faded patchwork maxi skirt, fingerless gloves, mismatched socks and scuffed boots, looking like she slept outside",
+      "sheet": "refs/skye/skye_sheet_4panel.png",
+      "voice": "airy, sing-song and cheerfully odd"
+    },
+    "walter": {
+      "kind": "character",
+      "name": "Dr. Walter",
+      "pronoun": "his",
+      "design": "a lean man in his mid-forties with dark hair going grey at the temples, swept back, a neatly trimmed dark beard, thin wire-rimmed glasses, a brown tweed jacket with elbow patches over a beige turtleneck, grey slacks and polished oxfords",
+      "sheet": "refs/walter/walter_sheet_4panel.png",
+      "voice": "soft, slow and soothing like a therapist, with a smug little pause before every insight"
+    },
+    "neil": {
+      "kind": "character",
+      "name": "Neil",
+      "pronoun": "his",
+      "design": "a tall man in his mid-thirties with a slightly soft build, thick dark brown hair with a side part, a long earnest face, a brown corduroy blazer over a checked flannel shirt, khaki chinos and a small fossil-tooth pendant",
+      "sheet": "refs/neil/neil_sheet_4panel.png",
+      "voice": "earnest and nasal, cracking into a whine when upset"
+    },
+    "gina": {
+      "kind": "character",
+      "name": "Gina",
+      "pronoun": "her",
+      "design": "a woman in her mid-thirties with a slightly heavyset build, sleek dark brunette hair pulled into a high ponytail, sharp dark eyes, a crisp white blouse with rolled sleeves, a navy apron, black slacks and flats",
+      "sheet": "refs/gina/gina_sheet_4panel.png",
+      "voice": "fast, precise and competitive, getting shrill under pressure"
+    },
+    "gina_robe": {
+      "kind": "character",
+      "of": "gina",
+      "name": "Gina",
+      "pronoun": "her",
+      "design": "a woman in her mid-thirties with a slightly heavyset build, dark brunette hair down and loose, sharp dark eyes, no makeup, wearing a short teal terrycloth bathrobe tied at the waist, bare shins and bare feet, no other clothing",
+      "sheet": "refs/gina_robe/gina_robe_sheet_4panel.png"
+    },
+    "gina_towel": {
+      "kind": "character",
+      "of": "gina",
+      "name": "Gina",
+      "pronoun": "her",
+      "design": "a woman in her mid-thirties with a slightly heavyset build, dark brunette hair down and soaking wet, slicked back from her face, sharp dark eyes, wearing only a white terrycloth bath towel wrapped around her body from the chest to mid-thigh and tucked at the chest, bare shoulders, bare arms, bare legs and bare feet, water beading on her skin, no other clothing",
+      "sheet": "refs/gina_towel/gina_towel_sheet_4panel.png"
+    },
+    "vinnie": {
+      "kind": "character",
+      "name": "Vinnie",
+      "pronoun": "his",
+      "design": "an Italian-American man in his mid-thirties with a slightly thick, soft-muscled build, short dark wavy hair, heavy dark brows, a handsome square jaw, a snug black t-shirt, a worn brown leather jacket, blue jeans and white sneakers",
+      "sheet": "refs/vinnie/vinnie_sheet_4panel.png",
+      "voice": "warm New York accent, slow and sincere"
+    },
+    "vinnie_sleep": {
+      "kind": "character",
+      "of": "vinnie",
+      "name": "Vinnie",
+      "pronoun": "his",
+      "design": "an Italian-American man in his mid-thirties with a slightly thick, soft-muscled build, short dark wavy hair mussed from the pillow, heavy dark brows, a handsome square jaw, shirtless with a bare chest and shoulders, wearing only navy boxer shorts, bare feet, no other clothing",
+      "sheet": "refs/vinnie_sleep/vinnie_sleep_sheet_4panel.png"
+    },
+    "vinnie_shower": {
+      "kind": "character",
+      "of": "vinnie",
+      "name": "Vinnie",
+      "pronoun": "his",
+      "design": "an Italian-American man in his mid-thirties with a slightly thick, soft-muscled build, heavy dark brows and a handsome square jaw, soaking wet, his short dark hair plastered flat and piled with white shampoo lather, water running down his face, bare wet shoulders and chest, seen from the chest up, no clothing visible",
+      "sheet": "refs/vinnie_shower/vinnie_shower_sheet_4panel.png"
+    },
+    "vinnie_towel": {
+      "kind": "character",
+      "of": "vinnie",
+      "name": "Vinnie",
+      "pronoun": "his",
+      "design": "an Italian-American man in his mid-thirties with a slightly thick, soft-muscled build, heavy dark brows and a handsome square jaw, dripping wet with his short dark hair soaked, bare chest and shoulders, a white bath towel wrapped around his waist, bare legs and bare feet, no other clothing",
+      "sheet": "refs/vinnie_towel/vinnie_towel_sheet_4panel.png"
+    },
+    "sal": {
+      "kind": "character",
+      "name": "Sal",
+      "pronoun": "his",
+      "design": "a short, round-bellied Italian-American man around sixty with a thick black-and-grey mustache, a balding head fringed with dark hair, very hairy forearms and chest hair poking from an open-collared cream short-sleeve shirt, a gold chain, brown work trousers and scuffed work boots",
+      "sheet": "refs/sal/sal_sheet_4panel.png",
+      "voice": "gravelly Staten Island accent, loud and gruff but soft underneath"
+    },
+    "sal_shower": {
+      "kind": "character",
+      "of": "sal",
+      "name": "Sal",
+      "pronoun": "his",
+      "design": "a round-bellied Italian-American man around sixty with a thick black-and-grey mustache, soaking wet, a white plastic shower cap pulled over his balding head, bare wet shoulders and a very hairy wet chest, seen from the chest up, no clothing visible",
+      "sheet": "refs/sal_shower/sal_shower_sheet_4panel.png"
+    },
+    "bev": {
+      "kind": "character",
+      "name": "Bev",
+      "pronoun": "her",
+      "design": "a friendly woman in her fifties with a full, busty figure, big teased auburn hair, heavy blue eyeshadow and coral lipstick, a leopard-print wrap blouse, a black pencil skirt, a chunky gold bracelet and low heels",
+      "sheet": "refs/bev/bev_sheet_4panel.png",
+      "voice": "chirpy Jersey accent, chatty and cheerful"
+    },
+    "carla": {
+      "kind": "character",
+      "name": "Carla",
+      "pronoun": "her",
+      "design": "a sturdy Italian-American woman in her fifties with a pear-shaped figure and wide hips, short curled black hair with grey roots, reading glasses pushed up on her head, a large diamond ring, a quilted maroon car coat over a floral house dress and sensible black shoes",
+      "sheet": "refs/carla/carla_sheet_4panel.png",
+      "voice": "brisk, no-nonsense Staten Island mother, loud and warm"
+    }
+  },
+  "locations": {
+    "gd_kitchen": {
+      "description": "a cozy apartment kitchen area with a humming white fridge, open shelves of mismatched mugs and a small window, bright late-morning daylight falling in from the right",
+      "plate": "refs/_bg/gd_kitchen.png"
+    },
+    "gd_living": {
+      "description": "a cozy apartment living room with a sagging floral couch draped in a loose crochet throw, a low coffee table and a big arched window behind, warm afternoon daylight coming through the window",
+      "plate": "refs/_bg/gd_living.png"
+    },
+    "gd_door": {
+      "description": "the front door of a cozy apartment painted purple with a small door buzzer panel on the wall beside it and coats on hooks, warm afternoon daylight from the left",
+      "plate": "refs/_bg/gd_door.png"
+    },
+    "gd_bathroom_door": {
+      "description": "a short apartment hallway ending in a white bathroom door, framed photos on the walls, warm afternoon daylight spilling from the left",
+      "plate": "refs/_bg/gd_bathroom_door.png"
+    },
+    "gd_wide": {
+      "description": "a cozy apartment seen whole: purple walls, an open kitchen on the left, a floral couch and coffee table in the middle and a big arched window on the right, warm afternoon daylight",
+      "plate": "refs/_bg/gd_wide.png"
+    },
+    "gd_morning": {
+      "description": "a cozy apartment with purple walls seen from the living room toward the purple front door, the open kitchen at the side, pale early-morning light coming through the window from the right",
+      "plate": "refs/_bg/gd_morning.png"
+    },
+    "mv_kitchen": {
+      "description": "a cluttered bachelor apartment kitchen counter with a stovetop, a cutting board and a saucepan, pizza boxes stacked by the fridge, warm yellow overhead light in the evening",
+      "plate": "refs/_bg/mv_kitchen.png"
+    },
+    "mv_living": {
+      "description": "a bachelor apartment living room with two battered recliners facing a small TV, a boxy fold-out sofa, a foosball table by the wall and a front door on the left, warm yellow lamp light in the evening",
+      "plate": "refs/_bg/mv_living.png"
+    },
+    "mv_day": {
+      "description": "a bachelor apartment living room with two battered recliners, a boxy fold-out sofa, a foosball table and a front door on the left, flat midday daylight from the window on the right",
+      "plate": "refs/_bg/mv_day.png"
+    },
+    "mv_night": {
+      "description": "a bachelor apartment living room at night with a fold-out sofa bed opened flat, rumpled sheets and a thin blanket, lit only by cool blue streetlight through the window on the right",
+      "plate": "refs/_bg/mv_night.png"
+    },
+    "mv_bathroom": {
+      "description": "a small bachelor-apartment bathroom with a white tub and a clear plastic shower curtain with a fish pattern, steam in the air, bright morning light from a frosted window",
+      "plate": "refs/_bg/mv_bathroom.png"
+    },
+    "mv_morning": {
+      "description": "a bachelor apartment living room in the morning, two battered recliners, a small kitchen table with a newspaper and a coffee mug, the bathroom door at the back, soft morning light from the right",
+      "plate": "refs/_bg/mv_morning.png"
+    },
+    "hallway": {
+      "description": "a narrow third-floor apartment hallway with worn green carpet, two facing doors and flickering wall sconces, dim warm light at night",
+      "plate": "refs/_bg/hallway.png"
+    },
+    "cafe_couch": {
+      "description": "a snug coffee house corner with a big orange velvet couch, two armchairs and a low table of oversized mugs, brick wall behind, warm lamp light and daylight from the front window",
+      "plate": "refs/_bg/cafe_couch.png"
+    },
+    "cafe_counter": {
+      "description": "a coffee house counter with an espresso machine, a pastry case and a chalkboard menu, warm lamp light",
+      "plate": "refs/_bg/cafe_counter.png"
+    },
+    "cafe_wide": {
+      "description": "a cozy coffee house seen whole: an orange velvet couch in the middle, the counter at the back, the front door on the right with daylight coming in through tall windows",
+      "plate": "refs/_bg/cafe_wide.png"
+    }
+  },
+  "audio": {
+    "mode": "generate"
+  }
+}

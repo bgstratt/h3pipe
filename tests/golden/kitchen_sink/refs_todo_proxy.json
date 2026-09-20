@@ -14,7 +14,8 @@
       "sh060",
       "sh310",
       "sh320",
-      "sh330"
+      "sh330",
+      "sh340"
     ]
   },
   {
@@ -115,6 +116,16 @@
     "blocks_shots": [
       "sh130",
       "sh210"
+    ]
+  },
+  {
+    "path": "refs/ada/ada_wet_sheet_4panel.png",
+    "kind": "character sheet",
+    "prompt": "A character model sheet on a plain flat background: FOUR panels side by side in a single horizontal strip, left to right — three-quarter body, side profile full body, back view full body, and a head-and-shoulders facial close-up. The SAME character in all four. a tall woman in her thirties with a short grey bob plastered flat and dripping, her mustard apron soaked through and clinging, and round red glasses fogged at the edges. Drawn as a flat vector cartoon with thick even outlines and a limited pastel palette. Output 4096x1024 or larger. This is Ada in a different state: start from the existing sheet at refs/ada/ada_sheet_4panel.png and change only what the description above changes, so the face, build and line quality stay identical.",
+    "size_hint": "4096x1024 or larger (horizontal 4-panel strip)",
+    "exists": false,
+    "blocks_shots": [
+      "sh340"
     ]
   }
 ]

@@ -1,0 +1,5 @@
+exit 1
+
+  error in two_variants.md: line 3: shot 'sh010' has ada_coat and ada_wet in it, and they are both variants of 'ada': one subject is in one state per shot. Cut the shot where the change happens.
+    | ## sh010
+

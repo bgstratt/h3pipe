@@ -33,7 +33,8 @@ import h3takes as T  # noqa: E402
 import h3_refsheet as RS  # noqa: E402
 import targets as TG  # noqa: E402
 from h3core import ir  # noqa: E402
-from h3core.series_config import character_ids, load_series_config, series_info, subject_ids  # noqa: E402
+from h3core.series_config import (character_ids, load_series_config,  # noqa: E402
+                                  series_info, subject_ids, variant_of)
 from h3core.story import parse_story  # noqa: E402
 from test_render import FIXTURE, FakeComfy, build_episode  # noqa: E402
 
@@ -54,7 +55,7 @@ def kitchen_sink():
     series_cfg = load_series_config(os.path.join(FIXTURE, "series.json"))
     with open(os.path.join(FIXTURE, "script.md"), encoding="utf-8") as fh:
         story = parse_story(fh.read(), subject_ids(series_cfg), character_ids(series_cfg),
-                            series_info(series_cfg))
+                            series_info(series_cfg), variant_of(series_cfg))
     return series_cfg, story
 
 

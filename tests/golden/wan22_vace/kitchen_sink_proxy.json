@@ -28,6 +28,16 @@
         "sheet": "refs/ada/ada_sheet_4panel.png",
         "voice_sample": "audio/voices/ada_sample.wav"
       },
+      "ada_wet": {
+        "kind": "character",
+        "sheet": "refs/ada/ada_wet_sheet_4panel.png",
+        "voice_sample": "audio/voices/ada_sample.wav"
+      },
+      "ada_coat": {
+        "kind": "character",
+        "sheet": "refs/ada/ada_coat_sheet_4panel.png",
+        "voice_sample": "audio/voices/ada_sample.wav"
+      },
       "bo": {
         "kind": "character",
         "sheet": "refs/bo/bo_sheet_4panel.png",
@@ -581,6 +591,37 @@
         "lora": "shot_lora.safetensors",
         "profile": "dialogue_close",
         "duration": 1.105
+      },
+      {
+        "id": "sh340",
+        "sequence": "sq04",
+        "subjects": [
+          "ada_wet"
+        ],
+        "background": "refs/_bg/kitchen.png",
+        "size": "close",
+        "length": 37,
+        "seed": 2470138522001882497,
+        "steps": 5,
+        "audio_policy": "silent",
+        "prompt": "Style: a flat vector cartoon with thick even outlines and a limited pastel palette. A close-up of a cramped diner kitchen with steel counters, a hanging ticket rail and cold fluorescent light from overhead, the camera remains static. Ada is a tall woman in her thirties with a short grey bob plastered flat and dripping, her mustard apron soaked through and clinging, and round red glasses fogged at the edges. Ada wrings the front of her soaked apron out over the sink. Ada talks, flat, mouth moving with the words.",
+        "negative": "色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走",
+        "keyframes": {
+          "first": "refs/shots/sh340/first.png",
+          "last": "refs/shots/sh340/last.png"
+        },
+        "panels": [
+          {
+            "subject": "ada_wet",
+            "kind": "character",
+            "path": "refs/ada/ada_wet_sheet_4panel.png",
+            "view": "face"
+          }
+        ],
+        "audio_intent": "generate",
+        "audio_note": "audio generate renders as silent on Wan+refs: Wan 2.2 makes no sound (lay the soundtrack in at the edit)",
+        "profile": "quick",
+        "duration": 2.314
       }
     ]
   },
@@ -593,13 +634,13 @@
     "model": "wan2.2_fun_vace_high_noise_14B_fp8_scaled.safetensors",
     "lora": "none",
     "fps": 16.0,
-    "shots": 15,
+    "shots": 16,
     "sequences": 4,
-    "target_s": 32.875,
-    "delivered_s": 34.1875,
+    "target_s": 35.1875,
+    "delivered_s": 36.5,
     "pad_frames": 21,
     "policies": {
-      "silent": 15
+      "silent": 16
     },
     "needed": {
       "refs/ada/ada_sheet_4panel.png": {
@@ -625,6 +666,10 @@
       "refs/rex/rex_sheet_4panel.png": {
         "kind": "character sheet",
         "prompt": "A character model sheet on a plain flat background: FOUR panels side by side in a single horizontal strip, left to right — three-quarter body, side profile full body, back view full body, and a head-and-shoulders facial close-up. The SAME character in all four. a scruffy brown terrier with one white ear and a red collar. Drawn as a flat vector cartoon with thick even outlines and a limited pastel palette. Output 4096x1024 or larger."
+      },
+      "refs/ada/ada_wet_sheet_4panel.png": {
+        "kind": "character sheet",
+        "prompt": "A character model sheet on a plain flat background: FOUR panels side by side in a single horizontal strip, left to right — three-quarter body, side profile full body, back view full body, and a head-and-shoulders facial close-up. The SAME character in all four. a tall woman in her thirties with a short grey bob plastered flat and dripping, her mustard apron soaked through and clinging, and round red glasses fogged at the edges. Drawn as a flat vector cartoon with thick even outlines and a limited pastel palette. Output 4096x1024 or larger. This is Ada in a different state: start from the existing sheet at refs/ada/ada_sheet_4panel.png and change only what the description above changes, so the face, build and line quality stay identical."
       }
     },
     "blocked_shots": {
@@ -661,13 +706,16 @@
       ],
       "refs/rex/rex_sheet_4panel.png": [
         "sh050"
+      ],
+      "refs/ada/ada_wet_sheet_4panel.png": [
+        "sh340"
       ]
     },
     "warnings": [
       "sh050: CRAMMED — 26 syllables in 1.81s forces 30.1 syl/s (ceiling 5.8). `dur: 5.81` gives it room.",
       "sh140: CRAMMED — 12 syllables in 1.81s forces 10.3 syl/s (ceiling 5.8). `dur: 3.56` gives it room.",
-      "Wan+refs makes no sound: 15 shot(s) render silent (asked for dub x2, dub_keep_foley x2, generate x11); lay the soundtrack in at the edit",
-      "12 dialogue shot(s): no audio or lip-sync on Wan (the lines are acted silently): sh020, sh030, sh040, sh050, sh060, sh110, sh120, sh130 …",
+      "Wan+refs makes no sound: 16 shot(s) render silent (asked for dub x2, dub_keep_foley x2, generate x12); lay the soundtrack in at the edit",
+      "13 dialogue shot(s): no audio or lip-sync on Wan (the lines are acted silently): sh020, sh030, sh040, sh050, sh060, sh110, sh120, sh130 …",
       "sh040 overrides model: shot_model.safetensors",
       "sh040 overrides lora: none",
       "sh110 overrides model: seq_model.safetensors",

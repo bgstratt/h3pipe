@@ -1,0 +1,186 @@
+{
+  "id": "minimax_h3_still",
+  "kind": "image",
+  "label": "MiniMax H3 (a still: the first frame of a 5-frame render)",
+  "short": "H3 still",
+  "code": "target.py",
+  "capabilities": {
+    "_note": "H3 with reference images behaves like an image edit, and its first frame is a clean still, so the video model doubles as an image target: it renders the shortest clip the node allows and keeps frame 0 (ImageFromBatch). `length` is 5 -- the node's minimum, 0.21s at 24fps -- which is far below its trained range of ~124-362 frames; it is a target param, so a preset or an override can raise it if a floor render ever proves worse than a short one. Up to 9 reference images (the node's autogrow maximum), where the video path uses 4.",
+    "mode": "edit",
+    "max_refs": 9
+  },
+  "template": {
+    "_note": "Sizes a series ref is generated at (as krea2's). H3 wants multiples of 32 on both axes and draws its own frame, so a keyframe is generated at the shot's render size with no upscale.",
+    "view_size": [
+      1024,
+      1024
+    ],
+    "plate_size": [
+      1344,
+      768
+    ],
+    "object_size": [
+      1024,
+      1024
+    ],
+    "size_multiple": 32
+  },
+  "binding": {
+    "_note": "The Ref2VA workflow with everything shot-shaped taken out: no H3ShotListLoader (the prompt, size, length, seed and steps are widgets an image job fills), no audio VAE, no CreateVideo/SaveVideo/H3SaveShot. VAEDecode feeds ImageFromBatch (frame 0), which feeds the saver. The model chain, the sampler and MiniMaxH3ReferenceToVideo are the video workflow's, node for node, so this graph is the one the pipeline already renders with -- including the dotted autogrow input name `ref_images.ref_image_0`, which is what the production video path sends today.",
+    "workflow": "workflow.json",
+    "workflow_name": "h3pipe_minimax_h3_still.json",
+    "env": "H3_STILL_WORKFLOW",
+    "saver": {
+      "class_type": "H3SaveRefTake",
+      "replace": {
+        "class_type": "SaveImage",
+        "inputs": {
+          "images": "images"
+        }
+      }
+    },
+    "prune": true,
+    "params": {
+      "model": {
+        "class_type": "UNETLoader",
+        "field": "unet_name"
+      },
+      "loras": {
+        "class_type": "LoraLoaderModelOnly",
+        "name": "lora_name",
+        "strength": "strength_model",
+        "input": "model",
+        "chain": true
+      },
+      "steps": {
+        "class_type": "BasicScheduler",
+        "field": "steps"
+      },
+      "seed": {
+        "class_type": "RandomNoise",
+        "field": "noise_seed"
+      },
+      "sampler": {
+        "class_type": "KSamplerSelect",
+        "field": "sampler_name"
+      },
+      "prompt": {
+        "class_type": "MiniMaxH3ReferenceToVideo",
+        "field": "prompt"
+      },
+      "width": {
+        "class_type": "MiniMaxH3ReferenceToVideo",
+        "field": "width"
+      },
+      "height": {
+        "class_type": "MiniMaxH3ReferenceToVideo",
+        "field": "height"
+      },
+      "length": {
+        "class_type": "MiniMaxH3ReferenceToVideo",
+        "field": "length"
+      },
+      "ref_image_size": {
+        "class_type": "MiniMaxH3ReferenceToVideo",
+        "field": "ref_image_size"
+      },
+      "text_encoder": {
+        "class_type": "CLIPLoader",
+        "field": "clip_name"
+      },
+      "video_vae": {
+        "class_type": "VAELoader",
+        "field": "vae_name",
+        "feeds": [
+          "VAEDecode",
+          "vae"
+        ]
+      }
+    }
+  },
+  "models": {
+    "_note": "The family each model param must be (targets/modelid.py). Names are checked first (case-insensitive globs; a series config's model_families adds more), then the file's header. Ref2VA and FL2VA share every tensor, so a file named neither is accepted as H3 with a note, and one named FL2VA is refused. Tiers (docs/API.md): the turbo LoRA is an accelerator (without it the pass renders its `base`); the rest are required. text_encoder / video_vae are the workflow's own files (`default`): patched only when another file of the family stands in. A substitute LoRA keeps the wanted one's step count (`keep`).",
+    "model": {
+      "family": "minimax-h3-ref2va",
+      "patterns": [
+        "*h3*ref2v*",
+        "*ref2va*"
+      ],
+      "tier": "required"
+    },
+    "loras": {
+      "family": "minimax-h3-ref2v-turbo-lora",
+      "patterns": [
+        "*h3*ref2v*turbo*",
+        "*h3*ref2v*lightx2v*"
+      ],
+      "tier": "accelerator",
+      "keep": [
+        "(\\d+)[_-]?steps?"
+      ],
+      "exclude": [
+        "*sla*"
+      ],
+      "class_type": "LoraLoaderModelOnly",
+      "field": "lora_name",
+      "folder": "loras"
+    },
+    "text_encoder": {
+      "family": "qwen3vl-32b",
+      "patterns": [
+        "*qwen3*vl*32b*"
+      ],
+      "tier": "required",
+      "default": "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors"
+    },
+    "video_vae": {
+      "family": "minimax-h3-video-vae",
+      "patterns": [
+        "*h3*video*vae*"
+      ],
+      "tier": "required",
+      "default": "minimax_h3_video_vae_fp16.safetensors"
+    }
+  },
+  "presets": {
+    "_note": "The video target's final pass, minus everything about length: the 8-step turbo LoRA at its own step count. `length` 5 is the node's floor; `ref_image_size` 'max' is the reference pipeline's 2048px short edge, which the node's own tooltip calls best for identity fidelity and which costs little on a 5-frame render.",
+    "final": {
+      "model": "minimax_h3_ref2va_pruned_int8_convrot.safetensors",
+      "lora": "minimax_h3_ref2v_turbo_8step_v1.0_768p_comfyui_bf16.safetensors",
+      "steps": 8,
+      "sampler": "euler",
+      "length": 5,
+      "ref_image_size": "max",
+      "text_encoder": "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
+      "video_vae": "minimax_h3_video_vae_fp16.safetensors",
+      "base": {
+        "loras": [],
+        "steps": 20,
+        "sampler": "res_multistep"
+      }
+    }
+  },
+  "downloads": {
+    "_note": "Where to get each file this target names (docs/API.md 'Downloads'). A url is only given when a trustworthy record has it: a ComfyUI template's or saved workflow's properties.models entry, or ComfyUI-Manager's model list; `source` says which. Otherwise url is null and source says what to search for. Never a guessed URL.",
+    "minimax_h3_ref2v_turbo_8step_v1.0_768p_comfyui_bf16.safetensors": {
+      "folder": "loras",
+      "url": null,
+      "source": "no URL: no ComfyUI template, saved workflow or ComfyUI-Manager model list on this machine records this file. Search Hugging Face for its exact name (lightx2v's MiniMax H3 Ref2V 8-step turbo LoRA v1.0, ComfyUI conversion)."
+    },
+    "minimax_h3_ref2va_pruned_int8_convrot.safetensors": {
+      "folder": "diffusion_models",
+      "url": "https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/diffusion_models/minimax_h3_ref2va_pruned_int8_convrot.safetensors",
+      "source": "ComfyUI template video_minimax_h3_r2v.json (properties.models)"
+    },
+    "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors": {
+      "folder": "text_encoders",
+      "url": "https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/text_encoders/qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
+      "source": "ComfyUI template video_minimax_h3_r2v.json (properties.models)"
+    },
+    "minimax_h3_video_vae_fp16.safetensors": {
+      "folder": "vae",
+      "url": "https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/vae/minimax_h3_video_vae_fp16.safetensors",
+      "source": "ComfyUI template video_minimax_h3_r2v.json (properties.models)"
+    }
+  }
+}

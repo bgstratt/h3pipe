@@ -14,7 +14,8 @@ sys.path.insert(0, HERE)
 
 import h3build  # noqa: E402
 from h3core import ir  # noqa: E402
-from h3core.series_config import character_ids, load_series_config, series_info, subject_ids  # noqa: E402
+from h3core.series_config import (character_ids, load_series_config,  # noqa: E402
+                                  series_info, subject_ids, variant_of)
 from h3core.story import ScriptError, parse_script, parse_story  # noqa: E402
 from test_golden import fixtures  # noqa: E402
 
@@ -34,7 +35,8 @@ def load_story(series_cfg_path: str, script_path: str) -> tuple[ir.Episode, dict
     series_cfg = load_series_config(series_cfg_path)
     with open(script_path, encoding="utf-8") as fh:
         text = fh.read()
-    story = parse_story(text, subject_ids(series_cfg), character_ids(series_cfg), series_info(series_cfg))
+    story = parse_story(text, subject_ids(series_cfg), character_ids(series_cfg),
+                        series_info(series_cfg), variant_of(series_cfg))
     return story, series_cfg, text
 
 
@@ -81,7 +83,8 @@ class FixtureTest(unittest.TestCase):
         for name, (series_cfg_path, script, _g) in fixtures().items():
             with self.subTest(fixture=name):
                 story, series_cfg, text = load_story(series_cfg_path, script)
-                want = parse_script(text, subject_ids(series_cfg), character_ids(series_cfg))
+                want = parse_script(text, subject_ids(series_cfg),
+                                   character_ids(series_cfg), variant_of(series_cfg))
                 for sq in want["sequences"]:
                     for k in set(sq) - keep_seq:
                         del sq[k]

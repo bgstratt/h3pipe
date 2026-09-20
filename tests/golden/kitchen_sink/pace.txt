@@ -13,8 +13,9 @@
   sh210        3.75    9     4.1   3.75  ok
   sh320        1.62    3     3.1   1.62  ok
   sh330        1.62    2     2.1   1.62  ok
+  sh340        2.33    6     4.3   2.33  ok
 
-  2 crammed, 1 tight, 9 ok of 12 dialogue shots
+  2 crammed, 1 tight, 10 ok of 13 dialogue shots
   pace 'normal' = 4.4 syl/s, ceiling 5.8
   giving every one of them room adds 7.08s of runtime
 

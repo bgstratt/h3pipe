@@ -100,10 +100,12 @@ class ListingTest(RefsTest):
         refs = self.listing()
         self.assertEqual(
             [i for i in refs],
-            ["subject:ada", "subject:bo", "subject:cy", "subject:rex", "subject:narrator",
-             "subject:kettle", "subject:van", "location:kitchen", "location:kitchen_window",
-             "location:street", "voice:ada", "voice:bo", "voice:cy", "voice:rex",
-             "voice:narrator"])
+            # ada_wet and ada_coat are variants of ada: a sheet each, and no
+            # voice of their own -- they share ada's (docs/PLAN.md, Phase 10)
+            ["subject:ada", "subject:ada_wet", "subject:ada_coat", "subject:bo", "subject:cy",
+             "subject:rex", "subject:narrator", "subject:kettle", "subject:van",
+             "location:kitchen", "location:kitchen_window", "location:street",
+             "voice:ada", "voice:bo", "voice:cy", "voice:rex", "voice:narrator"])
         ada = refs["subject:ada"]
         self.assertEqual((ada["scope"], ada["kind"], ada["name"], ada["path"]),
                          ("series", "character", "Ada", "refs/ada/ada_sheet_4panel.png"))
@@ -543,7 +545,7 @@ class KreagenTest(RefsTest):
         r = self.run_kreagen("--list", "--comfy", "http://127.0.0.1:9", "--no-workflow")
         out = r.stdout.decode("utf-8").replace("\r\n", "\n")
         self.assertEqual(r.returncode, 0, out + r.stderr.decode())
-        self.assertIn("9 asset(s)", out)
+        self.assertIn("10 asset(s)", out)
         self.assertIn("built-in", out)
         self.assertIn("ada_sheet_4panel.png", out)
         self.assertIn("1024x1024 x4  blocks 7", out)
@@ -560,7 +562,8 @@ class KreagenTest(RefsTest):
         os.remove(os.path.join(self.ep, "refs_todo.json"))
         self.assertEqual(self.run_kreagen("--list").returncode, 1)
         r = self.run_kreagen("--list", "--all", "--comfy", "http://127.0.0.1:9")
-        self.assertIn("10 asset(s)", r.stdout.decode("utf-8"))       # + the narrator
+        # + the narrator and ada_coat, a variant no shot uses (both "blocks 0")
+        self.assertIn("12 asset(s)", r.stdout.decode("utf-8"))
 
     @unittest.skipUnless(HAVE_PIL, "stitching needs PIL")
     def test_generate_picks_then_redo_keeps_live_files(self):
@@ -574,9 +577,11 @@ class KreagenTest(RefsTest):
         for p in (sheet, plate, os.path.join(self.ep, "refs", "props", "kettle.png")):
             self.assertTrue(os.path.isfile(p), p)
         self.assertEqual(R.load_picks(self.ep)["refs"]["location:kitchen"]["take"], 1)
-        # 4 views + kettle + kitchen + kitchen_window ("kitchen" is also a path
-        # fragment of it, as --only always matched)
-        self.assertEqual(len(c.graphs), 7)
+        # 4 views of ada + 4 of ada_wet (--only matches on the path, so a
+        # character's variants come with them) + kettle + kitchen +
+        # kitchen_window ("kitchen" is also a path fragment of it, as --only
+        # always matched). ada_coat is in the series config but in no shot.
+        self.assertEqual(len(c.graphs), 11)
         before = T.file_sha1(plate)
         # --redo: a new take, the live file untouched
         r = self.run_kreagen(*base, "--only", "kitchen", "--redo")

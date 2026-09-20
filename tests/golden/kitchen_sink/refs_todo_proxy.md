@@ -1,10 +1,10 @@
 # Asset work order — ks01 Kitchen Sink
 
-0/9 on disk. Generate each missing asset, save it to the path shown, then re-run h3build.
+0/10 on disk. Generate each missing asset, save it to the path shown, then re-run h3build.
 
 | # | Path | Kind | Size hint | Shots blocked |
 |---|---|---|---|---|
-| 1 | `refs/_bg/kitchen.png` | background plate | 1344x768 (the render resolution) | 9 |
+| 1 | `refs/_bg/kitchen.png` | background plate | 1344x768 (the render resolution) | 10 |
 | 2 | `refs/ada/ada_sheet_4panel.png` | character sheet | 4096x1024 or larger (horizontal 4-panel strip) | 8 |
 | 3 | `refs/bo/bo_sheet_4panel.png` | character sheet | 4096x1024 or larger (horizontal 4-panel strip) | 7 |
 | 4 | `refs/props/kettle.png` | prop reference | 1024x1024 or larger | 2 |
@@ -13,11 +13,12 @@
 | 7 | `refs/rex/rex_sheet_4panel.png` | character sheet | 4096x1024 or larger (horizontal 4-panel strip) | 1 |
 | 8 | `refs/_bg/street.png` | background plate | 1344x768 (the render resolution) | 4 |
 | 9 | `refs/_bg/kitchen_window.png` | background plate | 1344x768 (the render resolution) | 2 |
+| 10 | `refs/ada/ada_wet_sheet_4panel.png` | character sheet | 4096x1024 or larger (horizontal 4-panel strip) | 1 |
 
 ---
 
 ## 1. `refs/_bg/kitchen.png`
-**background plate** · size hint 1344x768 (the render resolution) · blocks 9 shot(s): sh010, sh020, sh030, sh040, sh050, sh060, sh310, sh320 …
+**background plate** · size hint 1344x768 (the render resolution) · blocks 10 shot(s): sh010, sh020, sh030, sh040, sh050, sh060, sh310, sh320 …
 
 ```
 A background plate drawn as a flat vector cartoon with thick even outlines and a limited pastel palette. An empty establishing view of a cramped diner kitchen with steel counters, a hanging ticket rail and cold fluorescent light from overhead. No characters, no props, no figures in frame — the environment only. Wide framing that shows the layout of the space.
@@ -77,4 +78,11 @@ A background plate drawn as a flat vector cartoon with thick even outlines and a
 
 ```
 A background plate drawn as a flat vector cartoon with thick even outlines and a limited pastel palette. An empty establishing view of the diner's pass-through window looking out to the counter, warm tungsten light spilling in from the dining room. No characters, no props, no figures in frame — the environment only. Wide framing that shows the layout of the space.
+```
+
+## 10. `refs/ada/ada_wet_sheet_4panel.png`
+**character sheet** · size hint 4096x1024 or larger (horizontal 4-panel strip) · blocks 1 shot(s): sh340
+
+```
+A character model sheet on a plain flat background: FOUR panels side by side in a single horizontal strip, left to right — three-quarter body, side profile full body, back view full body, and a head-and-shoulders facial close-up. The SAME character in all four. a tall woman in her thirties with a short grey bob plastered flat and dripping, her mustard apron soaked through and clinging, and round red glasses fogged at the edges. Drawn as a flat vector cartoon with thick even outlines and a limited pastel palette. Output 4096x1024 or larger. This is Ada in a different state: start from the existing sheet at refs/ada/ada_sheet_4panel.png and change only what the description above changes, so the face, build and line quality stay identical.
 ```

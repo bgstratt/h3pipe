@@ -7,7 +7,10 @@ you supply (docs/API.md, "References"). Refs are listed from the series config, 
 from refs_todo, so a character nobody uses yet can still be generated:
 
     subject:<id>            a character (four views, stitched into its sheet),
-                            prop or vehicle: the series config's `sheet` path
+                            prop or vehicle: the series config's `sheet` path.
+                            A wardrobe variant (`of:`) is listed like any other
+                            subject -- its own sheet -- and has no voice of its
+                            own: it shares the subject's it is a variant of
     location:<id>           the location's `plate`
     voice:<id>              a character's voice sample: the series config's
                             `voice_sample`, else refs/voices/<id>.wav once one
@@ -73,6 +76,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import h3edit as E  # noqa: E402
 import h3jobs as J  # noqa: E402
 import h3takes as T  # noqa: E402
+from h3core import series_config as SC  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # wording and the image model: the krea2 image target (targets/image/krea2)
@@ -91,7 +95,7 @@ from targets.image.krea2.graph import (  # noqa: E402,F401
     build_graph, patch_workflow, take_graph)
 from targets.image.krea2.prompt import (  # noqa: E402,F401
     VIEW_DESC, VIEW_TAGS, VIEW_TMPL, VIEWS, object_prompt, plate_prompt, sheet_prompt,
-    view_prompt)
+    view_edit_prompt, view_prompt)
 
 IMAGE_TARGET = TG.load_target(TG.DEFAULT_IMAGE_TARGET, "image")
 NEW_SEED_BITS = 53         # as h3jobs: a browser can hold these as numbers
@@ -236,6 +240,13 @@ def series_refs(s: Series) -> list[Ref]:
         # (targets/audio/), and picking a candidate for a character with no
         # sample writes VOICE_DIR/<id>.wav and the series config's line
         # (pick_take). A prop or a vehicle never speaks.
+        #
+        # A variant (`of:`) has its own sheet -- the wardrobe is what it is for --
+        # but never its own voice: it is the same character, and it inherited the
+        # base's `voice` and `voice_sample` when the series config loaded. A
+        # second voice ref would let one character be picked two voices.
+        if e.get("of"):
+            continue
         if e.get("voice_sample") or e.get("kind", "character") == "character":
             out.append(Ref(f"voice:{sid}", "series", "voice", e.get("name", sid),
                            e.get("voice_sample") or "", s.home, e, sid))
@@ -575,6 +586,37 @@ def picked_view_file(s: Series, subject: str, view: str) -> str | None:
     return t.paths.image if t is not None and os.path.isfile(t.paths.image) else None
 
 
+def variant_reference_images(s: Series, ref: Ref, view: str | None,
+                             target=None, limit: int | None = None) -> list[dict]:
+    """The reference image an edit target reads to generate one view of a
+    wardrobe variant: the SAME view of the subject it is a variant of
+    (docs/PLAN.md, Phase 10b). The towel's back panel edits the base's back
+    panel; generating it cold is what makes the face drift.
+
+    The base's picked take of that view, else that panel cut out of its live
+    4-panel sheet (`crop`), else nothing. Same shape as the keyframe parts
+    (`_reference_parts`), so staging, the prompt and the sidecar record read it
+    the way they already do. [] when the ref is not a variant, the target reads
+    no references, or the base has no picture yet."""
+    if limit is None:
+        limit = target.capabilities().get("max_refs", 0) if target is not None else 0
+    base_id = ref.entry.get("of")
+    if not limit or not view or ref.kind != "character" or not base_id:
+        return []
+    base = (s.series_cfg.get("subjects") or {}).get(base_id) or {}
+    d = {"role": "subject", "subject": base_id, "name": base.get("name", base_id),
+         "kind": "character", "view": view}
+    picked = picked_view_file(s, base_id, view)
+    if picked:
+        d["path"] = picked
+    elif base.get("sheet") and os.path.isfile(ref_file(s.home, base["sheet"])):
+        d["path"] = ref_file(s.home, base["sheet"])
+        d["crop"] = {"panels": len(VIEW_TAGS), "index": VIEW_TAGS.index(view)}
+    else:
+        return []
+    return [d]
+
+
 COMPOSITE_FIGURES = 4       # at most this many figures in a composed reference
 
 
@@ -679,7 +721,8 @@ def keyframe_prompt(s: Series, ref: Ref, target=None, refs: list[dict] | None = 
 
 
 def built_prompt(s: Series, ref: Ref, view: str | None = None,
-                 view_size: tuple[int, int] = VIEW_SIZE, target=None) -> str | None:
+                 view_size: tuple[int, int] = VIEW_SIZE, target=None,
+                 refs: list[dict] | None = None) -> str | None:
     """The prompt the series config gives this ref (and view): what a generate uses
     unless overridden. None when the series config lacks what it needs. A character
     with no view gets its hand-made-sheet description (as in refs_todo). A
@@ -699,7 +742,14 @@ def built_prompt(s: Series, ref: Ref, view: str | None = None,
         return None
     if ref.kind == "character":
         if view is None:
-            return sheet_prompt(e["design"], s.look)
+            # a variant's hand-made-sheet description says where to start from
+            return sheet_prompt(e["design"], s.look,
+                                base=s.series_cfg["subjects"].get(e.get("of")))
+        if refs:
+            # it is generated as an edit of that reference, so the brief is
+            # what to change rather than what to draw
+            return view_edit_prompt(view, e["design"], s.look, *view_size,
+                                    base_name=refs[0].get("name", "the same character"))
         return view_prompt(view, e["design"], s.look, *view_size)
     return object_prompt(e["design"], s.look)
 
@@ -778,9 +828,18 @@ def keyframe_size(s: Series | None, ref: Ref, target=None,
 
 def stable_seed(ref: Ref) -> int:
     """kreagen's seeds: a character's four views share seed_for(<id>); anything
-    else uses seed_for(<the path the series config names>)."""
+    else uses seed_for(<the path the series config names>).
+
+    A wardrobe variant (`of:`) borrows the seed of the subject it is a variant
+    of. On a text-to-image target that is the only thing carrying identity
+    across the two generations: same seed, same model, a prompt that differs
+    only in the wardrobe sentence. With its own id it drew a different person
+    who happened to be described similarly. It is not identity — an edit target
+    or the H3 still target is (docs/PLAN.md, Phase 10b) — but it is the
+    difference between the same character in new clothes and a new character
+    in the clothes."""
     if ref.kind == "character":
-        return seed_for(ref.subject)
+        return seed_for(ref.entry.get("of") or ref.subject)
     return seed_for(ref.path or ref.id)
 
 
@@ -1173,6 +1232,11 @@ def set_voice_sample(s: Series, subject: str, rel: str) -> bool:
             or not isinstance(book[subject], dict):
         raise RefError(f"{os.path.basename(src.path)} has no subject {subject!r} to give a "
                        f"voice_sample to")
+    # series_refs lists no voice for a variant, so this is only reachable by
+    # asking for one by id. Writing it would split one character's voice in two.
+    if book[subject].get("of"):
+        raise RefError(f"{subject!r} is a variant of {book[subject]['of']!r} and shares its "
+                       f"voice: give the voice to {book[subject]['of']!r} instead")
     if book[subject].get("voice_sample") == rel:
         return False
     book[subject]["voice_sample"] = rel
@@ -1940,12 +2004,16 @@ def plan_generate(s: Series, req: GenRequest, overrides: dict | None = None,
                     return ov[name]
                 return built
 
+            vrefs = refs
             if ref.kind == "keyframe":
                 base_prompt = keyframe_prompt(s, ref, target, refs)
             elif ref.kind == "voice":
                 base_prompt, line, line_source = voice_brief(s, ref, target, seconds)
             else:
-                base_prompt = built_prompt(s, ref, v, view_size, target)
+                # a variant's view edits the base's SAME view, so its reference
+                # -- and so its wording -- is per view, not per ref
+                vrefs = variant_reference_images(s, ref, v, target) or refs
+                base_prompt = built_prompt(s, ref, v, view_size, target, vrefs)
             prompt = pick("prompt", base_prompt, req.prompt)
             stale = ("prompt" in used and bool(ov.get("base_hash"))
                      and ov["base_hash"] != prompt_hash(base_prompt))
@@ -1959,7 +2027,7 @@ def plan_generate(s: Series, req: GenRequest, overrides: dict | None = None,
                 negative=negative, width=w, height=h,
                 note=req.note or "", overridden=sorted(set(used)), override_stale=stale,
                 target=target, negative_source=neg_source, values=_preset_values(target),
-                references=[dict(r) for r in refs], render_size=render_size,
+                references=[dict(r) for r in vrefs], render_size=render_size,
                 video_target=video_target, notes=list(notes),
                 seconds=seconds, frames=frames, fps=fps, line=line,
                 line_source=line_source))
@@ -2775,6 +2843,10 @@ def used_by(s: Series, refs: list[Ref]) -> dict[str, dict[str, list[str]]]:
             by_path.setdefault(_norm(r.path), []).append(r.id)
     ids = {r.id for r in refs}
     out = {r.id: {p: [] for p in T.PASSES} for r in refs}
+    # a variant has its own sheet but shares the subject's voice, so a shot of
+    # the variant counts as a use of that voice (series_refs lists no voice for
+    # a variant, and the shot would otherwise be dropped here)
+    variants = SC.variant_of(s.series_cfg)
 
     def add(ref_id, pass_, shot):
         if ref_id in ids and shot not in out[ref_id][pass_]:
@@ -2791,7 +2863,8 @@ def used_by(s: Series, refs: list[Ref]) -> dict[str, dict[str, list[str]]]:
                     if slot.get("subject") and slot["kind"] == "image":
                         add(f"subject:{slot['subject']}", ps, shot["id"])
                     elif slot.get("subject") and slot["kind"] == "audio":
-                        add(f"voice:{slot['subject']}", ps, shot["id"])
+                        who = slot["subject"]
+                        add(f"voice:{variants.get(who, who)}", ps, shot["id"])
                     else:
                         for rid in by_path.get(_norm(slot.get("path", "")), []):
                             add(rid, ps, shot["id"])
@@ -2903,6 +2976,10 @@ def ref_json(s: Series, ref: Ref, usage: dict | None = None,
     out = {
         "id": ref.id, "key": ref.key, "scope": ref.scope, "kind": ref.kind,
         "name": ref.name, "subject": ref.subject,
+        # a wardrobe variant keeps the subject's name (it is the same character,
+        # and that name goes into every prompt), so the listing says whose
+        # variant it is rather than inventing a second name for them
+        "of": ref.entry.get("of") or None,
         "path": ep_rel(s.ep, live),
         "exists": exists, "sha1": T.file_sha1(live) if exists else None,
         "used_by": (usage or {}).get(ref.id) or {p: [] for p in T.PASSES},

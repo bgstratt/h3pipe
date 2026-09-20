@@ -307,6 +307,14 @@ you supply. Refs are the same thing whatever model consumes them. Each has a `sc
 - A **character** has views (`01_threequarter`, `02_side`, `03_back`, `04_face`, as
   in `kreagen.VIEWS`). Each view has its own takes and pick. Picking a view that
   completes the set stitches the sheet with `mksheet` into the series config's `sheet` path.
+- A **wardrobe variant** (a subject with `of:` — docs/PLAN.md, Phase 10) is listed like any
+  other subject: its own sheet, its own views, its own takes. The listing carries `"of":
+  "<the subject it is a variant of>"`, and it has **no `voice:` ref of its own** — it is the
+  same character and shares theirs, so a voice picked for it would split one character's
+  voice in two. It keeps that character's `name`, because that name goes into every prompt;
+  the listing's `of` is what tells them apart on screen. Its views are generated as an edit
+  of the base's same view on any target that reads reference images, and on a text-to-image
+  target from the base's seed and the variant's words.
 - **Picking** a take copies it to the path the series config names, which is the file renders
   read. The pick is recorded in `refs/_picks.json`, so the UI knows which take is
   live. Re-picking changes the file's sha1, so video takes that used the old file

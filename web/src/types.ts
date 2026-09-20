@@ -838,6 +838,13 @@ export interface Ref {
   key?: string;
   /** the series config subject it belongs to (null for a location or a keyframe) */
   subject?: string | null;
+  /**
+   * a wardrobe variant's base: the subject it is a variant of (`of:` in the
+   * series config), null for everything else. A variant keeps that character's
+   * `name` — it is the same character, and that name goes into every prompt —
+   * so this is what tells the two rows apart.
+   */
+  of?: string | null;
   /** false when this ref can't be generated; `why_not` says why */
   can_generate?: boolean;
   why_not?: string | null;

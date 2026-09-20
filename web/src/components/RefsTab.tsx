@@ -724,6 +724,14 @@ function RefRow({ ep, r }: { ep: string; r: Ref }) {
         <div className="h3-col h3-grow" style={{ gap: 1 }}>
           <div className="h3-row">
             <b className="h3-ell">{kf ? `${kf.which} frame` : r.name}</b>
+            {r.of && (
+              <span
+                className="h3-muted h3-small h3-ell"
+                title={`A wardrobe variant of ${r.of}: same character, own sheet. Its views are generated from ${r.of}'s, and it shares ${r.of}'s voice.`}
+              >
+                variant of {r.of}
+              </span>
+            )}
             <span className="h3-muted h3-small h3-ell">{r.id}</span>
           </div>
           {kf ? (

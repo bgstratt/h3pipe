@@ -3,10 +3,10 @@
   model        series_model.safetensors
   lora         series_turbo_8step.safetensors
   ------------------------------------------------------------
-  4 sequences, 15 shots
-  runtime      0:36.42  (scripted 0:32.79, +87f grid pad)
-  audio        7x clone, 2x dub, 2x dub_keep_foley, 4x generate
-  references   0/13 on disk, 13 to make
+  4 sequences, 16 shots
+  runtime      0:38.75  (scripted 0:35.12, +87f grid pad)
+  audio        8x clone, 2x dub, 2x dub_keep_foley, 4x generate
+  references   0/14 on disk, 14 to make
     ! sh010: dur 2.50s snaps up to 3.04s, wasting 13 frames. Writing it as 3.04s costs the same render.
     ! sh050: CRAMMED — 26 syllables in 1.62s forces 38.5 syl/s (ceiling 5.8). This window holds about 3. Either `dur: 5.88` (+4.25s), cut ~23 syllables, or split the shot.
     ! sh060: tight — 12 syllables in 3.04s forces 5.7 syl/s against a slow pace of 3.6. `dur: 4.46` gives it room, or add `pace: fast` if the rush is the joke.
@@ -38,5 +38,6 @@
     ! sh330 overrides lora: shot_lora.safetensors
     ! sh330 overrides model: profile_model.safetensors
     ! sh330 overrides steps: 9
+    ! sh340 overrides steps: 5
     ! series.steps is 6 but the LoRA series_turbo_8step.safetensors is distilled for 8 steps — set steps: 8 or pick a matching lora
 

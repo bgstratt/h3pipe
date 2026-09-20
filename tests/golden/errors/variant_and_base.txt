@@ -1,0 +1,5 @@
+exit 1
+
+  error in variant_and_base.md: line 3: shot 'sh010' names both 'ada' and its variant 'ada_wet': they are the same subject, so name one of them.
+    | ## sh010
+

@@ -704,6 +704,51 @@
             "end_line": 168
           },
           "profile": "dialogue_close"
+        },
+        {
+          "id": "sh340",
+          "cast": [
+            "ada_wet"
+          ],
+          "props": [],
+          "plate": "kitchen",
+          "size": "close",
+          "camera": null,
+          "action": "Ada wrings the front of her soaked apron out over the sink.",
+          "dialogue": [
+            {
+              "speaker": "ada_wet",
+              "mode": "on",
+              "delivery": "flat",
+              "line": "Don't."
+            },
+            {
+              "speaker": "narrator",
+              "mode": "vo",
+              "delivery": "",
+              "line": "He did anyway."
+            }
+          ],
+          "sound": null,
+          "music": null,
+          "extras": null,
+          "text": null,
+          "timing": {
+            "auto": true
+          },
+          "pace": null,
+          "audio": null,
+          "preserve": null,
+          "seed_key": "ks01/sq04/sh340",
+          "overrides": {
+            "model": null,
+            "lora": null,
+            "steps": null
+          },
+          "source": {
+            "line": 173,
+            "end_line": 179
+          }
         }
       ]
     }

@@ -91,6 +91,9 @@ which ones your ComfyUI can render.
 ```
 
 - `kind` is `character`, `prop` or `vehicle`. Only characters speak.
+- `of` makes the subject a **wardrobe variant** of another one — the same character in
+  different clothes, the same prop in a different state. See **A wardrobe change is a new
+  subject**.
 - `pronoun` is used in the lips-closed clause on voiceover shots.
 - `audio.mode` sets how dialogue shots sound: `clone` (the model speaks the written lines in
   each character's sampled voice), `source_track` (the default: you supply a recorded mix,
@@ -231,10 +234,18 @@ config can say which:
 | `flux2_klein` | FLUX.2 Klein 9B, text to image |
 | `flux2_klein_edit` | FLUX.2 Klein 9B with up to 4 reference images (the default for keyframes when it is installed; otherwise keyframes use the refs model) |
 | `flux_kontext` | FLUX.1 Kontext dev, with one reference image |
+| `minimax_h3_still` | MiniMax H3 — the video model, rendering 5 frames and keeping the first, with up to 9 reference images. No second model stack to install if you already render on H3 |
 
 | audio target | what it is |
 |---|---|
 | `ltx2_voice` | LTX-2.5 audio-only: one speaking voice from the character's `voice` line and a line from the script (the default for voices) |
+
+A **variant**'s view (a subject with `of:`) is generated as an edit of the same view of the
+character it is a variant of, on any target that reads reference images — so its back panel
+is drawn from their back panel, and the face carries. On a text-to-image target there is
+nothing to edit from, so it falls back to drawing the variant from its `design` on the
+base's seed; write that sentence as close to the original's as the change allows, because
+there the wording is all the identity there is.
 
 The editor can choose per episode (kept in `overrides.json`, not here) and per ref, and a
 generate request can name one; most specific wins. `python h3.py targets --kind image`
@@ -285,6 +296,61 @@ office_wide    the whole interior at once
 
 **Time of day is part of the location.** `street_day` and `street_night` are two entries with
 two plates, because the plate carries the light.
+
+### A wardrobe change is a new subject
+
+The same idea for people. A character's clothes live in their `design` sentence and in their
+model sheet, so a character who changes clothes is a second subject with `of:` — a
+**variant** — not a note in the action line:
+
+```json
+"gina": {
+  "kind": "character", "name": "Gina", "pronoun": "her",
+  "design": "a woman in her forties, dark hair cut short, a grey mechanic's coverall over a black tee, steel-toed boots",
+  "sheet": "refs/gina/gina_sheet_4panel.png",
+  "voice": "low and dry, never hurried",
+  "voice_sample": "audio/voices/gina_sample.wav"
+},
+"gina_towel": {
+  "of": "gina",
+  "design": "a woman in her forties, dark hair cut short and soaked flat, a white bath towel wrapped and tucked at the chest, bare feet"
+}
+```
+
+A variant needs exactly two lines: `of:` and its own `design`. Everything else — `kind`,
+`name`, `pronoun`, `voice`, `voice_sample` — is inherited, so one character still has one
+voice, and a `sheet` path is derived from the original's (`refs/gina/gina_sheet_4panel.png`
+becomes `refs/gina/gina_towel_sheet_4panel.png`). Give it its own `sheet` line to put it
+somewhere else. Generate that sheet like any other reference; starting from the original's
+approved views holds the face far better than generating it cold.
+
+In the script, name the variant where it is on screen and go on calling the character by
+their name:
+
+```
+## sh120
+who: gina_towel
+size: medium
+dur: 3.04
+Gina leans out of the bathroom door, one hand on the frame.
+GINA (low): Don't come in.
+```
+
+`who:` takes the variant; `GINA:` still speaks, and the line is given to whichever of her is
+in the shot. A shot names one or the other, never both, and never two variants of the same
+subject — cut the shot where the change happens.
+
+**Why not a `wear:` line on the shot?** Because the reference sheet would still show the old
+clothes, and the prompt would have to argue with the picture. H3 preserves a subject as a
+whole — its `fully_preserved` marker covers face, hair, proportions *and* wardrobe — so the
+only way to contradict the sheet is to weaken the whole subject, which loosens the face in
+order to change the clothes. A variant keeps the identity lock and swaps the picture. It also
+costs nothing on the other targets: LTX-2 and Wan have no reference images and read the
+`design` sentence, which is already the variant's.
+
+**A change that happens on camera** — a coat coming off mid-shot — stays in the action line.
+A variant is for a state a shot is *in*, not a change it *makes*. Cut to a new shot when the
+new state has to hold.
 
 ## The script: epNN.md
 

@@ -1,14 +1,14 @@
 # Asset work order — ks01 Kitchen Sink
 
-0/13 on disk. Generate each missing asset, save it to the path shown, then re-run h3build.
+0/14 on disk. Generate each missing asset, save it to the path shown, then re-run h3build.
 
 | # | Path | Kind | Size hint | Shots blocked |
 |---|---|---|---|---|
-| 1 | `refs/_bg/kitchen.png` | background plate | 1344x768 (the render resolution) | 9 |
+| 1 | `refs/_bg/kitchen.png` | background plate | 1344x768 (the render resolution) | 10 |
 | 2 | `refs/ada/ada_sheet_4panel.png` | character sheet | 4096x1024 or larger (horizontal 4-panel strip) | 8 |
 | 3 | `refs/bo/bo_sheet_4panel.png` | character sheet | 4096x1024 or larger (horizontal 4-panel strip) | 7 |
 | 4 | `refs/props/kettle.png` | prop reference | 1024x1024 or larger | 2 |
-| 5 | `audio/voices/ada_sample.wav` | voice sample | 5-15 seconds of clean speech, mono wav | 4 |
+| 5 | `audio/voices/ada_sample.wav` | voice sample | 5-15 seconds of clean speech, mono wav | 5 |
 | 6 | `audio/voices/bo_sample.wav` | voice sample | 5-15 seconds of clean speech, mono wav | 4 |
 | 7 | `refs/props/van.png` | vehicle reference | 1024x1024 or larger | 1 |
 | 8 | `refs/cy/cy_sheet_4panel.png` | character sheet | 4096x1024 or larger (horizontal 4-panel strip) | 3 |
@@ -16,12 +16,13 @@
 | 10 | `audio/voices/cy_sample.wav` | voice sample | 5-15 seconds of clean speech, mono wav | 2 |
 | 11 | `refs/_bg/street.png` | background plate | 1344x768 (the render resolution) | 4 |
 | 12 | `refs/_bg/kitchen_window.png` | background plate | 1344x768 (the render resolution) | 2 |
-| 13 | `audio/voices/narrator_sample.wav` | voice sample | 5-15 seconds of clean speech, mono wav | 1 |
+| 13 | `audio/voices/narrator_sample.wav` | voice sample | 5-15 seconds of clean speech, mono wav | 2 |
+| 14 | `refs/ada/ada_wet_sheet_4panel.png` | character sheet | 4096x1024 or larger (horizontal 4-panel strip) | 1 |
 
 ---
 
 ## 1. `refs/_bg/kitchen.png`
-**background plate** · size hint 1344x768 (the render resolution) · blocks 9 shot(s): sh010, sh020, sh030, sh040, sh050, sh060, sh310, sh320 …
+**background plate** · size hint 1344x768 (the render resolution) · blocks 10 shot(s): sh010, sh020, sh030, sh040, sh050, sh060, sh310, sh320 …
 
 ```
 A background plate drawn as a flat vector cartoon with thick even outlines and a limited pastel palette. An empty establishing view of a cramped diner kitchen with steel counters, a hanging ticket rail and cold fluorescent light from overhead. No characters, no props, no figures in frame — the environment only. Wide framing that shows the layout of the space.
@@ -49,7 +50,7 @@ A single clean three-quarter view of one object on a plain flat background, no s
 ```
 
 ## 5. `audio/voices/ada_sample.wav`
-**voice sample** · size hint 5-15 seconds of clean speech, mono wav · blocks 4 shot(s): sh020, sh030, sh210, sh320
+**voice sample** · size hint 5-15 seconds of clean speech, mono wav · blocks 5 shot(s): sh020, sh030, sh210, sh320, sh340
 
 ```
 A 5-15 second clean recording of Ada speaking. Voice: dry, quick and precise.
@@ -105,8 +106,15 @@ A background plate drawn as a flat vector cartoon with thick even outlines and a
 ```
 
 ## 13. `audio/voices/narrator_sample.wav`
-**voice sample** · size hint 5-15 seconds of clean speech, mono wav · blocks 1 shot(s): sh210
+**voice sample** · size hint 5-15 seconds of clean speech, mono wav · blocks 2 shot(s): sh210, sh340
 
 ```
 A 5-15 second clean recording of the narrator speaking. Voice: warm, older, unhurried.
+```
+
+## 14. `refs/ada/ada_wet_sheet_4panel.png`
+**character sheet** · size hint 4096x1024 or larger (horizontal 4-panel strip) · blocks 1 shot(s): sh340
+
+```
+A character model sheet on a plain flat background: FOUR panels side by side in a single horizontal strip, left to right — three-quarter body, side profile full body, back view full body, and a head-and-shoulders facial close-up. The SAME character in all four. a tall woman in her thirties with a short grey bob plastered flat and dripping, her mustard apron soaked through and clinging, and round red glasses fogged at the edges. Drawn as a flat vector cartoon with thick even outlines and a limited pastel palette. Output 4096x1024 or larger. This is Ada in a different state: start from the existing sheet at refs/ada/ada_sheet_4panel.png and change only what the description above changes, so the face, build and line quality stay identical.
 ```

@@ -1,8 +1,8 @@
 """
 h3core.story — the script parser: epNN.md text + the series config's ids -> story IR.
 
-    parse_story(text, subject_ids, character_ids, series) -> ir.Episode
-    parse_script(text, subject_ids, character_ids)        -> dict (legacy shape)
+    parse_story(text, subject_ids, character_ids, series, variants) -> ir.Episode
+    parse_script(text, subject_ids, character_ids, variants)        -> dict (legacy)
 
 `parse_script` is the original parser and still returns the dict h3align and
 the H3 compile code were written against. `parse_story` runs the same parser,
@@ -80,13 +80,19 @@ def split_parenthetical(text: str) -> tuple[str, str]:
 # The parser
 # ---------------------------------------------------------------------------
 
-def _parse(text: str, subject_ids: set[str],
-           character_ids: set[str]) -> tuple[dict, list[int], dict[str, tuple[int, int]]]:
+def _parse(text: str, subject_ids: set[str], character_ids: set[str],
+           variants: dict[str, str] | None = None
+           ) -> tuple[dict, list[int], dict[str, tuple[int, int]]]:
     """(episode dict, header line per sequence, shot id -> (first, last) line).
 
     A shot's span runs from its `##` header to the last line that belongs to it
     (meta, dialogue or action); blank and comment lines after that are not part
     of it. Line numbers are 1-based, as in error messages.
+
+    `variants` is {variant id: the id it is a variant of}
+    (h3core.series_config.variant_of): with it, a shot whose cast names a
+    variant takes its base's dialogue (`GINA:` where `who: gina_towel`). See
+    `_bind_variants`. Without it a script parses exactly as it always did.
     """
     ep = {"id": None, "title": "", "sequences": []}
     seq = None
@@ -104,6 +110,10 @@ def _parse(text: str, subject_ids: set[str],
             if not shot["action"] and not shot["dialogue"]:
                 raise ScriptError(shot["_line"], f"## {shot['id']}",
                                   f"shot '{shot['id']}' has no action and no dialogue")
+            # after the whole shot is read: `who:` may come before or after the
+            # lines it re-owns.
+            _bind_variants(shot, variants or {})
+            shot.pop("_auto_cast", None)
             spans[shot["id"]] = (shot.pop("_line"), shot.pop("_end"))
             seq["shots"].append(shot)
             shot = None
@@ -147,7 +157,8 @@ def _parse(text: str, subject_ids: set[str],
                                            f"in an episode")
             first_line[sid] = n
             shot = {"id": sid, "cast": [], "props": [], "size": "medium",
-                    "dialogue": [], "_action": [], "_line": n, "_end": n}
+                    "dialogue": [], "_action": [], "_line": n, "_end": n,
+                    "_auto_cast": []}
             continue
 
         if seq is None:
@@ -188,6 +199,7 @@ def _parse(text: str, subject_ids: set[str],
             # Only an on-screen speaker joins the visible cast.
             if not mode and who not in shot["cast"]:
                 shot["cast"].append(who)
+                shot["_auto_cast"].append(who)
             continue
 
         # ---- key: value --------------------------------------------------
@@ -217,6 +229,8 @@ def _parse(text: str, subject_ids: set[str],
                     if c not in merged:
                         merged.append(c)
                 shot[bucket] = merged
+                # named here, so no longer just someone a line put on screen
+                shot["_auto_cast"] = [c for c in shot["_auto_cast"] if c not in names]
             elif key == "size":
                 if val.lower() not in SIZES:
                     raise ScriptError(n, line, f"size '{val}' must be one of {sorted(SIZES)}")
@@ -269,6 +283,51 @@ def _parse(text: str, subject_ids: set[str],
     return ep, seq_lines, spans
 
 
+def _bind_variants(shot: dict, variants: dict[str, str]) -> None:
+    """Give a shot's dialogue to the variant that is actually in it.
+
+    A wardrobe variant is its own subject (`gina_towel`, `of: gina`), but the
+    script keeps calling the character by name: `who: gina_towel` with a
+    `GINA:` line. Left alone, the base and the variant would be two people —
+    the base joining the cast as a second entry, burning a reference slot, and
+    the target labelling the speaker as an off-screen voice because the id in
+    the cast isn't the id that spoke. So every line of the base's in a shot
+    where a variant of theirs is on screen is rebound to the variant, and the
+    base is dropped from the cast when a line is all that put it there.
+
+    Errors (at the shot's header, since `who:` and the lines can be anywhere in
+    it): two variants of one subject in one shot, or a subject and its own
+    variant.
+    """
+    if not variants:
+        return
+    present: dict[str, list[str]] = {}          # base id -> its variants in this shot
+    for s in shot["cast"] + shot["props"]:
+        base = variants.get(s)
+        if base:
+            present.setdefault(base, []).append(s)
+    if not present:
+        return
+    line_no, line = shot["_line"], f"## {shot['id']}"
+    for base, vs in present.items():
+        if len(vs) > 1:
+            raise ScriptError(line_no, line,
+                              f"shot '{shot['id']}' has {' and '.join(sorted(vs))} in it, and "
+                              f"they are both variants of '{base}': one subject is in one "
+                              f"state per shot. Cut the shot where the change happens.")
+        v = vs[0]
+        if base in shot["cast"] or base in shot["props"]:
+            if base in shot["_auto_cast"]:
+                shot["cast"].remove(base)       # only a line put them there: it was the variant
+            else:
+                raise ScriptError(line_no, line,
+                                  f"shot '{shot['id']}' names both '{base}' and its variant "
+                                  f"'{v}': they are the same subject, so name one of them.")
+        for d in shot["dialogue"]:
+            if d["who"] == base:
+                d["who"] = v
+
+
 def _keyframe_method(key: str, val: str, n: int, line: str) -> str:
     """`first:` / `last:`: one of KEYFRAME_METHODS (lower-cased), or a path to
     an image (kept as written)."""
@@ -295,10 +354,11 @@ def _model_clamp(spec: str, n: int, line: str) -> dict:
     return {"min": lo, "max": hi}
 
 
-def parse_script(text: str, subject_ids: set[str], character_ids: set[str]) -> dict:
+def parse_script(text: str, subject_ids: set[str], character_ids: set[str],
+                 variants: dict[str, str] | None = None) -> dict:
     """Parse the screenplay-flavoured script into an episode structure (the
-    legacy dict: what h3align reads)."""
-    return _parse(text, subject_ids, character_ids)[0]
+    legacy dict: what h3align reads). `variants`: see `_parse`."""
+    return _parse(text, subject_ids, character_ids, variants)[0]
 
 
 # ---------------------------------------------------------------------------
@@ -369,8 +429,11 @@ def episode_from_parsed(ep: dict, seq_lines: list[int],
 
 
 def parse_story(text: str, subject_ids: set[str], character_ids: set[str],
-                series: dict | None = None) -> Episode:
+                series: dict | None = None,
+                variants: dict[str, str] | None = None) -> Episode:
     """Parse a script into the story IR. `series` ({fps, width, height}, from
-    series_config.series_info) is carried on the episode header."""
-    ep, seq_lines, spans = _parse(text, subject_ids, character_ids)
+    series_config.series_info) is carried on the episode header; `variants`
+    ({variant id: base id}, from series_config.variant_of) binds a base's
+    dialogue to the variant on screen. See `_parse`."""
+    ep, seq_lines, spans = _parse(text, subject_ids, character_ids, variants)
     return episode_from_parsed(ep, seq_lines, spans, series)

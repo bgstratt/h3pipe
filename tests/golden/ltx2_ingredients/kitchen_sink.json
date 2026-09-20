@@ -21,6 +21,16 @@
         "sheet": "refs/ada/ada_sheet_4panel.png",
         "voice_sample": "audio/voices/ada_sample.wav"
       },
+      "ada_wet": {
+        "kind": "character",
+        "sheet": "refs/ada/ada_wet_sheet_4panel.png",
+        "voice_sample": "audio/voices/ada_sample.wav"
+      },
+      "ada_coat": {
+        "kind": "character",
+        "sheet": "refs/ada/ada_coat_sheet_4panel.png",
+        "voice_sample": "audio/voices/ada_sample.wav"
+      },
       "bo": {
         "kind": "character",
         "sheet": "refs/bo/bo_sheet_4panel.png",
@@ -582,6 +592,38 @@
         "lora": "shot_lora.safetensors",
         "profile": "dialogue_close",
         "duration": 1.105
+      },
+      {
+        "id": "sh340",
+        "sequence": "sq04",
+        "subjects": [
+          "ada_wet"
+        ],
+        "background": "refs/_bg/kitchen.png",
+        "size": "close",
+        "length": 57,
+        "seed": 2470138522001882497,
+        "steps": 5,
+        "audio_policy": "generate",
+        "prompt": "Reference sheet: Ada, a tall woman in her thirties with a short grey bob plastered flat and dripping, her mustard apron soaked through and clinging, and round red glasses fogged at the edges, shown in a face close-up. The location, a cramped diner kitchen with steel counters, a hanging ticket rail and cold fluorescent light from overhead.\n\nGenerated video: Style: a flat vector cartoon with thick even outlines and a limited pastel palette. A close-up of a cramped diner kitchen with steel counters, a hanging ticket rail and cold fluorescent light from overhead, the camera remains static. Ada is in frame. Ada wrings the front of her soaked apron out over the sink. Ada, in a voice that is dry, quick and precise, says, flat: \"Don't.\" The narrator, in a voice that is warm, older, unhurried, says in an off-screen voiceover: \"He did anyway.\" The ambient sound of the place follows the action. There is no music.",
+        "negative": "worst quality, inconsistent motion, blurry, jittery, distorted, flickering, morphing, extra limbs, watermark, subtitles",
+        "panels": [
+          {
+            "subject": "ada_wet",
+            "kind": "character",
+            "path": "refs/ada/ada_wet_sheet_4panel.png",
+            "view": "face"
+          },
+          {
+            "location": "kitchen",
+            "kind": "plate",
+            "path": "refs/_bg/kitchen.png"
+          }
+        ],
+        "audio_intent": "clone",
+        "audio_note": "audio clone renders as generate on LTX+refs: LTX-2 generates sound with the picture and takes no voice sample or recording",
+        "profile": "quick",
+        "duration": 2.314
       }
     ]
   },
@@ -594,13 +636,13 @@
     "model": "ltx-2.3-22b-distilled-fp8.safetensors",
     "lora": "ltx-2.3-22b-ic-lora-ingredients-0.9.safetensors",
     "fps": 24.0,
-    "shots": 15,
+    "shots": 16,
     "sequences": 4,
-    "target_s": 32.791666666666664,
-    "delivered_s": 37.958333333333336,
-    "pad_frames": 124,
+    "target_s": 35.125,
+    "delivered_s": 40.333333333333336,
+    "pad_frames": 125,
     "policies": {
-      "generate": 15
+      "generate": 16
     },
     "needed": {
       "refs/ada/ada_sheet_4panel.png": {
@@ -638,6 +680,10 @@
       "refs/_bg/kitchen_window.png": {
         "kind": "background plate",
         "prompt": "A background plate drawn as a flat vector cartoon with thick even outlines and a limited pastel palette. An empty establishing view of the diner's pass-through window looking out to the counter, warm tungsten light spilling in from the dining room. No characters, no props, no figures in frame — the environment only. Wide framing that shows the layout of the space."
+      },
+      "refs/ada/ada_wet_sheet_4panel.png": {
+        "kind": "character sheet",
+        "prompt": "A character model sheet on a plain flat background: FOUR panels side by side in a single horizontal strip, left to right — three-quarter body, side profile full body, back view full body, and a head-and-shoulders facial close-up. The SAME character in all four. a tall woman in her thirties with a short grey bob plastered flat and dripping, her mustard apron soaked through and clinging, and round red glasses fogged at the edges. Drawn as a flat vector cartoon with thick even outlines and a limited pastel palette. Output 4096x1024 or larger. This is Ada in a different state: start from the existing sheet at refs/ada/ada_sheet_4panel.png and change only what the description above changes, so the face, build and line quality stay identical."
       }
     },
     "blocked_shots": {
@@ -660,7 +706,8 @@
         "sh060",
         "sh310",
         "sh320",
-        "sh330"
+        "sh330",
+        "sh340"
       ],
       "refs/bo/bo_sheet_4panel.png": [
         "sh020",
@@ -695,12 +742,15 @@
       "refs/_bg/kitchen_window.png": [
         "sh130",
         "sh210"
+      ],
+      "refs/ada/ada_wet_sheet_4panel.png": [
+        "sh340"
       ]
     },
     "warnings": [
       "sh050: CRAMMED — 26 syllables in 2.04s forces 23.8 syl/s (ceiling 5.8). Split the shot.",
       "sh140: CRAMMED — 12 syllables in 2.04s forces 8.6 syl/s (ceiling 5.8). Split the shot.",
-      "7 shot(s) ask for audio clone, which LTX+refs can't render (LTX-2 generates sound with the picture and takes no voice sample or recording): they render with generate: sh020, sh030, sh050, sh060, sh210, sh320, sh330",
+      "8 shot(s) ask for audio clone, which LTX+refs can't render (LTX-2 generates sound with the picture and takes no voice sample or recording): they render with generate: sh020, sh030, sh050, sh060, sh210, sh320, sh330, sh340",
       "2 shot(s) ask for audio dub, which LTX+refs can't render (LTX-2 generates sound with the picture and takes no voice sample or recording): they render with generate: sh110, sh140",
       "2 shot(s) ask for audio dub_keep_foley, which LTX+refs can't render (LTX-2 generates sound with the picture and takes no voice sample or recording): they render with generate: sh120, sh130",
       "sh040 overrides model: shot_model.safetensors",
@@ -714,7 +764,7 @@
       "sh320 overrides model: profile_model.safetensors",
       "sh330 overrides model: profile_model.safetensors",
       "sh330 overrides lora: shot_lora.safetensors",
-      "the IC-LoRA was trained at 121 frames; identity may weaken at other lengths (15 shots, frames): sh010 65, sh020 89, sh030 49, sh040 73, sh050 49, sh060 73, sh110 65, sh120 49, sh130 57, sh140 49, sh150 49, sh210 89 …"
+      "the IC-LoRA was trained at 121 frames; identity may weaken at other lengths (16 shots, frames): sh010 65, sh020 89, sh030 49, sh040 73, sh050 49, sh060 73, sh110 65, sh120 49, sh130 57, sh140 49, sh150 49, sh210 89 …"
     ],
     "target": "ltx2_ingredients",
     "size_hints": {

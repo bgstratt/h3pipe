@@ -49,6 +49,7 @@ queued; no rebuild. The format and how to choose are in
 | `flux2_klein` | FLUX.2 Klein 9B (text to image) |
 | `flux2_klein_edit` (default for keyframes, when installed) | FLUX.2 Klein 9B edit (uses reference images) |
 | `flux_kontext` | FLUX.1 Kontext dev (edit, one reference) |
+| `minimax_h3_still` | MiniMax H3 as an image model: renders 5 frames, keeps the first, up to 9 references |
 
 | Audio target | Label |
 |---|---|
@@ -212,7 +213,9 @@ and `h3peaks.py` (waveforms) are the library the commands and the editor's route
 - **`series.json`** — the series config: style, characters and props (with a `design`
   sentence each), locations (one entry per camera angle, with the light), voices, audio
   mode, and optionally the series target, render profiles, the `refs` image targets and a
-  `negative` prompt. See `examples/series_example.json`.
+  `negative` prompt. A character who changes clothes gets a second entry with `of:` — a
+  **wardrobe variant**, its own `design` and its own sheet, everything else inherited. See
+  `examples/series_example.json`.
 - **`epNN.md`** — the script: `# sq` sequences, `## sh` shots with `who:`, `with:`, `size:`,
   `dur:` or `audio:`, `plate:`, `camera:`, `sound:`, `music:`, optionally `target:`,
   `first:` / `last:`, action prose and `NAME:` lines. See `examples/script_example.md`.
@@ -307,7 +310,18 @@ python h3.py refs Shows\ep05 --voices      # also the voice samples, on the audi
 - Skips anything already on disk. `--redo` makes a new take (kept in `refs/_takes/`) and
   leaves the live file alone unless you add `--pick`; combine it with `--only`. `--all`
   works from the whole series config instead of `refs_todo.json`.
-- `--only` matches part of the file path, so `dean` also matches `dean_grown`.
+- `--only` matches part of the file path, so `dean` also matches `dean_grown` — which is
+  also how a character and their wardrobe variants regenerate together.
+- **Wardrobe variants come second.** A variant's views are edited from the character's own
+  (see **Reference sheets**), and a whole pass plans every job before any take is picked —
+  so in the first pass the variant has nothing to edit from and is drawn cold. Run the pass,
+  let the character's views pick (anything with no live file takes its first usable
+  candidate automatically), then regenerate just the variant on a model that reads
+  references: `--only gina_towel --target flux2_klein_edit --redo`. Set that target once on
+  the ref instead — in the editor's per-ref target picker — and every later generate of it
+  uses the edit model while everything else stays on krea2. The new take does **not** go
+  live on its own once the variant already has a file: pick it (`--pick`, or in the Refs
+  tab).
 - **Voices.** Images only, unless `--voices`: then each character's voice ref is generated
   on the audio target (`--voice-target`, `--voice-seconds`; default `ltx2_voice`) into
   `refs/voices/<char>.wav`, as takes like any other ref. `--from-take sh020:2:1.5-6.0`
@@ -615,6 +629,21 @@ mapping is fixed, so prompts are stable regardless of cast size:
 | `<Picture 2>` | background | subject 2 | subject 2 |
 | `<Picture 3>` | background | background | subject 3 |
 | `<Picture 4>` | background | background | background |
+
+**A change of clothes is a second subject**, not a note in the prompt. Give it `of:` in the
+series config and its own `design`; it inherits the character's name, voice and pronoun, and
+its sheet path is derived from theirs (`refs/gina/gina_sheet_4panel.png` →
+`refs/gina/gina_towel_sheet_4panel.png`). The script names the variant on `who:` and goes on
+calling the character by name in the dialogue. The point is that the retention marker stays
+`fully_preserved` against a sheet that is actually wearing the towel: H3 preserves a subject
+whole — face, hair, proportions *and* wardrobe — so the only way to contradict the sheet is
+to weaken the whole subject, which loosens the face in order to change the clothes.
+
+A variant's views are generated **from the character's own**: the towel's back panel is an
+edit of their back panel, on any image target that reads references (`flux2_klein_edit`,
+`flux_kontext`, `minimax_h3_still`). On a text-to-image target there is nothing to edit
+from, so it draws the variant from its `design` on the character's seed — closer than a
+fresh draw, but not the same thing.
 
 Props and vehicles are single clean images on a flat background and are never
 panel-cropped; only character sheets get `panel_mode`. Unused

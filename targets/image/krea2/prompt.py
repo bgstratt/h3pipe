@@ -39,15 +39,47 @@ def view_prompt(view: str, design: str, look: str, w: int, h: int) -> str:
     return VIEW_TMPL.format(view=VIEW_DESC[view], design=design, look=look, w=w, h=h)
 
 
-def sheet_prompt(design: str, look: str) -> str:
+def view_edit_prompt(view: str, design: str, look: str, w: int, h: int,
+                     base_name: str, word: str = "reference image") -> str:
+    """One view of a wardrobe variant, generated as an EDIT of the same view of
+    the subject it is a variant of (docs/PLAN.md, Phase 10b).
+
+    The brief is what to CHANGE, not what to draw: everything the reference
+    already settles — face, hair, build, proportions, line quality, the view
+    itself — is named as fixed, so the only thing left for the model to invent
+    is the wardrobe the description asks for. Generating the same view cold is
+    what makes the face drift between a character and their variant."""
+    return (f"The {word} is {base_name}: {VIEW_DESC[view]}. Redraw that same character in "
+            f"that same view and at the same scale, keeping the face, hair, build, "
+            f"proportions and line quality exactly as they are in the {word}, and changing "
+            f"only what this description changes: {design}. Keep the plain flat neutral "
+            f"background, no scene and no props, the whole figure inside the frame with "
+            f"margin on every side. Drawn as {look}. Output {w}x{h}.")
+
+
+def sheet_prompt(design: str, look: str, base: dict | None = None) -> str:
     """The whole 4-panel sheet, described for someone making it by hand
-    (refs_todo). Generating uses view_prompt four times instead."""
-    return (f"A character model sheet on a plain flat background: FOUR panels side "
-            f"by side in a single horizontal strip, left to right — three-quarter "
-            f"body, side profile full body, back view full body, and a "
-            f"head-and-shoulders facial close-up. The SAME character in all four. "
-            f"{design}. Drawn as {look}. "
-            f"Output 4096x1024 or larger.")
+    (refs_todo). Generating uses view_prompt four times instead.
+
+    `base` is the subject this one is a wardrobe variant of (`of:`), as
+    {"name", "sheet"}: the note tells whoever makes the sheet — a person or a
+    batch run — to start from that image rather than from nothing, which is
+    what holds the face across a change of clothes. It is an instruction about
+    where to start, never part of what the picture shows, so it goes last and
+    only here: view_prompt feeds a text-to-image model, where naming a file on
+    disk is noise (docs/PLAN.md, Phase 10b wires the real edit path)."""
+    out = (f"A character model sheet on a plain flat background: FOUR panels side "
+           f"by side in a single horizontal strip, left to right — three-quarter "
+           f"body, side profile full body, back view full body, and a "
+           f"head-and-shoulders facial close-up. The SAME character in all four. "
+           f"{design}. Drawn as {look}. "
+           f"Output 4096x1024 or larger.")
+    if base and base.get("sheet"):
+        out += (f" This is {base.get('name', 'the same character')} in a different state: "
+                f"start from the existing sheet at {base['sheet']} and change only what "
+                f"the description above changes, so the face, build and line quality stay "
+                f"identical.")
+    return out
 
 
 def object_prompt(design: str, look: str) -> str:
@@ -74,7 +106,8 @@ def ref_prompt(target, req, series_cfg: dict) -> str:
     if req.shape == "sheet":
         if req.views != len(VIEWS):
             raise ValueError(f"{target.id} words a {len(VIEWS)}-view sheet, not {req.views}")
-        return sheet_prompt(e['design'], series_cfg['style']['look'])
+        return sheet_prompt(e['design'], series_cfg['style']['look'],
+                            base=(series_cfg.get('subjects') or {}).get(e.get('of')))
     if req.shape == "object":
         return object_prompt(e['design'], series_cfg['style']['look'])
     raise ValueError(f"{target.id} can't word a {req.shape!r} reference")

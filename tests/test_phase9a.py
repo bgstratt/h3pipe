@@ -148,13 +148,15 @@ class SourceTest(ApiTest):
                                                    "text": stext.replace('"steps": 5',
                                                                          '"steps": 5,')}))
         self.assertEqual(r["errors"][0]["file"], "series")
-        self.assertEqual((r["errors"][0]["line"], r["errors"][0]["col"]), (107, 17))
+        steps_line = stext.split("\n").index('      "steps": 5') + 1
+        self.assertEqual((r["errors"][0]["line"], r["errors"][0]["col"]), (steps_line, 17))
         self.assertEqual(r["shots"], [])
         # a loader error names the key's line when it can, null when it can't
         r = self.ok(A.post_source_check(self.ctx, {"ep": self.ep, "file": "series",
                                                    "text": stext.replace('"steps": 5',
                                                                          '"steps": 0')}))
-        self.assertEqual((r["errors"][0]["file"], r["errors"][0]["line"]), ("series", 106))
+        self.assertEqual((r["errors"][0]["file"], r["errors"][0]["line"]),
+                         ("series", steps_line - 1))          # the profile's key line
         r = self.ok(A.post_source_check(self.ctx, {"ep": self.ep, "file": "series",
                                                    "text": stext.replace('"subjects"',
                                                                          '"subjectz"')}))
@@ -250,7 +252,8 @@ class SourceTest(ApiTest):
         before = read_bytes(self.series)
         r = self.put(got["text"].replace('"steps": 5', '"steps": 5,'), got["hash"], "series",
                      status=400)
-        self.assertEqual((r["line"], r["col"]), (107, 17))
+        steps_line = got["text"].split("\n").index('      "steps": 5') + 1
+        self.assertEqual((r["line"], r["col"]), (steps_line, 17))
         self.assertIn("not valid JSON", r["error"])
         self.assertEqual(read_bytes(self.series), before)
         self.assertFalse(os.path.exists(os.path.join(self.ep, H.HISTORY)))
