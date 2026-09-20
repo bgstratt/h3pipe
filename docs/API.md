@@ -2027,3 +2027,58 @@ its own section.
 - **[fixed] `GET /h3pipe/browse?files=audio`** lists `.aac` and `.opus` too, the same set `POST /h3pipe/track` accepts.
 - **[added] The interpreter alignment runs in** (`h3track.align_python`): `H3PIPE_ALIGN_PYTHON`, else this process's, else a `python` on PATH — the first that has numpy and a Whisper. The editor runs in ComfyUI's embedded Python, which usually has neither, while the system Python does; h3align is a subprocess either way. `GET /h3pipe/align/ready` reports (and its pip line names) that interpreter.
 - **Known, not changed:** `POST /h3pipe/refs/voice-from-take` answers `picked` as a boolean (the refs listing's `picked` is a take number) and `source` as an object `{shot, take, pass, start, end, file}`; the editor refetches `/refs` instead of using it.
+
+## Phase 9d: a shot's audio from elsewhere (contract written before building, 2026-09-19)
+
+A clip in the cut plays its own take's sound, or the recording when the player/assemble is
+in master mode. There is no way to say "this take's picture, that take's sound", which is
+what a fluffed line in an otherwise perfect take needs. 9d adds a per-entry audio source.
+
+### `cut.json`
+A cut entry gains `audio`, absent or null meaning "this take's own sound" (today's
+behaviour):
+```json
+{"shot": "sh020", "take": 3,
+ "audio": {"source": "take", "shot": "sh020", "take": 1, "pass": "final",
+           "offset": 0.0, "start": 0.0, "gain": 1.0}}
+{"shot": "sh030", "audio": {"source": "file", "path": "audio/line_sh030.wav",
+                            "offset": 0.0, "start": 0.0, "gain": 1.0}}
+{"shot": "sh040", "audio": {"source": "none"}}
+```
+- `source`: `"take"` (any shot's take, either pass — its mp4's sound, else its `_h3.wav`,
+  the `h3peaks.clip_audio` rule), `"file"` (a media file inside the episode, or beside a
+  parent-folder series config), or `"none"` (silence under this clip).
+- `start`: seconds into the source where the audio begins. `offset`: seconds it is shifted
+  against the picture (positive = later; the gap is silence). `gain`: a linear multiplier,
+  1.0 unchanged.
+- The audio is cut or padded with silence to the clip's length on the cut's clock (after
+  the dialogue window and the trims), so a clip's length never changes.
+
+### Backend
+- **`PUT /h3pipe/cut`** takes `audio` per entry: 400 for an unknown key, a `take` that
+  doesn't exist or has no sound, a `path` outside the episode or with no audio stream, a
+  negative `start`, or a `gain` outside 0–4.
+- **`POST /h3pipe/cut/reset`** `what` also takes `"audio"` (and `"all"` clears it);
+  **`/cut/copy`** copies `audio` with `"all"`.
+- **`GET /h3pipe/episode`:** each shot's `cut` carries `audio` (as stored) plus
+  `audio_file` (what will actually play, relative to the episode, null for `none`) and
+  `audio_why` (short text for the badge, e.g. "sh020 t01" or "line_sh030.wav").
+- **`h3assemble`:** lays the chosen audio under each clip instead of the take's, at
+  `gain`, cut or padded to the clip. `--audio master` still wins, and now warns naming
+  the clips whose own audio source it is overriding. `--audio none` is unchanged.
+  `--audio h3`/`mp4` apply to clips without a source.
+- **`h3.py cut`:** `--audio SH take SHOT:TAKE[:PASS] [--at SECONDS] [--from SECONDS]
+  [--gain G]`, `--audio SH file PATH [...]`, `--audio SH none`, `--audio SH own` (clear).
+- **`GET /h3pipe/peaks`** already serves any episode file, so the editor can draw the
+  source.
+
+### Editor
+- A clip's context menu gains **"Audio from…"**: a window with the take's own audio at the
+  top, a shot+take picker (takes with sound; the clip's own shot first), a file picker
+  (browse `files=audio`, upload as `/refs/import` does), and "silent".
+  - Both waveforms are drawn, the clip's picture length against the source, with the
+    `start` and `offset` handles draggable and as number fields; a preview plays the clip
+    with the chosen audio.
+- A clip whose audio isn't its own shows a small speaker badge with `audio_why`; the
+  Inspector's Cut section shows and clears it.
+- In recording mode the badge is dimmed and the toggle says per-clip audio is ignored.
