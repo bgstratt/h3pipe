@@ -255,6 +255,21 @@ def place_recording(ep: str, source: str, name: str | None = None) -> tuple[str,
     return inside_episode(ep, dest), True
 
 
+def import_audio(ep: str, source: str, name: str | None = None) -> dict:
+    """Put a media file in <ep>/audio/ for a cut entry's audio source (Phase
+    9d) and say where it landed: {"path" (relative to the episode, ready for
+    `audio.path`), "copied"}. The naming is place_recording's — sanitised,
+    `-2` on a clash, identical bytes reused, a file already inside the episode
+    left where it is.
+
+    This is only a file in the episode: it does not become the episode's
+    dialogue recording (the series config isn't touched and nothing is
+    rebuilt) and it is not a ref candidate.
+    """
+    rel, copied = place_recording(ep, source, name)
+    return {"path": rel, "copied": copied}
+
+
 # ---------------------------------------------------------------------------
 # the series config's audio block
 # ---------------------------------------------------------------------------
