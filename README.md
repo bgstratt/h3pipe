@@ -50,6 +50,7 @@ queued; no rebuild. The format and how to choose are in
 | `flux2_klein_edit` (default for keyframes, when installed) | FLUX.2 Klein 9B edit (uses reference images) |
 | `flux_kontext` | FLUX.1 Kontext dev (edit, one reference) |
 | `minimax_h3_still` | MiniMax H3 as an image model: renders 5 frames, keeps the first, up to 9 references |
+| `qwen_image_21` | Qwen-Image 2.1: text to image with nothing to edit from, an edit of up to 16 reference images when there is. The only image target with a usable cfg, scheduler, denoise and negative prompt |
 
 | Audio target | Label |
 |---|---|

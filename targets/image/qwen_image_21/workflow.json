@@ -1,0 +1,165 @@
+{
+ "1": {
+  "class_type": "UNETLoader",
+  "_meta": {
+   "title": "Diffusion model"
+  },
+  "inputs": {
+   "unet_name": "qwen_image_2.1_int8_convrot.safetensors",
+   "weight_dtype": "default"
+  }
+ },
+ "2": {
+  "class_type": "QwenImage21Cache",
+  "_meta": {
+   "title": "Prefix cache"
+  },
+  "inputs": {
+   "model": [
+    "1",
+    0
+   ],
+   "device": "auto",
+   "dtype": "default"
+  }
+ },
+ "3": {
+  "class_type": "CLIPLoader",
+  "_meta": {
+   "title": "Text encoder"
+  },
+  "inputs": {
+   "clip_name": "qwen3vl_8b_int8_convrot.safetensors",
+   "type": "qwen_image",
+   "device": "default"
+  }
+ },
+ "4": {
+  "class_type": "VAELoader",
+  "_meta": {
+   "title": "VAE"
+  },
+  "inputs": {
+   "vae_name": "qwen_image_2.1_vae_bf16.safetensors"
+  }
+ },
+ "5": {
+  "class_type": "LoadImage",
+  "_meta": {
+   "title": "Reference 1"
+  },
+  "inputs": {
+   "image": "reference.png"
+  }
+ },
+ "6": {
+  "class_type": "TextEncodeQwenImage21",
+  "_meta": {
+   "title": "Prompt and references"
+  },
+  "inputs": {
+   "clip": [
+    "3",
+    0
+   ],
+   "vae": [
+    "4",
+    0
+   ],
+   "prompt": "",
+   "negative_prompt": "",
+   "resolution": 0,
+   "images.image_1": [
+    "5",
+    0
+   ]
+  }
+ },
+ "7": {
+  "class_type": "EmptyLatentImage",
+  "_meta": {
+   "title": "Empty latent (text to image)"
+  },
+  "inputs": {
+   "width": 1024,
+   "height": 1024,
+   "batch_size": 1
+  }
+ },
+ "8": {
+  "class_type": "ComfySwitchNode",
+  "_meta": {
+   "title": "Start from"
+  },
+  "inputs": {
+   "switch": false,
+   "on_true": [
+    "7",
+    0
+   ],
+   "on_false": [
+    "6",
+    2
+   ]
+  }
+ },
+ "9": {
+  "class_type": "KSampler",
+  "_meta": {
+   "title": "Sampler"
+  },
+  "inputs": {
+   "model": [
+    "2",
+    0
+   ],
+   "positive": [
+    "6",
+    0
+   ],
+   "negative": [
+    "6",
+    1
+   ],
+   "latent_image": [
+    "8",
+    0
+   ],
+   "seed": 0,
+   "steps": 25,
+   "cfg": 1.0,
+   "sampler_name": "euler",
+   "scheduler": "simple",
+   "denoise": 1.0
+  }
+ },
+ "10": {
+  "class_type": "VAEDecode",
+  "_meta": {
+   "title": "Decode"
+  },
+  "inputs": {
+   "samples": [
+    "9",
+    0
+   ],
+   "vae": [
+    "4",
+    0
+   ]
+  }
+ },
+ "11": {
+  "class_type": "SaveImage",
+  "_meta": {
+   "title": "Save"
+  },
+  "inputs": {
+   "images": [
+    "10",
+    0
+   ],
+   "filename_prefix": "h3pipe/ref"
+  }
+ }
+}

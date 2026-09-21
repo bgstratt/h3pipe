@@ -386,9 +386,22 @@ function Selection({ r }: { r: Ref }) {
           <i className={busyDiscard ? "pi pi-spin pi-spinner" : "pi pi-trash"} /> Discard
         </button>
       </div>
-      {(t.prompt || t.model || t.note || t.original_name || keyframeSource(t) || (t.status === "failed" && t.save_notes)) && (
+      {(t.prompt || t.model || t.note || t.original_name || keyframeSource(t) || (t.source === "generated") || (t.status === "failed" && t.save_notes)) && (
         <div className="h3-kv">
           {keyframeSource(t) && <><span>from</span><span>{keyframeSource(t)}</span></>}
+          {t.source === "generated" && (
+            <>
+              <span>drawn</span>
+              <span title={(t.references || []).length
+                ? "An edit: these pictures were fed to the model as references"
+                : "Text to image: the model was given the prompt and nothing else"}>
+                {(t.references || []).length
+                  ? `edited from ${(t.references || []).map((x) =>
+                      `${x.name || x.id || "a reference"}${x.view ? ` (${viewLabel(x.view)})` : ""}`).join(", ")}`
+                  : "from the prompt alone"}
+              </span>
+            </>
+          )}
           {t.original_name && <><span>file</span><span>{t.original_name}</span></>}
           {t.target && <><span>model</span><span>{t.target}</span></>}
           {t.note && <><span>note</span><span>{t.note}</span></>}

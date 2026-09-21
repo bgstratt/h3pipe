@@ -2893,6 +2893,12 @@ def take_json(ep: str, ref: Ref, t: RefTake) -> dict:
             "prompt": sc.get("prompt"), "model": sc.get("model"), "loras": sc.get("loras"),
             "steps": sc.get("steps"), "width": sc.get("width"), "height": sc.get("height"),
             "overrides": sc.get("overrides", []),
+            # what this take was generated FROM: [] when nothing was fed, which
+            # is the only way to tell an edit from a text-to-image generate on a
+            # target that does both (targets/image/qwen_image_21)
+            "references": [{"id": r.get("id"), "name": r.get("name"),
+                            "view": r.get("view"), "path": r.get("path")}
+                           for r in (sc.get("references") or [])],
             "queued": sc.get("queued"), "finished": sc.get("finished"),
             "comfy_prompt_id": sc.get("comfy_prompt_id"),
             "save_notes": sc.get("save_notes", ""),

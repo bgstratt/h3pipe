@@ -1144,6 +1144,23 @@ the description says. The same contradiction sat in the **cold** path, so every 
 back view had it too, variants or not; `view_prompt` carries the caveat as well. Retry before
 reading anything else into the comparison.
 
+*Second live run (2026-09-21) — another of ours, in the shared wording.* Qwen-Image 2.1 came
+back usable but its close-up was not zoomed in, "and some other models had the same issue" —
+which was the tell: the framing clause lived in the shared view template, so **every** image
+target was told "the whole figure inside the frame with margin on every side" on the
+head-and-shoulders view too. Asked for a close-up and for the whole figure, a model draws the
+whole figure, since that satisfies both while still showing a head. Framing is per view now
+(`krea2.VIEW_FRAME`), on the cold and the edit path alike: the three body views keep the
+whole-figure clause and the close-up says framed close on the head and shoulders, cropped at
+the chest, NOT the whole figure. Same shape of bug as the back view's face, same place, found
+the same way — by a picture coming back wrong.
+
+*And a take now says what it was drawn from.* On a target that does both jobs there was no way
+to tell an edit from a text-to-image generate after the fact: the sidecar recorded
+`references`, but nothing surfaced them. `take_json` carries them now and the candidate detail
+reads "edited from Ada (back)" or "from the prompt alone" (bundle rebuilt). That is the check
+to make before judging any of these comparisons.
+
 *What can be tuned, and what cannot.* Neither edit path has the dial this wants. Both are
 **reference conditioning**, not img2img: the reference is injected as conditioning and the
 latent still starts from noise, so there is no continuum between ignoring it and copying it.
@@ -1176,9 +1193,31 @@ style carries for free. A distilled turbo model compresses the useful denoise ra
 inpainting behind a mask that protects the head, which needs a mask source and is the bigger
 job. Worth building before more tuning of paths that have no dial.
 
+*Added 2026-09-21 — `targets/image/qwen_image_21`, a fourth path.* Qwen-Image 2.1, offered as
+an option; every default is unchanged. One graph does both jobs, and which one is decided by
+whether the ref has anything to edit from: `TextEncodeQwenImage21` returns positive, negative
+**and a LATENT** spliced from its reference images, and `ComfySwitchNode` takes that latent
+(an edit) or an `EmptyLatentImage` (text to image). So `patch_graph` wires the references into
+the encoder's autogrow slots — `images.image_1`, counting from **one**, unlike H3's
+`ref_image_0` — and sets the switch; with none it drops the LoadImage and generates as krea2
+would. One target therefore serves both a character's first sheet and a variant edited out of
+it, with no second entry in the refs picker.
+
+It is also the first image target with the knobs the earlier comparison wanted: an ordinary
+KSampler, so `cfg`, `scheduler` and `denoise` are real settings, and a genuine
+`negative_prompt` on the encoder (inert at the shipped cfg 1, live once cfg is raised).
+Kontext aside, nothing else here takes a negative at all.
+
+Built from ComfyUI's own `image_qwen_image_2_1_image_edit.json`, flattened by hand: that
+template saves 16 widget values for 9 promoted widgets, which `ui_to_api` refuses rather than
+guess at. `workflow.json` is an API export (`h3jobs.graph_from` takes either form). Three
+files, ~17.3 GB, all three shared with the t2i and background-removal templates. Validated
+against the live `/object_info` for both paths — no unknown nodes, no missing required inputs —
+but **not yet rendered**. 16 tests in `tests/test_qwen_image_21.py`.
+
 *Left.* One live generate of a variant view on each path — krea2 (seed + words),
-`flux2_klein_edit` (edit) and `minimax_h3_still` (5 frames, frame 0) — compared against the
-base's sheet. It is a picture judgement, so it ends in a look, not an assert. Then the same
+`flux2_klein_edit` (edit), `minimax_h3_still` (5 frames, frame 0) and `qwen_image_21` —
+compared against the base's sheet. It is a picture judgement, so it ends in a look, not an assert. Then the same
 mechanism for a base character's own views (each view an edit of the approved
 three-quarter, the **Next up** item): the parts function is there, and what it needs is the
 rule for which view anchors the rest — a behaviour change for every character, not just

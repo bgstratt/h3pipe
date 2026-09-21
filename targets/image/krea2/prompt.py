@@ -51,9 +51,22 @@ VIEW_KEEP = {
     "04_face":         ("the face, hair and line quality", ""),
 }
 
+# How each view is FRAMED. Three of the four want the whole figure in shot; the
+# fourth is a close-up and must not, or one clause cancels the other and the
+# model draws a full figure, because that is the instruction it can satisfy
+# while still showing a head. It sits in the shared wording, so every image
+# target had the same un-zoomed close-up.
+VIEW_FRAME = {
+    "01_threequarter": "the whole figure inside the frame with margin on every side",
+    "02_side":         "the whole figure inside the frame with margin on every side",
+    "03_back":         "the whole figure inside the frame with margin on every side",
+    "04_face":         "framed close on the head and shoulders and cropped at the chest, "
+                       "the head filling most of the frame, NOT the whole figure",
+}
+
 VIEW_TMPL = ("A single character reference view on a plain flat neutral background, "
-             "no scene and no props, the whole figure inside the frame with margin "
-             "on every side: {view}. {design}.{caveat} Drawn as {look}. Output {w}x{h}.")
+             "no scene and no props, {frame}: {view}. {design}.{caveat} Drawn as "
+             "{look}. Output {w}x{h}.")
 
 
 def view_prompt(view: str, design: str, look: str, w: int, h: int) -> str:
@@ -62,9 +75,10 @@ def view_prompt(view: str, design: str, look: str, w: int, h: int) -> str:
     One `design` sentence serves all four views, so it describes a face even
     for the two views that can't show one. The view's caveat (VIEW_KEEP) says
     so, or the back view comes back with the character turned around to make
-    the description true."""
+    the description true. The framing is the view's too (VIEW_FRAME): the
+    close-up is the one view that must NOT hold the whole figure."""
     return VIEW_TMPL.format(view=VIEW_DESC[view], design=design, look=look, w=w, h=h,
-                            caveat=VIEW_KEEP[view][1])
+                            caveat=VIEW_KEEP[view][1], frame=VIEW_FRAME[view])
 
 
 def view_edit_prompt(view: str, design: str, look: str, w: int, h: int,
@@ -85,9 +99,8 @@ def view_edit_prompt(view: str, design: str, look: str, w: int, h: int,
     return (f"The {word} is {base_name}: {VIEW_DESC[view]}. Redraw that same character in "
             f"that same view and at the same scale, keeping {keep} exactly as they are in "
             f"the {word}, and changing only what this description changes: {design}."
-            f"{caveat} Keep the plain flat neutral background, no scene and no props, the "
-            f"whole figure inside the frame with margin on every side. Drawn as {look}. "
-            f"Output {w}x{h}.")
+            f"{caveat} Keep the plain flat neutral background, no scene and no props, "
+            f"{VIEW_FRAME[view]}. Drawn as {look}. Output {w}x{h}.")
 
 
 def sheet_prompt(design: str, look: str, base: dict | None = None) -> str:

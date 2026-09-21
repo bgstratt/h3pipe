@@ -691,6 +691,12 @@ export type RefScope = "series" | "shot";
 export type RefKind = "character" | "prop" | "vehicle" | "location" | "voice" | "keyframe";
 
 export interface RefTake {
+  /**
+   * the reference images this take was generated FROM, in order; `[]` when it
+   * was generated from the prompt alone. On a target that does both (Qwen-Image
+   * 2.1) this is the only way to tell an edit from a text-to-image generate.
+   */
+  references?: { id?: string | null; name?: string | null; view?: string | null; path?: string | null }[];
   take: number;
   /** the character view it belongs to (null for every other ref) */
   view?: string | null;

@@ -48,7 +48,8 @@ class LoadingTest(unittest.TestCase):
                                ("video", "wan22_ti2v"), ("video", "wan22_vace"), ("image", "krea2"),
                                ("image", "z_image_turbo"), ("image", "flux2_klein"),
                                ("image", "flux2_klein_edit"), ("image", "flux_kontext"),
-                               ("image", "minimax_h3_still"), ("audio", "ltx2_voice")})
+                               ("image", "minimax_h3_still"), ("image", "qwen_image_21"),
+                               ("audio", "ltx2_voice")})
         self.assertEqual([t.id for t in TG.list_targets("video")],
                          ["ltx2", "ltx2_ingredients", "minimax_h3_fl2va", H3, "wan22_i2v",
                           "wan22_ti2v", "wan22_vace"])
@@ -400,7 +401,7 @@ class TargetsRouteTest(ApiTest):
         self.assertEqual(set(by), {H3, "ltx2", "ltx2_ingredients", "minimax_h3_fl2va", "krea2",
                                    "wan22_i2v", "wan22_ti2v", "wan22_vace", "z_image_turbo",
                                    "flux2_klein", "flux2_klein_edit", "flux_kontext",
-                                   "minimax_h3_still", "ltx2_voice"})
+                                   "minimax_h3_still", "qwen_image_21", "ltx2_voice"})
         for tid, label, short in (("wan22_i2v", "Wan 2.2 14B I2V", "Wan I2V"),
                                   ("wan22_ti2v", "Wan 2.2 5B TI2V", "Wan 5B"),
                                   ("wan22_vace", "Wan 2.2 14B VACE (refs)", "Wan+refs")):
@@ -458,7 +459,7 @@ class TargetsRouteTest(ApiTest):
         images = self.ok(A.get_targets(self.ctx, {"kind": "image"}))["targets"]
         self.assertEqual([t["id"] for t in images],
                          ["flux2_klein", "flux2_klein_edit", "flux_kontext", "krea2",
-                          "minimax_h3_still", "z_image_turbo"])
+                          "minimax_h3_still", "qwen_image_21", "z_image_turbo"])
         caps = {t["id"]: t["capabilities"] for t in images}
         self.assertEqual(caps["krea2"], {"mode": "t2i", "max_refs": 0, "negative_prompt": False})
         self.assertEqual(caps["flux2_klein_edit"],
@@ -469,6 +470,9 @@ class TargetsRouteTest(ApiTest):
         # the video model as an image target: nine reference slots (Phase 10b)
         self.assertEqual(caps["minimax_h3_still"],
                          {"mode": "edit", "max_refs": 9, "negative_prompt": False})
+        # one graph, both jobs: the switch picks the references' latent or an empty one
+        self.assertEqual(caps["qwen_image_21"],
+                         {"mode": "edit", "max_refs": 16, "negative_prompt": True})
         self.assertTrue(by["wan22_i2v"]["capabilities"]["requires_first"])
         self.assertFalse(lt["capabilities"]["requires_first"])
         # Phase 9c-B: audio is a kind of its own (test_phase9c_voice)

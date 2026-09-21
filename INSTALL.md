@@ -515,6 +515,24 @@ Every file any target names. `python h3.py targets` tells you which of these you
 |---|---|---|---|---|
 | `qwen3vl_4b_fp8_scaled.safetensors` | `models/text_encoders/` | required | `krea2` | [Comfy-Org/Krea-2](https://huggingface.co/Comfy-Org/Krea-2/resolve/main/text_encoders/qwen3vl_4b_fp8_scaled.safetensors) |
 
+**Qwen-Image 2.1** (`qwen-image-2.1`)
+
+| File | ComfyUI folder | Tier | Targets | Download |
+|---|---|---|---|---|
+| `qwen_image_2.1_int8_convrot.safetensors` | `models/diffusion_models/` | required | `qwen_image_21` | [Comfy-Org/Qwen-Image-2.1](https://huggingface.co/Comfy-Org/Qwen-Image-2.1/resolve/main/diffusion_models/qwen_image_2.1_int8_convrot.safetensors) |
+
+**Qwen3-VL 8B (Qwen-Image 2.1's text encoder)** (`qwen3vl-8b`)
+
+| File | ComfyUI folder | Tier | Targets | Download |
+|---|---|---|---|---|
+| `qwen3vl_8b_int8_convrot.safetensors` | `models/text_encoders/` | required | `qwen_image_21` | [Comfy-Org/Qwen-Image-2.1](https://huggingface.co/Comfy-Org/Qwen-Image-2.1/resolve/main/text_encoders/qwen3vl_8b_int8_convrot.safetensors) |
+
+**Qwen-Image 2.1 VAE** (`qwen-image-2.1-vae`)
+
+| File | ComfyUI folder | Tier | Targets | Download |
+|---|---|---|---|---|
+| `qwen_image_2.1_vae_bf16.safetensors` | `models/vae/` | required | `qwen_image_21` | [Comfy-Org/Qwen-Image-2.1](https://huggingface.co/Comfy-Org/Qwen-Image-2.1/resolve/main/vae/qwen_image_2.1_vae_bf16.safetensors) |
+
 **Z-Image Turbo** (`z-image-turbo`)
 
 | File | ComfyUI folder | Tier | Targets | Download |

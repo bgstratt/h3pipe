@@ -1,0 +1,162 @@
+{
+  "id": "qwen_image_21",
+  "kind": "image",
+  "label": "Qwen-Image 2.1 (text to image, and edit from reference images)",
+  "short": "Qwen 2.1",
+  "code": "target.py",
+  "capabilities": {
+    "_note": "One graph, both jobs. TextEncodeQwenImage21 emits positive, negative AND a latent spliced from its reference images; ComfySwitchNode chooses that latent (edit) or an EmptyLatentImage (text to image), so a ref with something to edit from is an edit and a plain one is not -- see target.py. Up to 16 references (the node's autogrow names image_1..image_16), a real negative prompt (inert at the preset's cfg 1, live if cfg is raised), and an ordinary KSampler, so cfg, scheduler and denoise are all real knobs here, unlike the other edit targets.",
+    "mode": "edit",
+    "max_refs": 16
+  },
+  "template": {
+    "_note": "Sizes a series ref is generated at (as krea2's). Width and height only reach the EmptyLatentImage, so they size a text-to-image generate; an edit takes its size from the references, which the encoder rounds to multiples of 32.",
+    "view_size": [
+      1024,
+      1024
+    ],
+    "plate_size": [
+      1344,
+      768
+    ],
+    "object_size": [
+      1024,
+      1024
+    ],
+    "size_multiple": 32
+  },
+  "binding": {
+    "_note": "An API graph built from ComfyUI's own image_qwen_image_2_1_image_edit.json: the same nodes and wiring as that template's subgraph, flattened, with SaveImageAdvanced/ImageCompare/ResolutionSelector left out and H3SaveRefTake in the saver's place. Flattened by hand because the shipped template saves 16 widget values for 9 promoted widgets, which h3jobs.ui_to_api refuses rather than guess at.",
+    "workflow": "workflow.json",
+    "workflow_name": "h3pipe_qwen_image_21.json",
+    "env": "H3_QWEN_IMAGE_21_WORKFLOW",
+    "saver": {
+      "class_type": "H3SaveRefTake",
+      "replace": {
+        "class_type": "SaveImage",
+        "inputs": {
+          "images": "images"
+        }
+      }
+    },
+    "prune": true,
+    "params": {
+      "model": {
+        "class_type": "UNETLoader",
+        "field": "unet_name"
+      },
+      "text_encoder": {
+        "class_type": "CLIPLoader",
+        "field": "clip_name"
+      },
+      "vae": {
+        "class_type": "VAELoader",
+        "field": "vae_name"
+      },
+      "steps": {
+        "class_type": "KSampler",
+        "field": "steps"
+      },
+      "seed": {
+        "class_type": "KSampler",
+        "field": "seed"
+      },
+      "cfg": {
+        "class_type": "KSampler",
+        "field": "cfg"
+      },
+      "denoise": {
+        "class_type": "KSampler",
+        "field": "denoise"
+      },
+      "sampler": {
+        "class_type": "KSampler",
+        "field": "sampler_name"
+      },
+      "scheduler": {
+        "class_type": "KSampler",
+        "field": "scheduler"
+      },
+      "prompt": {
+        "class_type": "TextEncodeQwenImage21",
+        "field": "prompt"
+      },
+      "negative": {
+        "class_type": "TextEncodeQwenImage21",
+        "field": "negative_prompt"
+      },
+      "resolution": {
+        "class_type": "TextEncodeQwenImage21",
+        "field": "resolution"
+      },
+      "width": {
+        "class_type": "EmptyLatentImage",
+        "field": "width"
+      },
+      "height": {
+        "class_type": "EmptyLatentImage",
+        "field": "height"
+      }
+    }
+  },
+  "models": {
+    "_note": "Named-based identification only: no header fingerprint is recorded for these three yet (targets/modelid.py RULES), so a file renamed away from its pattern reports as unchecked rather than wrong.",
+    "model": {
+      "family": "qwen-image-2.1",
+      "patterns": [
+        "*qwen*image*2.1*",
+        "*qwen*image*2_1*"
+      ],
+      "tier": "required"
+    },
+    "text_encoder": {
+      "family": "qwen3vl-8b",
+      "patterns": [
+        "*qwen3vl*8b*"
+      ],
+      "tier": "required",
+      "default": "qwen3vl_8b_int8_convrot.safetensors"
+    },
+    "vae": {
+      "family": "qwen-image-2.1-vae",
+      "patterns": [
+        "*qwen*image*2.1*vae*",
+        "*qwen*image*vae*"
+      ],
+      "tier": "required",
+      "default": "qwen_image_2.1_vae_bf16.safetensors"
+    }
+  },
+  "presets": {
+    "_note": "ComfyUI's image_qwen_image_2_1_image_edit.json as shipped: 25 steps, cfg 1, euler/simple, resolution 0 (each reference kept at its own size, rounded to a multiple of 32). denoise 1.0: the structure of an edit comes from the reference latents the encoder splices in, not from partial denoising. There is no distilled LoRA for this model, so there is no accelerator tier and no base preset.",
+    "final": {
+      "model": "qwen_image_2.1_int8_convrot.safetensors",
+      "text_encoder": "qwen3vl_8b_int8_convrot.safetensors",
+      "vae": "qwen_image_2.1_vae_bf16.safetensors",
+      "steps": 25,
+      "cfg": 1.0,
+      "sampler": "euler",
+      "scheduler": "simple",
+      "denoise": 1.0,
+      "resolution": 0
+    }
+  },
+  "downloads": {
+    "_note": "Where to get each file this target names (docs/API.md 'Downloads').",
+    "qwen_image_2.1_int8_convrot.safetensors": {
+      "folder": "diffusion_models",
+      "url": "https://huggingface.co/Comfy-Org/Qwen-Image-2.1/resolve/main/diffusion_models/qwen_image_2.1_int8_convrot.safetensors",
+      "source": "the Hugging Face repo Comfy-Org/Qwen-Image-2.1, whose files ComfyUI's own image_qwen_image_2_1_* templates name"
+    },
+    "qwen3vl_8b_int8_convrot.safetensors": {
+      "folder": "text_encoders",
+      "url": "https://huggingface.co/Comfy-Org/Qwen-Image-2.1/resolve/main/text_encoders/qwen3vl_8b_int8_convrot.safetensors",
+      "source": "the Hugging Face repo Comfy-Org/Qwen-Image-2.1, whose files ComfyUI's own image_qwen_image_2_1_* templates name"
+    },
+    "qwen_image_2.1_vae_bf16.safetensors": {
+      "folder": "vae",
+      "url": "https://huggingface.co/Comfy-Org/Qwen-Image-2.1/resolve/main/vae/qwen_image_2.1_vae_bf16.safetensors",
+      "source": "the Hugging Face repo Comfy-Org/Qwen-Image-2.1, whose files ComfyUI's own image_qwen_image_2_1_* templates name"
+    }
+  }
+}

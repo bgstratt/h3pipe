@@ -241,6 +241,7 @@ config can say which:
 | `flux2_klein_edit` | FLUX.2 Klein 9B with up to 4 reference images (the default for keyframes when it is installed; otherwise keyframes use the refs model) |
 | `flux_kontext` | FLUX.1 Kontext dev, with one reference image |
 | `minimax_h3_still` | MiniMax H3 — the video model, rendering 5 frames and keeping the first, with up to 9 reference images. No second model stack to install if you already render on H3 |
+| `qwen_image_21` | Qwen-Image 2.1 — one model for both jobs: text to image for a character's own views, an edit of up to 16 reference images for a variant's. Takes a real negative prompt, and its cfg, scheduler and denoise are ordinary sampler settings |
 
 | audio target | what it is |
 |---|---|

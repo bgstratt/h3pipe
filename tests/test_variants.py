@@ -269,6 +269,19 @@ class RefsTest(unittest.TestCase):
         self.assertEqual((j["name"], j["of"]), ("Ada", "ada"))
         self.assertIsNone(R.ref_json(self.s, R.find_ref(self.s, "subject:ada"))["of"])
 
+    def test_a_take_records_what_it_was_drawn_from(self):
+        """On a target that does both, the references are the only way to tell
+        an edit from a text-to-image generate."""
+        ref = R.find_ref(self.s, "subject:ada")
+        src = os.path.join(self._tmp.name, "v.png")
+        with open(src, "wb") as fh:
+            fh.write(png_bytes(64, 64))
+        R.import_take(self.s, ref, "01_threequarter", src)
+        j = R.ref_json(self.s, ref)
+        take = j["views"][0]["takes"][0]
+        self.assertIn("references", take)
+        self.assertEqual(take["references"], [])        # imported: drawn from nothing
+
     def test_a_voice_cannot_be_written_onto_a_variant(self):
         with self.assertRaises(R.RefError) as cm:
             R.set_voice_sample(self.s, "ada_wet", "refs/voices/ada_wet.wav")
@@ -387,6 +400,22 @@ class DerivedViewsTest(unittest.TestCase):
             front = self.plan("subject:ada_wet", v, "flux2_klein_edit").prompt
             self.assertIn("keeping the face", front)
             self.assertNotIn("NOT visible", front)
+
+    def test_the_close_up_is_not_told_to_hold_the_whole_figure(self):
+        """The framing clause was shared by every view, so the head-and-
+        shoulders view was also told to fit the whole figure in frame. A model
+        satisfies both by drawing the full figure, which is the un-zoomed
+        close-up seen on every image target."""
+        import targets.image.krea2.prompt as KP
+        face = KP.view_prompt("04_face", "d", "l", 1024, 1024)
+        self.assertIn("framed close on the head and shoulders", face)
+        self.assertNotIn("the whole figure inside the frame", face)
+        for v in ("01_threequarter", "02_side", "03_back"):
+            self.assertIn("the whole figure inside the frame",
+                          KP.view_prompt(v, "d", "l", 1024, 1024), v)
+        edit = KP.view_edit_prompt("04_face", "d", "l", 1024, 1024, "Gina")
+        self.assertIn("framed close on the head and shoulders", edit)
+        self.assertNotIn("the whole figure inside the frame", edit)
 
     def test_the_cold_path_says_it_too(self):
         """The same contradiction sits in a plain character's back view, with

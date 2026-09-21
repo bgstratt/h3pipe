@@ -110,6 +110,10 @@ FAMILIES: dict[str, dict] = {
     "z-image": {"label": "Z-Image"},
     "z-image-turbo": {"label": "Z-Image Turbo", "parent": "z-image", "names": ["*turbo*"]},
     "qwen3-4b": {"label": "Qwen3 4B (Z-Image's text encoder)"},
+    # Qwen-Image 2.1 (text to image and edit, targets/image/qwen_image_21)
+    "qwen-image-2.1": {"label": "Qwen-Image 2.1"},
+    "qwen-image-2.1-vae": {"label": "Qwen-Image 2.1 VAE"},
+    "qwen3vl-8b": {"label": "Qwen3-VL 8B (Qwen-Image 2.1's text encoder)"},
     "flux2-klein-9b": {"label": "FLUX.2 Klein 9B"},
     "qwen3-8b": {"label": "Qwen3 8B (FLUX.2 Klein 9B's text encoder)"},
     "flux2-vae": {"label": "FLUX.2 VAE"},
