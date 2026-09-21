@@ -594,66 +594,10 @@ Two rules that save an hour of confusion:
 
 ### A first episode by hand
 
-`Shows\ep01\series.json`. `audio.mode: generate` means the model invents the voices from
-each character's `voice` line, so nothing has to be recorded first:
-
-```json
-{
-  "series": {
-    "id": "first_light",
-    "title": "First Light",
-    "fps": 24,
-    "width": 1344,
-    "height": 768
-  },
-  "proxy": { "width": 448, "height": 256 },
-  "style": {
-    "look": "a 2D hand-drawn cartoon animation with flat 2D illustration, clean black line art, flat solid colors, and cel-shaded artwork"
-  },
-  "subjects": {
-    "ada": {
-      "kind": "character",
-      "name": "Ada",
-      "pronoun": "her",
-      "design": "a nine-year-old girl with short curly black hair, a green raincoat, and yellow rain boots, drawn with thick confident outlines",
-      "sheet": "refs/ada/ada_sheet_4panel.png",
-      "voice": "bright, quick, a little breathless"
-    }
-  },
-  "locations": {
-    "porch": {
-      "description": "a wooden front porch at dawn, wet boards, a hanging lamp still lit, mist over the lawn beyond",
-      "plate": "refs/_bg/porch.png"
-    }
-  },
-  "audio": { "mode": "generate" }
-}
-```
-
-`Shows\ep01\ep01.md`:
-
-```
-= ep01  First Light
-
-# sq01  porch
-
-## sh010
-who: ada
-size: wide
-dur: 3
-Ada steps out onto the wet porch and stops, looking at the mist on the lawn.
-camera: holds a static wide shot
-sound: dawn birdsong, dripping water, a faint breeze
-
-## sh020
-who: ada
-size: close
-dur: auto
-Ada grins and pulls her hood up.
-camera: pushes in with small amplitude at slow speed
-ADA: It rained all night and nobody saw it but me.
-sound: rustling raincoat, dripping water, distant birds
-```
+Writing one is the authoring guide's job, not this one's:
+[docs/AUTHORING.md](docs/AUTHORING.md) opens with **Your first episode** — a complete
+series config and script you can paste into `Shows\ep01\` and build. Come back here for
+the commands that render it.
 
 ### The command line
 
@@ -697,6 +641,9 @@ of reusing the one on disk. Every flag after the episode goes straight through t
 underlying script, and each one has `--help`.
 
 ### The same thing in the editor
+
+[docs/EDITOR.md](docs/EDITOR.md) is the guide to the editor itself — the order to do things
+in, every button, and the keyboard. The short version follows.
 
 Reload ComfyUI, open the **h3 Shots** sidebar tab, and:
 

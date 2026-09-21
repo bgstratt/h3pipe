@@ -2,7 +2,7 @@
 
 A worked example for [AUTHORING.md](AUTHORING.md). The input is ordinary spec-format script
 pages; the output is the shot list. The interesting part is not the syntax, it's where the
-cuts land and why. (Packaged with the script-writing skill as `references/breakdown.md` by
+cuts land and why. (Packaged with the script-writing skill as `references/script_conversion.md` by
 `python tools/make_prompts.py`.)
 
 ## The source

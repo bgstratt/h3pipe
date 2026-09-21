@@ -58,7 +58,39 @@ def series_config_from(series_cfg: dict) -> dict:
     if not series_cfg["subjects"]:
         raise ValueError("series.json has no `subjects` block")
     series_cfg["subjects"] = _resolve_variants(series_cfg["subjects"])
+    _check_required(series_cfg)
     return series_cfg
+
+
+def _check_required(cfg: dict) -> None:
+    """What every target reads out of a series config, checked here so a
+    missing one is a sentence about series.json rather than a KeyError raised
+    deep in a prompt writer and reported against the script."""
+    if not isinstance(cfg.get("series"), dict):
+        raise ValueError(
+            'series.json needs a `series` block: at least an id and a title, and '
+            'optionally fps, width, height and the video target — '
+            '"series": {"id": "my_show", "title": "My Show"}')
+    if not str(((cfg.get("style") or {}).get("look") or "")).strip():
+        raise ValueError(
+            'series.json needs `style.look`: one sentence describing how the show is '
+            'drawn, which goes into every prompt — '
+            '"style": {"look": "a 2D hand-drawn cartoon with flat colors"}')
+    for sid, e in cfg["subjects"].items():
+        if not str(e.get("name") or "").strip():
+            raise ValueError(f"subject '{sid}' needs a `name`: what every prompt calls "
+                             f"them, e.g. \"name\": \"Ada\"")
+        # a character who is only ever a voice (V.O./O.S.) is never drawn and
+        # needs no description -- see "Voices without bodies" in the README
+        if not str(e.get("design") or "").strip() and not str(e.get("voice") or "").strip():
+            raise ValueError(f"subject '{sid}' needs a `design`: the sentence their "
+                             f"reference sheet is drawn from, and the one every prompt "
+                             f"that shows them repeats. A character who is only ever a "
+                             f"voice needs a `voice` line instead")
+    for lid, e in cfg["locations"].items():
+        if not str(e.get("description") or "").strip():
+            raise ValueError(f"location '{lid}' needs a `description`: the sentence its "
+                             f"background plate is drawn from, including the light")
 
 
 def _split_name(path: str) -> tuple[str, str]:

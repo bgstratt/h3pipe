@@ -26,7 +26,7 @@
     "size_multiple": 32
   },
   "binding": {
-    "_note": "An API graph built from ComfyUI's own image_qwen_image_2_1_image_edit.json: the same nodes and wiring as that template's subgraph, flattened, with SaveImageAdvanced/ImageCompare/ResolutionSelector left out and H3SaveRefTake in the saver's place. Flattened by hand because the shipped template saves 16 widget values for 9 promoted widgets, which h3jobs.ui_to_api refuses rather than guess at.",
+    "_note": "An API graph built from ComfyUI's own image_qwen_image_2_1_image_edit.json: the same nodes and wiring as that template's subgraph, flattened, with SaveImageAdvanced/ImageCompare/ResolutionSelector left out and H3SaveRefTake in the saver's place. Flattened by hand because the shipped template saves 16 widget values for 9 promoted widgets, which h3jobs.ui_to_api refuses rather than guess at. There is no LoRA loader in the graph: `insert_after` puts one between the UNETLoader and the prefix cache when a job has LoRAs, so the model is patched before its prefix is computed, and a job with none renders the graph as saved.",
     "workflow": "workflow.json",
     "workflow_name": "h3pipe_qwen_image_21.json",
     "env": "H3_QWEN_IMAGE_21_WORKFLOW",
@@ -44,6 +44,17 @@
       "model": {
         "class_type": "UNETLoader",
         "field": "unet_name"
+      },
+      "loras": {
+        "class_type": "LoraLoaderModelOnly",
+        "name": "lora_name",
+        "strength": "strength_model",
+        "input": "model",
+        "chain": true,
+        "insert_after": {
+          "class_type": "UNETLoader",
+          "output": 0
+        }
       },
       "text_encoder": {
         "class_type": "CLIPLoader",

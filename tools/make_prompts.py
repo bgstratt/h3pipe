@@ -9,7 +9,8 @@ assistant expects, so the copies cannot drift from the document:
     prompts/h3-script.instructions.md     Cursor, Copilot, generic system prompt
     build/skill/h3pipe-episode-script/    the whole skill, ready to install:
         SKILL.md                          the same text, plus what the folder bundles
-        references/breakdown.md           docs/BREAKDOWN.md (a scene worked into shots)
+        references/script_conversion.md    docs/SCRIPT_CONVERSION.md (a screenplay scene
+                                          worked through to shots)
         scripts/h3build.py, h3core/, targets/
                                           the build, to validate a script with --check
                                           where the pipeline isn't installed
@@ -17,7 +18,7 @@ assistant expects, so the copies cannot drift from the document:
                                           (Settings > Capabilities > Skills)
 
 prompts/ is committed; build/ is not. Run it after editing docs/AUTHORING.md or
-docs/BREAKDOWN.md:
+docs/SCRIPT_CONVERSION.md:
 
     python tools/make_prompts.py
     python tools/make_prompts.py --no-bundle     # prompts/ only
@@ -38,7 +39,7 @@ import zipfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SOURCE = os.path.join(ROOT, "docs", "AUTHORING.md")
-BREAKDOWN = os.path.join(ROOT, "docs", "BREAKDOWN.md")
+BREAKDOWN = os.path.join(ROOT, "docs", "SCRIPT_CONVERSION.md")
 
 NAME = "h3pipe-episode-script"
 
@@ -70,7 +71,7 @@ marked with that target's name. Validate with `h3build.py series.json <script> -
 
 BUNDLE_NOTE = """## Files in this skill
 
-- `references/breakdown.md`: a spec-format screenplay scene worked through to shots, with
+- `references/script_conversion.md`: a spec-format screenplay scene worked through to shots, with
   where the cuts land and why. Read it when adapting existing script pages rather than
   writing shots directly.
 - `scripts/h3build.py` (with `scripts/h3core/` and `scripts/targets/`): the build, bundled
@@ -150,7 +151,7 @@ def bundle(text: str) -> str:
           "A worked example for SKILL.md. The input is ordinary spec-format script pages;\n"
           "the output is the shot list. The interesting part is not the syntax, it's where\n"
           f"the cuts land and why.\n\n{rest}")
-    write(os.path.join(folder, "references", "breakdown.md"), bd)
+    write(os.path.join(folder, "references", "script_conversion.md"), bd)
 
     scripts = os.path.join(folder, "scripts")
     os.makedirs(scripts)

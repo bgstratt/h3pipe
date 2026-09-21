@@ -15,6 +15,22 @@ made it.
 New here? **[INSTALL.md](INSTALL.md)** goes from a clean ComfyUI to a rendered proxy
 episode; **[docs/AUTHORING.md](docs/AUTHORING.md)** is the script and series config format.
 
+### The documents
+
+| | What it is | Read it when |
+|---|---|---|
+| **[INSTALL.md](INSTALL.md)** | What to install and where: the node pack, the workflows, the model files, and the commands that prove it runs | Setting the pipeline up, or a model is missing |
+| **[docs/EDITOR.md](docs/EDITOR.md)** | Driving the editor inside ComfyUI: the order things happen in, every button, what click / double-click / right-click do in each panel, and the keyboard | Using the editor, or wondering what a control does |
+| **[docs/AUTHORING.md](docs/AUTHORING.md)** | The format, and the whole of it: a first episode to copy, every field of the script and the series config, framing, timing, camera and the reference rules | Writing or fixing an episode. Read once before the first one |
+| **[docs/SCRIPT_CONVERSION.md](docs/SCRIPT_CONVERSION.md)** | A spec-format screenplay scene worked all the way through to shots — what the series config absorbs, where the cuts fall and why, and what gets dropped | You have a screenplay and want it as an episode |
+| **[docs/API.md](docs/API.md)** | The editor's HTTP API and the on-disk contracts behind it (takes, overrides, the cut, references) | Changing the editor, or driving the pipeline from your own code |
+| **[docs/PLAN.md](docs/PLAN.md)** | The working plan: what is built, what was decided and why, what is open | Before changing the pipeline |
+| **[CONTRIBUTING.md](CONTRIBUTING.md)** | House rules: stdlib only, the golden tests, how the generated docs are regenerated | Sending a change |
+
+`prompts/SKILL.md` and `prompts/h3-script.instructions.md` are **generated** from
+`docs/AUTHORING.md` by `python tools/make_prompts.py`, so an assistant drafting a script
+reads exactly what you do. Edit the guide, never the copies — a test fails if they drift.
+
 ```
   you write                     generated                                  rendered
   ─────────                     ─────────                                  ────────
@@ -147,6 +163,10 @@ Open ComfyUI after installing the node pack:
   series config, the diffs of both, and Confirm to write them and rebuild.
 - **What's missing** (floating): which model files a target lacks, with folders and links.
 
+**[docs/EDITOR.md](docs/EDITOR.md) is the guide to driving all of it**: the order to do
+things in, what every button does, what click, double-click and right-click mean in each
+panel, and the keyboard shortcuts.
+
 The project roots are kept in ComfyUI's user folder (`user/default/h3pipe/config.json`),
 else read from `H3PIPE_ROOTS`. Everything the editor does is a file in the episode folder
 (`overrides.json`, `cut.json`, take sidecars, `_history/`), and the commands below do the
@@ -225,12 +245,21 @@ and `h3peaks.py` (waveforms) are the library the commands and the editor's route
 
 **[docs/AUTHORING.md](docs/AUTHORING.md) is the full format**: every field, choosing a
 target, keyframes, the frame grids, the syllable budget, the camera vocabulary, how to
-break a scene into shots, and the reference-slot rules. Read it once before writing an
-episode.
+break a scene into shots, giving two people in one scene an angle each, and the
+reference-slot rules. Read it once before writing an episode.
+
+Only three things are actually required of a script: the `= ep01 Title` header, at least one
+`# sq01 <location>` naming a location the series config defines, and per `## shNNN` a unique
+id, action or dialogue, and a length (`dur:` seconds / `auto` / `model`, or an `audio:`
+window). Everything else has a default — a speaker joins the cast from their own `NAME:`
+line, `size:` is medium, `plate:` is the sequence's location, and the camera holds still.
+The series config must have a `series` block, `style.look`, `subjects` (each with `name`,
+and `design` unless they are only ever a voice), and `locations` with a `description` and a
+`plate` each. `--check` names whichever is missing.
 
 Drafting with an AI assistant: `python tools/make_prompts.py` packages the guide as a skill,
 `h3pipe-episode-script`. `build/skill/h3pipe-episode-script/` is the whole skill (the
-guide, a worked scene breakdown from `docs/BREAKDOWN.md`, and a copy of `h3build` to
+guide, a worked screenplay conversion from `docs/SCRIPT_CONVERSION.md`, and a copy of `h3build` to
 validate with): copy the folder into `.claude/skills/` for Claude Code, or upload
 `build/skill/h3pipe-episode-script.zip` on claude.ai. `prompts/SKILL.md` is the skill's
 text alone, and `prompts/h3-script.instructions.md` the same guide for Cursor, Copilot or

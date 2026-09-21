@@ -7,4 +7,5 @@
   runtime      0:47.71  (scripted 0:45.38, +56f grid pad)
   audio        5x dub_keep_foley, 3x generate
   references   0/6 on disk, 6 to make
+    ! sequence sq01: Huey and Riley each get their own shot on the same plate (street), so they are drawn against one background from one view and the cut reads as a single camera rather than a reverse angle. Give the location an angle per speaker and name it with `plate:`.
 

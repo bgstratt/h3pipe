@@ -79,6 +79,12 @@ export interface ViewerState {
   /** image mode: the ref and view whose candidates are compared (a/b are take numbers) */
   ref?: string;
   view?: string | null;
+  /**
+   * image mode: a live ref file to show instead of candidates, relative to the
+   * episode. A character's stitched sheet is not a take -- mksheet makes it out
+   * of the four picked views -- so it has no take number to compare by.
+   */
+  file?: string | null;
 }
 
 export interface CutPlayState {

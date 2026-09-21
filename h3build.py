@@ -82,9 +82,81 @@ def compile_groups(story: ir.Episode, series_cfg: dict, pass_: str,
                    groups=None) -> list[tuple[TG.Target, dict, dict]]:
     """[(target, shotlist doc, report)] for one pass: each target the episode
     uses compiles its own shots (TG.episode_targets), the series target first.
-    What a build writes and what --check reports (and the editor's check)."""
+    What a build writes and what --check reports (and the editor's check).
+
+    Story warnings -- the ones that are about the script rather than any
+    model -- are added to the first report, which is the one `--check` prints
+    and the editor reads (h3source.check_text)."""
     groups = TG.episode_targets(story, series_cfg) if groups is None else groups
-    return [(t, *t.compile_episode(story, series_cfg, pass_, only=ids)) for t, ids in groups]
+    check_story(story, series_cfg)
+    built = [(t, *t.compile_episode(story, series_cfg, pass_, only=ids)) for t, ids in groups]
+    if built:
+        built[0][2]["warnings"] = (list(built[0][2].get("warnings") or [])
+                                   + story_warnings(story, series_cfg))
+    return built
+
+
+def check_story(story: ir.Episode, series_cfg: dict) -> None:
+    """ValueError for what the script asks of the series config and doesn't get.
+
+    A subject with no `design` is legal -- a character who is only ever a voice
+    needs none -- but putting one on screen leaves every prompt writer with
+    nothing to say about them, so it is caught here by name rather than deep in
+    one as a KeyError."""
+    book = series_cfg.get("subjects") or {}
+    for sq in story.sequences:
+        for sh in sq.shots:
+            for sid in list(sh.cast) + list(sh.props):
+                e = book.get(sid) or {}
+                if not str(e.get("design") or "").strip():
+                    raise ValueError(
+                        f"shot {sh.id}: '{sid}' is on screen but has no `design` in "
+                        f"series.json, so nothing can describe them. Give them one, or "
+                        f"keep them off screen: a voice-only character speaks with "
+                        f"(V.O.) or (O.S.) and never appears in `who:` or `with:`.")
+
+
+def story_warnings(story: ir.Episode, series_cfg: dict | None = None) -> list[str]:
+    """What the script says that no target can fix.
+
+    One plate is one picture. Two people who each get their own shot in a
+    sequence, both built on the same plate, are drawn against the same
+    background from the same view: the cut then reads as one camera with
+    people appearing and disappearing in it, rather than as a reverse angle.
+    Nothing in a prompt undoes that, because the plate is a picture and the
+    prompt is words -- it wants an angle per speaker in the series config
+    (docs/AUTHORING.md, "A location is one angle, not one place")."""
+    # a wardrobe variant is the same person: Dana in a towel and Dana in an
+    # afghan taking turns on one plate is one character changing clothes, not
+    # two people talking
+    variants = variant_of(series_cfg or {})
+    book = (series_cfg or {}).get("subjects") or {}
+
+    def person(sid: str) -> str:
+        return variants.get(sid, sid)
+
+    def name(sid: str) -> str:
+        return (book.get(sid) or {}).get("name", sid)
+
+    out = []
+    for sq in story.sequences:
+        by_plate: dict[str, list[str]] = {}
+        for sh in sq.shots:
+            if len(sh.cast) == 1:
+                by_plate.setdefault(sh.plate or sq.location, []).append(person(sh.cast[0]))
+        for plate, cast in by_plate.items():
+            who = sorted(set(cast))
+            if len(who) < 2:
+                continue
+            names = [name(w) for w in who]
+            listed = (" and ".join(names) if len(names) == 2
+                      else ", ".join(names[:-1]) + " and " + names[-1])
+            out.append(
+                f"sequence {sq.id}: {listed} each get their own shot on the same plate "
+                f"({plate}), so they are drawn against one background from one view and "
+                f"the cut reads as a single camera rather than a reverse angle. Give the "
+                f"location an angle per speaker and name it with `plate:`.")
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -224,7 +296,13 @@ def main() -> int:
     args = ap.parse_args()
 
     try:
-        series_cfg = load_series_config(args.series)
+        # the series config first, and on its own, so a problem in it is
+        # reported against series.json rather than against the script
+        try:
+            series_cfg = load_series_config(args.series)
+        except ValueError as exc:
+            print(f"\n  error in {os.path.basename(args.series)}: {exc}\n", file=sys.stderr)
+            return 1
         with open(args.script, encoding="utf-8") as fh:
             # parse -> story IR
             story = parse_story(fh.read(), subject_ids(series_cfg), character_ids(series_cfg),

@@ -1215,6 +1215,18 @@ files, ~17.3 GB, all three shared with the t2i and background-removal templates.
 against the live `/object_info` for both paths — no unknown nodes, no missing required inputs —
 but **not yet rendered**. 16 tests in `tests/test_qwen_image_21.py`.
 
+*Fixed 2026-09-21 — a LoRA on the Qwen target.* Setting one failed with "LoRAs need exactly
+one LoraLoaderModelOnly node in the workflow (found 0)": the new target declared no `loras`
+param, so `apply_loras` fell back to the default spec, which has no `insert_after` and so
+expects a loader already in the graph. Every other image target declares the same spec with
+`insert_after` the UNETLoader's MODEL; qwen_image_21 now does too, which puts the loader
+between the UNETLoader and the prefix cache — the model is patched before its prefix is
+computed — and leaves the graph alone when a job has no LoRAs. Guarded for every target from
+now on by `tests/test_readiness.py::LoraSpecTest`, which splices a LoRA into each target's
+workflow and fails if it cannot: an easy thing to leave out of a new target, and it only shows
+up the first time someone sets a LoRA. (krea2 is exempt: it splices its own model+clip
+`LoraLoader` in its graph code rather than through `apply_loras`.)
+
 *Left.* One live generate of a variant view on each path — krea2 (seed + words),
 `flux2_klein_edit` (edit), `minimax_h3_still` (5 frames, frame 0) and `qwen_image_21` —
 compared against the base's sheet. It is a picture judgement, so it ends in a look, not an assert. Then the same
@@ -1280,6 +1292,36 @@ one setting for every series ref, so choosing an edit model for variants today m
 choosing it for plain characters too. A fourth default slot ("variants use the keyframe
 target when it is ready", as keyframes already do) would fix that; left alone until the
 live comparison says which model wins.
+
+**Spatial continuity — what shipped 2026-09-21, and what deliberately did not.** A real
+episode cut badly: two characters talking in one room, each with their own shot, both built
+on the same plate, so the cut read as one locked camera with people appearing and
+disappearing in it — and neither of them looking at the other, because nothing in the data
+says which way anyone faces.
+
+Two causes, one addressed, one declined.
+
+- **One plate is one picture.** Singles for different speakers on the same plate are drawn
+  against the same background from the same view. `plate:` has always been per shot, so the
+  fix is authoring — an angle per speaker — not code. Now warned about at build
+  (`h3build.story_warnings`, added to the first report by `compile_groups`, so it prints on
+  every build and `--check` and reaches the editor's Script window through
+  `h3source.check_text`). Wardrobe variants count as one person, so a character changing
+  clothes across a scene doesn't trip it. It lit up 17 sequences of the first real episode.
+- **No eyeline field.** A `look:` was considered and rejected: the action line already
+  reaches every target's prompt, it is where a real script puts it, and a field would need
+  the axis tracked across a whole sequence to beat the sentence. `docs/AUTHORING.md` gained
+  "Two people talking need an angle each" instead — the three-entry pattern, keeping each
+  person on their side of the line, and writing the eyeline into the action — which is also
+  what the script-writing skill now teaches, since it regenerates from that file.
+
+**Also 2026-09-21 — the series config says what it needs.** Omitting `series`, `style.look`
+or a subject's `name` used to fail as a bare `KeyError` reported against the *script*
+(`error in ep01.md: 'name'`). `h3core.series_config._check_required` names the field and the
+file now, and `h3build` reports a config problem against `series.json`. A subject with no
+`design` is still legal — a character who is only ever a voice is never drawn — but putting
+one on screen is caught by shot id (`h3build.check_story`) rather than as a KeyError inside
+a prompt writer. `tests/test_checks.py`.
 
 ## Story IR — `shotlist/shots.json` (Phase 6)
 

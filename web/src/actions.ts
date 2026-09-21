@@ -1742,6 +1742,15 @@ export async function revertRefOverride(ref: string, view: string | null = null)
 }
 
 /** Compare a ref's candidates (stills) in the viewer. */
+/** The live file of a ref (a character's stitched sheet, a prop, a plate). */
+export function openRefFile(ref: string, file: string) {
+  set({
+    viewer: { kind: "image", shot: "", pass: get().pass, a: null, b: null,
+              mode: "single", target: "a", ref, view: null, file },
+    menu: null,
+  });
+}
+
 export function openImageCompare(ref: string, view: string | null, a: number | null, b: number | null = null) {
   set({
     viewer: { kind: "image", shot: "", pass: get().pass, a, b, mode: b != null ? "side" : "single", target: b != null ? "b" : "a", ref, view },

@@ -5,7 +5,7 @@
 import { memo, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import {
   clearRef, copyText, discardRefTake, dismissMissingResult, generateMissing, generateRef, keyframeFromTake, loadRefs, openBrowse,
-  openImageCompare, pickRef, revertRefOverride, saveRefOverride, selectRefTake, setRefDefault, setRefsFilter, toggleRefOpen,
+  openImageCompare, openRefFile, pickRef, revertRefOverride, saveRefOverride, selectRefTake, setRefDefault, setRefsFilter, toggleRefOpen,
 } from "../actions";
 import {
   cutNeighbour, isKeyframeRef, keyframeBlocks, keyframeGroups, keyframeOf, keyframePlan, keyframeSource, methodLabel, methodTitle,
@@ -731,7 +731,18 @@ function RefRow({ ep, r }: { ep: string; r: Ref }) {
       dataRef={r.id}
     >
 
-      <div className="h3-ref-row" onClick={() => toggleRefOpen(r.id)}>
+      <div
+        className="h3-ref-row"
+        onClick={() => toggleRefOpen(r.id)}
+        onDoubleClick={() => {
+          // the two clicks of a double-click have already toggled it twice, so
+          // the row is where it started; open the live file on top of that
+          if (!isAudioRef(r) && r.exists && r.path) openRefFile(r.id, r.path);
+        }}
+        title={r.exists && !isAudioRef(r)
+          ? `Click to expand, double-click to open ${r.path}`
+          : undefined}
+      >
         <span className="h3-chev">{open ? "▼" : "▶"}</span>
         <LiveThumb ep={ep} r={r} size={40} />
         <div className="h3-col h3-grow" style={{ gap: 1 }}>

@@ -802,6 +802,38 @@ function StillsView({ ep, v }: { ep: string; v: ViewerState }) {
     </div>
   );
 
+  // a live file (a character's stitched sheet, a prop, a plate) is not a take,
+  // so it gets one plain pane of its own rather than the A/B candidate stage
+  if (v.file) {
+    return (
+      <FloatingWindow
+        storageKey={RECT_KEY}
+        defaultRect={defaultViewerRect}
+        winRef={winRef}
+        head={
+          <>
+            <b>{ref?.name ?? v.ref}</b>
+            <span className="h3-muted h3-small">live · {v.file}</span>
+            <span className="h3-grow" />
+            <button className="h3-btn h3-icon" title="Close (Esc)" onClick={closeViewer}>
+              <i className="pi pi-times" />
+            </button>
+          </>
+        }
+      >
+        {/* the stage is what fits a picture to the window: `.h3-stage img.h3-still`
+            is the rule that scales it. A character sheet is a 4096x1024 strip, so
+            without it the four panels arrive at full size and run off the edge. */}
+        <div className="h3-stage h3-single">
+          <div className="h3-pane">
+            <img className="h3-still" src={api().refFileUrl(ep, v.file)} alt={v.file}
+                 draggable={false} />
+          </div>
+        </div>
+      </FloatingWindow>
+    );
+  }
+
   const head = (
     <>
       <b>{ref?.name ?? v.ref}</b>

@@ -219,23 +219,43 @@ export function createMockRefs(opts: {
     override: { fields: [], stale: false }, ov: {}, vov: {}, vcleared: {}, takes: [], picked: null, views: [], ...extra,
   });
 
+  // A wardrobe variant (`of:`) is resolved by the loader before any target sees
+  // it, so the mock resolves it too: it inherits the subject's name, kind and
+  // voice, its sheet path is derived from theirs, and it gets NO voice ref of
+  // its own (h3core.series_config, h3refs.series_refs). Without this the mock
+  // lists a second voice for one character and the editor is tested against
+  // something the backend never returns.
+  const rawOf = (r: Record<string, unknown>) =>
+    (typeof r.of === "string" && r.of) || null;
+  const variantSheet = (vid: string, baseId: string, baseSheet: string) => {
+    const cut = Math.max(baseSheet.lastIndexOf("/"), baseSheet.lastIndexOf("\\"));
+    const head = baseSheet.slice(0, cut + 1);
+    const file = baseSheet.slice(cut + 1);
+    return file.includes(baseId) ? head + file.replace(baseId, vid) : null;
+  };
+
   for (const [id, raw] of Object.entries(seriesCfg.subjects)) {
     if (id.startsWith("_") || typeof raw !== "object") continue;
-    const kind = (raw.kind ?? "character") as Ref["kind"];
-    const name = raw.name ?? id;
+    const of = rawOf(raw as Record<string, unknown>);
+    const parent = of ? (seriesCfg.subjects as Record<string, any>)[of] : null;
+    const kind = (raw.kind ?? parent?.kind ?? "character") as Ref["kind"];
+    const name = raw.name ?? parent?.name ?? id;
     const voiceOnly = VOICE_ONLY.has(id);
     const base_prompt = kind === "character"
       ? `A character reference sheet of ${name}: ${raw.design ?? ""}. ${look}. Plain light-grey background, even studio light.`
       : `A reference picture of ${name}: ${raw.design ?? ""}, alone on a plain light-grey background. ${look}.`;
+    const sheet = raw.sheet
+      ?? (of && parent?.sheet ? variantSheet(id, of, parent.sheet) : null)
+      ?? `refs/${id}/${id}.png`;
     refs.push(base(`subject:${id}`, kind, {
-      name, path: voiceOnly ? null : raw.sheet ?? `refs/${id}/${id}.png`, prompt: base_prompt, base_prompt, subject: id,
+      name, of, path: voiceOnly ? null : sheet, prompt: base_prompt, base_prompt, subject: id,
       ...(voiceOnly ? { why: `the series config names no sheet for ${name} (a voice-only character)` } : {}),
       ...(kind === "character" ? { views: VIEWS.map((v) => ({ view: v.view, picked: null, takes: [] })) } : {}),
     }));
     // Phase 9c-B: a voice ref for EVERY character, not only the ones the
     // series config already gives a `voice_sample` (props never speak). One
     // with no sample has `path: null` and can still generate.
-    if (kind === "character") {
+    if (kind === "character" && !of) {
       subjectCfg.set(id, { name, design: raw.design ?? "", voice: raw.voice ?? "" });
       refs.push(base(`voice:${id}`, "voice", {
         name: `${name}'s voice`, path: raw.voice_sample ?? null, subject: id,

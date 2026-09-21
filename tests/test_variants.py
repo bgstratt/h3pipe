@@ -41,7 +41,8 @@ TOWEL = {"of": "gina", "design": "Gina in a white bath towel, hair wet"}
 
 
 def cfg_with(subjects: dict) -> dict:
-    return series_config_from({"series": {"fps": 24},
+    return series_config_from({"series": {"id": "t", "title": "T", "fps": 24},
+                               "style": {"look": "a flat cartoon"},
                                "subjects": subjects,
                                "locations": {"bath": {"description": "a steamy bathroom",
                                                       "plate": "refs/_bg/bath.png"}}})

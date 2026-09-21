@@ -10,6 +10,75 @@ The script and the series config describe **the film**, not a model. Each shot r
 config, the script or the editor says otherwise. The build writes each target's prompt for
 you, from the same script. Sections that only hold for some targets say which.
 
+## Your first episode
+
+Two files in one folder, and nothing else. `Shows\ep01\series.json` first — `audio.mode: generate` means the model invents the voices from
+each character's `voice` line, so nothing has to be recorded first:
+
+```json
+{
+  "series": {
+    "id": "first_light",
+    "title": "First Light",
+    "fps": 24,
+    "width": 1344,
+    "height": 768
+  },
+  "proxy": { "width": 448, "height": 256 },
+  "style": {
+    "look": "a 2D hand-drawn cartoon animation with flat 2D illustration, clean black line art, flat solid colors, and cel-shaded artwork"
+  },
+  "subjects": {
+    "ada": {
+      "kind": "character",
+      "name": "Ada",
+      "pronoun": "her",
+      "design": "a nine-year-old girl with short curly black hair, a green raincoat, and yellow rain boots, drawn with thick confident outlines",
+      "sheet": "refs/ada/ada_sheet_4panel.png",
+      "voice": "bright, quick, a little breathless"
+    }
+  },
+  "locations": {
+    "porch": {
+      "description": "a wooden front porch at dawn, wet boards, a hanging lamp still lit, mist over the lawn beyond",
+      "plate": "refs/_bg/porch.png"
+    }
+  },
+  "audio": { "mode": "generate" }
+}
+```
+
+`Shows\ep01\ep01.md`:
+
+```
+= ep01  First Light
+
+# sq01  porch
+
+## sh010
+who: ada
+size: wide
+dur: 3
+Ada steps out onto the wet porch and stops, looking at the mist on the lawn.
+camera: holds a static wide shot
+sound: dawn birdsong, dripping water, a faint breeze
+
+## sh020
+who: ada
+size: close
+dur: auto
+Ada grins and pulls her hood up.
+camera: pushes in with small amplitude at slow speed
+ADA: It rained all night and nobody saw it but me.
+sound: rustling raincoat, dripping water, distant birds
+```
+
+Build it with `python h3.py check Shows\ep01` and then `python h3.py build
+Shows\ep01`; [INSTALL.md](../INSTALL.md) has the rest of the commands, and
+`docs/SCRIPT_CONVERSION.md` works a real screenplay scene through to
+shots if you are starting from one (the script-writing skill bundles it as
+`references/script_conversion.md`).
+
 ## The one thing that shapes every decision
 
 A screenplay is read once, front to back, by someone who remembers. A shot list is consumed
@@ -297,6 +366,64 @@ office_wide    the whole interior at once
 
 **Time of day is part of the location.** `street_day` and `street_night` are two entries with
 two plates, because the plate carries the light.
+
+**Write the angles as one place.** Each plate is drawn from its own `description`, so unless
+those sentences share fixed features they describe several rooms with the same name rather
+than one room from several sides. Anchor every angle to the same things: *"the kitchen from
+the hallway door, sink under the window on the left, the living-room arch behind camera"* and
+*"the kitchen from the sink, the hallway door on the right, the arch beyond it"*. That is what
+makes the geography hold together across a cut.
+
+### Two people talking need an angle each
+
+This is the one that spoils scenes most often, and the build warns about it:
+
+```
+sequence sq11: Skye and Dr. Walter each get their own shot on the same plate (cafe_couch), so
+they are drawn against one background from one view and the cut reads as a single camera
+rather than a reverse angle. Give the location an angle per speaker and name it with `plate:`.
+```
+
+One plate is one picture. Two singles built on it are drawn against the same background from
+the same view, so cutting between them looks like one locked-off camera that people step into
+and out of — not a conversation. No wording fixes it, because the plate is a picture and the
+prompt is only words.
+
+Author the scene as three entries and name one per shot:
+
+```
+cafe_couch          the whole seating area, both of them in it — the establishing shot
+cafe_couch_on_skye  past Walter's shoulder to Skye on the left of the couch, window behind her
+cafe_couch_on_walt  past Skye's shoulder to Walter in the armchair, the counter behind him
+```
+
+```
+## sh768
+who: skye, walter
+plate: cafe_couch
+size: medium
+dur: 3.04
+They settle in with their cups.
+
+## sh772
+who: skye
+plate: cafe_couch_on_skye
+size: close
+dur: 2.33
+Skye watches him over the rim of her cup, her eyes off to frame right where he sits.
+SKYE: You're early.
+```
+
+**Keep them on one side of the line.** Decide who sits on which side and keep it: if Skye is
+on the left of the two-shot, she stays screen-left in her single and looks off to frame
+right, and Walter looks off to frame left. Write that into the **action** line — *"her eyes
+off to frame right where he sits"*, *"he answers without looking up, his eyes down and to
+frame left"*. There is no field for it; the action sentence reaches every target's prompt and
+is where a real script would put it anyway. Without it a model does what it was trained to do
+and talks to the camera.
+
+The same applies to a character alone in a room who is meant to be aware of someone off
+screen: say where they are looking, and say that it is not at the camera.
 
 ### A wardrobe change is a new subject
 

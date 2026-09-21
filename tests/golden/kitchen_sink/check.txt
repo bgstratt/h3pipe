@@ -40,4 +40,6 @@
     ! sh330 overrides steps: 9
     ! sh340 overrides steps: 5
     ! series.steps is 6 but the LoRA series_turbo_8step.safetensors is distilled for 8 steps — set steps: 8 or pick a matching lora
+    ! sequence sq01: Ada and Bo each get their own shot on the same plate (kitchen), so they are drawn against one background from one view and the cut reads as a single camera rather than a reverse angle. Give the location an angle per speaker and name it with `plate:`.
+    ! sequence sq04: Ada, Bo and Cy each get their own shot on the same plate (kitchen), so they are drawn against one background from one view and the cut reads as a single camera rather than a reverse angle. Give the location an angle per speaker and name it with `plate:`.
 

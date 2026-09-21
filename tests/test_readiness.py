@@ -24,6 +24,7 @@ from __future__ import annotations
 import contextlib
 import io
 import json
+import json
 import os
 import sys
 import tempfile
@@ -568,6 +569,44 @@ class ReadinessTest(unittest.TestCase):
 # ---------------------------------------------------------------------------
 # the data
 # ---------------------------------------------------------------------------
+
+class LoraSpecTest(unittest.TestCase):
+    """Every target that can be given a LoRA can actually take one.
+
+    `apply_loras` needs either a loader already in the workflow or an
+    `insert_after` saying where to put one; with neither it raises "LoRAs need
+    exactly one LoraLoaderModelOnly node in the workflow (found 0)" the first
+    time someone sets a LoRA on that target. A new target is easy to write
+    without noticing, so it is checked here rather than found in use.
+    """
+
+    def test_every_target_can_take_a_lora(self):
+        import h3jobs as J
+        for t in TG.list_targets():
+            # audio targets take no LoRA; krea2 splices its own (LoraLoader, model
+            # and clip) in targets/image/krea2/graph.py rather than through
+            # apply_loras, which is why it alone needs no insert_after
+            if t.kind == "audio" or t.id == TG.DEFAULT_IMAGE_TARGET:
+                continue
+            with self.subTest(target=t.id):
+                specs = t.binding.specs("loras")
+                spec = dict(J.DEFAULT_LORA_SPEC, **(specs[0] if specs else {}))
+                path = t.binding.workflow      # an absolute path, or "" for krea2,
+                if not path:                       # which falls back to a built-in graph
+                    continue
+                with open(path, encoding="utf-8") as fh:
+                    g = J.graph_from(json.load(fh), path)
+                has_loader = any(v["class_type"] == spec["class_type"] for v in g.values())
+                self.assertTrue(
+                    has_loader or spec.get("insert_after"),
+                    f"{t.id} has no {spec['class_type']} in its workflow and its `loras` "
+                    f"param gives no `insert_after`, so setting a LoRA on it fails")
+                # and it really does splice in
+                J.apply_loras(g, [{"name": "x.safetensors", "strength": 1.0}],
+                              specs[0] if specs else None)
+                self.assertTrue(any(v["class_type"] == spec["class_type"]
+                                    for v in g.values()), t.id)
+
 
 class DownloadsDataTest(unittest.TestCase):
     def test_every_named_file_has_a_download_entry(self):
