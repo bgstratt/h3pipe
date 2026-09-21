@@ -370,6 +370,34 @@ class DerivedViewsTest(unittest.TestCase):
         self.assertIn("soaked through and clinging", job.prompt)
         self.assertEqual(job.seed, R.seed_for("ada"))
 
+    def test_a_view_is_never_asked_to_keep_a_face_it_cannot_show(self):
+        """One `design` sentence serves all four views, so it describes a face
+        even for the views that have none. Told to keep "the face exactly as in
+        the reference" on a back view, a model turns the character around."""
+        for v in R.VIEW_TAGS:
+            self.pick_base_view(v)
+        back = self.plan("subject:ada_wet", "03_back", "flux2_klein_edit").prompt
+        self.assertNotIn("keeping the face", back)
+        self.assertIn("the face is NOT visible", back)
+        self.assertIn("must not be turned toward the viewer", back)
+        side = self.plan("subject:ada_wet", "02_side", "flux2_klein_edit").prompt
+        self.assertIn("the profile of the face", side)
+        self.assertIn("must stay in profile", side)
+        for v in ("01_threequarter", "04_face"):
+            front = self.plan("subject:ada_wet", v, "flux2_klein_edit").prompt
+            self.assertIn("keeping the face", front)
+            self.assertNotIn("NOT visible", front)
+
+    def test_the_cold_path_says_it_too(self):
+        """The same contradiction sits in a plain character's back view, with
+        no variant involved."""
+        import targets.image.krea2.prompt as KP
+        back = KP.view_prompt("03_back", "a woman with a pretty face", "a flat cartoon",
+                              1024, 1024)
+        self.assertIn("the face is NOT visible", back)
+        self.assertNotIn("NOT visible",
+                         KP.view_prompt("01_threequarter", "x", "y", 1024, 1024))
+
     def test_a_text_to_image_job_keeps_the_plain_brief(self):
         for v in R.VIEW_TAGS:
             self.pick_base_view(v)

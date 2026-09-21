@@ -138,9 +138,12 @@ class ListingTest(RefsTest):
         # a voice's prompt is the audio target's brief now, not refs_todo's note
         self.assertIn("Bo says:", refs["voice:bo"]["prompt"])
         v = ada["views"][1]
-        self.assertEqual(v["prompt"], R.VIEW_TMPL.format(
-            view=R.VIEW_DESC["02_side"], design=self.s.series_cfg["subjects"]["ada"]["design"],
-            look=self.s.look, w=1024, h=1024))
+        self.assertEqual(v["prompt"], R.view_prompt(
+            "02_side", self.s.series_cfg["subjects"]["ada"]["design"], self.s.look, 1024, 1024))
+        # the side and back views say what of the description they cannot show
+        self.assertIn("must stay in profile", v["prompt"])
+        self.assertIn("the face is NOT visible", ada["views"][2]["prompt"])
+        self.assertNotIn("NOT visible", ada["views"][0]["prompt"])
         self.assertEqual((v["effective"]["seed"], v["effective"]["seed_source"]),
                          (R.seed_for("ada"), "stable"))
         self.assertEqual(refs["location:kitchen"]["effective"]["seed"],

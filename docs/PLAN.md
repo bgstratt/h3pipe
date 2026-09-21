@@ -14,9 +14,10 @@ safetensors header). Keyframe continuity is in the CLI, the routes and the edito
 family (a missing turbo LoRA renders the base preset, a missing required file skips the shot with its download
 link); `GET /h3pipe/targets?ready=1` and `h3.py targets` report what each target is missing; the episode target
 (`overrides.json` `episode.target`) sits between the script and `series.target`. See **Readiness and the
-episode target (as built)** below. Open items: the per-target lists under Phase 8 / Wan / shot lengths, the
-Phase 9 editor items, and Phase 10b (a variant's views generated as an edit of the base's
-approved ones); Phase 10a, wardrobe as subject variants, is in.
+episode target (as built)** below. Open items: the per-target lists under Phase 8 / Wan / shot lengths and the
+Phase 9 editor items. Phase 10 (wardrobe as subject variants) is in, 10a and 10b both; what is
+left of it is a look, not code — one variant view generated on each of the three paths, and the
+A/B behind the H3 headcount sentence.
 This is the working plan for the next round of development. `CLAUDE.md` points here.
 
 ## Goals
@@ -1131,6 +1132,50 @@ own tooltip calls that best for identity fidelity, and it costs little over five
 "trained range is ~124-362"; `ref_images` is an autogrow group, prefix `ref_image_`, **max 9**,
 so H3 takes up to nine reference images where the video path uses four.
 
+*First live run (2026-09-20) — neither edit path held, and one cause was ours.* The edit
+wording named "the face, hair, build, proportions and line quality" as fixed for **every**
+view, including the back, where there is no face in the reference — and the `design`
+sentence describes a face too, because one sentence serves all four views. Told to preserve
+a face in a view that has none, a model resolves it the only way it can: it turns the
+character around. That is the reported "H3 won't generate the back image". Fixed: what is
+named as fixed is per view now (`krea2.VIEW_KEEP`), the side view says stay in profile, and
+the back view says the face is NOT visible and must not be turned toward the viewer whatever
+the description says. The same contradiction sat in the **cold** path, so every character's
+back view had it too, variants or not; `view_prompt` carries the caveat as well. Retry before
+reading anything else into the comparison.
+
+*What can be tuned, and what cannot.* Neither edit path has the dial this wants. Both are
+**reference conditioning**, not img2img: the reference is injected as conditioning and the
+latent still starts from noise, so there is no continuum between ignoring it and copying it.
+`flux2_klein_edit` is distilled at cfg 1 (raising cfg fights the distillation), and
+`minimax_h3_still` guides with BasicGuider and has **no CFG node at all**. What is left is
+`steps`, `seed`, the model/LoRA, and on the H3 target `length` (5, against a trained range of
+~124-362 — the prime suspect for artifacts) and `ref_image_size` (`max` 2048 short edge vs
+`match`). Only `prompt`, `seed`, `model`, `loras`, `steps`, `note` and `target` are per-ref
+overridable (`h3refs.OVERRIDE_FIELDS`), so `length`, `cfg` and `ref_image_size` are preset
+edits today, not editor knobs.
+
+*Parked, and why it matters less than it looks (2026-09-20).* Reference generation is a
+**fallback**. The expected state is that sheets, props and plates are made outside h3pipe and
+supplied; the generators exist for when they don't. A ref simply dropped at the path the
+series config names needs no take and no pick — checked for a variant: `subject:ada_wet` with
+a hand-placed `refs/ada/ada_wet_sheet_4panel.png` reads `exists: true`, zero takes, and
+nothing asks to generate it. So the edit paths are worth no more polish until real use says
+otherwise, and the img2img note below is a plan for later, not next. What krea2 already does
+well is the case that matters most: the four views of a character, and a variant's four views,
+share one seed (`stable_seed` -> `seed_for(of or subject)`), which is what keeps a wardrobe
+change on model without any edit model at all.
+
+*The dial that would do it — img2img, when it is wanted.* Encoding the base view as the **starting latent** and
+denoising part way (~0.4-0.6) is exactly "keep the face and the pose, change the clothes",
+and nothing in the pipeline does it. krea2's graph is the one that could trivially: a plain
+KSampler reading `EmptyLatentImage`, so a `VAEEncode` of the reference plus an exposed
+`denoise` turns it into an edit path — in the model the show is already drawn in, so the
+style carries for free. A distilled turbo model compresses the useful denoise range (0.5 of
+8 steps is 4 effective steps), so it wants a steps override with it. More targeted still is
+inpainting behind a mask that protects the head, which needs a mask source and is the bigger
+job. Worth building before more tuning of paths that have no dial.
+
 *Left.* One live generate of a variant view on each path — krea2 (seed + words),
 `flux2_klein_edit` (edit) and `minimax_h3_still` (5 frames, frame 0) — compared against the
 base's sheet. It is a picture judgement, so it ends in a look, not an assert. Then the same
@@ -1155,7 +1200,13 @@ pipeline's casts include a talking terrier and a raccoon. Every H3 golden moved;
 on a render** — the claim is that removing the contradiction reduces duplicate figures in
 two-handers, and that wants an A/B on a real two-hander shot.
 
-**Open decision — the side and back views.** Nothing in the pipeline reads them. `_panels_for`
+**Settled 2026-09-20 — keep the side and back views.** The user's call: they cost one-off
+render time per character, they may be needed for shots that do use them, and Phase 10b's
+edit path wants them (a variant's back panel is edited from the base's back panel, and the
+same mechanism would hold a character's own four views together). The finding below stands
+as the record of what reads them today, in case generation cost ever becomes the argument.
+
+**The finding — nothing reads them yet.** Nothing in the pipeline reads them. `_panels_for`
 in `comfy_nodes/h3_shotlist.py` picks panel 3 (face) for a single-character close-up and panel 0
 (three-quarter) for everything else; `ltx2_ingredients` and `wan22_vace` both declare
 `"views": {"body": 0, "face": 3}`; keyframes take `04_face` or `01_threequarter`
@@ -1163,13 +1214,12 @@ in `comfy_nodes/h3_shotlist.py` picks panel 3 (face) for a single-character clos
 `panel_mode: full` widget (`pair` is [0, 3] too). So half of every character's four view renders
 is generated, taken, picked and stitched for nothing the pipeline asks for.
 
-Against dropping to a body+face sheet: `sheet_panels: 4`, each target recipe's `views` map,
+Were that ever revisited, against dropping to a body+face sheet: `sheet_panels: 4`, each target recipe's `views` map,
 krea2's `VIEWS`, the crop indices in `h3refs`, the size hints and INSTALL's wording all encode
 four — and **every sheet already on disk would be mis-cropped** (index 3 of a two-wide strip),
 so it needs a re-stitch pass over three real episodes. And Phase 10b wants the side and back:
 generating a variant as an edit of the base's sheet is panel-by-panel, so the towel's back view
-needs the base's back view. Cost is per character per series, not per shot or per take. Leaving
-it at four unless ref generation becomes the bottleneck; if it does, the change is contained
+needs the base's back view. Cost is per character per series, not per shot or per take. The change would be contained
 (krea2.VIEWS + each `target.json` + h3refs' crop) plus a migration script.
 
 **Swept after the fact (2026-09-20).** Four surfaces checked against variants rather than

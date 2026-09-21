@@ -36,12 +36,20 @@
       "design": "a woman in her mid-thirties with a soft, slightly heavyset build, shoulder-length light brown hair, damp and tousled from the shower, a pretty former-prom-queen face with a small upturned nose, small gold hoop earrings, wearing only a small white terrycloth bath towel wrapped around her body from the chest to mid-thigh and tucked at the chest, bare shoulders, bare arms, bare legs and bare feet, no other clothing",
       "sheet": "refs/dana_towel/dana_towel_sheet_4panel.png"
     },
+    "dana_towel_waist": {
+      "kind": "character",
+      "of": "dana",
+      "name": "Dana",
+      "pronoun": "her",
+      "design": "a woman in her mid-thirties with a soft, slightly heavyset build, shoulder-length light brown hair, damp and tousled from the shower, a pretty former-prom-queen face with a small upturned nose, small gold hoop earrings, a white terrycloth bath towel slipped down and held around her waist and hips, both forearms folded tightly across her bare chest so that it is fully covered and nothing is exposed, bare shoulders, bare upper back, bare arms, bare legs and bare feet, no other clothing",
+      "sheet": "refs/dana_towel_waist/dana_towel_waist_sheet_4panel.png"
+    },
     "dana_afghan": {
       "kind": "character",
       "of": "dana",
       "name": "Dana",
       "pronoun": "her",
-      "design": "a woman in her mid-thirties with a soft, slightly heavyset build, shoulder-length light brown hair, damp and tousled from the shower, a pretty former-prom-queen face with a small upturned nose, small gold hoop earrings, wrapped in a loose open-weave crocheted afghan blanket in cream and rust granny squares, pulled around her shoulders and clutched closed at her chest, hanging to her knees, bare shoulders and arms at its edges and bare feet below it, no other clothing",
+      "design": "a woman in her mid-thirties with a soft, slightly heavyset build, shoulder-length light brown hair, damp and tousled from the shower, a pretty former-prom-queen face with a small upturned nose, small gold hoop earrings, wrapped in a large white open-lace crocheted afghan, an airy doily-like pineapple stitch of wide open holes with scalloped pointed corners hanging in soft draping points, pulled around her shoulders and held closed at her chest, hanging past her knees, bare shoulders, arms and legs at its edges and bare feet, no other clothing",
       "sheet": "refs/dana_afghan/dana_afghan_sheet_4panel.png"
     },
     "marty": {
@@ -187,7 +195,7 @@
       "plate": "refs/_bg/gd_kitchen.png"
     },
     "gd_living": {
-      "description": "a cozy apartment living room with a sagging floral couch draped in a loose crochet throw, a low coffee table and a big arched window behind, warm afternoon daylight coming through the window",
+      "description": "a cozy apartment living room with a sagging floral couch draped with a white open-lace crocheted afghan in a doily-like pineapple stitch, a low coffee table and a big arched window behind, warm afternoon daylight coming through the window",
       "plate": "refs/_bg/gd_living.png"
     },
     "gd_door": {

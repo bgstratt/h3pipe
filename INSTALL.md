@@ -26,7 +26,8 @@ Two different Pythons are in play, and it matters which one gets what:
 | | Which Python | Needs |
 |---|---|---|
 | **The node pack and the editor's routes** | ComfyUI's own (`python_embeded` on the Windows portable build, or whatever venv you start ComfyUI with) | nothing beyond what ComfyUI already has — the nodes use torch, numpy and PIL, which ComfyUI provides |
-| **The `h3.py` command line** | whichever Python you type | **nothing**: the pipeline scripts are Python 3.10+ standard library only. No virtualenv, no `pip install` |
+| **The `h3.py` command line** | whichever Python you type | **nothing** to build, check, render or assemble: the pipeline scripts are Python 3.10+ standard library only. No virtualenv. `pillow` only for the picture-cutting steps below |
+| **Cutting pictures** (stitching a character sheet when its fourth view is picked; composing one reference image for a single-reference edit model; cropping a panel out of a sheet to edit a variant's view from) | the same Python that is running — ComfyUI's under the editor, yours on the command line | `pillow`. ComfyUI's already has it; a bare system Python does not, and the error says which interpreter couldn't import it |
 | **`h3align` (timing a script to a recording)** | the first interpreter that has the packages (see below) | `faster-whisper` and `numpy` |
 | **`demucs`, for the `dub_keep_foley` foley bed** | the `python` first on ComfyUI's PATH — the Save Shot node shells out to `python -m demucs` | `demucs` |
 
@@ -47,7 +48,29 @@ Two different Pythons are in play, and it matters which one gets what:
 |---|---|
 | `pip install faster-whisper numpy` | `h3.py align` / the editor's Recording window: transcribe a dialogue recording and write `audio:` windows onto every shot |
 | `pip install demucs` | the `dub_keep_foley` audio policy (H3's foley kept under your own vocal) |
+| `pip install pillow` | on the command line only, and only for the steps that cut pictures: picking the fourth view of a character sheet (it stitches), and generating a wardrobe variant's view as an edit of the character's (it crops that panel out of their sheet). The editor never needs it — ComfyUI's Python has PIL |
+| `pip install pytest` | `python -m pytest` for the test suite. Optional: `python -m unittest discover -s tests` runs the same tests with nothing installed |
 | Node.js 20+ and `npm install` in `web/` | rebuilding the editor UI. Only if you change `web/`; the built bundle is committed |
+
+**Which Python runs what.** There is no global "try ComfyUI's, fall back to system". Each
+part picks deliberately:
+
+- The node pack and the editor's routes **are** ComfyUI: they run in its interpreter, always.
+- Anything the pipeline shells out to — `h3build` from the editor's Save, the sheet stitcher,
+  the reference cutter — runs as a subprocess of **the Python already running**
+  (`sys.executable`): ComfyUI's when the editor asked, yours when you typed the command.
+- `h3align` is the exception, because it needs packages neither interpreter is guaranteed to
+  have; it searches (below).
+- `demucs` is invoked as `python -m demucs` by the Save Shot node, so it is whichever
+  `python` comes first on **ComfyUI's** PATH.
+
+If you want one interpreter that can do everything with no `pip install` at all, use
+ComfyUI's embedded Python for the command line too — it already has PIL (and aiohttp, which
+`tests/test_routes.py` needs):
+
+```
+C:\AI\ComfyUI\python_embeded\python.exe h3.py build Shows\ep05
+```
 
 **Which Python gets faster-whisper.** The editor runs inside ComfyUI's embedded Python,
 which usually has neither numpy nor a Whisper, while your system Python does. h3pipe

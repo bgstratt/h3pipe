@@ -29,14 +29,42 @@ VIEWS = [
 VIEW_TAGS = [tag for tag, _ in VIEWS]
 VIEW_DESC = dict(VIEWS)
 
+# What an EDIT of one view can actually carry over from it, and what that view
+# must not be talked into showing. A back view has no face in it: asking to
+# keep "the face exactly as in the reference" is a contradiction the model
+# resolves the only way it can — by turning the character around. The `design`
+# sentence describes a face too (it has to, it serves all four views), so the
+# back and side views say plainly what is not visible.
+VIEW_KEEP = {
+    "01_threequarter": ("the face, hair, build, proportions and line quality", ""),
+    "02_side":         ("the profile of the face, the hair, build, proportions and line "
+                        "quality",
+                        " This view is a side profile: only one side of the face is "
+                        "visible, and the figure must stay in profile rather than turning "
+                        "toward the viewer."),
+    "03_back":         ("the hair, the shape of the head, the build, proportions and line "
+                        "quality",
+                        " This view is from directly behind: the face is NOT visible and "
+                        "the figure must not be turned toward the viewer, whatever the "
+                        "description says about the face. Draw the back of the head and "
+                        "the back of what they are wearing."),
+    "04_face":         ("the face, hair and line quality", ""),
+}
+
 VIEW_TMPL = ("A single character reference view on a plain flat neutral background, "
              "no scene and no props, the whole figure inside the frame with margin "
-             "on every side: {view}. {design}. Drawn as {look}. Output {w}x{h}.")
+             "on every side: {view}. {design}.{caveat} Drawn as {look}. Output {w}x{h}.")
 
 
 def view_prompt(view: str, design: str, look: str, w: int, h: int) -> str:
-    """The prompt for one view of a character sheet (`view` is a VIEWS tag)."""
-    return VIEW_TMPL.format(view=VIEW_DESC[view], design=design, look=look, w=w, h=h)
+    """The prompt for one view of a character sheet (`view` is a VIEWS tag).
+
+    One `design` sentence serves all four views, so it describes a face even
+    for the two views that can't show one. The view's caveat (VIEW_KEEP) says
+    so, or the back view comes back with the character turned around to make
+    the description true."""
+    return VIEW_TMPL.format(view=VIEW_DESC[view], design=design, look=look, w=w, h=h,
+                            caveat=VIEW_KEEP[view][1])
 
 
 def view_edit_prompt(view: str, design: str, look: str, w: int, h: int,
@@ -45,16 +73,21 @@ def view_edit_prompt(view: str, design: str, look: str, w: int, h: int,
     the subject it is a variant of (docs/PLAN.md, Phase 10b).
 
     The brief is what to CHANGE, not what to draw: everything the reference
-    already settles — face, hair, build, proportions, line quality, the view
-    itself — is named as fixed, so the only thing left for the model to invent
-    is the wardrobe the description asks for. Generating the same view cold is
-    what makes the face drift between a character and their variant."""
+    already settles — hair, build, proportions, line quality, the view itself,
+    and the face where the view has one — is named as fixed, so the only thing
+    left for the model to invent is the wardrobe the description asks for.
+    Generating the same view cold is what makes the face drift between a
+    character and their variant.
+
+    What is named as fixed is per view (VIEW_KEEP): see the note there for why
+    the back view must not be told to preserve a face."""
+    keep, caveat = VIEW_KEEP[view]
     return (f"The {word} is {base_name}: {VIEW_DESC[view]}. Redraw that same character in "
-            f"that same view and at the same scale, keeping the face, hair, build, "
-            f"proportions and line quality exactly as they are in the {word}, and changing "
-            f"only what this description changes: {design}. Keep the plain flat neutral "
-            f"background, no scene and no props, the whole figure inside the frame with "
-            f"margin on every side. Drawn as {look}. Output {w}x{h}.")
+            f"that same view and at the same scale, keeping {keep} exactly as they are in "
+            f"the {word}, and changing only what this description changes: {design}."
+            f"{caveat} Keep the plain flat neutral background, no scene and no props, the "
+            f"whole figure inside the frame with margin on every side. Drawn as {look}. "
+            f"Output {w}x{h}.")
 
 
 def sheet_prompt(design: str, look: str, base: dict | None = None) -> str:
