@@ -13,7 +13,7 @@ import { promptText } from "../lib/format";
 import type {
   BuildResult, CutAudioSource, CutEntry, EpisodeStatus, EpisodeSummary, Lora, MissingRef, Override, OverrideResult, Pass,
   RefGenerateMissingResult, RefUsed, RenderResult, ShotDetail, ShotStatus, ShotTargetSource, SourceCheck, SourceFile,
-  TakeDetail, TakeSummary, Track, TrackResult,
+  TakeDetail, TakeSummary, Target, TargetGraph, Track, TrackResult,
 } from "../types";
 import { localShotSpans } from "../lib/source";
 import { buildScript, buildSeries, checkScript, checkSeries, jsonErrorAt, mockHash, planPromote, type MockShotSource } from "./mockSource";
@@ -451,6 +451,30 @@ export function createMockApi(emit: Emit, opts: MockOptions = {}): Api & { outsi
 
   /** The episode's default target: the editor's, else series.json's. */
   let episodeTarget: string | null = null;
+  // Phase 11: which workflows this "ComfyUI" has saved (Copy to ComfyUI / Revert).
+  // H3's is saved already, as it is on a machine that has rendered with it.
+  const savedWorkflows = new Set<string>(
+    [MOCK_TARGETS.targets.find((t) => t.id === H3)?.workflow].filter((x): x is string => !!x),
+  );
+
+  /** A target's `graph` block: $ENV isn't set in the mock, so a saved copy wins,
+   * else the repo's. H3's saved copy is marked edited, to exercise the badge. */
+  const mockGraph = (t: Target): TargetGraph => {
+    const name = t.workflow || `${t.id}.json`;
+    const saved = savedWorkflows.has(name);
+    return {
+      name,
+      source: saved ? "comfy" : "repo",
+      where: saved ? `http://127.0.0.1:8188 (user workflows/${name})`
+        : `C:\repos\h3pipe\targets\${t.kind}\${t.id}\workflow.json`,
+      env: "H3_WORKFLOW",
+      env_set: false,
+      installed: saved,
+      differs: saved && t.id === H3,
+      repo: `C:\repos\h3pipe\targets\${t.kind}\${t.id}\workflow.json`,
+      error: "",
+    };
+  };
 
   /** The target a shot's next render uses, and where it comes from (no request here). */
   function shotTargetOf(shot: string, ov: Override): { target: string; source: ShotTargetSource } {
@@ -1270,7 +1294,27 @@ export function createMockApi(emit: Emit, opts: MockOptions = {}): Api & { outsi
       await wait(ready ? 300 : undefined);
       const all = clone(MOCK_TARGETS);
       if (ready) for (const t of all.targets) t.readiness = mockReadiness(t.id);
+      for (const t of all.targets) t.graph = mockGraph(t);
       return kind ? { ...all, targets: all.targets.filter((t) => t.kind === kind) } : all;
+    },
+    async installWorkflow(target, opts) {
+      await wait();
+      const t = MOCK_TARGETS.targets.find((x) => x.id === target);
+      if (!t) throw new MockError(`no target called '${target}'`, 400);
+      const name = opts?.name || t.workflow || `${target}.json`;
+      if (savedWorkflows.has(name) && !opts?.overwrite) {
+        throw new MockError(`workflows/${name} is already saved in ComfyUI — pass overwrite: true to replace it`, 409);
+      }
+      savedWorkflows.add(name);
+      return { ok: true, target, installed: name, renders: name === t.workflow, graph: mockGraph(t) };
+    },
+    async revertWorkflow(target, name) {
+      await wait();
+      const t = MOCK_TARGETS.targets.find((x) => x.id === target);
+      if (!t) throw new MockError(`no target called '${target}'`, 400);
+      const file = name || t.workflow || `${target}.json`;
+      const had = savedWorkflows.delete(file);
+      return { ok: true, target, deleted: had, name: file, graph: mockGraph(t) };
     },
     async putEpisodeTarget(ep, target) {
       await wait();

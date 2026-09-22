@@ -104,6 +104,34 @@ pass. Save, then **New take like this one…** to render it.
 Story edits — action, camera, dialogue — belong in the **Script** window instead, not in an
 override. **Promote** moves overrides that the authored files can express back into them.
 
+### The graph a model renders with
+
+Each target renders a ComfyUI workflow, and **What's missing** (the model status window)
+shows which copy of it is in force, per target:
+
+| It says | What that means |
+|---|---|
+| **repo** | the graph h3pipe ships, in `targets/<kind>/<id>/workflow.json` |
+| **ComfyUI** | a workflow of that name is saved in this ComfyUI, and it wins |
+| **$VAR** | that environment variable points at a file, which beats both |
+| **edited here** | the graph in force isn't the repo's — ignoring everything a render
+  patches anyway (model, LoRAs, prompt, size, seed, the episode's folder) |
+
+To change how a model renders, press **Copy to ComfyUI**: the repo's graph is written into
+ComfyUI's workflows under the name the target looks up. Open it on the canvas, change what
+you like, save — from then on your saved copy is what that target renders. Your own graph
+works the same way: save it in ComfyUI under that name (What's missing shows the name, with
+a copy button). **Revert to the repo's copy** deletes the saved one and puts the shipped
+graph back; it never touches an environment variable.
+
+What a render sets per shot stays out of your hands: the prompt, size, length, seed, model
+and LoRAs are written into the graph at queue time, so editing those widgets on the canvas
+changes nothing. Everything else — samplers, extra nodes, upscalers, how the picture is
+built — is yours.
+
+From the command line: `python h3.py targets` prints the same per-target line, and
+`--install-workflow <target>` / `--revert-workflow <target>` are the two buttons.
+
 ## h3 Refs
 
 Used heavily at the start of a series and rarely afterwards, if the references come out

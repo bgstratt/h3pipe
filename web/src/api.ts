@@ -31,7 +31,7 @@ import type {
   PeaksResult, PickRequest, Ref, RefDefaults, RefDiscardRequest, RefGenerateMissingRequest, RefGenerateMissingResult, RefGenerateRequest,
   RefGenerateResult, RefImportRequest, RefKeyframeRequest, RefList, RefOverrideInfo, RefOverrideRequest, RefPickRequest, RefPickResult,
   RefTake, RefUploadRequest, RenderRequest, RenderResult, Seed, ShotDetail, TakeRef, TargetKind, TargetList, TrackResult,
-  VoiceFromTakeRequest, VoiceFromTakeResult,
+  VoiceFromTakeRequest, VoiceFromTakeResult, WorkflowInstallResult,
   PromoteHashes, PromotePlan, PromoteResult, SourceCheck, SourceDoc, SourceFile, SourceHash, SourceSaveRequest, SourceSaveResult,
 } from "./types";
 import { comboChoices } from "./lib/targets";
@@ -129,6 +129,12 @@ export interface Api {
   /** PUT /h3pipe/episode-target: the episode's default target; null clears it
    * (back to series.json's). */
   putEpisodeTarget(ep: string, target: string | null): Promise<EpisodeTargetResult>;
+  /** Phase 11: copy a target's repo workflow into ComfyUI's saved workflows, to
+   * edit it on the canvas. Its renders use that copy from then on. 409
+   * (ApiError) when one of that name is already saved and `overwrite` is off. */
+  installWorkflow(target: string, opts?: { name?: string; overwrite?: boolean }): Promise<WorkflowInstallResult>;
+  /** Phase 11: delete that saved copy, so the target renders the repo's again. */
+  revertWorkflow(target: string, name?: string): Promise<WorkflowInstallResult>;
   /** ComfyUI's choices for one combo widget (`/object_info/<class_type>`), or
    * null when the node or widget isn't there. */
   widgetChoices(classType: string, field: string): Promise<string[] | null>;
@@ -468,6 +474,16 @@ export function createHttpApi(t: Transport): Api {
       const { kind, ready } = targetsQuery(opts);
       const r = await get<Partial<TargetList>>(`/h3pipe/targets?${qs({ kind, ready: ready ? "1" : undefined })}`);
       return { targets: Array.isArray(r?.targets) ? r.targets : [], default: r?.default ?? {} };
+    },
+    installWorkflow: async (target, opts) => {
+      const r = await call<WorkflowInstallResult | undefined>("POST", "/h3pipe/workflow/install", {
+        target, name: opts?.name, overwrite: opts?.overwrite ?? false,
+      });
+      return r ?? {};
+    },
+    revertWorkflow: async (target, name) => {
+      const r = await call<WorkflowInstallResult | undefined>("DELETE", `/h3pipe/workflow/install?${qs({ target, name })}`);
+      return r ?? {};
     },
     putEpisodeTarget: async (ep, target) => {
       if (target !== null && (typeof target !== "string" || !target)) {

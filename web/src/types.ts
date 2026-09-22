@@ -1144,6 +1144,33 @@ export interface Target {
   models?: Record<string, { family: string; label?: string; patterns?: string[]; folder?: string | null; tier?: RequirementTier }>;
   /** Only with `?ready=1`: what's installed, what's missing and where to get it. */
   readiness?: Readiness | null;
+  /** Phase 11: which workflow this target's next render uses. */
+  graph?: TargetGraph;
+}
+
+/**
+ * Phase 11: the graph a target renders with (GET /h3pipe/targets `graph`).
+ * `source` is where it comes from, in the order a render resolves it: the
+ * target's env var, a workflow saved in the running ComfyUI, $COMFYUI_PATH's
+ * workflows folder, then the repo's own copy.
+ */
+export interface TargetGraph {
+  /** the workflow file name the binding looks up */
+  name: string;
+  source: "env" | "comfy" | "saved" | "repo" | "none";
+  /** the path, or the saved workflow it was read from */
+  where: string;
+  /** the environment variable that would win, and whether it is set */
+  env?: string;
+  env_set?: boolean;
+  /** a copy is saved in this ComfyUI under `name` (it may not be the one in force) */
+  installed: boolean;
+  /** the graph in force isn't the repo's copy, ignoring what a job patches */
+  differs: boolean;
+  /** the repo copy's path, "" when the target ships none */
+  repo?: string;
+  /** why a candidate couldn't be read (the rest still applies) */
+  error?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -1193,6 +1220,20 @@ export interface Readiness {
   resolved: Record<string, Resolution>;
   features_off: string[];
   nodes_missing: string[];
+}
+
+/** POST / DELETE /h3pipe/workflow/install (Phase 11). */
+export interface WorkflowInstallResult {
+  ok?: boolean;
+  target?: string;
+  /** POST: the name it was saved as */
+  installed?: string;
+  /** POST: whether that name is the one renders pick up */
+  renders?: boolean;
+  /** DELETE: whether a saved copy was there */
+  deleted?: boolean;
+  name?: string;
+  graph?: TargetGraph;
 }
 
 /** One file of GET /h3pipe/models: how it stands against the param's family. */

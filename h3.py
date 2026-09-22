@@ -46,7 +46,10 @@ your projects, with the pipeline scripts beside it (see the README).
                                                     # (see h3promote.py for what maps where)
 
     python h3.py targets  [Shows\\ep05] [--json]     # which targets the running ComfyUI can
-                                                    # render, and what to download for the rest
+                                                    # render, what to download for the rest,
+                                                    # and the workflow each one renders
+    python h3.py targets  --install-workflow ltx2    # copy its graph into ComfyUI, to edit on
+                                                    # the canvas (--revert-workflow undoes it)
 
 The episode can be a folder (any name) holding series.json and one script .md,
 or several folders at once, or a parent with --each:

@@ -2225,6 +2225,135 @@ and the checks all call.
   as before). The source then reads as `"… (missing)"` in the status, and assemble warns and
   lays silence, which is visible; rewriting other shots' entries on a discard is not.
 
+## Phase 11: the graph handoff — the workflow a target renders with (as built, 2026-09-21)
+
+A target's graph is looked up by name (`binding.workflow_name`), and a workflow **saved in
+the running ComfyUI** under that name beats the repo's `workflow.json`
+(`h3jobs.resolve_workflow`). Nothing in the editor used to say which one was in force, and
+readiness judged the repo's copy while renders used the saved one. Phase 11 makes the
+source visible, lets the editor hand a target's graph to ComfyUI for editing and take it
+back, and points readiness at the graph that actually renders.
+
+### Which graph is in force
+
+`h3jobs.workflow_candidates(explicit, name, comfy_url, env, prefer_repo)` is now the one
+place that knows the order — an explicit path, `$ENV`, the running ComfyUI's saved
+workflows, `$COMFYUI_PATH/user/default/workflows`, then the repo's copy — and
+`resolve_workflow` walks it, unchanged in behaviour.
+
+`h3jobs.target_graph_source(target, comfy_url, with_graph=False)` classifies it:
+
+```json
+{"name": "H3_Ref2VA_Shotlist_v1.json",
+ "source": "comfy",
+ "where": "http://127.0.0.1:8188 (user workflows/H3_Ref2VA_Shotlist_v1.json)",
+ "env": "H3_WORKFLOW", "env_set": false,
+ "installed": true, "differs": false,
+ "repo": "…/targets/video/minimax_h3_ref2va/workflow.json", "error": ""}
+```
+
+- `source`: `env` | `comfy` | `saved` ($COMFYUI_PATH) | `repo` | `none` (nothing of that
+  name: renders fail).
+- `installed`: a copy is saved in the running ComfyUI under `name`, whether or not it wins
+  (`$ENV` beats it).
+- `differs`: the graph in force is not the repo's copy. **What a job patches is ignored**:
+  `h3jobs.neutral_graph` blanks every widget the binding names (model, LoRAs, prompt, size,
+  sampler, the model files, ...) and the loader's and saver's own inputs
+  (`project_root`, the frozen shotlist, take, sidecar) before
+  `h3jobs.graph_fingerprint` compares class-and-widget sets. Without that, a canvas that
+  once rendered an episode looks edited because it still holds that episode's
+  `project_root` — which is exactly what the first run on this machine reported.
+  Node ids and canvas layout never count; adding or removing a node, or changing a widget
+  no param covers (`UNETLoader.weight_dtype`, `H3SLAAttention.sparsity_ratio`) does.
+- `error` collects a candidate that couldn't be read; the rest of the answer still applies.
+- At most one request to ComfyUI: the walk stops once the answer can't change. For a caller
+  asking about every target (`h3edit.target_graphs`, the route, `h3.py targets`), ComfyUI's
+  saved workflows are **listed once** (`saved_names`), so a machine that has saved none of
+  them costs one request instead of one per target: 15 targets answer in about 0.1 s.
+- `prefer_repo` (audio targets) only moves `$COMFYUI_PATH` after the repo copy. A workflow
+  saved in the running ComfyUI wins for every kind.
+
+### The ComfyUI client
+
+`h3jobs.Comfy` gained the write side of ComfyUI's user folder, beside `userdata()`:
+
+- `list_userdata(folder="workflows")` → the files in it, relative paths, recursive
+  (`GET /api/userdata?dir=workflows&recurse=true`).
+- `put_userdata(path, data, overwrite=True)` → `POST /api/userdata/<url-encoded path>` with
+  the file as the raw body; returns its path relative to the user folder. With
+  `overwrite=False` an existing file raises a `RuntimeError` naming 409 and writes nothing.
+- `delete_userdata(path)` → `DELETE`; `False` when there was nothing to delete (404).
+
+`_json` now goes through `_open`, which keeps the "ComfyUI `<code>` on `<path>`: `<body>`"
+message, so callers can tell 404 / 409 apart by status.
+
+### `GET /h3pipe/targets`
+
+Every target gains `graph`, the block above **without** the graph itself (the editor never
+needs the nodes). It is computed for all targets at once and cached per ComfyUI address for
+`READY_TTL` (30 s), like readiness, and an install or a revert drops both caches.
+
+### `POST /h3pipe/workflow/install`
+
+```json
+{"target": "minimax_h3_ref2va", "name": null, "overwrite": false}
+```
+Writes the target's repo `workflow.json` into the running ComfyUI's saved workflows, **byte
+for byte** (a canvas save keeps its layout and `extra`), under `binding.workflow_name`.
+From then on that saved copy is what the target's renders use — that is the point: open it
+in ComfyUI, edit, save.
+
+- `name` saves a scratch copy under another name instead; the answer's `renders` is then
+  `false`, because no render looks that name up. It must end in `.json` and hold no `..`
+  segment (400); `""` means "the name the binding looks up", as omitting it does.
+- 409 when a workflow of that name is already saved and `overwrite` isn't true. The editor
+  asks before replacing it, since the file may hold the user's edits.
+- 400 for an unknown target, or one that ships no `workflow.json`; 502 when ComfyUI refuses
+  the write.
+- Answer: `{"ok": true, "target", "installed": "<name>", "renders": true|false, "graph": {…}}`.
+
+### `DELETE /h3pipe/workflow/install?target=<id>[&name=…]`
+
+Deletes that saved copy, so the target renders the repo's graph again.
+`{"ok": true, "target", "deleted": true|false, "name", "graph": {…}}` — `deleted: false`
+when ComfyUI had none. **`$ENV` is never written or deleted**: when it is the source, the
+editor disables both buttons and names the variable instead.
+
+### Readiness judges the graph in force
+
+`h3edit.target_nodes(t, graph=None, where="")` takes the graph a render would use (cached
+per target *and* `where`), and `h3edit.readiness(..., graph_of=…)` takes a
+`graph_of(target) -> (graph, where)`; `h3edit.target_graphs(targets, comfy_url)` builds
+them and `h3edit.graph_lookup` turns them into that callable. The routes and
+`h3.py targets` pass one, so a saved graph with a node this ComfyUI lacks makes the target
+`not_ready` with that class in `nodes_missing` — previously invisible, because only the
+repo's copy was read. Without `graph_of` the repo copy is still used, as before.
+
+### CLI
+
+`h3.py targets` prints a `graph` line per target (the workflow name, where it comes from,
+`edited here`, and "a saved copy exists but doesn't win"), and `--json` gains `graphs`.
+Two new flags, both needing a reachable ComfyUI:
+
+- `--install-workflow <target> [--name X] [--force]`
+- `--revert-workflow <target> [--name X]`
+
+### The editor
+
+The What's missing window is where a target's detail already lives, so the **Graph** card
+sits at the top of it: the workflow name, where it comes from, an "edited here" chip when
+`differs`, and one button — **Copy to ComfyUI** (with a confirm before replacing a saved
+file) or **Revert to the repo's copy** when a saved copy is in force. `$ENV` shows the
+variable and no buttons. The all-targets table gains a Graph column (`repo` / `ComfyUI` /
+`$VAR` / `missing`, plus `· edited`).
+
+### Found on the way
+
+On this machine `H3_Ref2VA_Shotlist_v1.json` was already saved in ComfyUI, so every H3
+render from the editor had been using that canvas copy rather than the repo's, and
+`krea2_refs_t2i.json` the same for reference images. Both agree with the repo's copies, but
+nothing said so. That is the case Phase 11 exists to make visible.
+
 ## LTX-2.5: the quality profile and ingredients references (as built, 2026-09-19)
 
 Two additions to the `ltx2` target. Both are decided **at queue time**, from the model file

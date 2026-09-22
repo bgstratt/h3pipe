@@ -309,6 +309,7 @@ class FakeComfy:
         self.predicted_frames = 199               # what a duration predictor "chooses"
         self.files: dict[str, bytes] = {}         # /view filename -> bytes
         self.userdata: dict[str, dict] = {}       # "workflows/x.json" -> saved workflow
+        self.userdata_raw: dict[str, bytes] = {}  # the same, as written (POST /userdata)
         self.graphs: list[dict] = []
         self.history: dict[str, dict] = {}
         self.running: list[str] = []
@@ -333,6 +334,12 @@ class FakeComfy:
                 if self.path.startswith("/history/"):
                     pid = self.path.rsplit("/", 1)[1]
                     self._send({pid: fake.history[pid]} if pid in fake.history else {})
+                elif self.path.startswith("/api/userdata?"):
+                    from urllib.parse import parse_qs, urlparse
+                    q = parse_qs(urlparse(self.path).query)
+                    folder = (q.get("dir") or [""])[0].strip("/")
+                    pre = folder + "/" if folder else ""
+                    self._send(sorted(k[len(pre):] for k in fake.userdata if k.startswith(pre)))
                 elif self.path.startswith("/api/userdata/"):
                     from urllib.parse import unquote
                     key = unquote(self.path[len("/api/userdata/"):])
@@ -361,8 +368,41 @@ class FakeComfy:
                 else:
                     self._send({})
 
+            def do_DELETE(self):
+                # ComfyUI's DELETE /userdata/<file>: 204, or 404 when it isn't there
+                if self.path.startswith("/api/userdata/"):
+                    from urllib.parse import unquote, urlparse
+                    key = unquote(urlparse(self.path).path[len("/api/userdata/"):])
+                    there = key in fake.userdata
+                    fake.userdata.pop(key, None)
+                    self.send_response(204 if there else 404)
+                    self.send_header("Content-Length", "0")
+                    self.end_headers()
+                    return
+                self.send_response(404)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+
             def do_POST(self):
                 raw = self.rfile.read(int(self.headers["Content-Length"]))
+                if self.path.startswith("/api/userdata/"):
+                    # ComfyUI's POST /userdata/<file>: the raw body is the file,
+                    # ?overwrite=false makes an existing one a 409
+                    from urllib.parse import parse_qs, unquote, urlparse
+                    u = urlparse(self.path)
+                    key = unquote(u.path[len("/api/userdata/"):])
+                    q = parse_qs(u.query)
+                    if q.get("overwrite", ["true"])[0] == "false" and key in fake.userdata:
+                        body = b"File already exists"
+                        self.send_response(409)
+                        self.send_header("Content-Length", str(len(body)))
+                        self.end_headers()
+                        self.wfile.write(body)
+                        return
+                    fake.userdata[key] = json.loads(raw)
+                    fake.userdata_raw[key] = raw
+                    self._send(key)
+                    return
                 if self.path == "/upload/image":
                     # multipart: keep the fields and the file's bytes
                     import email.parser

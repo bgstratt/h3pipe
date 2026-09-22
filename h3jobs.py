@@ -493,35 +493,32 @@ def graph_from(data: dict, where: str = "workflow") -> dict:
     raise ValueError(f"{where} is neither a ComfyUI workflow save nor an API export")
 
 
-def resolve_workflow(explicit: str | None, name: str = WORKFLOW_NAME,
-                     comfy_url: str | None = None, env: str = "H3_WORKFLOW",
-                     required: bool = True,
-                     prefer_repo: bool = False) -> tuple[dict | None, str]:
-    """(API graph, where it came from) for the workflow called `name`.
-
-    In order: an explicit path; $`env`; the workflow as saved in the RUNNING
-    ComfyUI at `comfy_url` (its user workflows, fetched over the API, so it
-    always matches that ComfyUI's node versions; skipped when comfy_url is
-    None); $COMFYUI_PATH's workflows folder; the copy in this repo (the
-    target's workflow.json whose binding names `name`, else workflows/ or
-    beside it). `prefer_repo` puts the repo copy ahead of $COMFYUI_PATH, for
-    callers whose saved canvas holds experiments that must not leak in (a
-    style LoRA on the reference-image graph). With `required=False`, finding
-    nothing returns (None, "") instead of raising.
-    """
+def workflow_candidates(explicit: str | None, name: str = WORKFLOW_NAME,
+                        comfy_url: str | None = None, env: str = "H3_WORKFLOW",
+                        prefer_repo: bool = False) -> list[tuple[str, str, object]]:
+    """Every place the workflow called `name` may come from, in the order
+    resolve_workflow takes them: (source, where, load), where `load()` is the
+    API graph or None when that place has nothing. `source` is one of
+    "explicit", "env", "comfy" (the running ComfyUI's saved workflows),
+    "saved" ($COMFYUI_PATH's workflows folder) or "repo"."""
+    out: list[tuple[str, str, object]] = []
     if explicit:
-        return load_graph(explicit), explicit
+        return [("explicit", explicit, lambda p=explicit: load_graph(p))]
     envp = os.environ.get(env, "")
-    if envp and os.path.isfile(envp):
-        return load_graph(envp), envp
+    if envp:
+        out.append(("env", envp,
+                    lambda p=envp: load_graph(p) if os.path.isfile(p) else None))
     if comfy_url:
-        try:
-            data = Comfy(comfy_url).userdata(f"workflows/{name}")
-        except Exception:
-            data = None
-        if data is not None:
-            where = f"{comfy_url.rstrip('/')} (user workflows/{name})"
-            return graph_from(data, where), where
+        where = f"{comfy_url.rstrip('/')} (user workflows/{name})"
+
+        def from_comfy(url=comfy_url, where=where, name=name):
+            try:
+                data = Comfy(url).userdata(f"workflows/{name}")
+            except Exception:
+                return None
+            return graph_from(data, where) if data is not None else None
+
+        out.append(("comfy", where, from_comfy))
     here = os.path.dirname(os.path.abspath(__file__))
     comfy = os.environ.get("COMFYUI_PATH", "")
     saved = [os.path.join(comfy, "user", "default", "workflows", name)] if comfy else []
@@ -530,15 +527,157 @@ def resolve_workflow(explicit: str | None, name: str = WORKFLOW_NAME,
     mine = TG.repo_workflow(name)
     if mine:
         repo.insert(0, mine)
-    cands = repo + saved if prefer_repo else saved + repo
-    for cand in cands:
-        if os.path.isfile(cand):
-            cand = os.path.normpath(cand)
-            return load_graph(cand), cand
+    files = ([("repo", p) for p in repo] + [("saved", p) for p in saved]) if prefer_repo \
+        else ([("saved", p) for p in saved] + [("repo", p) for p in repo])
+    for source, cand in files:
+        out.append((source, os.path.normpath(cand),
+                    lambda p=cand: load_graph(os.path.normpath(p))
+                    if os.path.isfile(p) else None))
+    return out
+
+
+def resolve_workflow(explicit: str | None, name: str = WORKFLOW_NAME,
+                     comfy_url: str | None = None, env: str = "H3_WORKFLOW",
+                     required: bool = True,
+                     prefer_repo: bool = False) -> tuple[dict | None, str]:
+    """(API graph, where it came from) for the workflow called `name`.
+
+    In order (workflow_candidates): an explicit path; $`env`; the workflow as
+    saved in the RUNNING ComfyUI at `comfy_url` (its user workflows, fetched
+    over the API, so it always matches that ComfyUI's node versions; skipped
+    when comfy_url is None); $COMFYUI_PATH's workflows folder; the copy in
+    this repo (the target's workflow.json whose binding names `name`, else
+    workflows/ or beside it). `prefer_repo` puts the repo copy ahead of
+    $COMFYUI_PATH, for callers whose saved canvas holds experiments that must
+    not leak in (a style LoRA on the reference-image graph). With
+    `required=False`, finding nothing returns (None, "") instead of raising.
+    """
+    for _source, where, load in workflow_candidates(explicit, name, comfy_url, env,
+                                                    prefer_repo):
+        g = load()
+        if g is not None:
+            return g, where
     if not required:
         return None, ""
     raise FileNotFoundError(f"{name} not found in ComfyUI's saved workflows or beside "
                             f"this script — pass --workflow, or set {env}")
+
+
+def is_link(v) -> bool:
+    """True when a node input is a link ([node id, output slot]) rather than a
+    widget value."""
+    return (isinstance(v, list) and len(v) == 2 and isinstance(v[0], str)
+            and isinstance(v[1], int) and not isinstance(v[1], bool))
+
+
+def neutral_graph(g: dict, binding) -> dict:
+    """A copy of `g` with every widget a job patches at queue time blanked: the
+    params the binding names (model, LoRAs, prompt, size, sampler, the model
+    files, ...) and the loader's and saver's own inputs (project_root, the
+    frozen shotlist, take, sidecar, fps, ...). What is left is the part of the
+    graph the author chose, which is what graph_fingerprint should compare —
+    otherwise a canvas that once rendered an episode looks "edited" because it
+    still holds that episode's project_root."""
+    g = copy.deepcopy(g or {})
+    for name in getattr(binding, "params", ()) or ():
+        for spec in binding.specs(name):
+            if not (spec.get("class_type") and spec.get("field")):
+                continue
+            for v in g.values():
+                if v.get("class_type") == spec["class_type"] \
+                        and spec["field"] in (v.get("inputs") or {}) \
+                        and not is_link(v["inputs"][spec["field"]]):
+                    v["inputs"][spec["field"]] = ""
+    for cls in (getattr(binding, "loader_class", None), getattr(binding, "saver_class", None)):
+        if not cls:
+            continue
+        for v in g.values():
+            if v.get("class_type") == cls:
+                v["inputs"] = {k: x for k, x in (v.get("inputs") or {}).items() if is_link(x)}
+    return g
+
+
+def graph_fingerprint(g: dict) -> list:
+    """A graph's shape, ignoring node ids and canvas layout: every node's class
+    with its widget values (the inputs that aren't links), sorted. Two graphs
+    with the same fingerprint render the same thing."""
+    out = []
+    for v in (g or {}).values():
+        widgets = sorted((k, json.dumps(x, sort_keys=True, default=str))
+                         for k, x in (v.get("inputs") or {}).items() if not is_link(x))
+        out.append((v.get("class_type") or "", widgets))
+    return sorted(out)
+
+
+def prefers_repo(target: "TG.Target") -> bool:
+    """Whether this target's workflow is taken from the repo before
+    $COMFYUI_PATH's workflows folder (h3refs.resolve_workflow passes
+    prefer_repo for audio targets). A workflow saved in the RUNNING ComfyUI
+    still wins over both, for every target."""
+    return target.kind == "audio"
+
+
+def target_graph_source(target: "TG.Target", comfy_url: str | None = None,
+                        with_graph: bool = False,
+                        saved_names: "set[str] | None" = None) -> dict:
+    """Which graph a render of `target` would use now, and how it compares with
+    the repo's copy:
+
+      {"name": the workflow name the binding looks up,
+       "source": "env" | "comfy" | "saved" | "repo" | "none",
+       "where": the path or the saved-workflow name it came from,
+       "env": the environment variable that would win, and whether it is set,
+       "installed": a copy is saved in the running ComfyUI under `name`,
+       "differs": the graph in force is not the repo's copy (widget values and
+                  node classes compared, layout and node ids ignored),
+       "repo": the repo copy's path, "" when the target ships none,
+       "error": why a candidate couldn't be read (the rest still apply)}
+
+    With `with_graph`, the graph in force is under "graph" (for readiness,
+    which needs its node classes). One request to ComfyUI at most — none when
+    `saved_names` (one listing of its saved workflows, for a caller asking
+    about every target) says it hasn't got this one."""
+    b = target.binding
+    name = b.workflow_name
+    env = b.env or "H3_WORKFLOW"
+    out = {"name": name, "source": "none", "where": "", "env": env,
+           "env_set": bool(os.environ.get(env, "")), "installed": False, "differs": False,
+           "repo": b.workflow if b.workflow and os.path.isfile(b.workflow) else "",
+           "error": ""}
+    repo_graph, in_force, errors, seen_comfy = None, None, [], comfy_url is None
+    if out["repo"]:
+        try:
+            repo_graph = load_graph(out["repo"])
+        except Exception as e:
+            errors.append(f"the repo copy can't be read: {e}")
+    for source, where, load in workflow_candidates(None, name, comfy_url, env,
+                                                   prefers_repo(target)):
+        if in_force is not None and seen_comfy:
+            break                                     # nothing later can change the answer
+        if source == "comfy" and saved_names is not None and name not in saved_names:
+            seen_comfy = True                         # one listing already said it isn't there
+            continue
+        try:
+            g = load()
+        except Exception as e:
+            errors.append(f"{where}: {e}")
+            if source == "comfy":
+                seen_comfy = True
+            continue
+        if source == "comfy":
+            seen_comfy = True
+            out["installed"] = g is not None
+        if g is None:
+            continue
+        if in_force is None:
+            out["source"], out["where"], in_force = source, where, g
+    if in_force is not None and repo_graph is not None:
+        out["differs"] = (graph_fingerprint(neutral_graph(in_force, b))
+                          != graph_fingerprint(neutral_graph(repo_graph, b)))
+    out["error"] = "; ".join(errors)
+    if with_graph:
+        out["graph"] = in_force
+    return out
 
 
 def target_workflow(target: "TG.Target", explicit: str | None = None,
@@ -566,16 +705,22 @@ class Comfy:
         self.base = base.rstrip("/")
         self.client_id = client_id
 
-    def _json(self, path: str, payload=None, timeout=60):
-        data = json.dumps(payload).encode() if payload is not None else None
-        req = urllib.request.Request(f"{self.base}{path}", data=data,
+    def _open(self, path: str, data=None, method: str | None = None,
+              timeout: int = 60) -> bytes:
+        """The bytes of one request. An HTTP error is a RuntimeError naming the
+        status, so a caller can tell 404 / 409 from the message."""
+        req = urllib.request.Request(f"{self.base}{path}", data=data, method=method,
                                      headers={"Content-Type": "application/json"})
         try:
             with urllib.request.urlopen(req, timeout=timeout) as r:
-                return json.loads(r.read() or b"{}")
+                return r.read()
         except urllib.error.HTTPError as e:
             body = e.read().decode("utf-8", "replace")
             raise RuntimeError(f"ComfyUI {e.code} on {path}: {body[:1500]}") from None
+
+    def _json(self, path: str, payload=None, timeout=60):
+        data = json.dumps(payload).encode() if payload is not None else None
+        return json.loads(self._open(path, data, timeout=timeout) or b"{}")
 
     def ping(self):
         self._json("/system_stats", timeout=10)
@@ -589,6 +734,47 @@ class Comfy:
             if "ComfyUI 404" in str(e):
                 return None
             raise
+
+    def list_userdata(self, folder: str = "workflows") -> list[str]:
+        """The files in one folder of ComfyUI's user folder, as paths relative
+        to it ("H3_Ref2VA_Shotlist_v1.json", "old/x.json"). Empty when the
+        folder isn't there."""
+        from urllib.parse import urlencode
+        q = urlencode({"dir": folder, "recurse": "true"})
+        try:
+            got = self._json(f"/api/userdata?{q}", timeout=15)
+        except RuntimeError as e:
+            if "ComfyUI 404" in str(e):
+                return []
+            raise
+        return sorted(x for x in (got or []) if isinstance(x, str))
+
+    def put_userdata(self, path: str, data, overwrite: bool = True) -> str:
+        """Write a JSON file into ComfyUI's user folder (e.g.
+        workflows/x.json), returning its path relative to that folder. The
+        body is the file itself, as ComfyUI's POST /userdata/<file> takes it;
+        with overwrite=False an existing file is a RuntimeError naming 409."""
+        from urllib.parse import quote, urlencode
+        body = (bytes(data) if isinstance(data, (bytes, bytearray))
+                else json.dumps(data, indent=2).encode())
+        q = urlencode({"overwrite": "true" if overwrite else "false"})
+        got = self._open(f"/api/userdata/{quote(path, safe='')}?{q}", body, "POST", timeout=30)
+        try:
+            return json.loads(got or b'""')
+        except ValueError:
+            return got.decode("utf-8", "replace")
+
+    def delete_userdata(self, path: str) -> bool:
+        """Delete a file from ComfyUI's user folder. False when it wasn't
+        there (ComfyUI answers 404)."""
+        from urllib.parse import quote
+        try:
+            self._open(f"/api/userdata/{quote(path, safe='')}", method="DELETE", timeout=15)
+        except RuntimeError as e:
+            if "ComfyUI 404" in str(e):
+                return False
+            raise
+        return True
 
     def queue(self, graph: dict) -> str:
         r = self._json("/prompt", {"prompt": graph, "client_id": self.client_id})

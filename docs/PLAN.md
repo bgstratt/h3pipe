@@ -18,6 +18,9 @@ episode target (as built)** below. Open items: the per-target lists under Phase 
 Phase 9 editor items. Phase 10 (wardrobe as subject variants) is in, 10a and 10b both; what is
 left of it is a look, not code — one variant view generated on each of the three paths, and the
 A/B behind the H3 headcount sentence.
+Phase 11 (the graph handoff: which workflow each target renders, and copying one into ComfyUI
+to edit on the canvas) is in as of 2026-09-21. **Phase 12** (custom targets from any ComfyUI
+workflow, no Python) is planned, in four steps — see its entry at the end of **Phases**.
 This is the working plan for the next round of development. `CLAUDE.md` points here.
 
 ## Goals
@@ -1322,6 +1325,185 @@ file now, and `h3build` reports a config problem against `series.json`. A subjec
 `design` is still legal — a character who is only ever a voice is never drawn — but putting
 one on screen is caught by shot id (`h3build.check_story`) rather than as a KeyError inside
 a prompt writer. `tests/test_checks.py`.
+
+**Phase 11 — the graph handoff: a target's workflow, editable in ComfyUI** ✅ done 2026-09-21
+(as built in `docs/API.md`, "Phase 11: the graph handoff"; the editor's side in
+`docs/EDITOR.md`, "The graph a model renders with"). Everything in the contract below is
+implemented. What it left open, and what the build found:
+
+- **`differs` had to be judged on a job-patched graph.** The first live answer called the H3
+  canvas copy edited, over `project_root`, a sidecar path and a VAE filename — all of which a
+  render overwrites. `h3jobs.neutral_graph` now blanks every widget the binding names and the
+  loader's and saver's own inputs before `graph_fingerprint` compares; the answer flipped to
+  "same graph", which is the truth. A consequence worth knowing: a change to any widget the
+  binding patches (sampler on H3, steps, the model file) is *not* an edit, because a render
+  overwrites it. Only the author's own part of the graph counts.
+- **No api→canvas converter is needed.** Verified on frontend 1.53.6: `isApiJson` +
+  `loadApiJson` import an API graph onto the canvas with generated positions, so the three
+  Wan targets' API exports are editable too. The first canvas save fixes their layout.
+- `DELETE /h3pipe/workflow/install` takes its `target` in the query, like the other DELETE
+  routes, not in a body.
+- `h3edit.target_nodes(t, graph, where)` is cached per target **and** `where`, so switching a
+  target's graph re-checks its nodes instead of serving the repo copy's answer.
+- **Live exit check** (2026-09-21, the real ComfyUI at 127.0.0.1:8188, a scratch episode built
+  from `tests/fixtures/kitchen_sink`): `--install-workflow wan22_ti2v` wrote
+  `user workflows/h3pipe_wan22_5b_ti2v.json`; `h3render` then reported that saved copy as its
+  workflow; changing `UNETLoader.weight_dtype` to `fp8_e4m3fn` in the saved copy (standing in
+  for a canvas edit, which is the same write) flipped `differs` to true and put
+  `weight_dtype: fp8_e4m3fn` into the graph a render queues, while `unet_name` stayed the
+  preset's; `--revert-workflow` deleted it and the queued graph went back to `default`.
+  ComfyUI was left with the 64 workflows it started with. 731 Python tests (27 new in
+  `tests/test_phase11.py`), 410 web tests, goldens unmoved.
+- Found on the way: `H3_Ref2VA_Shotlist_v1.json` was **already** saved in this ComfyUI, so
+  every H3 render from the editor had been using that canvas copy, not the repo's. The two
+  agree; nothing said so before this phase. That is the case it exists for.
+- Left: the What's missing window is where the Graph card lives, because that is where a
+  target's detail already is. If the targets list grows its own panel later, the card moves
+  with it.
+
+The contract as written before building:
+
+Why: `binding.workflow_name` and `$H3_*_WORKFLOW` are the only ways to put your own graph in,
+neither is visible in the editor, and `resolve_workflow` prefers the **running ComfyUI's saved
+copy** over the repo's. So a graph can be in force with nothing saying so. Verified on this
+machine 2026-09-21: `H3_Ref2VA_Shotlist_v1.json` is one of 64 saved workflows, so every H3
+render from the editor already uses that canvas copy, not
+`targets/video/minimax_h3_ref2va/workflow.json`. The two are identical today (same 19 nodes,
+same widget values); nothing would say so if they stopped being.
+
+- `Comfy` (h3jobs.py:565) gains `list_userdata(dir)`, `put_userdata(path, data)` and
+  `delete_userdata(path)` beside `userdata()`. Verified live: `GET
+  /api/userdata?dir=workflows&recurse=true` lists, `/api/userdata/<url-encoded path>` reads.
+- **`GET /h3pipe/targets`** per target gains `graph`:
+  `{name, source: "env" | "comfy" | "repo", where, installed, differs}`. Resolved exactly as a
+  render resolves it (`J.target_workflow` with the routes' comfy_url); `differs` compares the
+  in-force API graph with the repo copy (class multiset + widget values), so "edited here" is
+  visible. Cached per ComfyUI address for 30 s, like readiness.
+- **`POST /h3pipe/workflow/install`** `{target, name?, overwrite?}` writes the repo copy into the
+  running ComfyUI's saved workflows through its own API. `name` defaults to
+  `binding.workflow_name`; another name is allowed but renders nothing (a scratch copy) and the
+  response says so. 409 when the name exists and `overwrite` isn't true.
+- **`DELETE /h3pipe/workflow/install`** `{target}` deletes the saved copy: back to the repo graph.
+  `$H3_*_WORKFLOW` is never written or deleted; when env is the source both buttons are disabled
+  and the UI names the variable.
+- Readiness stops reading the repo copy. `h3edit.target_nodes` takes the **in-force** graph (the
+  drift docs/API.md notes today), keyed by graph source in `_NODES`.
+- Editor: the Targets/readiness panel gains a Graph row per target — source, name, "edited here" —
+  with **Copy to ComfyUI**, **Revert to repo copy** and **Open in ComfyUI**. Verified 2026-09-21
+  that frontend 1.53.6 has `isApiJson` + `loadApiJson` with auto-layout, so the three Wan API
+  exports open on the canvas too; their positions are generated, so the first canvas save is what
+  fixes the layout. No api→UI converter is needed.
+- CLI: `h3.py targets --install-workflow <id> [--name X] [--force]` and `--revert-workflow <id>`;
+  the table gains a Graph column.
+- Exit check (scratch copy of an episode): install `wan22_i2v`, open it on the canvas, change
+  `sampler` to `dpmpp_2m`, save; the panel shows source `comfy` and `differs`; render a shot from
+  the editor and its sidecar records the new sampler; revert; render again and it is back.
+  `python -m pytest` green — this phase generates no build output, so the goldens must not move.
+
+**Phase 12 — custom targets: any ComfyUI workflow, no Python** (contract written before building,
+2026-09-21)
+
+A user's own graph should become a selectable target without touching the repo. Four decisions
+taken 2026-09-21, before any code:
+
+| Decision | Why |
+|---|---|
+| A custom target is **data in the series folder** (`<series root>/targets/<id>/target.json`), its code a **builtin module** | It travels with the show, survives a pull, and the editor never writes into its own source tree. The only new machinery is a second target root and a `code: "builtin:<name>"` indirection. |
+| A custom target is **prompt-only**, plus one optional keyframe | Prompt, size, length, seed, models and LoRAs are all widgets, which is every stock ComfyUI graph. Subject-ref composition is real code and stays in the repo (12d). |
+| The mapping is **proposed by inspecting the graph**, then confirmed | 17 `binding.params` entries is too many to hand-author, but almost all of them are derivable from widget names, link walks and the files the graph already selects. The human answers what no graph states. |
+| A custom target is **draft until a probe render passes** | `template.frames` and size rules are guesses; a one-shot render at the proxy size is the cheapest way to find out before the target is offered in the pickers. |
+
+**12a — builtin target code, and a second target root.**
+- `targets/generic/video_prose.py`: `compile_episode` / `compile_shot` / `required_refs` /
+  `ref_slots` / `patch_graph` for a loader-less, prompt-only video target. Prose prompts from
+  `targets/video/ltx2/prompt.py` — the writer `targets/video/wan/prompt.py` already builds on
+  (dialogue as silent acting when the target makes no sound, spoken lines when it does). Sizes and
+  lengths from `template`, as `targets/video/wan/common.py` does it.
+- `Target.module` (targets/__init__.py:428): a `code` of `builtin:<name>` imports
+  `targets.generic.<name>`; anything else keeps today's `targets.<kind>.<id>.<stem>`. A target.json
+  in a **custom** root with no `code` defaults to `builtin:video_prose`; repo targets keep their
+  current defaults (compile.py / prompt.py) unchanged.
+- Custom root: `<series root>/targets/<id>/target.json`, no package and no `__init__.py`.
+  `_folders(root=None)` and `load_target(id, kind, root=None)` gain it; `list_targets` merges with
+  the repo first; a custom id shadowing a built-in is a `TargetError`. The routes pass the
+  episode's series root; the CLI picks it up where it already resolves the series config.
+- Declarative keyframe, replacing hand-written `patch_graph` for the simple case:
+  `binding.inputs: {"first": {"class_type": "LoadImage", "field": "image",
+  "disconnect": {"class_type": "Wan22ImageToVideoLatent", "input": "start_image"}}}` — exactly what
+  `targets/video/wan22_ti2v/compile.py` does today, generalised. `recipe.keyframes` and
+  `keyframe_path` are unchanged.
+- Exit check: hand-write `<root>/targets/ti2v_custom/target.json` re-expressing `wan22_ti2v` on
+  `builtin:video_prose` (its compile is 44 lines, all delegation, so this is a clean equivalence
+  test); render the same shot on both; the two frozen shotlists differ only in `target`. Full
+  suite byte-identical — this phase touches target loading, so the goldens are the proof.
+
+**12b — propose a target.json from a graph.**
+- **`GET /h3pipe/workflows`** — the running ComfyUI's saved workflows (names only), for the picker.
+- **`POST /h3pipe/targets/inspect`** `{workflow: "<saved name>" | {graph}, ep?, kind?}` →
+  `{proposal, matched, ambiguous, warnings, models, unknown_nodes}`. Read-only; writes nothing.
+- Detection, with `/object_info` supplying every class's input names and types:
+  - **widget rules**: `seed` / `noise_seed` → seed; `steps`; `cfg`; `sampler_name`; `scheduler`;
+    `shift`; `denoise`; `width` / `height`; `length`; `fps`. Several nodes of one class holding the
+    same widget → `all: true` when their values agree, an `ambiguous` entry when they don't.
+  - **prompt vs negative**: walk each sampler/guider's `positive` and `negative` conditioning
+    inputs back to the node holding a text widget. No negative input (BasicGuider) → no `negative`.
+  - **saver**: the terminal node, matched against the four `replace` recipes already shipped
+    (`CreateVideo`, `SaveVideo`, `SaveImage`, `SaveAudio`), with that recipe's `drop` / `set`.
+  - **model params**: loader classes whose widget choices contain the graph's current value; the
+    models **folder** found by testing which `folder_paths` listing holds that file
+    (`ctx.model_list`), not a hardcoded class→folder table; `family` and `patterns` from
+    `targets/modelid.py` on the current file (name, then header); `tier` `required`, except a LoRA
+    loader, which is an `accelerator` with a `base` preset (no LoRA, 20 steps) as H3 has.
+  - **presets**: `final` = the graph's current widget values; `proxy` = the same with the long side
+    halved and snapped to `size_multiple`, steps kept.
+  - **downloads**: the graph's own `properties.models` entries (verified present in the H3 canvas
+    save: the turbo LoRA with its Hugging Face URL); `url: null` otherwise. Never a guessed URL.
+  - **audio**: `capabilities.audio` is `generate` when the saver takes audio or anything decodes
+    it, else `none` with `policy_fallback: {to: "silent"}`.
+  - **nodes**: graph classes that aren't ComfyUI core, so readiness reports a missing node pack.
+  - **loras**: an existing loader if there is one, else an `insert_after` spec on the model
+    loader's MODEL output (what `wan22_ti2v` declares).
+- Defaulted, and **always** in `warnings` because no graph states them: `template.frames`
+  (`{step: 4, base: 1}`), `size_multiple` 16, `size_fit: "snap"`, `max_size` from the graph's
+  current size, `trained_frames` null, fps from the graph else `series.fps`. Where the length
+  widget's node declares min/max/step in `/object_info`, use them and say so.
+- Validation before anything is saved: `check_graph` against `/object_info`, then a dry `graph_for`
+  on a synthetic job (every param patched, saver replaced, pruned) — the path a real render takes.
+- **`PUT /h3pipe/targets/custom`** `{ep, target}` validates and writes
+  `<root>/targets/<id>/target.json` with `draft: true` until a probe passes.
+  **`DELETE /h3pipe/targets/custom`** `{ep, id}`. Both emit `h3pipe.episode`.
+- CLI mirror: `h3.py target-from-workflow <name> [--id X] [--json]` prints or writes the proposal,
+  so the detector is scriptable and testable without the UI.
+
+**12c — the editor flow.**
+- Targets panel: **Add target from a workflow** → pick a saved workflow (or drop a `.json`) → the
+  proposal form: the human fields (label/short, fps, frames step/base/max, size multiple and max
+  size, prompt style, audio), one row per `ambiguous` entry (choose a node, or "title it in
+  ComfyUI and re-inspect"), detected models and downloads read-only, warnings listed.
+- **Probe render**: queue one shot (the episode's first, proxy size, shortest legal length) into a
+  scratch subfolder and report ok, or ComfyUI's error verbatim. A draft target renders only from
+  this form; it joins the shot/episode target pickers once a probe passes, badged "custom".
+- Readiness treats a custom target like any other — it is just a target.json — so missing files
+  and node packs are reported the same way.
+- Exit check: build `minimax_h3_r2v_SLA.json` (saved on this machine: an H3 R2V graph with no
+  h3pipe nodes) into a custom target through the UI; the probe passes; render one shot on it and
+  one on `minimax_h3_ref2va`; both play, and the custom take's sidecar records its own target id,
+  resolved files and prompt.
+
+**12d — deferred, explicitly: subject references for custom targets.** Sheet composition, panel
+choice and backgrounds are code (`comfy_nodes/h3_refsheet.py` and per-target recipes); a JSON DSL
+for them would be the wrong abstraction, the same call the Decisions table already makes about
+prompt formats. A custom target that needs subject refs gets a repo folder. Revisit only when two
+custom targets want the same ref recipe.
+
+**Phase 12 risks**
+- `template.frames` is the only field a wrong guess makes *silently* wrong: a graph will accept 97
+  frames and produce a stutter. The probe render catches a crash, not a stutter. Partial mitigation
+  in 12b (`/object_info` min/max/step where declared); the warning stays either way.
+- Prompt style is `prose` only. H3's `sections` and `fields` writers assume that model's slots, so
+  offering them to an arbitrary graph would produce plausible text the graph mis-reads.
+- A custom target's id is scoped to its series root, so two shows may both have `my_wan`; take
+  sidecars record the id only, which is fine while episodes live under their series.
 
 ## Story IR — `shotlist/shots.json` (Phase 6)
 

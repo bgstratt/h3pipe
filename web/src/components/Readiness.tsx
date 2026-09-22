@@ -4,7 +4,7 @@
 // the notes a take's `resolved` gives.
 
 import { useEffect, useRef, useState } from "react";
-import { closeMissing, copyText, openMissing, refreshReadiness, setEpisodeTarget } from "../actions";
+import { closeMissing, copyText, installWorkflow, openMissing, refreshReadiness, revertWorkflow, setEpisodeTarget } from "../actions";
 import {
   downloadOf, episodeTargetSourceLabel, folderPath, missingCountText, missingGroups, normReadiness, notReadyBanner,
   pickWarning, readinessBadge, readinessOf, resolutionNotes, searchText, seriesSnippet, seriesTarget, targetCounts,
@@ -301,7 +301,7 @@ function AllTargets({ video }: { video: Target[] }) {
     <>
       <table className="h3-table">
         <thead>
-          <tr><th>Target</th><th>Status</th><th>Missing</th><th /></tr>
+          <tr><th>Target</th><th>Status</th><th>Missing</th><th>Graph</th><th /></tr>
         </thead>
         <tbody>
           {video.map((t) => {
@@ -313,6 +313,7 @@ function AllTargets({ video }: { video: Target[] }) {
                 <td className="h3-small">
                   {!r ? "" : r.status === "unknown" ? "ComfyUI didn't answer" : r.status === "ready" ? <span className="h3-muted">nothing</span> : missingCountText(r)}
                 </td>
+                <td className="h3-small" title={t.graph?.where || ""}>{graphWord(t)}</td>
                 <td><button className="h3-link" onClick={(e) => { e.stopPropagation(); openMissing(t.id); }}>details</button></td>
               </tr>
             );
@@ -323,6 +324,22 @@ function AllTargets({ video }: { video: Target[] }) {
         ✓ ready: every file is installed · ◐ degraded: renders, but slower or with a feature off · ✗ not ready: a needed
         file is missing, so its shots are skipped.
       </div>
+    </>
+  );
+}
+
+/** The all-targets table's Graph cell: where this target's workflow comes from. */
+function graphWord(t: Target): React.ReactNode {
+  const g = t.graph;
+  if (!g) return "";
+  const word = g.source === "env" ? `$${g.env}` :
+    g.source === "comfy" ? "ComfyUI" :
+    g.source === "saved" ? "$COMFYUI_PATH" :
+    g.source === "repo" ? "repo" : "missing";
+  return (
+    <>
+      <span className={g.source === "none" ? "h3-note-err" : g.source === "repo" ? "h3-muted" : ""}>{word}</span>
+      {g.differs ? <span className="h3-muted"> · edited</span> : null}
     </>
   );
 }
@@ -358,6 +375,7 @@ function TargetMissing({ list, id }: { list: TargetList; id: string }) {
           <span className="h3-grow">{statusLine(label, r)}</span>
         </div>
       </div>
+      <GraphCard t={t} />
       {groups.map((g) => (
         <div key={g.tier} className="h3-col" style={{ gap: 4 }}>
           <div className="h3-h">{g.label} <span className="h3-muted h3-small" style={{ textTransform: "none", fontWeight: 400 }}>{g.blurb}</span></div>
@@ -395,6 +413,64 @@ function TargetMissing({ list, id }: { list: TargetList; id: string }) {
         <div className="h3-small h3-muted">Put each file in its folder under your ComfyUI install, then click Refresh.</div>
       )}
     </>
+  );
+}
+
+/**
+ * Phase 11: which workflow this target renders with, and the two buttons that
+ * move it: copy the repo's graph into ComfyUI to edit on the canvas, and put it
+ * back. $ENV wins over both, so there both buttons are off and the variable is
+ * named.
+ */
+function GraphCard({ t }: { t: Target }) {
+  const g = t.graph;
+  const busy = useApp((s) => !!s.busy[`workflow|${t.id}`]);
+  if (!g) return null;
+  const env = g.source === "env";
+  const saved = g.source === "comfy";
+  const where =
+    env ? `$${g.env} points at it` :
+    saved ? "saved in this ComfyUI — open it on the canvas, edit, save" :
+    g.source === "saved" ? "$COMFYUI_PATH's workflows folder" :
+    g.source === "repo" ? "the repo's copy (h3pipe ships it)" :
+    "no workflow of that name was found: renders will fail";
+  const confirmInstall = async () => {
+    if (await installWorkflow(t.id)) return;
+    if (!confirm(`ComfyUI already has a workflow called ${g.name}.\n\nReplace it with the repo's copy? Your edits to it are lost.`)) return;
+    void installWorkflow(t.id, true);
+  };
+  return (
+    <div className="h3-col" style={{ gap: 4 }}>
+      <div className="h3-h">Graph</div>
+      <div className="h3-mfile">
+        <div className="h3-row">
+          <span className={`h3-tier h3-tier-${g.source === "none" ? "required" : "node"}`}>
+            {env ? "$ENV" : saved ? "ComfyUI" : g.source === "none" ? "missing" : "repo"}
+          </span>
+          <b className="h3-mono h3-ell h3-grow" title={g.where || g.name}>{g.name}</b>
+          {g.differs && <span className="h3-chip" title="The graph in force isn't the repo's copy (what a job patches — model, prompt, size, seed — is ignored)">edited here</span>}
+          <CopyButton text={g.name} what="Workflow name" />
+        </div>
+        <div className="h3-small">{where}.</div>
+        {g.installed && !saved && !env && (
+          <div className="h3-small h3-muted">A copy is saved in ComfyUI, but this one wins.</div>
+        )}
+        {g.error && <div className="h3-note h3-note-err h3-small">{g.error}</div>}
+        <div className="h3-row h3-small">
+          {!env && !saved && (
+            <button className="h3-btn" disabled={busy || !g.repo} title={g.repo ? `Write ${g.name} into ComfyUI's workflows, to edit on the canvas` : "This target ships no workflow.json"} onClick={() => void confirmInstall()}>
+              <i className={busy ? "pi pi-spin pi-spinner" : "pi pi-download"} /> Copy to ComfyUI
+            </button>
+          )}
+          {saved && (
+            <button className="h3-btn" disabled={busy} title={`Delete ComfyUI's ${g.name}: renders go back to the repo's copy`} onClick={() => void revertWorkflow(t.id)}>
+              <i className={busy ? "pi pi-spin pi-spinner" : "pi pi-undo"} /> Revert to the repo's copy
+            </button>
+          )}
+          {env && <span className="h3-muted">Unset ${g.env} to choose here.</span>}
+        </div>
+      </div>
+    </div>
   );
 }
 

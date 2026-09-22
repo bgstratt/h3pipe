@@ -909,6 +909,11 @@ def get_targets(ctx: Context, query: dict):
         raise ApiError(400, f"ready must be 1 or 0, not {ready!r}")
     targets = TG.list_targets(kind)
     out = [t.describe() for t in targets]
+    graphs = target_graphs(ctx)
+    for d in out:
+        g = graphs.get(d["id"])
+        if g is not None:
+            d["graph"] = {k: v for k, v in g.items() if k != "graph"}
     if ready in ("1", "true"):
         rd = target_readiness(ctx)
         for d in out:
@@ -921,6 +926,87 @@ def get_targets(ctx: Context, query: dict):
 READY_TTL = 30.0                                          # seconds a readiness answer is kept
 _READY: dict = {}
 _READY_LOCK = None
+_GRAPHS: dict = {}                                        # (Phase 11) the graph in force
+
+
+def target_graphs(ctx: Context, refresh: bool = False) -> dict:
+    """{target id: which workflow its next render uses} (h3edit.target_graphs:
+    $ENV, the running ComfyUI's saved workflows, $COMFYUI_PATH, then the repo's
+    copy), kept READY_TTL seconds per ComfyUI address. Each entry carries the
+    graph itself, for readiness' node check; the route strips it."""
+    import time
+    hit = _GRAPHS.get(ctx.comfy_url)
+    if hit and not refresh and time.monotonic() - hit[0] < READY_TTL:
+        return hit[1]
+    graphs = E.target_graphs(TG.list_targets(), ctx.comfy_url)
+    _GRAPHS[ctx.comfy_url] = (time.monotonic(), graphs)
+    return graphs
+
+
+def forget_graphs(ctx: Context) -> None:
+    """Drop the cached answers that depend on which workflow is in force: the
+    graph itself, and readiness (its node check reads that graph)."""
+    _GRAPHS.pop(ctx.comfy_url, None)
+    _READY.pop(ctx.comfy_url, None)
+
+
+@handler
+def post_workflow_install(ctx: Context, body):
+    """Copy a target's repo workflow into this ComfyUI's saved workflows, so it
+    can be opened and edited on the canvas. Written verbatim under the name the
+    binding looks up (`name` saves a scratch copy under another name instead);
+    from then on that saved copy is what the target's renders use."""
+    body = body_dict(body)
+    t = _workflow_target(body.get("target"))
+    name = _opt_str(body, "name") or None
+    overwrite = body.get("overwrite", False)
+    if not isinstance(overwrite, bool):
+        raise ApiError(400, "overwrite must be true or false")
+    try:
+        r = E.install_workflow(t, ctx.comfy, name, overwrite=overwrite)
+    except FileNotFoundError as e:
+        raise ApiError(400, str(e))
+    except ValueError as e:
+        raise ApiError(400, str(e))
+    except RuntimeError as e:
+        if "ComfyUI 409" in str(e):
+            raise ApiError(409, f"workflows/{name or t.binding.workflow_name} is already saved "
+                                f"in ComfyUI — pass overwrite: true to replace it")
+        raise ApiError(502, f"couldn't write the workflow to ComfyUI: {e}")
+    forget_graphs(ctx)
+    return 200, {"ok": True, "target": t.id, "installed": r["name"], "renders": r["renders"],
+                 "graph": _graph_view(ctx, t)}
+
+
+@handler
+def delete_workflow_install(ctx: Context, query: dict):
+    """Delete a target's workflow from this ComfyUI's saved workflows: its
+    renders go back to the repo's copy. $ENV is never touched."""
+    t = _workflow_target(query.get("target"))
+    try:
+        r = E.revert_workflow(t, ctx.comfy, query.get("name") or None)
+    except ValueError as e:
+        raise ApiError(400, str(e))
+    except RuntimeError as e:
+        raise ApiError(502, f"couldn't delete the workflow in ComfyUI: {e}")
+    forget_graphs(ctx)
+    return 200, {"ok": True, "target": t.id, "deleted": r["deleted"], "name": r["name"],
+                 "graph": _graph_view(ctx, t)}
+
+
+def _workflow_target(tid):
+    if not tid or not isinstance(tid, str):
+        raise ApiError(400, "target is required: a target id")
+    try:
+        return TG.load_target(tid)
+    except TG.TargetError as e:
+        raise ApiError(400, str(e))
+
+
+def _graph_view(ctx: Context, t) -> dict:
+    """One target's graph block, fresh (after an install or a revert)."""
+    g = J.target_graph_source(t, ctx.comfy_url)
+    return {k: v for k, v in g.items() if k != "graph"}
 
 
 def target_readiness(ctx: Context) -> dict:
@@ -943,7 +1029,7 @@ def target_readiness(ctx: Context) -> dict:
         except Exception as e:
             info, error = None, f"ComfyUI didn't answer /object_info: {e}"
         rd = E.readiness(TG.list_targets(), info, ctx.model_resolve, ctx.model_cache,
-                         error=error)
+                         error=error, graph_of=E.graph_lookup(target_graphs(ctx)))
         # an unanswered ComfyUI isn't worth remembering
         if info is not None:
             _READY[ctx.comfy_url] = (time.monotonic(), rd)
@@ -1824,6 +1910,8 @@ ROUTES = [
     ("POST", "/h3pipe/assemble", post_assemble, "body"),
     ("GET", "/h3pipe/targets", get_targets, "query"),
     ("GET", "/h3pipe/models", get_models, "query"),
+    ("POST", "/h3pipe/workflow/install", post_workflow_install, "body"),
+    ("DELETE", "/h3pipe/workflow/install", delete_workflow_install, "query"),
     ("GET", "/h3pipe/refs", get_refs, "query"),
     ("POST", "/h3pipe/refs/generate", post_refs_generate, "body"),
     ("PUT", "/h3pipe/refs/pick", put_refs_pick, "body"),

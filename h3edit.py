@@ -1409,17 +1409,24 @@ READY_STATUSES = ("ready", "degraded", "not_ready", "unknown")
 _NODES: dict = {}
 
 
-def target_nodes(t) -> dict[str, dict]:
+def target_nodes(t, graph: dict | None = None, where: str = "") -> dict[str, dict]:
     """{node class: {"tier", "feature"}} a target's renders need: its
     workflow's classes as a job's graph keeps them (the saver in place, then
     pruned to what the saver needs), its loader and saver, and target.json's
-    `nodes`. From the repo's copy of the workflow; cached per target."""
-    if t.id in _NODES:
-        return _NODES[t.id]
+    `nodes`.
+
+    `graph` is the workflow a render would use now (h3jobs.target_graph_source,
+    which the routes and the CLI pass: a graph saved in the running ComfyUI
+    wins over the repo's copy, so readiness must judge that one). Without it,
+    the repo's copy. Cached per target and `where`."""
+    key = (t.id, where)
+    if key in _NODES:
+        return _NODES[key]
     b = t.binding
     need: dict[str, dict] = {}
     try:
-        g = J.load_graph(b.workflow) if b.workflow and os.path.isfile(b.workflow) else {}
+        g = copy.deepcopy(graph) if graph is not None else (
+            J.load_graph(b.workflow) if b.workflow and os.path.isfile(b.workflow) else {})
         if g and b.saver.get("replace"):
             J.prepare_saver(g, b)
         # a job patches a value into every widget the binding names, cutting
@@ -1445,13 +1452,13 @@ def target_nodes(t) -> dict[str, dict]:
     for c in sorted(classes | {x for x in (b.loader_class, b.saver_class) if x}):
         need[c] = {"tier": "required", "feature": ""}
     need.update(t.nodes)
-    _NODES[t.id] = need
+    _NODES[key] = need
     return need
 
 
 def readiness(targets, object_info: dict | None, resolve=None, cache=None,
               extra: dict | None = None, series_cfg: dict | None = None,
-              error: str = "") -> dict[str, dict]:
+              error: str = "", graph_of=None) -> dict[str, dict]:
     """{target id: readiness} for each target (docs/API.md "Readiness"):
 
       {"status": "ready" | "degraded" | "not_ready" | "unknown",
@@ -1460,6 +1467,11 @@ def readiness(targets, object_info: dict | None, resolve=None, cache=None,
        "resolved": {param: {"want", "using", "how", "tier"}}  (the final pass),
        "by_pass": {pass: resolved},
        "features_off": [...], "nodes_missing": [...]}
+
+    `graph_of(target) -> (graph, where)` is the workflow each target would
+    render with now (the routes and the CLI pass one built from
+    h3jobs.target_graph_source, so a graph saved in the running ComfyUI is what
+    the node check judges); None means the repo's copy, as before.
 
     `object_info` is ComfyUI's /object_info (None: it didn't answer, so
     every target is "unknown", with `error`). Each pass's files (the
@@ -1503,7 +1515,7 @@ def readiness(targets, object_info: dict | None, resolve=None, cache=None,
                 if f not in features_off:
                     features_off.append(f)
         nodes_missing = []
-        for cls, spec in target_nodes(t).items():
+        for cls, spec in target_nodes(t, *(graph_of(t) if graph_of else (None, ""))).items():
             if cls in object_info:
                 continue
             nodes_missing.append(cls)
@@ -1534,9 +1546,102 @@ def ready_line(tid: str, r: dict) -> str:
     return f"  {tid:<20} {r['status']:<10}" + (f" missing {', '.join(what)}" if n else "")
 
 
+# ---------------------------------------------------------------------------
+# the workflow in force (Phase 11)
+# ---------------------------------------------------------------------------
+
+GRAPH_LABELS = {"env": "$ENV", "comfy": "saved in ComfyUI", "saved": "$COMFYUI_PATH",
+                "repo": "repo copy", "none": "none found"}
+
+
+def target_graphs(targets, comfy_url: str | None = None) -> dict[str, dict]:
+    """{target id: which graph its next render uses} (h3jobs.target_graph_source
+    with the graph itself, for the node check). ComfyUI's saved workflows are
+    listed once, so a machine that has saved none is one request, not one per
+    target. A target whose workflow can't be read anywhere is reported, not
+    raised."""
+    saved = None
+    if comfy_url:
+        try:
+            saved = set(J.Comfy(comfy_url).list_userdata("workflows"))
+        except Exception:
+            saved = None                                  # ask per target instead
+    out = {}
+    for t in targets:
+        try:
+            out[t.id] = J.target_graph_source(t, comfy_url, with_graph=True, saved_names=saved)
+        except Exception as e:                            # pragma: no cover - defensive
+            out[t.id] = {"name": t.binding.workflow_name, "source": "none", "where": "",
+                         "env": t.binding.env or "H3_WORKFLOW", "env_set": False,
+                         "installed": False, "differs": False, "repo": "",
+                         "error": str(e), "graph": None}
+    return out
+
+
+def graph_lookup(graphs: dict[str, dict]):
+    """graph_of(target) -> (graph, where) for readiness, from target_graphs."""
+    def graph_of(t):
+        g = graphs.get(t.id) or {}
+        return g.get("graph"), g.get("where") or ""
+    return graph_of
+
+
+def graph_line(tid: str, g: dict) -> str:
+    """One target's graph, one line: the workflow name and where it comes from."""
+    label = GRAPH_LABELS.get(g.get("source") or "none", g.get("source"))
+    extra = []
+    if g.get("source") == "env":
+        extra.append(f"${g.get('env')}")
+    if g.get("differs"):
+        extra.append("edited here")
+    if g.get("installed") and g.get("source") != "comfy":
+        extra.append("a saved copy exists but doesn't win")
+    return (f"      graph       {g.get('name')}  [{label}]"
+            + (f"  ({', '.join(extra)})" if extra else "")
+            + (f"\n                  !! {g['error']}" if g.get("error") else ""))
+
+
+def workflow_target(target_id: str):
+    """The target one of the workflow commands names, any kind."""
+    return J.TG.load_target(target_id)
+
+
+def install_workflow(t, comfy, name: str | None = None, overwrite: bool = False) -> dict:
+    """Copy a target's repo workflow into the running ComfyUI's saved workflows,
+    so it can be opened and edited on the canvas. The file is written verbatim
+    (a canvas save keeps its layout), under `name`, which defaults to the name
+    the binding looks up — the only name a render picks up. Returns
+    {"name", "wrote", "renders"}: `renders` is False for a name the binding
+    doesn't look up (a scratch copy). RuntimeError naming 409 when the file is
+    there and `overwrite` is False."""
+    b = t.binding
+    if not (b.workflow and os.path.isfile(b.workflow)):
+        raise FileNotFoundError(f"{t.id} ships no workflow.json to copy")
+    name = (name or b.workflow_name or "").strip().replace("\\", "/").lstrip("/")
+    if not name.endswith(".json") or ".." in name.split("/"):
+        raise ValueError(f"{name!r} is not a workflow file name (it must end in .json)")
+    with open(b.workflow, "rb") as fh:
+        raw = fh.read()
+    wrote = comfy.put_userdata(f"workflows/{name}", raw, overwrite=overwrite)
+    return {"name": name, "wrote": wrote, "renders": name == b.workflow_name}
+
+
+def revert_workflow(t, comfy, name: str | None = None) -> dict:
+    """Delete the target's workflow from the running ComfyUI's saved workflows,
+    so its renders go back to the repo's copy. Returns {"name", "deleted"}
+    (deleted False: there was none). $ENV is never touched."""
+    b = t.binding
+    name = (name or b.workflow_name or "").strip().replace("\\", "/").lstrip("/")
+    if not name.endswith(".json") or ".." in name.split("/"):
+        raise ValueError(f"{name!r} is not a workflow file name (it must end in .json)")
+    return {"name": name, "deleted": bool(comfy.delete_userdata(f"workflows/{name}"))}
+
+
 def cmd_targets(root: str | None, argv: list[str]) -> int:
     """h3.py targets [<episode>] [--json] [--comfy URL]: each target's
-    readiness on the running ComfyUI."""
+    readiness on the running ComfyUI, the graph each one renders with, and
+    --install-workflow / --revert-workflow to hand a graph to ComfyUI and take
+    it back."""
     import json as _json
     ap = argparse.ArgumentParser(prog="h3.py targets",
                                  description="Which targets this ComfyUI can render, and what "
@@ -1544,7 +1649,18 @@ def cmd_targets(root: str | None, argv: list[str]) -> int:
     ap.add_argument("--json", action="store_true", help="print the readiness as JSON")
     ap.add_argument("--comfy", default="http://127.0.0.1:8188")
     ap.add_argument("--kind", choices=J.TG.KINDS)
+    wf = ap.add_mutually_exclusive_group()
+    wf.add_argument("--install-workflow", metavar="TARGET",
+                    help="copy this target's workflow into ComfyUI's saved workflows, to edit "
+                         "on the canvas (its renders then use that copy)")
+    wf.add_argument("--revert-workflow", metavar="TARGET",
+                    help="delete that saved copy: the target renders the repo's workflow again")
+    ap.add_argument("--name", help="save under another name (a scratch copy: no render uses it)")
+    ap.add_argument("--force", action="store_true",
+                    help="overwrite a saved workflow of that name")
     args = ap.parse_args(argv)
+    if args.install_workflow or args.revert_workflow:
+        return _workflow_action(args)
     series_cfg, extra, marks = None, {}, {}
     if root:
         series_cfg = J.series_config(root)
@@ -1560,10 +1676,14 @@ def cmd_targets(root: str | None, argv: list[str]) -> int:
     except Exception as e:
         object_info, error = None, f"ComfyUI at {args.comfy} didn't answer: {e}"
     targets = J.TG.list_targets(args.kind)
+    graphs = target_graphs(targets, args.comfy if object_info is not None else None)
     ready = readiness(targets, object_info, J.model_resolver(), J.TG.modelid.temp_cache(),
-                      extra, series_cfg, error)
+                      extra, series_cfg, error, graph_lookup(graphs))
     if args.json:
-        sys.stdout.write(_json.dumps({"comfy": args.comfy, "targets": ready}, indent=2) + "\n")
+        sys.stdout.write(_json.dumps(
+            {"comfy": args.comfy, "targets": ready,
+             "graphs": {k: {x: y for x, y in v.items() if x != "graph"}
+                        for k, v in graphs.items()}}, indent=2) + "\n")
         return 0 if object_info is not None else 1
     print(f"\n  targets on {args.comfy}" + (f"  ·  {os.path.basename(root)}" if root else ""))
     if object_info is None:
@@ -1571,6 +1691,7 @@ def cmd_targets(root: str | None, argv: list[str]) -> int:
     for t in targets:
         r = ready[t.id]
         print(ready_line(t.id, r) + (f"   <- {marks[t.id]}" if t.id in marks else ""))
+        print(graph_line(t.id, graphs.get(t.id) or {}))
         for m in r["missing"]:
             passes = "" if len(m["passes"]) == len(t.presets) else f" ({'/'.join(m['passes'])})"
             what = f"feature off: {m['feature']}" if m["tier"] == "optional" and m.get("feature") \
@@ -1586,6 +1707,47 @@ def cmd_targets(root: str | None, argv: list[str]) -> int:
                 print(f"      using       {param}: {v['using']} for {v['want']}")
     print()
     return 0 if object_info is not None else 1
+
+
+def _workflow_action(args) -> int:
+    """h3.py targets --install-workflow / --revert-workflow."""
+    tid = args.install_workflow or args.revert_workflow
+    try:
+        t = workflow_target(tid)
+    except J.TG.TargetError as e:
+        print(f"  !! {e}")
+        return 1
+    comfy = J.Comfy(args.comfy)
+    try:
+        comfy.ping()
+    except Exception as e:
+        print(f"  !! can't reach ComfyUI at {args.comfy}: {e}")
+        return 1
+    try:
+        if args.install_workflow:
+            r = install_workflow(t, comfy, args.name, overwrite=args.force)
+            print(f"  {t.id}: wrote user workflows/{r['name']}")
+            print("      open it in ComfyUI, edit and save: renders use it from then on"
+                  if r["renders"] else
+                  f"      a scratch copy: renders keep using {t.binding.workflow_name}")
+        else:
+            r = revert_workflow(t, comfy, args.name)
+            print(f"  {t.id}: " + (f"deleted user workflows/{r['name']}; renders use the repo's "
+                                   f"workflow again" if r["deleted"] else
+                                   f"there was no saved workflows/{r['name']}"))
+    except (FileNotFoundError, ValueError) as e:
+        print(f"  !! {e}")
+        return 1
+    except RuntimeError as e:
+        if "ComfyUI 409" in str(e):
+            print(f"  !! workflows/{args.name or t.binding.workflow_name} is already saved in "
+                  f"ComfyUI — pass --force to overwrite it")
+        else:
+            print(f"  !! {e}")
+        return 1
+    print(graph_line(t.id, J.target_graph_source(t, args.comfy)))
+    print()
+    return 0
 
 
 # Runs a script with its own folder on sys.path. `python script.py` normally

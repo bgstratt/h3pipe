@@ -152,6 +152,52 @@ export async function setEpisodeTarget(target: string | null): Promise<boolean> 
   });
 }
 
+/**
+ * Phase 11: copy a target's repo workflow into ComfyUI's saved workflows, so it
+ * can be opened and edited on the canvas. From then on that saved copy is what
+ * the target renders. An existing file of that name is only replaced with
+ * `overwrite` (the caller asks first).
+ */
+export async function installWorkflow(target: string, overwrite = false): Promise<boolean> {
+  return withBusy(`workflow|${target}`, async () => {
+    try {
+      const r = await api().installWorkflow(target, { overwrite });
+      await loadTargets(true);
+      host().toast(
+        "success",
+        `${r.installed ?? "the workflow"} is now in ComfyUI's workflows`,
+        r.renders === false
+          ? "A scratch copy: renders keep using the workflow the target looks up."
+          : "Open it in ComfyUI, edit and save — this target's renders use it from then on.",
+      );
+      return true;
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 409) return false;   // the caller confirms
+      report("Couldn't copy the workflow to ComfyUI", e);
+      return false;
+    }
+  });
+}
+
+/** Phase 11: delete that saved copy, so the target renders the repo's graph again. */
+export async function revertWorkflow(target: string): Promise<boolean> {
+  return withBusy(`workflow|${target}`, async () => {
+    try {
+      const r = await api().revertWorkflow(target);
+      await loadTargets(true);
+      host().toast(
+        "success",
+        r.deleted ? `${r.name} was removed from ComfyUI's workflows` : `ComfyUI had no ${r.name}`,
+        r.deleted ? "This target renders the repo's workflow again." : undefined,
+      );
+      return true;
+    } catch (e) {
+      report("Couldn't remove the workflow from ComfyUI", e);
+      return false;
+    }
+  });
+}
+
 const choicesLoading = new Map<string, Promise<void>>();
 
 /** ComfyUI's choices for a combo widget a target binds (cached; failures are
