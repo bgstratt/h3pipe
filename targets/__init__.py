@@ -76,6 +76,7 @@ import json
 import math
 import os
 import re
+import threading
 from dataclasses import dataclass, field
 
 from . import modelid
@@ -386,6 +387,8 @@ class Target:
     def __init__(self, folder: str, spec: dict):
         self.folder = folder
         self.spec = spec
+        # a show's own target (<show>/targets/<id>/): data only, no Python
+        self.custom = is_custom(folder)
         self.id: str = spec["id"]
         self.kind: str = spec["kind"]
         self.label: str = spec.get("label", self.id)
@@ -420,14 +423,36 @@ class Target:
 
     @property
     def module(self):
-        """The target's code (target.json "code", default compile.py for a
-        video target, prompt.py for an image target), imported on first use."""
+        """The target's code, imported on first use. target.json "code" is a
+        file beside target.json (default: compile.py for a video target,
+        prompt.py for an image or audio one) or **`builtin:<name>`**, one of the
+        shared modules in targets/generic/ — which is what a show's own target
+        uses, since it ships no Python (its default is
+        `builtin:video_prose`)."""
         if self._module is None:
-            code = self.spec.get("code") or ("compile.py" if self.kind == "video"
-                                             else "prompt.py")
-            self._module = importlib.import_module(
-                f"{__name__}.{self.kind}.{self.id}.{os.path.splitext(code)[0]}")
+            code = self.spec.get("code") or self.default_code
+            if code.startswith("builtin:"):
+                name = code.split(":", 1)[1].strip()
+                if not name.isidentifier():
+                    raise TargetError(f"{self.kind} target {self.id}: {code!r} is not a builtin "
+                                      f"module name")
+                try:
+                    self._module = importlib.import_module(f"{__name__}.generic.{name}")
+                except ImportError as e:
+                    raise TargetError(f"{self.kind} target {self.id}: there is no builtin "
+                                      f"{name!r} ({e})") from None
+            else:
+                self._module = importlib.import_module(
+                    f"{__name__}.{self.kind}.{self.id}.{os.path.splitext(code)[0]}")
         return self._module
+
+    @property
+    def default_code(self) -> str:
+        """The code a target.json with no `code` gets: a show's own target has
+        no package to import from, so it is the builtin prose compile."""
+        if self.custom:
+            return "builtin:video_prose" if self.kind == "video" else "builtin:" + self.kind
+        return "compile.py" if self.kind == "video" else "prompt.py"
 
     def _need(self, name: str):
         fn = getattr(self.module, name, None)
@@ -717,6 +742,9 @@ class Target:
                 "saver": self.binding.saver_class or None,
                 "template": self.template.to_json(),
                 "short": self.short,
+                # Phase 12: a show's own target, and one that hasn't rendered yet
+                **({"custom": True} if self.custom else {}),
+                **({"draft": True} if self.spec.get("draft") else {}),
                 "capabilities": self.capabilities(),
                 "models": {k: {"family": v["family"], "label": modelid.family_label(v["family"]),
                                "patterns": list(v["patterns"]), "folder": v["folder"],
@@ -730,11 +758,94 @@ class Target:
 # loading
 # ---------------------------------------------------------------------------
 
-_CACHE: dict[str, Target] = {}
+_CACHE: dict[str, Target] = {}                            # folder -> Target
+CUSTOM_DIR = "targets"                                    # <show>/targets/<id>/target.json
 
 
-def _folders() -> list[tuple[str, str, str]]:
-    """(kind, id, folder) of every target on disk."""
+# ---------------------------------------------------------------------------
+# a show's own targets (Phase 12): <series folder>/targets/<id>/target.json
+# ---------------------------------------------------------------------------
+
+_THREAD = threading.local()
+
+
+def show_folder(root: str) -> str:
+    """The folder whose `targets/` holds a show's own targets: the one with
+    series.json — the episode folder, else its parent, as every other reader of
+    the series config looks for it."""
+    root = os.path.abspath(root)
+    for d in (root, os.path.dirname(os.path.normpath(root))):
+        if os.path.isfile(os.path.join(d, "series.json")):
+            return d
+    return root
+
+
+def use_roots(*roots: str):
+    """Context manager: while it is open, `load_target` and `list_targets` also
+    see the targets of these shows (each an episode or series folder). Used at
+    the entry points — a build, a queued render, one route — so the deep callers
+    that only have an id keep working. Always a `with`, because the routes run
+    handlers on pooled threads: the roots must not outlive the request."""
+    import contextlib
+
+    @contextlib.contextmanager
+    def scope():
+        before = getattr(_THREAD, "roots", ())
+        _THREAD.roots = tuple(dict.fromkeys(list(before) + [r for r in roots if r]))
+        try:
+            yield _THREAD.roots
+        finally:
+            _THREAD.roots = before
+    return scope()
+
+
+def add_thread_root(root: str) -> None:
+    """Put one show's targets in force for this thread, without a `with`. For
+    the routes, where the episode is only known once a handler has validated it
+    (h3pipe_api.check_ep) — the route wrapper calls clear_thread_roots() before
+    each handler, so nothing carries over to the next request on that thread."""
+    if not root:
+        return
+    _THREAD.roots = tuple(dict.fromkeys(list(thread_roots()) + [root]))
+
+
+def thread_roots() -> tuple:
+    """The show folders in force for this thread."""
+    return tuple(getattr(_THREAD, "roots", ()))
+
+
+def clear_thread_roots() -> None:
+    """Forget them (the routes call this before each handler)."""
+    _THREAD.roots = ()
+
+
+def custom_folders(root: str) -> list[tuple[str, str, str]]:
+    """(kind, id, folder) of one show's own targets: every
+    `<show>/targets/<id>/target.json`, its kind read from the file (a custom
+    target has no kind folder). An unreadable or mislabelled one is skipped
+    here and named by load_target."""
+    d = os.path.join(show_folder(root), CUSTOM_DIR)
+    out = []
+    if not os.path.isdir(d):
+        return out
+    for name in sorted(os.listdir(d)):
+        p = os.path.join(d, name, "target.json")
+        if not os.path.isfile(p):
+            continue
+        try:
+            with open(p, encoding="utf-8") as fh:
+                kind = json.load(fh).get("kind")
+        except (OSError, ValueError):
+            continue
+        if kind in KINDS:
+            out.append((kind, name, os.path.join(d, name)))
+    return out
+
+
+def _folders(root: str | None = None) -> list[tuple[str, str, str]]:
+    """(kind, id, folder) of every target on disk: the repo's, then the custom
+    ones of `root`'s show and of any show this thread has open (use_roots).
+    A custom target may not take a repo target's id; load_target says so."""
     out = []
     for kind in KINDS:
         d = os.path.join(HERE, kind)
@@ -743,30 +854,88 @@ def _folders() -> list[tuple[str, str, str]]:
         for name in sorted(os.listdir(d)):
             if os.path.isfile(os.path.join(d, name, "target.json")):
                 out.append((kind, name, os.path.join(d, name)))
+    seen = {os.path.normcase(f) for _, _, f in out}
+    for r in ((root,) if root else ()) + thread_roots():
+        for entry in custom_folders(r):
+            if os.path.normcase(entry[2]) not in seen:
+                seen.add(os.path.normcase(entry[2]))
+                out.append(entry)
     return out
 
 
-def load_target(target_id: str, kind: str | None = None) -> Target:
-    """The target called `target_id` (of `kind`, when given)."""
-    key = f"{kind or '*'}:{target_id}"
-    if key in _CACHE:
-        return _CACHE[key]
-    for k, name, folder in _folders():
-        if name == target_id and (kind is None or k == kind):
-            with open(os.path.join(folder, "target.json"), encoding="utf-8") as fh:
-                spec = json.load(fh)
-            if spec.get("id") != name or spec.get("kind") != k:
-                raise TargetError(f"{folder}/target.json must say id {name!r} and kind {k!r}")
-            t = Target(folder, spec)
-            _CACHE[key] = t
-            return t
-    known = ", ".join(t.id for t in list_targets(kind)) or "none"
+def is_custom(folder: str) -> bool:
+    """A target outside this repo: a show's own (it ships no Python)."""
+    here = os.path.normcase(os.path.abspath(HERE))
+    return not os.path.normcase(os.path.abspath(folder)).startswith(here)
+
+
+def load_target(target_id: str, kind: str | None = None, root: str | None = None) -> Target:
+    """The target called `target_id` (of `kind`, when given). `root` is a show
+    (episode or series folder) whose own targets count too, as use_roots' do.
+
+    Cached per folder, so two shows may have a custom target of the same name.
+    """
+    folders = _folders(root)
+    repo_ids = {(k, n) for k, n, f in folders if not is_custom(f)}
+    for k, name, folder in folders:
+        if name != target_id or (kind is not None and k != kind):
+            continue
+        # a custom target that took a built-in's name is ignored: the built-in
+        # is what renders. Saving one is refused instead (the routes' 400), and
+        # shadowed_custom() finds any that got there another way.
+        if is_custom(folder) and (k, name) in repo_ids:
+            continue
+        return _load_folder(k, name, folder)
+    known = ", ".join(t.id for t in list_targets(kind, root)) or "none"
     raise TargetError(f"no {kind + ' ' if kind else ''}target called {target_id!r} "
                       f"(known: {known})")
 
 
-def list_targets(kind: str | None = None) -> list[Target]:
-    return [load_target(name, k) for k, name, _ in _folders() if kind is None or k == kind]
+def _load_folder(kind: str, name: str, folder: str) -> Target:
+    """The target in one folder, cached by folder (so two shows may each have a
+    custom target of the same name)."""
+    if folder in _CACHE:
+        return _CACHE[folder]
+    with open(os.path.join(folder, "target.json"), encoding="utf-8") as fh:
+        spec = json.load(fh)
+    if spec.get("id") != name or spec.get("kind") != kind:
+        raise TargetError(f"{folder}/target.json must say id {name!r} and kind {kind!r}")
+    t = Target(folder, spec)
+    _CACHE[folder] = t
+    return t
+
+
+def list_targets(kind: str | None = None, root: str | None = None) -> list[Target]:
+    """Every target, the repo's first, then the custom ones of `root`'s show and
+    of the shows this thread has open. A custom target that takes a built-in's
+    name is left out — the built-in is what renders — and one whose target.json
+    can't be read is skipped here; load_target names both."""
+    folders = _folders(root)
+    repo_ids = {(k, n) for k, n, f in folders if not is_custom(f)}
+    out = []
+    for k, name, folder in folders:
+        if kind is not None and k != kind:
+            continue
+        if is_custom(folder) and (k, name) in repo_ids:
+            continue
+        try:
+            out.append(_load_folder(k, name, folder))
+        except (TargetError, OSError, ValueError, KeyError):
+            continue
+    return out
+
+
+def shadowed_custom(root: str) -> list[str]:
+    """Folders of one show's custom targets that take a built-in's name, so they
+    are ignored. Saving such a target is refused; this finds the ones that got
+    there another way (a copied folder, a renamed built-in), for a warning."""
+    repo_ids = {(k, n) for k, n, f in _folders() if not is_custom(f)}
+    return [f for k, n, f in custom_folders(root) if (k, n) in repo_ids]
+
+
+def forget_targets() -> None:
+    """Drop the cache (a custom target.json was written or deleted)."""
+    _CACHE.clear()
 
 
 def video_target(series_cfg: dict | None = None) -> Target:

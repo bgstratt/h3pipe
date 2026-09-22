@@ -349,6 +349,10 @@ class FakeComfy:
                         self.send_response(404)
                         self.send_header("Content-Length", "0")
                         self.end_headers()
+                elif self.path == "/object_info":
+                    # everything this ComfyUI knows: `info` when it is set,
+                    # else a bare entry per class in `nodes`
+                    self._send(dict({c: {"input": {}} for c in fake.nodes}, **fake.info))
                 elif self.path.startswith("/object_info/"):
                     from urllib.parse import unquote
                     ct = unquote(self.path[len("/object_info/"):])

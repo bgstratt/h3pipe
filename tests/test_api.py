@@ -22,7 +22,8 @@ import h3pipe_api as A  # noqa: E402
 import h3edit as E  # noqa: E402
 import h3jobs as J  # noqa: E402
 import h3takes as T  # noqa: E402
-from test_render import stub_refs, ENV, FIXTURE, FakeComfy  # noqa: E402
+import targets as TG  # noqa: E402
+from test_render import stub_refs, ENV, FIXTURE, FakeComfy, WORKFLOW  # noqa: E402
 
 HAVE_FF = bool(shutil.which("ffmpeg") and shutil.which("ffprobe"))
 _BUILT = None                                            # one build, copied per test
@@ -111,12 +112,20 @@ class ConfigAndRootsTest(ApiTest):
     def test_config_roundtrip(self):
         cfg = self.ok(A.get_config(self.ctx, {}))
         self.assertEqual(cfg, {"roots": [os.path.abspath(self.shows)],
-                               "comfy": self.comfy.url, "version": 1})
+                               "comfy": self.comfy.url, "review_copy": False, "version": 1})
         self.assertTrue(os.path.isfile(os.path.join(self.user, "default", "h3pipe",
                                                     "config.json")))
         self.err(A.put_config(self.ctx, {"roots": [os.path.join(self.tmp, "nope")]}), 400)
         self.err(A.put_config(self.ctx, {"roots": "x"}), 400)
         self.err(A.put_config(self.ctx, ["x"]), 400)
+        # the review copy in ComfyUI/output is off unless it is asked for, and
+        # saving roots again doesn't forget the answer
+        self.err(A.put_config(self.ctx, {"roots": [self.shows], "review_copy": "yes"}), 400)
+        on = self.ok(A.put_config(self.ctx, {"roots": [self.shows], "review_copy": True}))
+        self.assertTrue(on["review_copy"])
+        self.assertTrue(self.ok(A.put_config(self.ctx, {"roots": [self.shows]}))["review_copy"])
+        off = self.ok(A.put_config(self.ctx, {"roots": [self.shows], "review_copy": False}))
+        self.assertFalse(off["review_copy"])
 
     def test_roots_from_env_without_config_file(self):
         other = os.path.join(self.tmp, "Other")
@@ -285,6 +294,42 @@ class SweepTest(ApiTest):
 
 
 class RenderTest(ApiTest):
+    def test_no_review_copy_in_comfyui_output_unless_asked(self):
+        """A graph may end in its own SaveVideo branch as well as the saver (H3's
+        shipped one did until 2026-09-21, and a canvas copy still may). The take
+        is saved by H3SaveShot either way, so that second copy into ComfyUI's
+        output folder is dropped unless the config asks for it."""
+        # a saved canvas copy with a review branch, as ComfyUI would hold it
+        graph = J.graph_from(json.load(open(WORKFLOW, encoding="utf-8")))
+        images = next(k for k, v in graph.items() if v["class_type"] == "VAEDecode")
+        graph["900"] = {"class_type": "CreateVideo", "inputs": {"images": [images, 0], "fps": 24},
+                        "_meta": {"title": "Review copy"}}
+        graph["901"] = {"class_type": "SaveVideo",
+                        "inputs": {"video": ["900", 0], "filename_prefix": "video/H3_shot"},
+                        "_meta": {"title": "Daily"}}
+        name = f"workflows/{TG.load_target('minimax_h3_ref2va').binding.workflow_name}"
+        self.comfy.userdata[name] = graph
+
+        self.render("sh010")
+        classes = {v["class_type"] for v in self.comfy.graphs[-1].values()}
+        self.assertIn(J.SAVER, classes)                   # the take itself
+        self.assertNotIn("SaveVideo", classes)            # nothing in ComfyUI/output
+        self.assertNotIn("CreateVideo", classes)
+
+        self.ok(A.put_config(self.ctx, {"roots": [self.shows], "review_copy": True}))
+        self.render("sh020")
+        classes = {v["class_type"] for v in self.comfy.graphs[-1].values()}
+        self.assertIn("SaveVideo", classes)
+        self.assertIn(J.SAVER, classes)
+
+    def test_the_shipped_h3_graph_has_no_review_branch(self):
+        """It was removed on 2026-09-21: renders write the take and nothing else."""
+        g = J.graph_from(json.load(open(WORKFLOW, encoding="utf-8")))
+        classes = {v["class_type"] for v in g.values()}
+        self.assertIn(J.SAVER, classes)
+        self.assertNotIn("SaveVideo", classes)
+        self.assertNotIn("CreateVideo", classes)
+
     def test_queue_skip_redo(self):
         data = self.render("sh010", "sh020", note="first")
         self.assertEqual([q["shot"] for q in data["queued"]], ["sh010", "sh020"])

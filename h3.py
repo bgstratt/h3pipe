@@ -158,6 +158,10 @@ def main() -> int:
         rest = argv[1:]
         ep = os.path.abspath(rest.pop(0)) if rest and not rest[0].startswith("-") else None
         return h3edit.cmd_targets(ep, rest)
+    if argv and argv[0] == "target-from-workflow":
+        sys.path.insert(0, HERE)
+        import h3edit
+        return h3edit.cmd_target_from_workflow(argv[1:])
     if argv and argv[0] == "promote":
         if len(argv) < 2 or argv[1].startswith("-"):
             sys.exit("  !! usage: python h3.py promote <episode> [<shot>] [--all | --item ID ...] "

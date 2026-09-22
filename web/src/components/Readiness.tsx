@@ -13,6 +13,7 @@ import {
 import { findTarget, listDefaultTarget, seriesDefaultTarget, targetLabel } from "../lib/targets";
 import { useApp } from "../store";
 import type { MissingFile, Readiness, Resolution, Target, TargetList } from "../types";
+import { CustomTargets } from "./CustomTarget";
 import { FloatingWindow, type Rect } from "./FloatingWindow";
 import { useStatus } from "./hooks";
 import { useTargets } from "./Targets";
@@ -286,13 +287,13 @@ export function MissingWindow() {
     <FloatingWindow storageKey={RECT_KEY} defaultRect={defaultMissingRect} head={head} className="h3-missing-win" minW={320}>
       <div className="h3-scroll h3-pad h3-col">
         {!list && (error ? <div className="h3-note h3-note-err">Can't list the targets: {error}</div> : <div className="h3-muted">Loading…</div>)}
-        {list && (sel ? <TargetMissing list={list} id={sel} /> : <AllTargets video={video} />)}
+        {list && (sel ? <TargetMissing list={list} id={sel} /> : <AllTargets video={video} list={list} />)}
       </div>
     </FloatingWindow>
   );
 }
 
-function AllTargets({ video }: { video: Target[] }) {
+function AllTargets({ video, list }: { video: Target[]; list: TargetList }) {
   const anyReadiness = video.some((t) => t.readiness);
   if (!anyReadiness) {
     return <div className="h3-note">This server doesn't report readiness yet (GET /h3pipe/targets?ready=1). Update the h3pipe node pack, then Refresh.</div>;
@@ -324,6 +325,7 @@ function AllTargets({ video }: { video: Target[] }) {
         ✓ ready: every file is installed · ◐ degraded: renders, but slower or with a feature off · ✗ not ready: a needed
         file is missing, so its shots are skipped.
       </div>
+      <CustomTargets list={list} />
     </>
   );
 }

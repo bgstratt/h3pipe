@@ -284,6 +284,26 @@ class RoutesTest(ApiTest):
         d = self.ok(A.delete_workflow_install(self.ctx, {"target": H3}))
         self.assertFalse(d["deleted"])
 
+    def test_editing_the_saved_graph_is_noticed(self):
+        """The node check is cached per graph, not per workflow name: a saved
+        workflow keeps its name when it is edited."""
+        name = f"workflows/{TG.load_target(H3).binding.workflow_name}"
+        self.comfy.userdata[name] = repo_graph(H3)
+        first = self.ok(A.get_targets(self.ctx, {"kind": "video", "ready": "1"}))
+        h3 = next(t for t in first["targets"] if t["id"] == H3)
+        self.assertNotIn("SomeNodePackNobodyHas", h3["readiness"]["nodes_missing"])
+        # edit it, as saving on the canvas would, under the same name
+        saved = repo_graph(H3)
+        node = copy.deepcopy(next(n for n in saved["nodes"] if n["type"] == "H3SLAAttention"))
+        node.update(id=9999, type="SomeNodePackNobodyHas", inputs=[], outputs=[])
+        saved["nodes"].append(node)
+        self.comfy.userdata[name] = saved
+        A._GRAPHS.clear()
+        A._READY.clear()
+        again = self.ok(A.get_targets(self.ctx, {"kind": "video", "ready": "1"}))
+        h3 = next(t for t in again["targets"] if t["id"] == H3)
+        self.assertIn("SomeNodePackNobodyHas", h3["readiness"]["nodes_missing"])
+
     def test_readiness_judges_the_graph_in_force(self):
         """A saved graph with a node this ComfyUI doesn't have is what readiness
         reports on — not the repo's copy."""

@@ -47,6 +47,7 @@ try:
         raise ImportError(f"another module called 'targets' shadows the pipeline's "
                           f"({getattr(_spec, 'origin', None)})")
     import h3edit as E  # noqa: E402
+    import h3inspect as IN  # noqa: E402
     import h3jobs as J  # noqa: E402
     import h3peaks as PK  # noqa: E402
     import h3promote as P  # noqa: E402
@@ -55,7 +56,7 @@ try:
     import h3track as K  # noqa: E402
     import targets as TG  # noqa: E402
 except Exception as exc:                                  # pragma: no cover
-    E = J = K = P = PK = R = T = TG = None
+    E = IN = J = K = P = PK = R = T = TG = None
     IMPORT_ERROR = (f"h3pipe: can't import the pipeline from {HOME} "
                     f"({exc.__class__.__name__}: {exc}); set H3PIPE_HOME to the repo")
 
@@ -170,8 +171,16 @@ class Context:
 
 
 def handler(fn):
-    """Turn ApiError and stray exceptions into (status, {"error": ...})."""
+    """Turn ApiError and stray exceptions into (status, {"error": ...}).
+
+    Also scopes the custom targets a request may see (Phase 12): check_ep puts
+    the episode's show in force for this thread, and it must not outlive the
+    handler — the routes reuse threads, so the next request would inherit
+    another show's targets. Cleared here rather than in the route layer, so a
+    direct caller (the CLI, the tests) gets the same guarantee."""
     def wrapped(*args, **kw):
+        if TG is not None:
+            TG.clear_thread_roots()
         try:
             return fn(*args, **kw)
         except ApiError as e:
@@ -182,6 +191,9 @@ def handler(fn):
             if P is not None and isinstance(e, P.H.SourceError):
                 return e.status, dict({"error": str(e)}, **e.data)
             return 500, {"error": f"{e.__class__.__name__}: {e}"}
+        finally:
+            if TG is not None:
+                TG.clear_thread_roots()
     wrapped.__name__ = fn.__name__
     wrapped.__doc__ = fn.__doc__
     return wrapped
@@ -240,8 +252,33 @@ def load_roots(ctx: Context) -> list[str]:
     return [r for r in env.split(os.pathsep) if r.strip()]
 
 
+def load_config(ctx: Context) -> dict:
+    """The editor's config file, {} when there is none."""
+    p = config_path(ctx)
+    if not os.path.isfile(p):
+        return {}
+    try:
+        with open(p, encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, ValueError) as e:
+        raise ApiError(500, f"{p} is unreadable: {e}")
+    return data if isinstance(data, dict) else {}
+
+
+def review_copy(ctx: Context) -> bool:
+    """Whether a render also leaves the workflow's own copy in ComfyUI's output
+    folder (config `review_copy`, off by default).
+
+    Only a target whose binding keeps `review_nodes` has one at all
+    (minimax_h3_ref2va's SaveVideo / CreateVideo branch): every take is written
+    into the episode by the saver, so the second copy is a convenience for
+    watching in ComfyUI, and it is off unless asked for."""
+    return bool(load_config(ctx).get("review_copy", False))
+
+
 def config_json(ctx: Context) -> dict:
-    return {"roots": load_roots(ctx), "comfy": ctx.comfy_url, "version": CONFIG_VERSION}
+    return {"roots": load_roots(ctx), "comfy": ctx.comfy_url,
+            "review_copy": review_copy(ctx), "version": CONFIG_VERSION}
 
 
 def _real(p: str) -> str:
@@ -256,7 +293,13 @@ def _inside(path: str, root: str) -> bool:
 
 
 def check_ep(ctx: Context, ep) -> str:
-    """The episode folder `ep` (absolute, inside a configured root), or ApiError."""
+    """The episode folder `ep` (absolute, inside a configured root), or ApiError.
+
+    Validating it also puts that show's own targets in force for this thread
+    (Phase 12: `<show>/targets/<id>/target.json`), so every loader below —
+    planning, a retarget, readiness — sees them without being passed the root.
+    Only a folder that passed the checks above is registered, and the route
+    wrapper clears them before each handler."""
     if not ep or not isinstance(ep, str):
         raise ApiError(400, "ep is required: the episode's absolute folder path")
     if not os.path.isabs(ep):
@@ -267,7 +310,9 @@ def check_ep(ctx: Context, ep) -> str:
                             "(set them with PUT /h3pipe/config)")
     if not os.path.isdir(ep):
         raise ApiError(404, f"no episode folder at {ep}")
-    return os.path.abspath(ep)
+    ep = os.path.abspath(ep)
+    TG.add_thread_root(ep)
+    return ep
 
 
 def check_pass(v, default: str = DEFAULT_PASS) -> str:
@@ -333,7 +378,11 @@ def put_config(ctx: Context, body):
         a = os.path.abspath(r)
         if os.path.normcase(a) not in {os.path.normcase(c) for c in clean}:
             clean.append(a)
-    T.write_json(config_path(ctx), {"roots": clean, "version": CONFIG_VERSION})
+    keep = body.get("review_copy", load_config(ctx).get("review_copy", False))
+    if not isinstance(keep, bool):
+        raise ApiError(400, "review_copy must be true or false")
+    T.write_json(config_path(ctx), {"roots": clean, "review_copy": keep,
+                                    "version": CONFIG_VERSION})
     return 200, config_json(ctx)
 
 
@@ -573,7 +622,7 @@ def post_render(ctx: Context, body):
 
     result = E.queue_shots(ep, pass_, shots, template, ctx.comfy, base_for,
                            model_resolve=ctx.model_resolve, model_cache=ctx.model_cache,
-                           model_list=ctx.model_choices)
+                           model_list=ctx.model_choices, review_copy=review_copy(ctx))
     for q in result["queued"]:
         # "queued" even if the job has already finished: the saver sends its own event
         take_event(ctx, ep, T.get_take(ep, pass_, q["shot"], q["take"]), "queued")
@@ -900,7 +949,10 @@ def delete_override(ctx: Context, query: dict):
 @handler
 def get_targets(ctx: Context, query: dict):
     """Every video, image and audio target: id, kind, label, presets, and the
-    widgets its binding exposes (for pickers). `kind` narrows to one kind."""
+    widgets its binding exposes (for pickers). `kind` narrows to one kind; `ep`
+    adds that show's own targets (Phase 12)."""
+    if query.get("ep"):
+        check_ep(ctx, query.get("ep"))                    # registers its custom targets
     kind = query.get("kind") or None
     if kind is not None and kind not in TG.KINDS:
         raise ApiError(400, f"kind must be one of {', '.join(TG.KINDS)}, not {kind!r}")
@@ -992,6 +1044,140 @@ def delete_workflow_install(ctx: Context, query: dict):
     forget_graphs(ctx)
     return 200, {"ok": True, "target": t.id, "deleted": r["deleted"], "name": r["name"],
                  "graph": _graph_view(ctx, t)}
+
+
+# ---------------------------------------------------------------------------
+# custom targets from a workflow (Phase 12b)
+# ---------------------------------------------------------------------------
+
+@handler
+def get_workflows(ctx: Context, query: dict):
+    """The workflows saved in this ComfyUI, for the picker that turns one into a
+    target. Names only; `h3pipe/` copies and this repo's own are marked."""
+    try:
+        names = ctx.comfy.list_userdata("workflows")
+    except Exception as e:
+        raise ApiError(502, f"couldn't list ComfyUI's workflows: {e}")
+    mine = {t.binding.workflow_name for t in TG.list_targets()}
+    return 200, {"workflows": [{"name": n, "target": n in mine} for n in names]}
+
+
+@handler
+def post_targets_inspect(ctx: Context, body):
+    """Propose the target.json for a workflow (h3inspect). Read-only: it writes
+    nothing, and says what it could not work out (`ambiguous`, `warnings`)."""
+    body = body_dict(body)
+    ep = check_ep(ctx, body.get("ep")) if body.get("ep") else None
+    data = _workflow_data(ctx, body)
+    try:
+        info = ctx.comfy.object_info()
+    except Exception as e:
+        raise ApiError(502, f"ComfyUI didn't answer /object_info: {e}")
+    extra = {}
+    if ep:
+        try:
+            extra = J.series_model_families(ep)
+        except ValueError:
+            extra = {}
+    try:
+        out = IN.inspect_graph(data, info, ctx.model_list,
+                               target_id=_opt_str(body, "id") or "",
+                               label=_opt_str(body, "label") or "",
+                               workflow_name=_opt_str(body, "workflow") or "",
+                               extra=extra,
+                               series_cfg=J.series_config(ep) if ep else None)
+    except (IN.InspectError, ValueError) as e:
+        raise ApiError(400, str(e))
+    out["problems"] = out.get("problems") or []
+    out["can_save"] = not out["problems"]
+    return 200, out
+
+
+def _workflow_data(ctx: Context, body: dict) -> dict:
+    """The graph a request names: `workflow` (saved in ComfyUI) or `graph` (sent
+    with the request, for a file the editor read)."""
+    if isinstance(body.get("graph"), dict) and body["graph"]:
+        return body["graph"]
+    name = _opt_str(body, "workflow")
+    if not name:
+        raise ApiError(400, "give `workflow` (a name among ComfyUI's saved workflows) "
+                            "or `graph` (the workflow itself)")
+    try:
+        data = ctx.comfy.userdata(f"workflows/{name}")
+    except Exception as e:
+        raise ApiError(502, f"couldn't read workflows/{name} from ComfyUI: {e}")
+    if data is None:
+        raise ApiError(404, f"ComfyUI has no saved workflow called {name}")
+    return data
+
+
+@handler
+def put_targets_custom(ctx: Context, body):
+    """Save a show's own target (`<show>/targets/<id>/target.json`). Validated
+    first, against the workflow it names as a render would resolve it."""
+    body = body_dict(body)
+    ep = check_ep(ctx, body.get("ep"))
+    spec = body.get("target")
+    if spec is None and body.get("id") and "draft" in body:
+        # the small edit the editor makes after a probe render: stop being a
+        # draft (or go back to being one), without sending the whole target.json
+        if not isinstance(body["draft"], bool):
+            raise ApiError(400, "draft must be true or false")
+        try:
+            t = TG.load_target(str(body["id"]), root=ep)
+        except TG.TargetError as e:
+            raise ApiError(404, str(e))
+        if not t.custom:
+            raise ApiError(400, f"{t.id} is a built-in target, not this show's")
+        spec = dict(t.spec)
+        if body["draft"]:
+            spec["draft"] = True
+        else:
+            spec.pop("draft", None)
+    if not isinstance(spec, dict) or not spec:
+        raise ApiError(400, "target must be the target.json to save, as an object")
+    graph, info = None, None
+    try:
+        info = ctx.comfy.object_info()
+    except Exception:
+        info = None
+    name = ((spec.get("binding") or {}).get("workflow_name") or "")
+    if name:
+        try:
+            data = ctx.comfy.userdata(f"workflows/{name}")
+        except Exception:
+            data = None
+        if data is None:
+            data = None if not TG.repo_workflow(name) else J.load_graph(TG.repo_workflow(name))
+            graph = data
+        else:
+            graph = J.graph_from(data, name)
+    problems = IN.validate_spec(spec, graph, info)
+    if graph is None:
+        problems = [p for p in problems] + [
+            f"no workflow called {name} is saved in ComfyUI, so the binding can't be checked: "
+            f"save the graph there first (its name is binding.workflow_name)"]
+    if problems:
+        raise ApiError(400, "this target.json can't be used yet: " + problems[0],
+                       problems=problems)
+    path = IN.save_spec(ep, spec)
+    episode_event(ctx, ep)
+    return 200, {"ok": True, "id": spec["id"], "path": path,
+                 "draft": bool(spec.get("draft")),
+                 "targets": IN.custom_targets(ep)}
+
+
+@handler
+def delete_targets_custom(ctx: Context, query: dict):
+    """Remove a show's own target."""
+    ep = check_ep(ctx, query.get("ep"))
+    tid = query.get("id") or ""
+    if not tid:
+        raise ApiError(400, "id is required: the custom target to remove")
+    gone = IN.delete_spec(ep, tid)
+    if gone:
+        episode_event(ctx, ep)
+    return 200, {"ok": True, "id": tid, "deleted": gone, "targets": IN.custom_targets(ep)}
 
 
 def _workflow_target(tid):
@@ -1910,6 +2096,10 @@ ROUTES = [
     ("POST", "/h3pipe/assemble", post_assemble, "body"),
     ("GET", "/h3pipe/targets", get_targets, "query"),
     ("GET", "/h3pipe/models", get_models, "query"),
+    ("GET", "/h3pipe/workflows", get_workflows, "query"),
+    ("POST", "/h3pipe/targets/inspect", post_targets_inspect, "body"),
+    ("PUT", "/h3pipe/targets/custom", put_targets_custom, "body"),
+    ("DELETE", "/h3pipe/targets/custom", delete_targets_custom, "query"),
     ("POST", "/h3pipe/workflow/install", post_workflow_install, "body"),
     ("DELETE", "/h3pipe/workflow/install", delete_workflow_install, "query"),
     ("GET", "/h3pipe/refs", get_refs, "query"),

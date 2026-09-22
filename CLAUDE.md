@@ -6,7 +6,9 @@ Script-to-episode pipeline for AI video on a local ComfyUI. Authored inputs are
 **Current work: `docs/PLAN.md`** — a shot/take editor inside ComfyUI (takes,
 overrides, cut, then the UI), followed by making the pipeline model-agnostic (story
 IR + targets). Read it before changing `h3build.py`, `h3render.py`, `kreagen.py` or
-`comfy_nodes/`, and follow its phase order and exit checks.
+`comfy_nodes/`, and follow its phase order and exit checks. Phases 11 and 12 are in:
+a target's workflow can be handed to ComfyUI and back, and a show can have targets of
+its own (data only, proposed from a workflow by `h3inspect.py`).
 
 ## Layout
 
@@ -24,6 +26,9 @@ IR + targets). Read it before changing `h3build.py`, `h3render.py`, `kreagen.py`
 - `comfy_nodes/h3pipe_api.py` + `h3pipe_routes.py` — the editor's HTTP API (`docs/API.md`);
   `web/` — the editor UI (React/Vite), built into `comfy_nodes/web/h3pipe-editor.js`
 - `kreagen.py`, `mksheet.py` — reference images
+- `h3inspect.py` — reads a ComfyUI workflow and proposes the `target.json` that drives it
+  (a show's own targets live in `<show>/targets/<id>/target.json`; `targets/generic/` holds
+  the `builtin:` code such a target uses instead of shipping Python)
 - `h3align.py` — times the script against a dialogue recording
 - `h3assemble.py` — review cut (ffmpeg)
 - `h3peaks.py` — a media file's sound: has it any, duration, waveform peaks (the editor's

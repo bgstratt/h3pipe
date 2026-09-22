@@ -18,9 +18,11 @@ episode target (as built)** below. Open items: the per-target lists under Phase 
 Phase 9 editor items. Phase 10 (wardrobe as subject variants) is in, 10a and 10b both; what is
 left of it is a look, not code — one variant view generated on each of the three paths, and the
 A/B behind the H3 headcount sentence.
-Phase 11 (the graph handoff: which workflow each target renders, and copying one into ComfyUI
-to edit on the canvas) is in as of 2026-09-21. **Phase 12** (custom targets from any ComfyUI
-workflow, no Python) is planned, in four steps — see its entry at the end of **Phases**.
+Phases 11 and 12 are in as of 2026-09-21: a target's workflow can be handed to ComfyUI for
+editing and taken back (and the editor says which copy is in force), and a show can have
+**targets of its own** — `<show>/targets/<id>/target.json`, data only, proposed from any saved
+ComfyUI workflow by `h3inspect.py` and rendered by the builtin prose compile. 12d (subject
+reference sheets for such a target) is deferred on purpose.
 This is the working plan for the next round of development. `CLAUDE.md` points here.
 
 ## Goals
@@ -1400,8 +1402,56 @@ same widget values); nothing would say so if they stopped being.
   the editor and its sidecar records the new sampler; revert; render again and it is back.
   `python -m pytest` green — this phase generates no build output, so the goldens must not move.
 
-**Phase 12 — custom targets: any ComfyUI workflow, no Python** (contract written before building,
-2026-09-21)
+**Phase 12 — custom targets: any ComfyUI workflow, no Python** ✅ 12a, 12b and 12c done
+2026-09-21; 12d deferred as planned (as built in `docs/API.md`, "Phase 12: a show's own
+targets, from any ComfyUI workflow"; the editor's side in `docs/EDITOR.md`, "Your own model,
+from your own workflow"). What the contract left open, and what the build found:
+
+- **12a's exit check passed exactly.** `tests/fixtures/custom_target/ti2v_custom` is
+  `wan22_ti2v` re-expressed as data alone (no `code`, no Python, `binding.inputs` for its
+  keyframe). Both passes compile shot for shot identically — every entry, every default — and
+  only the doc's `target` differs. The one report difference is intentional: the dialogue
+  warning names the target's own short label instead of "Wan".
+- **The move was a refactor of shipped code, and the goldens held.**
+  `targets/video/wan/common.py` became `targets/generic/video_prose.py`; the Wan file is now
+  a 40-line binding that supplies Wan's wording through a `Style`. The silent-shot warnings
+  and the shotlist's default `audio_policy` are read from the target now, not hardcoded.
+- **[differs] A custom target that takes a built-in's id is ignored, not an error.** The
+  contract said 400; that is right for *saving* one (the route refuses it) but wrong for
+  loading, where raising would break rendering an otherwise fine episode over a stray
+  folder. The built-in wins and `TG.shadowed_custom(root)` finds the folder for a warning.
+- **[added] Where a show's roots come into force.** Threading a `root` through every
+  `load_target` call was too invasive (the compile modules load their own target at import
+  time), so `TG.use_roots(...)` / `TG.add_thread_root(root)` put a show in force for the
+  current thread and the entry points set it: `h3build` (`-o`), `h3render` (each episode),
+  `h3.py targets <ep>`, and `check_ep` in the routes. The `handler` decorator clears them
+  around every handler, so a pooled thread can't serve one show's targets to another
+  request. Targets are cached per folder, so two shows may each have a `my_wan`.
+- **[settled] Detection is good enough to trust, and honest where it isn't.** Measured
+  against the shipped targets' own hand-written bindings: 17/17 params for `wan22_ti2v`,
+  18/18 for `wan22_i2v`, 15/15 for `minimax_h3_fl2va`, 18/19 for `wan22_vace`, 12/15 for
+  `ltx2`. The misses are multi-widget specs and one model-specific knob; `unbound` now lists
+  every widget no param covers, so what stays fixed is visible rather than surprising.
+- **[added] Two ComfyUI facts the build turned up.** A combo widget comes in two shapes
+  (`[[choices], {...}]` for a file list, `["COMBO", {"options": [...]}]` for an enum) and
+  missing the second made whole nodes invisible. A widget's own `step` / `default` carry the
+  real frame grid: `length.step` gave 4 for Wan, 8 for LTX and 17 for H3, matching what the
+  shipped targets declare by hand.
+- **[added] Validation runs against the prepared graph.** `binding.params.fps` and friends
+  point at `H3SaveShot`, which only exists after the saver swap, so `validate_spec` runs
+  `prepare_saver` first and then resolves every spec the way a render does.
+- **[differs] `draft` is cleared by a person, not by a watcher.** The contract implied the
+  probe render would promote the target. Renders are asynchronous, so the editor queues the
+  probe, the author looks at the take, and **Enable for shots** flips the flag (`PUT
+  /h3pipe/targets/custom` with `{ep, id, draft}`). Less magic, and the take gets looked at.
+- **Tests:** 782 Python (50 in `tests/test_phase12.py`) and 418 web (8 new), goldens
+  unmoved. Live: `h3.py target-from-workflow minimax_h3_r2v_SLA.json` (a graph of this
+  machine's, not one of ours) proposed a working target with 17 widgets bound, its frame grid
+  read as 17k+5 — which is H3's real grid.
+- **Left:** the wizard doesn't yet offer a two-stage LoRA chain or a list-valued param (it
+  binds the first widget and says so); `frames.max` stays a guess the probe render tests.
+
+The contract as written before building:
 
 A user's own graph should become a selectable target without touching the repo. Four decisions
 taken 2026-09-21, before any code:

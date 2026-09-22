@@ -186,8 +186,12 @@ def main() -> int:
                     help="also write each shot as a PNG sequence (16-50 GB per episode)")
     fr.add_argument("--no-frames", dest="save_frames", action="store_false",
                     help="mp4 and wav only, no PNG sequence")
-    ap.add_argument("--no-review-copy", action="store_true",
-                    help="drop the CreateVideo/SaveVideo review copy in ComfyUI/output")
+    rc = ap.add_mutually_exclusive_group()
+    rc.add_argument("--review-copy", dest="review_copy", action="store_true", default=False,
+                    help="also leave the workflow's own SaveVideo copy in ComfyUI/output "
+                         "(off by default: the take is already saved in the episode)")
+    rc.add_argument("--no-review-copy", dest="review_copy", action="store_false",
+                    help=argparse.SUPPRESS)
     ap.add_argument("--strip-meta", action="store_true", help=argparse.SUPPRESS)
     ap.add_argument("--timeout", type=int, default=3600,
                     help="seconds to wait per shot (default %(default)s)")
@@ -209,6 +213,9 @@ def main() -> int:
         ap.error("give one or more episode folders, or --all DIR")
 
     loras = [l for spec in args.lora for l in parse_lora(spec)] if args.lora else None
+    # each episode's show may have targets of its own (<show>/targets/<id>/)
+    for r in roots:
+        TG.add_thread_root(r)
     if args.target:
         try:
             J.check_video_target(args.target)
@@ -229,7 +236,7 @@ def main() -> int:
 
     def base_for(target_id: str):
         if target_id not in workflows:
-            t = TG.load_target(target_id, "video")
+            t = TG.load_target(target_id, "video", root=roots[0] if roots else None)
             b = t.binding
             explicit = args.workflow if (args.workflow and (
                 target_id == wf_target or (wf_target is None and target_id == default_id))) \
@@ -346,7 +353,7 @@ def main() -> int:
     print(f"  {n_todo} shot(s), {total_frames / fps:.1f}s of video · comfy {args.comfy}\n")
 
     gkw = dict(panel_mode=args.panel_mode, save_frames=args.save_frames,
-               review_copy=not args.no_review_copy, strip_meta=args.strip_meta)
+               review_copy=args.review_copy, strip_meta=args.strip_meta)
     if args.list:
         return 0
     if args.dry_run:

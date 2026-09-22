@@ -1,8 +1,23 @@
 """
-What the three Wan 2.2 targets share: the compile from the story IR to
-shotlist entries, the ref slots, and the graph helpers. Each target's own
-compile.py (wan22_i2v, wan22_ti2v, wan22_vace) binds these to its target.json
-and adds its graph surgery (patch_graph) and, for VACE, the reference image.
+builtin:video_prose — the compile for a video target whose prompt is one
+paragraph of prose: the story IR to shotlist entries, the ref slots, and the
+graph helpers. A target.json says `"code": "builtin:video_prose"` and ships no
+Python; the three Wan 2.2 targets bind it to their own wording and graph
+surgery through targets/video/wan/common.py, and a custom target made from a
+user's own workflow (docs/PLAN.md Phase 12) uses it as it is.
+
+What a target brings to it:
+
+    recipe.prompt         "prose" (the ltx2 writer: sound and spoken lines) or
+                          "prose_silent" (the Wan writer: dialogue as acting).
+                          Unset: chosen from whether the target makes sound.
+    capabilities.audio    "none" makes every shot silent, warns once, and
+                          switches the prompt to the silent writer.
+    recipe.keyframes      which ends a shot may pin; `keyframe_required` makes
+                          one a blocker (Wan 14B I2V's first frame).
+    recipe.reference_image  compose the shot's subjects into one picture (VACE).
+    binding.inputs        where a keyframe's LoadImage is, declaratively, for a
+                          target with no patch_graph of its own (`keyframe_inputs`).
 
 An entry carries the neutral keys every target's entries do (id, sequence,
 subjects, background, size, length, seed, steps, audio_policy, prompt, plus
@@ -12,15 +27,16 @@ recipe has a `reference_image` (VACE) `panels`: the shot's subjects, in order,
 each {"subject", "kind", "path", "view"?} (the plate only when the recipe
 asks for it). Paths are the series config's (the picked, live files).
 
-Audio: Wan makes none (target.json `capabilities.audio: "none"`). Every
-policy renders `silent` (recipe.policies ["silent"], the fallback from any
-other), so each entry has audio_intent / audio_note and each take says so;
-dialogue shots get one `--check` warning (no audio or lip-sync on Wan: the
-lines are acted silently, prompt.acting).
+Audio: a target that makes none (`capabilities.audio: "none"`, the Wan
+targets) renders every policy as `silent` (recipe.policies ["silent"], the
+fallback from any other), so each entry has audio_intent / audio_note and each
+take says so; dialogue shots get one `--check` warning (the lines are acted
+silently, prompt.acting). A target that does make sound keeps the intent it
+was asked for.
 
-Sizes: a Wan target renders its own presets' sizes unless it is the series
-target: another model's pass block (H3's 448x256 proxy) is far below the
-480p/720p Wan was trained at, so it lends no size.
+Sizes: a target renders its own presets' sizes unless it is the series target:
+another model's pass block (H3's 448x256 proxy) is far below the 480p/720p Wan
+was trained at, so it lends no size.
 
 Stdlib only.
 """
@@ -28,6 +44,7 @@ from __future__ import annotations
 
 import os
 import re
+from dataclasses import dataclass
 
 import targets as TG
 from h3core import ir
@@ -35,10 +52,55 @@ from h3core.ir import stable_seed
 from h3core.speech import RATE_CEILING, SPEECH_RATE, forced_rate, pacing, speech_seconds
 from targets.video.ltx2.compile import _duration, _lines, put_model_duration, shotlist_extra
 
-from .prompt import build_prompt
-
 SILENT = "silent"
 PLATE = "plate"                      # the absent-set name of the plate
+
+
+@dataclass
+class Style:
+    """What a prose target words its own way. `build_prompt(shot, seq,
+    series_cfg)` writes the paragraph; `silent_dialogue` is the `--check`
+    warning for dialogue a silent model can't voice, with {n} and {ids}
+    ("" for none). Defaults come from the target (style_for)."""
+    build_prompt: object
+    silent_dialogue: str = ("{n} dialogue shot(s): no audio or lip-sync on {short} "
+                            "(the lines are acted silently): {ids}")
+
+
+def prose_writer(silent: bool):
+    """The prose writer a target gets: the Wan one (dialogue as silent acting)
+    for a model that makes no sound, else the ltx2 one (soundscape and spoken
+    lines). Imported on use, so neither target package is needed until then."""
+    if silent:
+        from targets.video.wan.prompt import build_prompt as fn
+    else:
+        from targets.video.ltx2.prompt import build_prompt as fn
+    return fn
+
+
+def style_for(target, style: "Style | None" = None) -> Style:
+    """`style`, else the one the target's own data asks for. A target that makes
+    no sound gets the silent writer whatever else it says (a soundscape and
+    quoted lines would describe something it can't render); `recipe.prompt:
+    "prose_silent"` asks for that writer on a target that *can* make sound —
+    a picture-only graph whose audio comes from the edit."""
+    if style is not None:
+        return style
+    silent = (not makes_sound(target)
+              or (target.recipe.get("prompt") or "").strip() == "prose_silent")
+    return Style(prose_writer(silent))
+
+
+def makes_sound(target) -> bool:
+    """Whether this target renders audio at all (`capabilities.audio`)."""
+    return (target.capabilities() or {}).get("audio", "generate") != "none"
+
+
+def default_policy(target) -> str:
+    """The `audio_policy` a shotlist's defaults carry: what this target renders
+    when nothing asks for anything else."""
+    policies = target.policies
+    return "generate" if "generate" in policies else (policies[0] if policies else SILENT)
 
 
 def keyframe_path(recipe: dict, shot_id: str, end: str) -> str:
@@ -57,8 +119,10 @@ class Ctx:
     the refs the shots need. `absent` names refs to compile WITHOUT (render
     anyway): subject ids and/or "plate"."""
 
-    def __init__(self, target, series_cfg: dict, pass_: str, absent=None):
+    def __init__(self, target, series_cfg: dict, pass_: str, absent=None, style=None):
         self.target, self.series_cfg, self.pass_ = target, series_cfg, pass_
+        self.style = style_for(target, style)
+        self.silent = not makes_sound(target)
         self.recipe = target.recipe
         self.preset = target.preset(pass_, series_cfg)
         self.fps = target.template.fps_for(series_cfg)
@@ -224,7 +288,7 @@ def compile_entry(ctx: Ctx, sq: ir.Sequence, shot: ir.Shot, ep_id: str) -> dict:
         "seed": stable_seed(ep_id, sq.id, shot.id),
         "steps": int(TG.layered(layers, "steps", ctx.preset.steps, present=True)),
         "audio_policy": policy,
-        "prompt": build_prompt(shot, sq, series_cfg),
+        "prompt": ctx.style.build_prompt(shot, sq, series_cfg),
         "negative": ctx.preset.extra.get("negative", ""),
         "keyframes": {end: keyframe_path(ctx.recipe, shot.id, end)
                       for end in TG.keyframe_ends(ctx.recipe, shot, sq)},
@@ -257,8 +321,8 @@ def _ids(ids: list[str], n: int = 8) -> str:
 
 
 def compile_episode(target, story: ir.Episode, series_cfg: dict, pass_: str,
-                    only: set[str] | None = None, absent=None) -> tuple[dict, dict]:
-    ctx = Ctx(target, series_cfg, pass_, absent)
+                    only: set[str] | None = None, absent=None, style=None) -> tuple[dict, dict]:
+    ctx = Ctx(target, series_cfg, pass_, absent, style)
     shots_out, seqs = [], 0
     for sq in story.sequences:
         mine = [s for s in sq.shots if only is None or s.id in only]
@@ -274,20 +338,21 @@ def compile_episode(target, story: ir.Episode, series_cfg: dict, pass_: str,
         "target": target.id,
         "defaults": {"width": ctx.width, "height": ctx.height, "fps": ctx.fps,
                      "steps": p.steps, "model": p.model, "lora": p.lora,
-                     "audio_policy": SILENT, "master_track": ctx.recording, **extra},
+                     "audio_policy": default_policy(target),
+                     "master_track": ctx.recording, **extra},
         "subjects": {s: {"kind": e.get("kind", "character"), "sheet": e.get("sheet", ""),
                          "voice_sample": e.get("voice_sample", "")}
                      for s, e in series_cfg["subjects"].items()},
         "shots": shots_out,
     }
     r = target.recipe
-    if shots_out:
+    if shots_out and ctx.silent:
         asked = ", ".join(f"{k} x{n}" for k, n in sorted(ctx.intents.items()))
         ctx.warnings.append(f"{target.short} makes no sound: {len(shots_out)} shot(s) render "
                             f"silent (asked for {asked}); lay the soundtrack in at the edit")
-    if ctx.talking:
-        ctx.warnings.append(f"{len(ctx.talking)} dialogue shot(s): no audio or lip-sync on Wan "
-                            f"(the lines are acted silently): {_ids(ctx.talking)}")
+    if ctx.talking and ctx.silent and ctx.style.silent_dialogue:
+        ctx.warnings.append(ctx.style.silent_dialogue.format(
+            n=len(ctx.talking), short=target.short, ids=_ids(ctx.talking)))
     for end, why in (r.get("keyframe_required") or {}).items():
         if shots_out:
             ctx.warnings.append(f"{target.short} renders from a first frame: each of these "
@@ -322,7 +387,8 @@ def compile_episode(target, story: ir.Episode, series_cfg: dict, pass_: str,
     return doc, report
 
 
-def compile_shot(target, shot_ir: ir.Shot, series_cfg: dict, preset, ctx=None) -> dict:
+def compile_shot(target, shot_ir: ir.Shot, series_cfg: dict, preset, ctx=None,
+                 style=None) -> dict:
     """One shot's entry, as compile_episode builds it. `ctx` needs
     {"episode": ir.Episode}, and may give {"absent": [subject ids, "plate"]}."""
     ctx = dict(ctx or {})
@@ -330,26 +396,28 @@ def compile_shot(target, shot_ir: ir.Shot, series_cfg: dict, preset, ctx=None) -
     if story is None:
         raise ValueError("compile_shot needs ctx['episode'], the shot's ir.Episode")
     pass_ = preset if isinstance(preset, str) else preset.name
-    doc, _ = compile_episode(target, story, series_cfg, pass_, {shot_ir.id}, ctx.get("absent"))
+    doc, _ = compile_episode(target, story, series_cfg, pass_, {shot_ir.id}, ctx.get("absent"),
+                             style)
     if not doc["shots"]:
         raise ValueError(f"{shot_ir.id} is not in episode {story.id}")
     return doc["shots"][0]
 
 
 def compile_without(target, story: ir.Episode, series_cfg: dict, pass_: str,
-                    entry: dict, missing: list[dict]) -> dict:
+                    entry: dict, missing: list[dict], style=None) -> dict:
     """`entry` compiled again as if the `missing` refs (ref_slots dicts)
     didn't exist: they leave the reference image (the prose describes every
     subject in words anyway). ValueError when the build is out of date."""
     shot_ir = next((s for s in story.shots() if s.id == entry["id"]), None)
     if shot_ir is None:
         raise ValueError(f"{entry['id']} is not in shots.json")
-    if compile_shot(target, shot_ir, series_cfg, pass_, {"episode": story}) != entry:
+    if compile_shot(target, shot_ir, series_cfg, pass_, {"episode": story}, style) != entry:
         raise ValueError(f"{entry['id']}: the build is out of date (rebuild the episode)")
     absent = {r["subject"] for r in missing if r.get("subject")}
     if any(r.get("location") for r in missing):
         absent.add(PLATE)
-    return compile_shot(target, shot_ir, series_cfg, pass_, {"episode": story, "absent": absent})
+    return compile_shot(target, shot_ir, series_cfg, pass_,
+                        {"episode": story, "absent": absent}, style)
 
 
 def required_refs(target, shot_ir: ir.Shot, series_cfg: dict, ctx=None) -> list[TG.RefRequest]:
@@ -445,3 +513,47 @@ def split_stages(target, g: dict, job) -> int:
 
 def abs_path(root: str, p: str) -> str:
     return p if os.path.isabs(p) else os.path.join(root, p)
+
+
+# ---------------------------------------------------------------------------
+# keyframes without code (target.json `binding.inputs`)
+# ---------------------------------------------------------------------------
+
+def keyframe_inputs(target) -> dict:
+    """target.json `binding.inputs`: {role: where that keyframe goes}, the
+    declarative form of the graph surgery a target would otherwise write in
+    Python. One entry per role the recipe's `keyframes` names:
+
+        "first": {"class_type": "LoadImage", "field": "image",
+                  "title": "First frame",            # when the class repeats
+                  "disconnect": {"class_type": "Wan22ImageToVideoLatent",
+                                 "input": "start_image"}}
+
+    `field` defaults to "image". `disconnect` is what to unwire when the shot
+    has no such keyframe (a list, or one entry): the node input is popped, so
+    the graph renders from the prompt alone and `prune` drops the loader.
+    Without it, every input the loader feeds is popped instead."""
+    return dict((target.spec.get("binding") or {}).get("inputs") or {})
+
+
+def patch_graph(target, g: dict, job, inputs: dict) -> None:
+    """Put each staged keyframe into the node `binding.inputs` names, and
+    unwire the ones the shot hasn't got. A target that declares no inputs (a
+    text-to-video graph) needs nothing here."""
+    for role, spec in keyframe_inputs(target).items():
+        if not isinstance(spec, dict) or not spec.get("class_type"):
+            raise ValueError(f"{target.id}: binding.inputs.{role} needs a class_type")
+        node = one(g, spec["class_type"], spec.get("title"), target.id)
+        name = (inputs or {}).get(role)
+        if name:
+            g[node]["inputs"][spec.get("field", "image")] = name
+            continue
+        drop = spec.get("disconnect")
+        drop = [drop] if isinstance(drop, dict) else list(drop or [])
+        if drop:
+            for d in drop:
+                for nid in of(g, d["class_type"], d.get("title")):
+                    g[nid]["inputs"].pop(d["input"], None)
+        else:
+            for nid, inp in consumers(g, node):
+                g[nid]["inputs"].pop(inp, None)

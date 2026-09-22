@@ -282,42 +282,6 @@
       "take": 1
      }
     },
-    "43": {
-     "_meta": {
-      "title": "Review copy"
-     },
-     "class_type": "CreateVideo",
-     "inputs": {
-      "audio": [
-       "41",
-       0
-      ],
-      "bit_depth": 8,
-      "codec": "none",
-      "color_space": "sRGB",
-      "fps": 24,
-      "images": [
-       "40",
-       0
-      ]
-     }
-    },
-    "44": {
-     "_meta": {
-      "title": "Daily"
-     },
-     "class_type": "SaveVideo",
-     "inputs": {
-      "codec": "auto",
-      "filename_prefix": "video/H3_shot",
-      "format": "auto",
-      "format.codec": "auto",
-      "video": [
-       "43",
-       0
-      ]
-     }
-    },
     "5": {
      "_meta": {
       "title": "Text encoder"
@@ -775,42 +739,6 @@
       "sidecar": "renders/sh020/sh020_t01.json",
       "subfolder": "renders",
       "take": 1
-     }
-    },
-    "43": {
-     "_meta": {
-      "title": "Review copy"
-     },
-     "class_type": "CreateVideo",
-     "inputs": {
-      "audio": [
-       "41",
-       0
-      ],
-      "bit_depth": 8,
-      "codec": "none",
-      "color_space": "sRGB",
-      "fps": 24,
-      "images": [
-       "40",
-       0
-      ]
-     }
-    },
-    "44": {
-     "_meta": {
-      "title": "Daily"
-     },
-     "class_type": "SaveVideo",
-     "inputs": {
-      "codec": "auto",
-      "filename_prefix": "video/H3_shot",
-      "format": "auto",
-      "format.codec": "auto",
-      "video": [
-       "43",
-       0
-      ]
      }
     },
     "5": {
@@ -1314,42 +1242,6 @@
       "take": 1
      }
     },
-    "43": {
-     "_meta": {
-      "title": "Review copy"
-     },
-     "class_type": "CreateVideo",
-     "inputs": {
-      "audio": [
-       "41",
-       0
-      ],
-      "bit_depth": 8,
-      "codec": "none",
-      "color_space": "sRGB",
-      "fps": 24,
-      "images": [
-       "40",
-       0
-      ]
-     }
-    },
-    "44": {
-     "_meta": {
-      "title": "Daily"
-     },
-     "class_type": "SaveVideo",
-     "inputs": {
-      "codec": "auto",
-      "filename_prefix": "video/H3_shot",
-      "format": "auto",
-      "format.codec": "auto",
-      "video": [
-       "43",
-       0
-      ]
-     }
-    },
     "5": {
      "_meta": {
       "title": "Text encoder"
@@ -1823,42 +1715,6 @@
       "take": 1
      }
     },
-    "43": {
-     "_meta": {
-      "title": "Review copy"
-     },
-     "class_type": "CreateVideo",
-     "inputs": {
-      "audio": [
-       "41",
-       0
-      ],
-      "bit_depth": 8,
-      "codec": "none",
-      "color_space": "sRGB",
-      "fps": 24,
-      "images": [
-       "40",
-       0
-      ]
-     }
-    },
-    "44": {
-     "_meta": {
-      "title": "Daily"
-     },
-     "class_type": "SaveVideo",
-     "inputs": {
-      "codec": "auto",
-      "filename_prefix": "video/H3_shot",
-      "format": "auto",
-      "format.codec": "auto",
-      "video": [
-       "43",
-       0
-      ]
-     }
-    },
     "5": {
      "_meta": {
       "title": "Text encoder"
@@ -2325,42 +2181,6 @@
       "sidecar": "renders/sh050/sh050_t01.json",
       "subfolder": "renders",
       "take": 1
-     }
-    },
-    "43": {
-     "_meta": {
-      "title": "Review copy"
-     },
-     "class_type": "CreateVideo",
-     "inputs": {
-      "audio": [
-       "41",
-       0
-      ],
-      "bit_depth": 8,
-      "codec": "none",
-      "color_space": "sRGB",
-      "fps": 24,
-      "images": [
-       "40",
-       0
-      ]
-     }
-    },
-    "44": {
-     "_meta": {
-      "title": "Daily"
-     },
-     "class_type": "SaveVideo",
-     "inputs": {
-      "codec": "auto",
-      "filename_prefix": "video/H3_shot",
-      "format": "auto",
-      "format.codec": "auto",
-      "video": [
-       "43",
-       0
-      ]
      }
     },
     "5": {
@@ -2856,42 +2676,6 @@
       "take": 1
      }
     },
-    "43": {
-     "_meta": {
-      "title": "Review copy"
-     },
-     "class_type": "CreateVideo",
-     "inputs": {
-      "audio": [
-       "41",
-       0
-      ],
-      "bit_depth": 8,
-      "codec": "none",
-      "color_space": "sRGB",
-      "fps": 24,
-      "images": [
-       "40",
-       0
-      ]
-     }
-    },
-    "44": {
-     "_meta": {
-      "title": "Daily"
-     },
-     "class_type": "SaveVideo",
-     "inputs": {
-      "codec": "auto",
-      "filename_prefix": "video/H3_shot",
-      "format": "auto",
-      "format.codec": "auto",
-      "video": [
-       "43",
-       0
-      ]
-     }
-    },
     "5": {
      "_meta": {
       "title": "Text encoder"
@@ -3375,42 +3159,6 @@
       "sidecar": "renders/sh110/sh110_t01.json",
       "subfolder": "renders",
       "take": 1
-     }
-    },
-    "43": {
-     "_meta": {
-      "title": "Review copy"
-     },
-     "class_type": "CreateVideo",
-     "inputs": {
-      "audio": [
-       "41",
-       0
-      ],
-      "bit_depth": 8,
-      "codec": "none",
-      "color_space": "sRGB",
-      "fps": 24,
-      "images": [
-       "40",
-       0
-      ]
-     }
-    },
-    "44": {
-     "_meta": {
-      "title": "Daily"
-     },
-     "class_type": "SaveVideo",
-     "inputs": {
-      "codec": "auto",
-      "filename_prefix": "video/H3_shot",
-      "format": "auto",
-      "format.codec": "auto",
-      "video": [
-       "43",
-       0
-      ]
      }
     },
     "5": {
@@ -3899,42 +3647,6 @@
       "take": 1
      }
     },
-    "43": {
-     "_meta": {
-      "title": "Review copy"
-     },
-     "class_type": "CreateVideo",
-     "inputs": {
-      "audio": [
-       "41",
-       0
-      ],
-      "bit_depth": 8,
-      "codec": "none",
-      "color_space": "sRGB",
-      "fps": 24,
-      "images": [
-       "40",
-       0
-      ]
-     }
-    },
-    "44": {
-     "_meta": {
-      "title": "Daily"
-     },
-     "class_type": "SaveVideo",
-     "inputs": {
-      "codec": "auto",
-      "filename_prefix": "video/H3_shot",
-      "format": "auto",
-      "format.codec": "auto",
-      "video": [
-       "43",
-       0
-      ]
-     }
-    },
     "5": {
      "_meta": {
       "title": "Text encoder"
@@ -4401,42 +4113,6 @@
       "sidecar": "renders/sh130/sh130_t01.json",
       "subfolder": "renders",
       "take": 1
-     }
-    },
-    "43": {
-     "_meta": {
-      "title": "Review copy"
-     },
-     "class_type": "CreateVideo",
-     "inputs": {
-      "audio": [
-       "41",
-       0
-      ],
-      "bit_depth": 8,
-      "codec": "none",
-      "color_space": "sRGB",
-      "fps": 24,
-      "images": [
-       "40",
-       0
-      ]
-     }
-    },
-    "44": {
-     "_meta": {
-      "title": "Daily"
-     },
-     "class_type": "SaveVideo",
-     "inputs": {
-      "codec": "auto",
-      "filename_prefix": "video/H3_shot",
-      "format": "auto",
-      "format.codec": "auto",
-      "video": [
-       "43",
-       0
-      ]
      }
     },
     "5": {
@@ -4907,42 +4583,6 @@
       "take": 1
      }
     },
-    "43": {
-     "_meta": {
-      "title": "Review copy"
-     },
-     "class_type": "CreateVideo",
-     "inputs": {
-      "audio": [
-       "41",
-       0
-      ],
-      "bit_depth": 8,
-      "codec": "none",
-      "color_space": "sRGB",
-      "fps": 24,
-      "images": [
-       "40",
-       0
-      ]
-     }
-    },
-    "44": {
-     "_meta": {
-      "title": "Daily"
-     },
-     "class_type": "SaveVideo",
-     "inputs": {
-      "codec": "auto",
-      "filename_prefix": "video/H3_shot",
-      "format": "auto",
-      "format.codec": "auto",
-      "video": [
-       "43",
-       0
-      ]
-     }
-    },
     "5": {
      "_meta": {
       "title": "Text encoder"
@@ -5402,42 +5042,6 @@
       "take": 1
      }
     },
-    "43": {
-     "_meta": {
-      "title": "Review copy"
-     },
-     "class_type": "CreateVideo",
-     "inputs": {
-      "audio": [
-       "41",
-       0
-      ],
-      "bit_depth": 8,
-      "codec": "none",
-      "color_space": "sRGB",
-      "fps": 24,
-      "images": [
-       "40",
-       0
-      ]
-     }
-    },
-    "44": {
-     "_meta": {
-      "title": "Daily"
-     },
-     "class_type": "SaveVideo",
-     "inputs": {
-      "codec": "auto",
-      "filename_prefix": "video/H3_shot",
-      "format": "auto",
-      "format.codec": "auto",
-      "video": [
-       "43",
-       0
-      ]
-     }
-    },
     "5": {
      "_meta": {
       "title": "Text encoder"
@@ -5895,42 +5499,6 @@
       "sidecar": "renders/sh210/sh210_t01.json",
       "subfolder": "renders",
       "take": 1
-     }
-    },
-    "43": {
-     "_meta": {
-      "title": "Review copy"
-     },
-     "class_type": "CreateVideo",
-     "inputs": {
-      "audio": [
-       "41",
-       0
-      ],
-      "bit_depth": 8,
-      "codec": "none",
-      "color_space": "sRGB",
-      "fps": 24,
-      "images": [
-       "40",
-       0
-      ]
-     }
-    },
-    "44": {
-     "_meta": {
-      "title": "Daily"
-     },
-     "class_type": "SaveVideo",
-     "inputs": {
-      "codec": "auto",
-      "filename_prefix": "video/H3_shot",
-      "format": "auto",
-      "format.codec": "auto",
-      "video": [
-       "43",
-       0
-      ]
      }
     },
     "5": {
@@ -6438,42 +6006,6 @@
       "take": 1
      }
     },
-    "43": {
-     "_meta": {
-      "title": "Review copy"
-     },
-     "class_type": "CreateVideo",
-     "inputs": {
-      "audio": [
-       "41",
-       0
-      ],
-      "bit_depth": 8,
-      "codec": "none",
-      "color_space": "sRGB",
-      "fps": 24,
-      "images": [
-       "40",
-       0
-      ]
-     }
-    },
-    "44": {
-     "_meta": {
-      "title": "Daily"
-     },
-     "class_type": "SaveVideo",
-     "inputs": {
-      "codec": "auto",
-      "filename_prefix": "video/H3_shot",
-      "format": "auto",
-      "format.codec": "auto",
-      "video": [
-       "43",
-       0
-      ]
-     }
-    },
     "5": {
      "_meta": {
       "title": "Text encoder"
@@ -6764,7 +6296,7 @@
      "class_type": "MiniMaxH3SigmaShift",
      "inputs": {
       "model": [
-       "45",
+       "43",
        0
       ],
       "shift_audio": 3,
@@ -6935,42 +6467,6 @@
      }
     },
     "43": {
-     "_meta": {
-      "title": "Review copy"
-     },
-     "class_type": "CreateVideo",
-     "inputs": {
-      "audio": [
-       "41",
-       0
-      ],
-      "bit_depth": 8,
-      "codec": "none",
-      "color_space": "sRGB",
-      "fps": 24,
-      "images": [
-       "40",
-       0
-      ]
-     }
-    },
-    "44": {
-     "_meta": {
-      "title": "Daily"
-     },
-     "class_type": "SaveVideo",
-     "inputs": {
-      "codec": "auto",
-      "filename_prefix": "video/H3_shot",
-      "format": "auto",
-      "format.codec": "auto",
-      "video": [
-       "43",
-       0
-      ]
-     }
-    },
-    "45": {
      "_meta": {
       "title": "LoRA 2 (h3jobs)"
      },
@@ -7466,42 +6962,6 @@
       "take": 1
      }
     },
-    "43": {
-     "_meta": {
-      "title": "Review copy"
-     },
-     "class_type": "CreateVideo",
-     "inputs": {
-      "audio": [
-       "41",
-       0
-      ],
-      "bit_depth": 8,
-      "codec": "none",
-      "color_space": "sRGB",
-      "fps": 24,
-      "images": [
-       "40",
-       0
-      ]
-     }
-    },
-    "44": {
-     "_meta": {
-      "title": "Daily"
-     },
-     "class_type": "SaveVideo",
-     "inputs": {
-      "codec": "auto",
-      "filename_prefix": "video/H3_shot",
-      "format": "auto",
-      "format.codec": "auto",
-      "video": [
-       "43",
-       0
-      ]
-     }
-    },
     "5": {
      "_meta": {
       "title": "Text encoder"
@@ -7974,42 +7434,6 @@
       "sidecar": "renders/sh340/sh340_t01.json",
       "subfolder": "renders",
       "take": 1
-     }
-    },
-    "43": {
-     "_meta": {
-      "title": "Review copy"
-     },
-     "class_type": "CreateVideo",
-     "inputs": {
-      "audio": [
-       "41",
-       0
-      ],
-      "bit_depth": 8,
-      "codec": "none",
-      "color_space": "sRGB",
-      "fps": 24,
-      "images": [
-       "40",
-       0
-      ]
-     }
-    },
-    "44": {
-     "_meta": {
-      "title": "Daily"
-     },
-     "class_type": "SaveVideo",
-     "inputs": {
-      "codec": "auto",
-      "filename_prefix": "video/H3_shot",
-      "format": "auto",
-      "format.codec": "auto",
-      "video": [
-       "43",
-       0
-      ]
      }
     },
     "5": {
@@ -8500,42 +7924,6 @@
       "take": 1
      }
     },
-    "43": {
-     "_meta": {
-      "title": "Review copy"
-     },
-     "class_type": "CreateVideo",
-     "inputs": {
-      "audio": [
-       "41",
-       0
-      ],
-      "bit_depth": 8,
-      "codec": "none",
-      "color_space": "sRGB",
-      "fps": 24,
-      "images": [
-       "40",
-       0
-      ]
-     }
-    },
-    "44": {
-     "_meta": {
-      "title": "Daily"
-     },
-     "class_type": "SaveVideo",
-     "inputs": {
-      "codec": "auto",
-      "filename_prefix": "video/H3_shot",
-      "format": "auto",
-      "format.codec": "auto",
-      "video": [
-       "43",
-       0
-      ]
-     }
-    },
     "5": {
      "_meta": {
       "title": "Text encoder"
@@ -8993,42 +8381,6 @@
       "sidecar": "renders_proxy/sh020/sh020_t01.json",
       "subfolder": "renders_proxy",
       "take": 1
-     }
-    },
-    "43": {
-     "_meta": {
-      "title": "Review copy"
-     },
-     "class_type": "CreateVideo",
-     "inputs": {
-      "audio": [
-       "41",
-       0
-      ],
-      "bit_depth": 8,
-      "codec": "none",
-      "color_space": "sRGB",
-      "fps": 24,
-      "images": [
-       "40",
-       0
-      ]
-     }
-    },
-    "44": {
-     "_meta": {
-      "title": "Daily"
-     },
-     "class_type": "SaveVideo",
-     "inputs": {
-      "codec": "auto",
-      "filename_prefix": "video/H3_shot",
-      "format": "auto",
-      "format.codec": "auto",
-      "video": [
-       "43",
-       0
-      ]
      }
     },
     "5": {
@@ -9509,42 +8861,6 @@
       "take": 1
      }
     },
-    "43": {
-     "_meta": {
-      "title": "Review copy"
-     },
-     "class_type": "CreateVideo",
-     "inputs": {
-      "audio": [
-       "41",
-       0
-      ],
-      "bit_depth": 8,
-      "codec": "none",
-      "color_space": "sRGB",
-      "fps": 24,
-      "images": [
-       "40",
-       0
-      ]
-     }
-    },
-    "44": {
-     "_meta": {
-      "title": "Daily"
-     },
-     "class_type": "SaveVideo",
-     "inputs": {
-      "codec": "auto",
-      "filename_prefix": "video/H3_shot",
-      "format": "auto",
-      "format.codec": "auto",
-      "video": [
-       "43",
-       0
-      ]
-     }
-    },
     "5": {
      "_meta": {
       "title": "Text encoder"
@@ -10004,42 +9320,6 @@
       "sidecar": "renders_proxy/sh040/sh040_t01.json",
       "subfolder": "renders_proxy",
       "take": 1
-     }
-    },
-    "43": {
-     "_meta": {
-      "title": "Review copy"
-     },
-     "class_type": "CreateVideo",
-     "inputs": {
-      "audio": [
-       "41",
-       0
-      ],
-      "bit_depth": 8,
-      "codec": "none",
-      "color_space": "sRGB",
-      "fps": 24,
-      "images": [
-       "40",
-       0
-      ]
-     }
-    },
-    "44": {
-     "_meta": {
-      "title": "Daily"
-     },
-     "class_type": "SaveVideo",
-     "inputs": {
-      "codec": "auto",
-      "filename_prefix": "video/H3_shot",
-      "format": "auto",
-      "format.codec": "auto",
-      "video": [
-       "43",
-       0
-      ]
      }
     },
     "5": {
@@ -10508,42 +9788,6 @@
       "sidecar": "renders_proxy/sh050/sh050_t01.json",
       "subfolder": "renders_proxy",
       "take": 1
-     }
-    },
-    "43": {
-     "_meta": {
-      "title": "Review copy"
-     },
-     "class_type": "CreateVideo",
-     "inputs": {
-      "audio": [
-       "41",
-       0
-      ],
-      "bit_depth": 8,
-      "codec": "none",
-      "color_space": "sRGB",
-      "fps": 24,
-      "images": [
-       "40",
-       0
-      ]
-     }
-    },
-    "44": {
-     "_meta": {
-      "title": "Daily"
-     },
-     "class_type": "SaveVideo",
-     "inputs": {
-      "codec": "auto",
-      "filename_prefix": "video/H3_shot",
-      "format": "auto",
-      "format.codec": "auto",
-      "video": [
-       "43",
-       0
-      ]
      }
     },
     "5": {
@@ -11016,42 +10260,6 @@
       "take": 1
      }
     },
-    "43": {
-     "_meta": {
-      "title": "Review copy"
-     },
-     "class_type": "CreateVideo",
-     "inputs": {
-      "audio": [
-       "41",
-       0
-      ],
-      "bit_depth": 8,
-      "codec": "none",
-      "color_space": "sRGB",
-      "fps": 24,
-      "images": [
-       "40",
-       0
-      ]
-     }
-    },
-    "44": {
-     "_meta": {
-      "title": "Daily"
-     },
-     "class_type": "SaveVideo",
-     "inputs": {
-      "codec": "auto",
-      "filename_prefix": "video/H3_shot",
-      "format": "auto",
-      "format.codec": "auto",
-      "video": [
-       "43",
-       0
-      ]
-     }
-    },
     "5": {
      "_meta": {
       "title": "Text encoder"
@@ -11512,42 +10720,6 @@
       "sidecar": "renders_proxy/sh110/sh110_t01.json",
       "subfolder": "renders_proxy",
       "take": 1
-     }
-    },
-    "43": {
-     "_meta": {
-      "title": "Review copy"
-     },
-     "class_type": "CreateVideo",
-     "inputs": {
-      "audio": [
-       "41",
-       0
-      ],
-      "bit_depth": 8,
-      "codec": "none",
-      "color_space": "sRGB",
-      "fps": 24,
-      "images": [
-       "40",
-       0
-      ]
-     }
-    },
-    "44": {
-     "_meta": {
-      "title": "Daily"
-     },
-     "class_type": "SaveVideo",
-     "inputs": {
-      "codec": "auto",
-      "filename_prefix": "video/H3_shot",
-      "format": "auto",
-      "format.codec": "auto",
-      "video": [
-       "43",
-       0
-      ]
      }
     },
     "5": {
@@ -12036,42 +11208,6 @@
       "take": 1
      }
     },
-    "43": {
-     "_meta": {
-      "title": "Review copy"
-     },
-     "class_type": "CreateVideo",
-     "inputs": {
-      "audio": [
-       "41",
-       0
-      ],
-      "bit_depth": 8,
-      "codec": "none",
-      "color_space": "sRGB",
-      "fps": 24,
-      "images": [
-       "40",
-       0
-      ]
-     }
-    },
-    "44": {
-     "_meta": {
-      "title": "Daily"
-     },
-     "class_type": "SaveVideo",
-     "inputs": {
-      "codec": "auto",
-      "filename_prefix": "video/H3_shot",
-      "format": "auto",
-      "format.codec": "auto",
-      "video": [
-       "43",
-       0
-      ]
-     }
-    },
     "5": {
      "_meta": {
       "title": "Text encoder"
@@ -12538,42 +11674,6 @@
       "sidecar": "renders_proxy/sh130/sh130_t01.json",
       "subfolder": "renders_proxy",
       "take": 1
-     }
-    },
-    "43": {
-     "_meta": {
-      "title": "Review copy"
-     },
-     "class_type": "CreateVideo",
-     "inputs": {
-      "audio": [
-       "41",
-       0
-      ],
-      "bit_depth": 8,
-      "codec": "none",
-      "color_space": "sRGB",
-      "fps": 24,
-      "images": [
-       "40",
-       0
-      ]
-     }
-    },
-    "44": {
-     "_meta": {
-      "title": "Daily"
-     },
-     "class_type": "SaveVideo",
-     "inputs": {
-      "codec": "auto",
-      "filename_prefix": "video/H3_shot",
-      "format": "auto",
-      "format.codec": "auto",
-      "video": [
-       "43",
-       0
-      ]
      }
     },
     "5": {
@@ -13044,42 +12144,6 @@
       "take": 1
      }
     },
-    "43": {
-     "_meta": {
-      "title": "Review copy"
-     },
-     "class_type": "CreateVideo",
-     "inputs": {
-      "audio": [
-       "41",
-       0
-      ],
-      "bit_depth": 8,
-      "codec": "none",
-      "color_space": "sRGB",
-      "fps": 24,
-      "images": [
-       "40",
-       0
-      ]
-     }
-    },
-    "44": {
-     "_meta": {
-      "title": "Daily"
-     },
-     "class_type": "SaveVideo",
-     "inputs": {
-      "codec": "auto",
-      "filename_prefix": "video/H3_shot",
-      "format": "auto",
-      "format.codec": "auto",
-      "video": [
-       "43",
-       0
-      ]
-     }
-    },
     "5": {
      "_meta": {
       "title": "Text encoder"
@@ -13539,42 +12603,6 @@
       "take": 1
      }
     },
-    "43": {
-     "_meta": {
-      "title": "Review copy"
-     },
-     "class_type": "CreateVideo",
-     "inputs": {
-      "audio": [
-       "41",
-       0
-      ],
-      "bit_depth": 8,
-      "codec": "none",
-      "color_space": "sRGB",
-      "fps": 24,
-      "images": [
-       "40",
-       0
-      ]
-     }
-    },
-    "44": {
-     "_meta": {
-      "title": "Daily"
-     },
-     "class_type": "SaveVideo",
-     "inputs": {
-      "codec": "auto",
-      "filename_prefix": "video/H3_shot",
-      "format": "auto",
-      "format.codec": "auto",
-      "video": [
-       "43",
-       0
-      ]
-     }
-    },
     "5": {
      "_meta": {
       "title": "Text encoder"
@@ -14032,42 +13060,6 @@
       "sidecar": "renders_proxy/sh210/sh210_t01.json",
       "subfolder": "renders_proxy",
       "take": 1
-     }
-    },
-    "43": {
-     "_meta": {
-      "title": "Review copy"
-     },
-     "class_type": "CreateVideo",
-     "inputs": {
-      "audio": [
-       "41",
-       0
-      ],
-      "bit_depth": 8,
-      "codec": "none",
-      "color_space": "sRGB",
-      "fps": 24,
-      "images": [
-       "40",
-       0
-      ]
-     }
-    },
-    "44": {
-     "_meta": {
-      "title": "Daily"
-     },
-     "class_type": "SaveVideo",
-     "inputs": {
-      "codec": "auto",
-      "filename_prefix": "video/H3_shot",
-      "format": "auto",
-      "format.codec": "auto",
-      "video": [
-       "43",
-       0
-      ]
      }
     },
     "5": {
@@ -14541,42 +13533,6 @@
       "take": 1
      }
     },
-    "43": {
-     "_meta": {
-      "title": "Review copy"
-     },
-     "class_type": "CreateVideo",
-     "inputs": {
-      "audio": [
-       "41",
-       0
-      ],
-      "bit_depth": 8,
-      "codec": "none",
-      "color_space": "sRGB",
-      "fps": 24,
-      "images": [
-       "40",
-       0
-      ]
-     }
-    },
-    "44": {
-     "_meta": {
-      "title": "Daily"
-     },
-     "class_type": "SaveVideo",
-     "inputs": {
-      "codec": "auto",
-      "filename_prefix": "video/H3_shot",
-      "format": "auto",
-      "format.codec": "auto",
-      "video": [
-       "43",
-       0
-      ]
-     }
-    },
     "5": {
      "_meta": {
       "title": "Text encoder"
@@ -14867,7 +13823,7 @@
      "class_type": "MiniMaxH3SigmaShift",
      "inputs": {
       "model": [
-       "45",
+       "43",
        0
       ],
       "shift_audio": 3,
@@ -15038,42 +13994,6 @@
      }
     },
     "43": {
-     "_meta": {
-      "title": "Review copy"
-     },
-     "class_type": "CreateVideo",
-     "inputs": {
-      "audio": [
-       "41",
-       0
-      ],
-      "bit_depth": 8,
-      "codec": "none",
-      "color_space": "sRGB",
-      "fps": 24,
-      "images": [
-       "40",
-       0
-      ]
-     }
-    },
-    "44": {
-     "_meta": {
-      "title": "Daily"
-     },
-     "class_type": "SaveVideo",
-     "inputs": {
-      "codec": "auto",
-      "filename_prefix": "video/H3_shot",
-      "format": "auto",
-      "format.codec": "auto",
-      "video": [
-       "43",
-       0
-      ]
-     }
-    },
-    "45": {
      "_meta": {
       "title": "LoRA 2 (h3jobs)"
      },
@@ -15557,42 +14477,6 @@
       "take": 1
      }
     },
-    "43": {
-     "_meta": {
-      "title": "Review copy"
-     },
-     "class_type": "CreateVideo",
-     "inputs": {
-      "audio": [
-       "41",
-       0
-      ],
-      "bit_depth": 8,
-      "codec": "none",
-      "color_space": "sRGB",
-      "fps": 24,
-      "images": [
-       "40",
-       0
-      ]
-     }
-    },
-    "44": {
-     "_meta": {
-      "title": "Daily"
-     },
-     "class_type": "SaveVideo",
-     "inputs": {
-      "codec": "auto",
-      "filename_prefix": "video/H3_shot",
-      "format": "auto",
-      "format.codec": "auto",
-      "video": [
-       "43",
-       0
-      ]
-     }
-    },
     "5": {
      "_meta": {
       "title": "Text encoder"
@@ -16053,42 +14937,6 @@
       "sidecar": "renders_proxy/sh340/sh340_t01.json",
       "subfolder": "renders_proxy",
       "take": 1
-     }
-    },
-    "43": {
-     "_meta": {
-      "title": "Review copy"
-     },
-     "class_type": "CreateVideo",
-     "inputs": {
-      "audio": [
-       "41",
-       0
-      ],
-      "bit_depth": 8,
-      "codec": "none",
-      "color_space": "sRGB",
-      "fps": 24,
-      "images": [
-       "40",
-       0
-      ]
-     }
-    },
-    "44": {
-     "_meta": {
-      "title": "Daily"
-     },
-     "class_type": "SaveVideo",
-     "inputs": {
-      "codec": "auto",
-      "filename_prefix": "video/H3_shot",
-      "format": "auto",
-      "format.codec": "auto",
-      "video": [
-       "43",
-       0
-      ]
      }
     },
     "5": {

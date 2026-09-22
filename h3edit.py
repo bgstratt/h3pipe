@@ -1315,7 +1315,8 @@ def discard_take(root: str, pass_: str, shot_id: str, take: int,
 def queue_shots(root: str, pass_: str, shot_ids: list[str] | None,
                 template: J.RenderRequest, comfy, base,
                 folder: str | None = None, model_resolve=J.DEFAULT,
-                model_cache=J.DEFAULT, model_list=None) -> dict:
+                model_cache=J.DEFAULT, model_list=None,
+                review_copy: bool = False) -> dict:
     """Plan and queue a take for each shot (every shot when `shot_ids` is
     None), as h3render does, without waiting for any of them.
 
@@ -1331,6 +1332,10 @@ def queue_shots(root: str, pass_: str, shot_ids: list[str] | None,
     `model_resolve` and `model_cache`): a file of another family skips the
     shot, with `model_mismatch` listing the checks, unless the template
     allows it.
+
+    `review_copy` keeps the workflow's own SaveVideo branch, so ComfyUI writes a
+    second copy of the video into its output folder (only a target with
+    `review_nodes` has one; off by default, since the take is already saved).
 
     Returns {"queued": [{shot, take, prompt_id, seed, seed_source, target}],
     "skipped": [{shot, take, reason}], "errors": [{shot, error, take?}]}. A
@@ -1389,7 +1394,7 @@ def queue_shots(root: str, pass_: str, shot_ids: list[str] | None,
             out["errors"].append({"shot": sid, "error": str(e)[:800]})
             continue
         try:
-            pid = comfy.queue(J.graph_for(graph, job, take))
+            pid = comfy.queue(J.graph_for(graph, job, take, review_copy=review_copy))
             J.mark_queued(take, pid)
         except Exception as e:
             J.mark_failed(take, str(e)[:800])
@@ -1409,6 +1414,17 @@ READY_STATUSES = ("ready", "degraded", "not_ready", "unknown")
 _NODES: dict = {}
 
 
+def _graph_key(graph: dict | None) -> str:
+    """A short digest of a graph's shape, for the node check's cache key. "" for
+    no graph (the repo's copy, which only changes when the repo does)."""
+    if not graph:
+        return ""
+    import hashlib
+    import json as _json
+    blob = _json.dumps(J.graph_fingerprint(graph), sort_keys=True, default=str)
+    return hashlib.sha1(blob.encode("utf-8")).hexdigest()[:16]
+
+
 def target_nodes(t, graph: dict | None = None, where: str = "") -> dict[str, dict]:
     """{node class: {"tier", "feature"}} a target's renders need: its
     workflow's classes as a job's graph keeps them (the saver in place, then
@@ -1418,8 +1434,13 @@ def target_nodes(t, graph: dict | None = None, where: str = "") -> dict[str, dic
     `graph` is the workflow a render would use now (h3jobs.target_graph_source,
     which the routes and the CLI pass: a graph saved in the running ComfyUI
     wins over the repo's copy, so readiness must judge that one). Without it,
-    the repo's copy. Cached per target and `where`."""
-    key = (t.id, where)
+    the repo's copy.
+
+    Cached per target and per graph: the key carries the graph's own shape, not
+    just where it came from, because a workflow saved in ComfyUI keeps its name
+    when it is edited — keying on the name alone would answer for the graph as
+    it was when this ComfyUI started."""
+    key = (t.id, where, _graph_key(graph))
     if key in _NODES:
         return _NODES[key]
     b = t.binding
@@ -1663,6 +1684,7 @@ def cmd_targets(root: str | None, argv: list[str]) -> int:
         return _workflow_action(args)
     series_cfg, extra, marks = None, {}, {}
     if root:
+        J.TG.add_thread_root(root)                        # the show's own targets (Phase 12)
         series_cfg = J.series_config(root)
         try:
             extra = J.series_model_families(root)
@@ -1707,6 +1729,104 @@ def cmd_targets(root: str | None, argv: list[str]) -> int:
                 print(f"      using       {param}: {v['using']} for {v['want']}")
     print()
     return 0 if object_info is not None else 1
+
+
+def cmd_target_from_workflow(argv: list[str]) -> int:
+    """h3.py target-from-workflow <workflow> [<episode>] [--save] ...: propose
+    the target.json for one of ComfyUI's saved workflows (h3inspect), print what
+    it could not work out, and with --save write it into the show's own
+    targets."""
+    import json as _json
+    import h3inspect as IN
+    ap = argparse.ArgumentParser(prog="h3.py target-from-workflow",
+                                 description="Turn a ComfyUI workflow into a target.")
+    ap.add_argument("workflow", help="a name among ComfyUI's saved workflows, or a .json path")
+    ap.add_argument("episode", nargs="?", help="the show to save it in (with --save)")
+    ap.add_argument("--id", help="the target id (default: from the workflow's name)")
+    ap.add_argument("--label", help="how the editor names it")
+    ap.add_argument("--save", action="store_true", help="write it into <show>/targets/<id>/")
+    ap.add_argument("--json", action="store_true", help="print the whole answer as JSON")
+    ap.add_argument("--comfy", default="http://127.0.0.1:8188")
+    args = ap.parse_args(argv)
+    comfy = J.Comfy(args.comfy)
+    name = args.workflow
+    if os.path.isfile(name):
+        data, name = J.load_json(name) if hasattr(J, "load_json") else (
+            _json.load(open(name, encoding="utf-8")), os.path.basename(name))
+    else:
+        try:
+            data = comfy.userdata(f"workflows/{name}")
+        except Exception as e:
+            print(f"  !! can't reach ComfyUI at {args.comfy}: {e}")
+            return 1
+        if data is None:
+            print(f"  !! ComfyUI has no saved workflow called {name}")
+            return 1
+    try:
+        info = comfy.object_info()
+    except Exception as e:
+        print(f"  !! ComfyUI didn't answer /object_info: {e}")
+        return 1
+    root = os.path.abspath(args.episode) if args.episode else None
+    extra = {}
+    if root:
+        J.TG.add_thread_root(root)
+        try:
+            extra = J.series_model_families(root)
+        except ValueError:
+            extra = {}
+    folders: dict = {}
+
+    def model_list(folder, class_type, field):
+        """The files in one models folder, from the running ComfyUI (asked once
+        per folder), else the loader's own choices."""
+        if folder:
+            if folder not in folders:
+                folders[folder] = comfy.model_files(folder)
+            return folders[folder]
+        return comfy.choices(class_type, field) if class_type and field else []
+
+    try:
+        r = IN.inspect_graph(data, info, model_list, target_id=args.id or "",
+                             label=args.label or "", workflow_name=name,
+                             extra=extra, series_cfg=J.series_config(root) if root else None)
+    except (IN.InspectError, ValueError) as e:
+        print(f"  !! {e}")
+        return 1
+    if args.json:
+        sys.stdout.write(_json.dumps(r, indent=2, ensure_ascii=False) + "\n")
+    else:
+        prop = r["proposal"]
+        print(f"\n  {name} -> target {prop['id']} ({prop['label']})")
+        print(f"      audio {prop['capabilities']['audio']}, "
+              f"{len(prop['binding']['params'])} widgets bound, "
+              f"{len(prop['models'])} model file(s)")
+        for param, how in sorted(r["matched"].items()):
+            print(f"      {param:<14} {how}")
+        for a in r["ambiguous"]:
+            print(f"  ?? {a['ask']}")
+        for w in r["warnings"]:
+            print(f"   ! {w}")
+        for p in r["problems"]:
+            print(f"  !! {p}")
+    if not args.save:
+        if not args.json:
+            print("\n  nothing written (pass --save with an episode to keep it)\n")
+        return 0 if not r["problems"] else 1
+    if not root:
+        print("  !! --save needs the episode (or series) folder to save into")
+        return 1
+    problems = IN.validate_spec(r["proposal"], J.graph_from(data, name), info)
+    if problems:
+        for p in problems:
+            print(f"  !! {p}")
+        return 1
+    path = IN.save_spec(root, r["proposal"])
+    print(f"\n  wrote {path}")
+    print(f"      it is a draft: render one shot on it "
+          f"(h3render {os.path.basename(root)} --target {r['proposal']['id']}) before the "
+          f"editor offers it\n")
+    return 0
 
 
 def _workflow_action(args) -> int:

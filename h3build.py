@@ -294,6 +294,9 @@ def main() -> int:
     ap.add_argument("--pace", action="store_true",
                     help="report dialogue pacing per shot and write nothing")
     args = ap.parse_args()
+    # a show's own targets (<show>/targets/<id>/target.json) count for this
+    # build: `target:` lines and profiles may name them (Phase 12)
+    TG.add_thread_root(args.out)
 
     try:
         # the series config first, and on its own, so a problem in it is

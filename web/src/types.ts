@@ -1146,6 +1146,49 @@ export interface Target {
   readiness?: Readiness | null;
   /** Phase 11: which workflow this target's next render uses. */
   graph?: TargetGraph;
+  /** Phase 12: a show's own target, from `<show>/targets/<id>/target.json`. */
+  custom?: boolean;
+  /** Phase 12: saved but not proved yet — no probe render has succeeded, so the
+   * shot and episode pickers leave it out. */
+  draft?: boolean;
+}
+
+/** Phase 12b: one saved ComfyUI workflow (GET /h3pipe/workflows). */
+export interface WorkflowFile {
+  name: string;
+  /** a workflow one of h3pipe's own targets already drives */
+  target?: boolean;
+}
+
+/** Phase 12b: POST /h3pipe/targets/inspect — the target.json it proposes, and
+ * what it could not work out. `proposal` is saved as-is once confirmed. */
+export interface TargetProposal {
+  proposal: Record<string, unknown>;
+  matched: Record<string, string>;
+  ambiguous: {
+    param: string;
+    ask: string;
+    candidates: { node: string; class_type: string; field: string; title?: string; value?: unknown }[];
+  }[];
+  warnings: string[];
+  models: { param: string; file: string; family?: string; folder?: string; label?: string }[];
+  /** node classes outside ComfyUI core, by the pack they come from */
+  nodes: Record<string, string>;
+  /** widgets no param covers: they keep the graph's own value */
+  unbound?: { class_type: string; field: string; value?: unknown; title?: string }[];
+  /** the graph itself is wrong: nothing can be saved until these are fixed */
+  problems: string[];
+  can_save?: boolean;
+}
+
+/** PUT / DELETE /h3pipe/targets/custom. */
+export interface CustomTargetResult {
+  ok?: boolean;
+  id?: string;
+  path?: string;
+  draft?: boolean;
+  deleted?: boolean;
+  targets?: { id: string; kind: string; label: string; short: string; draft: boolean; workflow: string; path: string }[];
 }
 
 /**

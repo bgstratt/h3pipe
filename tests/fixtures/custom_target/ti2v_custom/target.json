@@ -1,0 +1,237 @@
+{
+  "id": "ti2v_custom",
+  "kind": "video",
+  "label": "Wan 2.2 5B (custom)",
+  "short": "Wan 5B",
+  "capabilities": {
+    "audio": "none"
+  },
+  "models": {
+    "model": {
+      "patterns": [
+        "wan2.2_ti2v_5B*",
+        "*wan2*2*ti2v*5b*"
+      ],
+      "family": "wan2.2-ti2v-5b",
+      "class_type": "UNETLoader",
+      "field": "unet_name",
+      "tier": "required"
+    },
+    "text_encoder": {
+      "patterns": [
+        "umt5_xxl*",
+        "*umt5*"
+      ],
+      "family": "umt5-xxl",
+      "class_type": "CLIPLoader",
+      "field": "clip_name",
+      "tier": "required"
+    },
+    "vae": {
+      "patterns": [
+        "wan2.2_vae*",
+        "*wan2*2*vae*"
+      ],
+      "family": "wan2.2-vae",
+      "class_type": "VAELoader",
+      "field": "vae_name",
+      "tier": "required"
+    }
+  },
+  "nodes": [
+    "LoadImage"
+  ],
+  "template": {
+    "fps": 24,
+    "frames": {
+      "step": 4,
+      "base": 5,
+      "max": 241
+    },
+    "size_multiple": 32,
+    "size_fit": "snap",
+    "max_size": {
+      "long_side": 1280,
+      "pixels": 901120
+    },
+    "trained_frames": 121
+  },
+  "recipe": {
+    "policies": [
+      "silent"
+    ],
+    "policy_fallback": {
+      "to": "silent",
+      "why": "Wan 2.2 makes no sound (lay the soundtrack in at the edit)"
+    },
+    "keyframes": [
+      "first"
+    ],
+    "keyframe_path": "refs/shots/{shot}/{end}.png",
+    "prompt": "prose",
+    "size_hints": {
+      "keyframe": "the render size (any size works: it is scaled and centre-cropped to the frame)"
+    }
+  },
+  "binding": {
+    "workflow_name": "h3pipe_wan22_5b_ti2v.json",
+    "env": "H3_WAN22_TI2V_WORKFLOW",
+    "saver": {
+      "class_type": "H3SaveShot",
+      "inputs": {
+        "root": "project_root",
+        "subfolder": "subfolder",
+        "take": "take",
+        "sidecar": "sidecar"
+      },
+      "replace": {
+        "class_type": "CreateVideo",
+        "inputs": {
+          "images": "images",
+          "audio": "audio"
+        }
+      },
+      "drop": [
+        "SaveVideo"
+      ],
+      "set": {
+        "save_frames": false
+      }
+    },
+    "prune": true,
+    "params": {
+      "model": {
+        "class_type": "UNETLoader",
+        "field": "unet_name"
+      },
+      "loras": {
+        "class_type": "LoraLoaderModelOnly",
+        "name": "lora_name",
+        "strength": "strength_model",
+        "input": "model",
+        "chain": true,
+        "insert_after": {
+          "class_type": "UNETLoader",
+          "output": 0
+        }
+      },
+      "steps": {
+        "class_type": "KSampler",
+        "field": "steps"
+      },
+      "seed": {
+        "class_type": "KSampler",
+        "field": "seed"
+      },
+      "cfg": {
+        "class_type": "KSampler",
+        "field": "cfg"
+      },
+      "sampler": {
+        "class_type": "KSampler",
+        "field": "sampler_name"
+      },
+      "shift": {
+        "class_type": "ModelSamplingSD3",
+        "field": "shift"
+      },
+      "prompt": {
+        "class_type": "CLIPTextEncode",
+        "field": "text",
+        "title": "Positive prompt"
+      },
+      "negative": {
+        "class_type": "CLIPTextEncode",
+        "field": "text",
+        "title": "Negative prompt"
+      },
+      "width": {
+        "class_type": "Wan22ImageToVideoLatent",
+        "field": "width"
+      },
+      "height": {
+        "class_type": "Wan22ImageToVideoLatent",
+        "field": "height"
+      },
+      "length": {
+        "class_type": "Wan22ImageToVideoLatent",
+        "field": "length"
+      },
+      "fps": {
+        "class_type": "H3SaveShot",
+        "field": "fps"
+      },
+      "shot_id": {
+        "class_type": "H3SaveShot",
+        "field": "shot_id"
+      },
+      "audio_policy": {
+        "class_type": "H3SaveShot",
+        "field": "audio_policy"
+      },
+      "text_encoder": {
+        "class_type": "CLIPLoader",
+        "field": "clip_name"
+      },
+      "vae": {
+        "class_type": "VAELoader",
+        "field": "vae_name"
+      }
+    },
+    "review_nodes": [],
+    "inputs": {
+      "first": {
+        "class_type": "LoadImage",
+        "field": "image",
+        "disconnect": {
+          "class_type": "Wan22ImageToVideoLatent",
+          "input": "start_image"
+        }
+      }
+    }
+  },
+  "presets": {
+    "final": {
+      "model": "wan2.2_ti2v_5B_fp16.safetensors",
+      "lora": null,
+      "steps": 20,
+      "width": 1280,
+      "height": 704,
+      "cfg": 5.0,
+      "sampler": "uni_pc",
+      "shift": 8.0,
+      "negative": "色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走",
+      "text_encoder": "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+      "vae": "wan2.2_vae.safetensors"
+    },
+    "proxy": {
+      "lora": null,
+      "steps": 12,
+      "width": 640,
+      "height": 352,
+      "cfg": 5.0,
+      "sampler": "uni_pc",
+      "shift": 8.0,
+      "negative": "色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走",
+      "text_encoder": "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+      "vae": "wan2.2_vae.safetensors"
+    }
+  },
+  "downloads": {
+    "wan2.2_ti2v_5B_fp16.safetensors": {
+      "folder": "diffusion_models",
+      "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/diffusion_models/wan2.2_ti2v_5B_fp16.safetensors",
+      "source": "ComfyUI template video_wan2_2_5B_ti2v.json (properties.models)"
+    },
+    "umt5_xxl_fp8_e4m3fn_scaled.safetensors": {
+      "folder": "text_encoders",
+      "url": "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+      "source": "ComfyUI template video_wan2_2_5B_ti2v.json (properties.models)"
+    },
+    "wan2.2_vae.safetensors": {
+      "folder": "vae",
+      "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/vae/wan2.2_vae.safetensors",
+      "source": "ComfyUI template video_wan2_2_5B_ti2v.json (properties.models)"
+    }
+  }
+}

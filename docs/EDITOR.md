@@ -132,6 +132,31 @@ built — is yours.
 From the command line: `python h3.py targets` prints the same per-target line, and
 `--install-workflow <target>` / `--revert-workflow <target>` are the two buttons.
 
+### Your own model, from your own workflow
+
+A workflow that isn't a variant of one h3pipe ships can become a model of its own, for this
+show, without touching the repo. Save the graph in ComfyUI, then in **What's missing** →
+**This show's own targets** → **Add a target from a workflow…**:
+
+1. **Pick the workflow and press Read it.** h3pipe works out which widget takes the prompt,
+   the negative, the size, the length, the seed, the steps, the sampler and each model file,
+   which node saves the video, whether the graph makes sound, and where a keyframe goes.
+2. **Answer what no graph can state.** A name; the frame grid (`step`, `base`, longest); the
+   size multiple; fps; whether the model makes sound; whether dialogue is spoken or acted
+   silently. Anything ambiguous — two nodes that could take the same value — is a list to
+   choose from, or title the node in ComfyUI and read it again.
+3. **Save as a draft.** It lands in `<show>/targets/<id>/target.json`, beside series.json.
+   It travels with the show and survives updating h3pipe.
+4. **Probe render, then enable it.** The probe queues the episode's first shot on it at the
+   proxy pass. Look at the take: a wrong frame grid stutters, a missing file is reported.
+   When it looks right, **Enable for shots** — until then the shot and episode pickers leave
+   it out, so a draft can't quietly become the episode's model.
+
+What it can do: prompt, size, length, seed, steps, model and LoRAs per shot, plus one first
+keyframe. What it can't, yet: subject reference sheets (character identity), which stay a
+repo target's job. `python h3.py target-from-workflow <workflow> [<episode>] --save` is the
+same thing without the UI.
+
 ## h3 Refs
 
 Used heavily at the start of a series and rarely afterwards, if the references come out

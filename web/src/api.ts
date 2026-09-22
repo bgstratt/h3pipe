@@ -31,7 +31,8 @@ import type {
   PeaksResult, PickRequest, Ref, RefDefaults, RefDiscardRequest, RefGenerateMissingRequest, RefGenerateMissingResult, RefGenerateRequest,
   RefGenerateResult, RefImportRequest, RefKeyframeRequest, RefList, RefOverrideInfo, RefOverrideRequest, RefPickRequest, RefPickResult,
   RefTake, RefUploadRequest, RenderRequest, RenderResult, Seed, ShotDetail, TakeRef, TargetKind, TargetList, TrackResult,
-  VoiceFromTakeRequest, VoiceFromTakeResult, WorkflowInstallResult,
+  CustomTargetResult, TargetProposal, VoiceFromTakeRequest, VoiceFromTakeResult,
+  WorkflowFile, WorkflowInstallResult,
   PromoteHashes, PromotePlan, PromoteResult, SourceCheck, SourceDoc, SourceFile, SourceHash, SourceSaveRequest, SourceSaveResult,
 } from "./types";
 import { comboChoices } from "./lib/targets";
@@ -135,6 +136,16 @@ export interface Api {
   installWorkflow(target: string, opts?: { name?: string; overwrite?: boolean }): Promise<WorkflowInstallResult>;
   /** Phase 11: delete that saved copy, so the target renders the repo's again. */
   revertWorkflow(target: string, name?: string): Promise<WorkflowInstallResult>;
+  /** Phase 12b: the workflows saved in this ComfyUI, for the target wizard. */
+  workflows(): Promise<WorkflowFile[]>;
+  /** Phase 12b: propose the target.json for one workflow. Read-only. */
+  inspectTarget(req: { ep?: string | null; workflow?: string; graph?: unknown; id?: string; label?: string }): Promise<TargetProposal>;
+  /** Phase 12b: save a show's own target (validated first; 400 lists every problem). */
+  saveCustomTarget(ep: string, target: Record<string, unknown>): Promise<CustomTargetResult>;
+  /** Phase 12b: remove one. */
+  deleteCustomTarget(ep: string, id: string): Promise<CustomTargetResult>;
+  /** Phase 12c: stop being a draft (a probe render proved it), or go back to one. */
+  setTargetDraft(ep: string, id: string, draft: boolean): Promise<CustomTargetResult>;
   /** ComfyUI's choices for one combo widget (`/object_info/<class_type>`), or
    * null when the node or widget isn't there. */
   widgetChoices(classType: string, field: string): Promise<string[] | null>;
@@ -485,6 +496,14 @@ export function createHttpApi(t: Transport): Api {
       const r = await call<WorkflowInstallResult | undefined>("DELETE", `/h3pipe/workflow/install?${qs({ target, name })}`);
       return r ?? {};
     },
+    workflows: async () => {
+      const r = await get<{ workflows?: WorkflowFile[] }>("/h3pipe/workflows");
+      return Array.isArray(r?.workflows) ? r.workflows : [];
+    },
+    inspectTarget: (req) => call("POST", "/h3pipe/targets/inspect", req),
+    saveCustomTarget: (ep, target) => call("PUT", "/h3pipe/targets/custom", { ep, target }),
+    deleteCustomTarget: (ep, id) => call("DELETE", `/h3pipe/targets/custom?${qs({ ep, id })}`),
+    setTargetDraft: (ep, id, draft) => call("PUT", "/h3pipe/targets/custom", { ep, id, draft }),
     putEpisodeTarget: async (ep, target) => {
       if (target !== null && (typeof target !== "string" || !target)) {
         return Promise.reject(new Error(`An episode target is a target id or null, got ${String(target)}`));

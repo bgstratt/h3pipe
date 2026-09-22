@@ -11,8 +11,20 @@ import { tn, type Badge } from "./format";
 /** The H3 target's id: what a server from before Phase 7 renders everything on. */
 export const LEGACY_TARGET = "minimax_h3_ref2va";
 
-export function videoTargets(list: TargetList | null | undefined): Target[] {
-  return (list?.targets ?? []).filter((t) => (t.kind ?? "video") === "video");
+/**
+ * The video targets the pickers offer. A show's own target that hasn't rendered
+ * yet (`draft`, Phase 12c) is left out: it is offered once a probe render has
+ * proved it, so a draft can't quietly become an episode's model. `withDrafts`
+ * asks for them anyway, for the panel that manages them.
+ */
+export function videoTargets(list: TargetList | null | undefined, withDrafts = false): Target[] {
+  return (list?.targets ?? []).filter((t) => (t.kind ?? "video") === "video"
+    && (withDrafts || !t.draft));
+}
+
+/** A show's own targets (`<show>/targets/<id>/target.json`), drafts included. */
+export function customTargets(list: TargetList | null | undefined): Target[] {
+  return (list?.targets ?? []).filter((t) => t.custom);
 }
 
 export function findTarget(list: TargetList | null | undefined, id: string | null | undefined): Target | undefined {

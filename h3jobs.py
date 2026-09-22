@@ -847,6 +847,17 @@ class Comfy:
                                f"{e.read().decode('utf-8', 'replace')[:400]}") from None
         return "/".join(x for x in (got.get("subfolder") or sub, got.get("name") or fname) if x)
 
+    def model_files(self, folder: str) -> list:
+        """The files ComfyUI lists in one models folder (GET /models/<folder>),
+        [] when it hasn't got that folder. For a caller outside ComfyUI, which
+        can't ask folder_paths."""
+        from urllib.parse import quote
+        try:
+            got = self._json(f"/models/{quote(folder, safe='')}", timeout=30)
+        except RuntimeError:
+            return []
+        return [str(x) for x in (got or [])] if isinstance(got, list) else []
+
     def object_info(self) -> dict:
         """/object_info: every node class the running ComfyUI knows."""
         return self._json("/object_info", timeout=120)
@@ -1224,9 +1235,10 @@ class Job:
                 + " (pass allow_missing_refs: true to render anyway)")
 
 
-def check_video_target(target_id: str) -> str:
-    """`target_id` if it names a video target, else TargetError naming the known ones."""
-    TG.load_target(target_id, "video")
+def check_video_target(target_id: str, root: str | None = None) -> str:
+    """`target_id` if it names a video target, else TargetError naming the known
+    ones. `root` is a show whose own targets count (Phase 12)."""
+    TG.load_target(target_id, "video", root=root)
     return target_id
 
 
@@ -1361,7 +1373,7 @@ def plan_job(root: str, pass_: str, doc: dict, index: int, req: RenderRequest,
         except Exception as e:
             error = f"can't render {sid} on {target_id}: {e}"
     dflt = sdoc.get("defaults", {})
-    target = TG.load_target(target_id, "video") if not error else built_target
+    target = TG.load_target(target_id, "video", root=root) if not error else built_target
     ov = T.shot_override(overrides or {}, sid, pass_, target.id)
     shot_hash = story_hash(shot)
 
@@ -1570,7 +1582,7 @@ def retarget(root: str, pass_: str, doc: dict, shot: dict, target_id: str,
             raise hit
         return hit
     try:
-        new = TG.load_target(target_id, "video")
+        new = TG.load_target(target_id, "video", root=root)
         story, series_cfg = episode_story(root)
         if not any(s.id == shot["id"] for s in story.shots()):
             raise ValueError(f"{shot['id']} is not in shots.json (rebuild the episode)")
@@ -1896,7 +1908,8 @@ def loras_for(loras: list[dict], spec: dict) -> list[dict]:
 
 
 def job_target(job: Job) -> "TG.Target":
-    return TG.load_target(job.target, "video")
+    # root: the show's own targets count too (targets.load_target, Phase 12)
+    return TG.load_target(job.target, "video", root=job.root)
 
 
 def select_nodes(g: dict, spec: dict) -> list[str]:

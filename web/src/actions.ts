@@ -23,7 +23,8 @@ import {
 import type {
   AlignEvent, AlignMissing, AlignRequest, BuildResult, CutAudioSource, EpisodeStatus, Lora, SourceFile, OverrideFields, Pass,
   ProgressEvent, PromptEvent, Ref, RefEvent, RefGenerateRequest, RefTake, RenderRequest, RenderResult, RenderSkip, Seed,
-  SeedMode, ShotDetail, TakeEvent, TakeRef, TrackResult, VoiceFromTakeRequest,
+  SeedMode, ShotDetail, TakeEvent, TakeRef, TargetProposal, TrackResult,
+  VoiceFromTakeRequest, WorkflowFile,
 } from "./types";
 
 const set = store.set;
@@ -193,6 +194,122 @@ export async function revertWorkflow(target: string): Promise<boolean> {
       return true;
     } catch (e) {
       report("Couldn't remove the workflow from ComfyUI", e);
+      return false;
+    }
+  });
+}
+
+// ---------------------------------------------------------------------------
+// a show's own targets, from a ComfyUI workflow (Phase 12)
+// ---------------------------------------------------------------------------
+
+/** GET /h3pipe/workflows: what ComfyUI has saved, for the wizard's picker. */
+export async function loadWorkflows(): Promise<WorkflowFile[]> {
+  try {
+    return await api().workflows();
+  } catch (e) {
+    report("Couldn't list ComfyUI's workflows", e);
+    return [];
+  }
+}
+
+/** POST /h3pipe/targets/inspect: the target.json a workflow suggests. */
+export async function inspectTarget(req: { workflow?: string; graph?: unknown; id?: string; label?: string }): Promise<TargetProposal | null> {
+  const ep = get().ep;
+  return withBusy("target-inspect", async () => {
+    try {
+      return await api().inspectTarget({ ...req, ep });
+    } catch (e) {
+      report("Couldn't read that workflow", e);
+      return null;
+    }
+  });
+}
+
+/** PUT /h3pipe/targets/custom: save it (a draft until a render proves it). */
+export async function saveCustomTarget(target: Record<string, unknown>): Promise<boolean> {
+  const ep = get().ep;
+  if (!ep) return false;
+  return withBusy("target-save", async () => {
+    try {
+      const r = await api().saveCustomTarget(ep, target);
+      await loadTargets(true);
+      host().toast("success", `${r.id} is saved`,
+        r.draft ? "A draft: render one shot on it from here, then enable it for shots." : undefined);
+      return true;
+    } catch (e) {
+      const problems = e instanceof ApiError ? (e.data as { problems?: string[] })?.problems : undefined;
+      report("That target can't be saved yet",
+        problems?.length ? new Error(problems.join("; ")) : e);
+      return false;
+    }
+  });
+}
+
+/** Clear `draft`: the target joins the shot and episode pickers. */
+export async function enableCustomTarget(id: string, draft = false): Promise<boolean> {
+  const ep = get().ep;
+  if (!ep) return false;
+  return withBusy("target-save", async () => {
+    try {
+      await api().setTargetDraft(ep, id, draft);
+      await loadTargets(true);
+      host().toast("success", draft ? `${id} is a draft again`
+        : `${id} is ready: shots and episodes can render on it`);
+      return true;
+    } catch (e) {
+      report("Couldn't change that target", e);
+      return false;
+    }
+  });
+}
+
+export async function deleteCustomTarget(id: string): Promise<boolean> {
+  const ep = get().ep;
+  if (!ep) return false;
+  return withBusy("target-save", async () => {
+    try {
+      await api().deleteCustomTarget(ep, id);
+      await loadTargets(true);
+      host().toast("success", `${id} was removed`);
+      return true;
+    } catch (e) {
+      report("Couldn't remove that target", e);
+      return false;
+    }
+  });
+}
+
+/**
+ * The probe render of Phase 12c: one shot on a draft target, at the proxy pass,
+ * so a wrong frame grid or a missing file shows up before the target is used
+ * for real. Queued like any other render; watch the take to see how it went.
+ */
+export async function probeTarget(target: string): Promise<boolean> {
+  const ep = get().ep;
+  const st = get().status[statusKey(ep ?? "", "proxy")] ?? get().status[statusKey(ep ?? "", "final")];
+  const shot = st?.shots?.[0]?.shot;
+  if (!ep || !shot) {
+    host().toast("error", "Nothing to probe with", "Build the episode first: the probe renders its first shot.");
+    return false;
+  }
+  return withBusy("target-probe", async () => {
+    try {
+      const r = await api().render({
+        ep, pass: "proxy", shots: [shot], target, redo: true, seed_mode: "auto", seed: null,
+        model: null, loras: null, steps: null, prompt: null, parent_take: null,
+        note: `probe render for ${target}`, allow_missing_refs: true,
+      });
+      const err = r.errors?.[0]?.error || r.skipped?.[0]?.reason;
+      if (err) {
+        host().toast("error", `${target} couldn't render ${shot}`, err);
+        return false;
+      }
+      host().toast("success", `${shot} is queued on ${target}`,
+        "When the take finishes, look at it — then enable the target for shots.");
+      return true;
+    } catch (e) {
+      report("Couldn't queue the probe render", e);
       return false;
     }
   });

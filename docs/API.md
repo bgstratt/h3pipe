@@ -28,13 +28,28 @@ Change it first when either side needs something new.
 ### `GET /h3pipe/config`
 ```json
 {"roots": ["C:/Users/bgstr/ComfyProjects"], "comfy": "http://127.0.0.1:8188",
- "version": 1}
+ "review_copy": false, "version": 1}
 ```
 Stored in ComfyUI's user folder as `user/default/h3pipe/config.json`. If that file
 doesn't exist, `roots` comes from `$H3PIPE_ROOTS` (`os.pathsep`-separated), else `[]`.
 
+`review_copy` (2026-09-21, **false** by default) keeps a workflow's own video branch, so
+ComfyUI writes a second copy of each render into its `output/` folder. Every take is written
+into the episode by the saver either way (`renders[_proxy]/<shot>/`), so the second copy is
+only a convenience for watching in ComfyUI. `h3render` matches the default
+(`--review-copy` keeps it; `--no-review-copy` is the old spelling of the default).
+
+`minimax_h3_ref2va`'s graph used to end in a `CreateVideo` titled "Review copy" and a
+`SaveVideo` titled "Daily" (`output/video/H3_shot_*`) beside `H3SaveShot`; **both were
+removed from the shipped workflow on 2026-09-21** (the graph snapshot golden was regenerated
+for it: the graph is two nodes smaller, and the LoRA node h3jobs inserts is now id 43 rather
+than 45). `binding.review_nodes` still lists those classes, so a *saved* graph that has them
+— an older canvas copy, someone else's — is still stripped at queue time unless
+`review_copy` is on.
+
 ### `PUT /h3pipe/config`
-Body `{"roots": [...]}`. The roots must exist. Returns the new config.
+Body `{"roots": [...], "review_copy": true|false}`. The roots must exist; `review_copy` is
+optional and keeps its stored value when the body leaves it out. Returns the new config.
 
 ## Episodes
 
@@ -2319,6 +2334,20 @@ Deletes that saved copy, so the target renders the repo's graph again.
 when ComfyUI had none. **`$ENV` is never written or deleted**: when it is the source, the
 editor disables both buttons and names the variable instead.
 
+### When a graph is re-read
+
+h3pipe holds no long-lived copy of a workflow. **`POST /h3pipe/render` resolves it per
+request** (`base_for`'s cache is local to the handler), so saving a workflow in ComfyUI is
+picked up by the very next render — no restart, no cache to clear. `h3render` resolves once
+per run, for the same reason. What it reads is the **saved file**, not the canvas: an edit
+nobody saved is invisible.
+
+The only caches are for display and readiness, both keyed so an edit can't hide in them: the
+`graph` block is kept `READY_TTL` (30 s) per ComfyUI address, and the node check's key
+carries a digest of the graph's own shape (`h3edit._graph_key`), because a saved workflow
+keeps its name when it is edited — keying on the name alone would answer for the graph as it
+was when ComfyUI started.
+
 ### Readiness judges the graph in force
 
 `h3edit.target_nodes(t, graph=None, where="")` takes the graph a render would use (cached
@@ -2353,6 +2382,129 @@ On this machine `H3_Ref2VA_Shotlist_v1.json` was already saved in ComfyUI, so ev
 render from the editor had been using that canvas copy rather than the repo's, and
 `krea2_refs_t2i.json` the same for reference images. Both agree with the repo's copies, but
 nothing said so. That is the case Phase 11 exists to make visible.
+
+## Phase 12: a show's own targets, from any ComfyUI workflow (as built, 2026-09-21)
+
+A target was code plus data in this repo. Now a show can have targets of its own — data
+only, in `<show>/targets/<id>/target.json` — and h3pipe can propose that file by reading a
+workflow. `docs/PLAN.md` has the phase and its decisions; this is the contract.
+
+### 12a: the builtin prose compile, and a second target root
+
+- **`targets/generic/video_prose.py`** is the compile every loader-less prose video target
+  uses: the story IR to shotlist entries, ref slots, keyframes, the graph helpers. It was
+  `targets/video/wan/common.py`, moved and parameterised; `wan/common.py` is now a thin
+  binding that gives it Wan's wording (`Style`) and re-exports the helpers the three Wan
+  targets' `patch_graph` use. Golden output is unchanged.
+  - `Style(build_prompt, silent_dialogue)`: the prose writer and the `--check` line about
+    dialogue a silent model can't voice. `style_for(target)` picks it when a caller doesn't:
+    a target that makes no sound gets the Wan writer (dialogue as silent acting), one that
+    does gets the ltx2 writer (soundscape, spoken lines). `recipe.prompt: "prose_silent"`
+    asks for the silent writer on a target that *could* make sound.
+  - The silent warnings and the shotlist's default `audio_policy` now come from the target
+    (`capabilities.audio`, `recipe.policies`) instead of being Wan's constants.
+- **`"code": "builtin:<name>"`** in target.json imports `targets.generic.<name>` instead of
+  a module beside target.json (`Target.module`). A custom target with no `code` defaults to
+  `builtin:video_prose` (`Target.default_code`), so it ships no Python at all.
+- **A show's own targets** live in `<show>/targets/<id>/target.json`, where `<show>` is the
+  folder holding series.json — the episode folder, else its parent (`TG.show_folder`). The
+  kind is read from the file (there is no kind folder). `TG.load_target(id, kind, root=…)`
+  and `TG.list_targets(kind, root=…)` take a show; `TG.use_roots(...)` (a context manager)
+  and `TG.add_thread_root(root)` put one in force for the current thread, so the deep
+  callers that only have an id — planning, a retarget, readiness — see them unchanged.
+  Targets are cached per folder, so two shows may each have a `my_wan`.
+  - **Where the roots are set:** `h3build` (its `-o` root), `h3render` (each episode),
+    `h3.py targets <ep>`, and `h3pipe_api.check_ep` — which registers the episode's show
+    after validating it. The `handler` decorator clears the thread's roots before and after
+    every handler, so one request can't inherit another show's targets (the routes run
+    handlers on pooled threads).
+  - A custom target that takes a built-in's id is **ignored** (the built-in is what
+    renders); `TG.shadowed_custom(root)` finds such folders, and saving one is refused.
+- **Keyframes without code:** `binding.inputs` is the declarative form of the graph surgery
+  a target would otherwise write in Python:
+  ```json
+  "inputs": {"first": {"class_type": "LoadImage", "field": "image",
+                       "disconnect": {"class_type": "Wan22ImageToVideoLatent",
+                                      "input": "start_image"}}}
+  ```
+  With a staged keyframe the loader gets its name; without one the `disconnect` input is
+  popped, so the graph renders from the prompt alone and `prune` drops the loader. This is
+  exactly what `wan22_ti2v`'s hand-written `patch_graph` does, and the two agree node for
+  node (`tests/test_phase12.py`).
+
+### 12b: proposing a target.json from a workflow
+
+**`h3inspect.py`** reads a graph and proposes the target.json that would drive it. Nothing
+in it writes.
+
+```
+inspect_graph(data, object_info, model_list, target_id=, label=, workflow_name=, extra=)
+  -> {"proposal", "matched", "ambiguous", "warnings", "models", "nodes", "unbound",
+      "problems"}
+```
+
+| what | how it is found |
+|---|---|
+| saver | the terminal node, matched against the savers the shipped targets replace (`CreateVideo`, `SaveVideo`, `SaveImage`, `SaveAudio`), taken from the targets themselves so it can't drift |
+| prompt / negative | walk each sampler's or guider's `positive` / `negative` conditioning back to the node holding the text |
+| widgets | by name: `seed`/`noise_seed`, `steps`, `cfg`, `sampler_name`, `scheduler`, `shift`, `denoise`, `width`, `height`, `length`, `fps`. Several of one class with equal values become `all: true`; several that disagree are an **ambiguity** for the author. A widget fed by another node still counts — a render cuts that link (LTX's resolution picker) — and says so |
+| the saver's own | `fps`, `shot_id`, `audio_policy` are bound to the saver whenever it has them |
+| models | every combo widget whose choices are a models folder's files. The **folder** is found by asking which folder lists that file, the **param name** from the loader class (then the folder, then the widget name), the **family** by running the file name through the patterns every shipped target declares (`known_families`). Two loaders of one class are told apart by what they feed (`feeds`: a VAE into `VAEDecodeAudio` is the audio VAE) or by their titles (Wan's high / low noise). One file loaded by several nodes becomes one param with a list of widgets (LTX 2.3) |
+| template | `size_multiple` from the width widget's `step`, `frames.step` from the length widget's, `frames.base` from its default, `fps` from the video node, `max_size` from the size the graph is set to |
+| audio | `generate` only when something that outputs AUDIO actually reaches the saver: a `CreateVideo` with nothing in its `audio` input is a mute video |
+| keyframes | one `LoadImage` becomes `binding.inputs.first`, its `disconnect` inferred from what it feeds |
+| presets | `final` is the values the graph holds now; `proxy` the same at half the long side |
+| downloads | the canvas save's own `properties.models` (real URLs, never a guess) |
+| nodes | classes whose `python_module` is not ComfyUI's own, so readiness reports a missing pack |
+
+`frames.max` is the one thing no graph states: it is a guess, always in `warnings`, and the
+probe render is what catches it. Widgets no param covers are listed in `unbound` — they keep
+the graph's value for every shot.
+
+**Measured against the shipped targets** (their own workflows, their own hand-written
+bindings): 17/17 params recovered for `wan22_ti2v`, 18/18 for `wan22_i2v`, 15/15 for
+`minimax_h3_fl2va`, 18/19 for `wan22_vace` (its VACE strength is model-specific), and 12/15
+for `ltx2` (its multi-widget specs and an uninstalled upscaler).
+
+Routes:
+
+- **`GET /h3pipe/workflows`** — the workflows saved in this ComfyUI; `target: true` marks one
+  an h3pipe target already drives.
+- **`POST /h3pipe/targets/inspect`** `{workflow | graph, ep?, id?, label?}` → the answer
+  above plus `can_save`. 404 for a name ComfyUI hasn't got, 400 for a graph with no saver.
+- **`PUT /h3pipe/targets/custom`** `{ep, target}` validates (`IN.validate_spec`) and writes
+  `<show>/targets/<id>/target.json`. Validation resolves every binding param against the
+  graph **as a job prepares it** (the saver takes its node's place first), so a spec that
+  would fail at queue time fails here. 400 lists every problem in `problems`. With
+  `{ep, id, draft}` instead it only flips the draft flag.
+- **`DELETE /h3pipe/targets/custom?ep=…&id=…`** removes one.
+- **`GET /h3pipe/targets`** takes `ep` (a show's own targets are included) and each target
+  gains `custom` and `draft`.
+
+CLI: **`h3.py target-from-workflow <workflow> [<episode>] [--id X] [--label X] [--save]
+[--json]`** prints the proposal, what it matched, what it guessed, and with `--save` writes
+it.
+
+### 12c: the editor
+
+The What's missing window — where a target's detail already lives — gains **This show's own
+targets**: each one with `draft` / `ready`, its workflow, and buttons for **Probe render**,
+**Enable for shots**, **Back to draft** and **Remove**. **Add a target from a workflow…**
+opens a wizard: pick one of ComfyUI's saved workflows, Read it, then confirm the handful of
+fields no graph states (id, name, the frame grid, the size multiple, fps, sound, prompt
+style), settle any ambiguity from a list of candidate widgets, and Save as a draft.
+
+A **draft** is saved but not offered: `videoTargets()` leaves it out of the shot and episode
+pickers, so a target nobody has rendered with can't quietly become an episode's model. The
+probe render queues the episode's first shot on it at the proxy pass; look at the take, then
+**Enable for shots**.
+
+### 12d: deferred, on purpose
+
+Subject references for custom targets. Sheet composition, panel choice and backgrounds are
+code (`comfy_nodes/h3_refsheet.py`, per-target recipes), and a JSON DSL for them would be
+the wrong abstraction — the same call the plan's decision table makes about prompt formats.
+A custom target that needs subject refs gets a repo folder.
 
 ## LTX-2.5: the quality profile and ingredients references (as built, 2026-09-19)
 

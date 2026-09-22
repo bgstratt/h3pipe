@@ -1297,6 +1297,87 @@ export function createMockApi(emit: Emit, opts: MockOptions = {}): Api & { outsi
       for (const t of all.targets) t.graph = mockGraph(t);
       return kind ? { ...all, targets: all.targets.filter((t) => t.kind === kind) } : all;
     },
+    async workflows() {
+      await wait();
+      return [...savedWorkflows].sort().map((name) => ({
+        name, target: MOCK_TARGETS.targets.some((t) => t.workflow === name),
+      })).concat([{ name: "my_own_wan_experiment.json", target: false }]);
+    },
+    async inspectTarget(req) {
+      await wait(400);
+      const name = req.workflow || "my_own_wan_experiment.json";
+      const id = req.id || "my_wan";
+      // the mock stands in for h3inspect: a plausible proposal with one thing
+      // it couldn't settle and the warnings the real one always gives
+      return {
+        proposal: {
+          id, kind: "video", label: req.label || "My Wan", short: "Mine", draft: true,
+          capabilities: { audio: "none" },
+          template: { fps: 16, frames: { step: 4, base: 1, max: 243 }, size_multiple: 16, size_fit: "snap" },
+          recipe: { prompt: "prose", policies: ["silent"] },
+          binding: { workflow_name: name, saver: { class_type: "H3SaveShot" }, params: {} },
+          presets: { final: { model: "my_model.safetensors", steps: 20, width: 832, height: 480 } },
+          models: { model: { family: "wan2.2-i2v-14b-high", patterns: ["my_model*"], tier: "required", folder: "diffusion_models" } },
+        },
+        matched: {
+          model: "UNETLoader.unet_name", prompt: "CLIPTextEncode.text",
+          negative: "CLIPTextEncode.text", width: "WanImageToVideo.width",
+          height: "WanImageToVideo.height", length: "WanImageToVideo.length",
+          seed: "KSampler.seed", steps: "KSampler.steps",
+        },
+        ambiguous: [{
+          param: "cfg", ask: "2 nodes could take cfg: KSampler.cfg, KSamplerAdvanced.cfg. Pick one, or give it a title in ComfyUI and inspect again.",
+          candidates: [
+            { node: "7", class_type: "KSampler", field: "cfg", value: 5 },
+            { node: "9", class_type: "KSamplerAdvanced", field: "cfg", value: 3.5 },
+          ],
+        }],
+        warnings: [
+          "frames: step 4 and base 1 come from the length widget's own step and default (81); `max` (243) is a guess — no graph states how long the model can go. Probe-render the longest shot you mean to use.",
+          "loras: the graph has no LoRA loader, so one is inserted after the model loader when a shot or profile names a LoRA.",
+        ],
+        models: [{ param: "model", file: "my_model.safetensors", family: "wan2.2-i2v-14b-high", folder: "diffusion_models", label: "Wan 2.2 I2V 14B (high noise)" }],
+        nodes: {},
+        unbound: [{ class_type: "UNETLoader", field: "weight_dtype", value: "default" }],
+        problems: [],
+        can_save: true,
+      };
+    },
+    async saveCustomTarget(ep, target) {
+      await wait();
+      need(ep);
+      const id = String((target as { id?: string }).id || "my_wan");
+      if (MOCK_TARGETS.targets.some((t) => t.id === id)) {
+        throw new MockError(`'${id}' is a built-in target's name: choose another`, 400);
+      }
+      const existing = MOCK_TARGETS.targets.findIndex((t) => t.id === id && t.custom);
+      const entry = {
+        ...(target as object), id, kind: "video" as const, custom: true,
+        draft: !!(target as { draft?: boolean }).draft,
+        label: String((target as { label?: string }).label || id),
+      } as (typeof MOCK_TARGETS)["targets"][number];
+      if (existing >= 0) MOCK_TARGETS.targets[existing] = entry;
+      else MOCK_TARGETS.targets.push(entry);
+      emit("h3pipe.episode", { ep: EP });
+      return { ok: true, id, path: `${ep}\targets\${id}\target.json`, draft: entry.draft };
+    },
+    async setTargetDraft(ep, id, draft) {
+      await wait();
+      need(ep);
+      const t = MOCK_TARGETS.targets.find((x) => x.id === id && x.custom);
+      if (!t) throw new MockError(`no custom target called '${id}'`, 404);
+      t.draft = draft;
+      emit("h3pipe.episode", { ep: EP });
+      return { ok: true, id, draft };
+    },
+    async deleteCustomTarget(ep, id) {
+      await wait();
+      need(ep);
+      const i = MOCK_TARGETS.targets.findIndex((t) => t.id === id && t.custom);
+      if (i >= 0) MOCK_TARGETS.targets.splice(i, 1);
+      emit("h3pipe.episode", { ep: EP });
+      return { ok: true, id, deleted: i >= 0 };
+    },
     async installWorkflow(target, opts) {
       await wait();
       const t = MOCK_TARGETS.targets.find((x) => x.id === target);
