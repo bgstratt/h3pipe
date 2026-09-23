@@ -13,7 +13,14 @@ Change it first when either side needs something new.
 - **Episodes are named by absolute folder path**, `ep`, in the query string for GET
   and in the body for writes. Every `ep` must be inside a configured root (see
   `/h3pipe/config`), or the route answers 403. Relative `path`s are relative to `ep`,
-  use forward slashes, and must stay inside it (no `..`).
+  use forward slashes, and stay inside it — with two exceptions for a series config that
+  names a file above its episode (2026-09-22, `_in_series_home`): a config living in the
+  episode's **parent** opens that whole folder, and a config living in the **episode** that
+  names `../refs/...` or `../audio/...` opens exactly those two folders of the parent. The
+  second is the shared-refs layout a multi-episode series uses — one `refs/` for the show,
+  a `series.json` per episode so an episode can add props and locations of its own — and
+  without it every sheet and plate in the Refs tab is a broken image. A sibling episode's
+  files, the show folder's own files and anything outside a configured root stay refused.
 - **`pass`** is `"final"` or `"proxy"`. Default `"proxy"`.
 - **Seeds are strings** in every request and response. Built seeds are 63-bit and
   JavaScript numbers lose precision above 2^53. Never parse them to a JS number.
@@ -59,6 +66,11 @@ optional and keeps its stored value when the body leaves it out. Returns the new
 [{"ep": "C:\\...\\DeanStories\\ep05", "name": "ep05", "series": "…", "title": "…",
   "built": {"final": true, "proxy": true}, "shots": 49, "script": "ep05.md"}]
 ```
+Every folder up to two levels below a root with a series config and a script. The config
+is the folder's own or — as `episode_series_config` has always allowed, and as of
+2026-09-23 the listing too — the one in its parent, a series folder shared by the
+episodes under it. In that case the script has to be named after the folder
+(`ep05/ep05.md`), so a folder of loose notes beside the episodes isn't taken for one.
 
 ### `GET /h3pipe/episode?ep=…&pass=proxy`
 `h3edit.episode_status(ep, pass)`, with seeds turned into strings. First it sweeps
@@ -124,6 +136,43 @@ episode's series config and script (`h3edit.episode_series_config` / `episode_sc
 ```
 A script error returns `ok: false` with the message (it names the line) in `error`.
 The status is still 200: a script that doesn't compile is a result, not a server error.
+
+### `POST /h3pipe/episode/new`  (P5, 2026-09-23)
+Body `{"parent", "name", "title"?, "series_id"?}` — the first step the editor could not
+take before. `parent` is the folder the **episodes** live in (the show's folder, not an
+episode's) and is checked like every other path: absolute, inside a configured root, or
+403. `name` becomes both the folder and the script's stem (`ep02` → `ep02.md`), which is
+what makes the episode discoverable; a name that isn't a folder name, or is one
+`find_episodes` walks past (`refs`, `audio`, `shotlist`, `renders`, `renders_proxy`,
+`views`, `targets`) or a Windows device name, is 400. An existing `<parent>/<name>` is
+409 — nothing is ever written over.
+
+```json
+{"ep": "C:\\Shows\\Porchlights\\ep02", "template": "episode",
+ "from": "C:\\Shows\\Porchlights\\ep01", "files": ["series.json", "ep02.md"],
+ "refs": "C:\\Shows\\Porchlights\\refs",
+ "check": {"ok": true, "errors": [], "warnings": [], "shots": [{"id": "sh010", …}]},
+ "episode": {"ep": …, "name": "ep02", "built": {"final": false, "proxy": false}, …}}
+```
+
+- **The template** is the newest episode already under `parent` (`template: "episode"`):
+  its series config is copied, so the cast, look, render profiles and targets carry over,
+  and the script is a one-shot skeleton naming that config's own first character and
+  location — a place to start writing, not a story. With no episode there, the shipped
+  `examples/starter` pair is written instead (`template: "starter"`), which is also
+  docs/AUTHORING.md's opening example (`tools/sync_starter_doc.py` keeps the two equal).
+- **Every episode gets a series config of its own**, even under a show that has one. That
+  is what lets episode four add a character without touching the first three, while
+  `../refs/...` paths keep one shared `refs` folder. `refs` in the answer is where this
+  config's pictures go, resolved and created.
+- `title` titles the new episode (the script's `= <id>  <title>` line). `series_id` and
+  the series' own title are the series', so they are written only when this is its first
+  episode.
+- The only thing rewritten in a copied config is `audio.track`, which follows the name
+  (`audio/ep01_dialogue.wav` → `audio/ep02_dialogue.wav`): a recording is per episode.
+- `check` is `check_text` on what was written, so the editor can show at once that it
+  builds. `h3pipe.episode` is emitted for the new folder. Same thing from the CLI:
+  `python h3.py new Shows\ep02 [--title "…"] [--series-id …]`.
 
 ## Files
 
@@ -2445,11 +2494,24 @@ feels slow — the pipeline's saver writes an mp4, a wav, a thumbnail and the ti
 strip where a stock graph writes one mp4. `time.perf_counter` costs ~100 ns a call, so the
 measuring is free. The same fields reach `h3takes`' sidecar contract.
 
-**Still on the table** (not done): the loader pads unused subject sockets with the plate
-(`while len(refs) < 3`), because the prompt names it `<Picture 4>` — so a one-subject shot
-sends the plate three times. On a 229-shot episode that is 379 duplicate references, ~4.7
-minutes of proxy and an estimated ~12 minutes of final. Fixing it means numbering the
-pictures by how many are wired, which moves every H3 prompt.
+**Unused subject sockets are empty** (2026-09-22). The loader used to pad them with the plate
+(`while len(refs) < 3`), so a one-subject shot sent the same picture three times. Tested
+first, because the fix depended on it: `MiniMaxH3ReferenceToVideo` accepts `None` on an
+optional reference socket **and does not renumber the rest** — the plate stays `<Picture 4>`
+whatever comes before it. (The ComfyUI canvas collapses the visible input list when a link is
+removed, which is what made padding look necessary; the API graph keeps the names.) So no
+prompt changed, no golden moved, and no override needed migrating.
+
+Measured on a one-subject shot at 864x480, same seed, same frozen shotlist:
+
+| | S | kept blocks | pinned | take |
+|---|---|---|---|---|
+| padded (4 pictures) | 12,942 | 93/203 | 63 | 17.6 s |
+| empty sockets (2 pictures) | 11,306 | 64/177 | 38 | **14.0 s** |
+
+3.6 s a shot — more than the tokens alone imply, because fewer pinned references also let SLA
+sparsify harder (54% -> 64%). On a 229-shot episode (156 one-subject, 64 two-subject) that is
+379 references it no longer sends, about 11 minutes of a proxy pass.
 
 ## Phase 12: a show's own targets, from any ComfyUI workflow (as built, 2026-09-21)
 

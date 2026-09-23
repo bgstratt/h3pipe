@@ -620,7 +620,13 @@ class DownloadsDataTest(unittest.TestCase):
                 self.assertTrue(d["source"], (t.id, name))
                 if d["url"] is not None:
                     self.assertTrue(d["url"].startswith("https://huggingface.co/"), (t.id, name))
-                    self.assertTrue(d["url"].endswith("/" + name), (t.id, name))
+                    # the URL ends in the file's own name, unless upstream ships it
+                    # under a different one and `source` says what to save it as
+                    # (lightx2v's Wan2.2-Lightning pair is high_noise_model.safetensors
+                    # in every release, so the variant lives in our name for it)
+                    if not d["url"].endswith("/" + name):
+                        self.assertIn("save it under this name", d["source"], (t.id, name))
+                        self.assertTrue(d["url"].endswith(".safetensors"), (t.id, name))
                     # a URL always says where the record came from: a ComfyUI
                     # template, a saved workflow, ComfyUI-Manager's model
                     # list, or the model's own Hugging Face repo listing
@@ -655,8 +661,8 @@ class DownloadsDataTest(unittest.TestCase):
         self.assertEqual({t.id for t in TG.list_targets()
                           if any(m["tier"] == "accelerator" for m in t.models.values())},
                          {"minimax_h3_ref2va", "minimax_h3_fl2va", "minimax_h3_still",
-                          "wan22_i2v", "ltx2_ingredients", "flux2_klein", "flux2_klein_edit",
-                          "ltx2_voice"})
+                          "wan22_i2v", "wan22_vace", "ltx2_ingredients", "flux2_klein",
+                          "flux2_klein_edit", "ltx2_voice"})
         self.assertEqual({p for p, m in TG.load_target("ltx2").models.items()
                           if m["tier"] == "optional"},
                          {"duration_head", "quality_model", "reference_lora"})

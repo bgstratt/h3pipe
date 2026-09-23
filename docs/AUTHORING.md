@@ -12,8 +12,16 @@ you, from the same script. Sections that only hold for some targets say which.
 
 ## Your first episode
 
-Two files in one folder, and nothing else. `Shows\ep01\series.json` first — `audio.mode: generate` means the model invents the voices from
-each character's `voice` line, so nothing has to be recorded first:
+Two files in one folder — and `python h3.py new Shows\ep01` writes both of them for
+you (so does **New episode…** in the editor's project folders). This is what it writes,
+and it is also `examples/starter/`, so you can read it before you run anything.
+
+`Shows\ep01\series.json` first. `audio.mode: generate` means the model invents the
+voices from each character's `voice` line, so nothing has to be recorded first. The
+pictures are named `../refs/...`, one level up: that way every episode of the show
+shares one `refs` folder while each keeps a series config of its own (a config in the
+episode wins, the one beside it is the fallback), which is what lets episode four add
+a character without touching the first three.
 
 ```json
 {
@@ -34,14 +42,20 @@ each character's `voice` line, so nothing has to be recorded first:
       "name": "Ada",
       "pronoun": "her",
       "design": "a nine-year-old girl with short curly black hair, a green raincoat, and yellow rain boots, drawn with thick confident outlines",
-      "sheet": "refs/ada/ada_sheet_4panel.png",
+      "sheet": "../refs/ada/ada_sheet_4panel.png",
       "voice": "bright, quick, a little breathless"
+    },
+    "lantern": {
+      "kind": "prop",
+      "name": "the porch lantern",
+      "design": "a dented brass hurricane lantern with a smoke-stained glass chimney and a wire handle",
+      "sheet": "../refs/props/lantern.png"
     }
   },
   "locations": {
     "porch": {
       "description": "a wooden front porch at dawn, wet boards, a hanging lamp still lit, mist over the lawn beyond",
-      "plate": "refs/_bg/porch.png"
+      "plate": "../refs/_bg/porch.png"
     }
   },
   "audio": { "mode": "generate" }
@@ -64,6 +78,15 @@ camera: holds a static wide shot
 sound: dawn birdsong, dripping water, a faint breeze
 
 ## sh020
+who: ada
+with: lantern
+size: medium
+dur: 4
+Ada lifts the lantern off its hook and turns the flame down until it gutters out.
+camera: holds static
+sound: a metal hook ringing, the soft pop of a flame going out
+
+## sh030
 who: ada
 size: close
 dur: auto

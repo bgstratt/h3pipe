@@ -459,6 +459,13 @@ Every file any target names. `python h3.py targets` tells you which of these you
 |---|---|---|---|---|
 | `wan2.2_fun_vace_low_noise_14B_fp8_scaled.safetensors` | `models/diffusion_models/` | required | `wan22_vace` | **none recorded** |
 
+**Wan 2.2 T2V lightx2v 4-step LoRA** (`wan2.2-t2v-lightx2v-lora`)
+
+| File | ComfyUI folder | Tier | Targets | Download |
+|---|---|---|---|---|
+| `wan2.2_t2v_lightx2v_4steps_lora_250928_high_noise.safetensors` | `models/loras/` | accelerator | `wan22_vace` | [lightx2v/Wan2.2-Lightning](https://huggingface.co/lightx2v/Wan2.2-Lightning/resolve/main/Wan2.2-T2V-A14B-4steps-lora-250928/high_noise_model.safetensors) |
+| `wan2.2_t2v_lightx2v_4steps_lora_250928_low_noise.safetensors` | `models/loras/` | accelerator | `wan22_vace` | [lightx2v/Wan2.2-Lightning](https://huggingface.co/lightx2v/Wan2.2-Lightning/resolve/main/Wan2.2-T2V-A14B-4steps-lora-250928/low_noise_model.safetensors) |
+
 **FLUX.2 Klein 9B** (`flux2-klein-9b`)
 
 | File | ComfyUI folder | Tier | Targets | Download |
@@ -566,20 +573,33 @@ is generated.
 
 ```
 Shows\
-  ep01\
-    series.json     the series config: the look, the cast, the locations, the voices
-    ep01.md         the script
+  Porchlights\
+    refs\            the pictures, shared by every episode (`../refs/...` in the configs)
+    ep01\
+      series.json    the series config: the look, the cast, the locations, the voices
+      ep01.md        the script
+    ep02\
+      series.json    its own, so this episode can add a character
+      ep02.md
 ```
 
 Two rules that save an hour of confusion:
 
 - The script should be named after its folder — `ep01\ep01.md`. Any other single `.md` in
   the folder is accepted, but two of them and nothing can tell which is the script.
-- `series.json` goes **in the episode folder**. The command line will also read one from
-  the parent folder, but the editor only lists folders that contain it directly.
+- `series.json` goes **in the episode folder**. A config in the parent folder is used as a
+  fallback for episodes that have none of their own.
+
+You don't have to type either file: `python h3.py new Shows\Porchlights\ep02` writes both,
+starting from the episode beside it (its cast, look and profiles) or from
+`examples/starter/` when the show is new. **New episode…** in the editor's project folders
+does the same.
 
 ### Something to copy from
 
+- `examples/starter/` — the smallest correct pair: one character, one prop, one location,
+  three shots. It is what `h3.py new` writes and what **Your first episode** in the
+  authoring guide quotes, so it builds with no warnings as it stands.
 - `examples/series_example.json` and `examples/script_example.md` — a full three-sequence
   episode with props, a voice-only character and `audio:` windows. Note that it is written
   for a **recorded** dialogue mix (`audio.mode: source_track`), so its dialogue shots stay
@@ -592,12 +612,17 @@ Two rules that save an hour of confusion:
   skill in `build/skill/h3pipe-episode-script/` — copy the folder into `.claude/skills/`
   for Claude Code, or upload the zip beside it on claude.ai.
 
-### A first episode by hand
+### A first episode
 
-Writing one is the authoring guide's job, not this one's:
-[docs/AUTHORING.md](docs/AUTHORING.md) opens with **Your first episode** — a complete
-series config and script you can paste into `Shows\ep01\` and build. Come back here for
-the commands that render it.
+```
+python h3.py new Shows\ep01 --title "First Light"
+python h3.py build Shows\ep01
+```
+
+That writes the two files (the starter pair) and compiles them. Writing your own is the
+authoring guide's job, not this one's: [docs/AUTHORING.md](docs/AUTHORING.md) opens with
+**Your first episode** — the same pair, field by field. Come back here for the commands
+that render it.
 
 ### The command line
 

@@ -3,6 +3,7 @@
 h3.py — one front door for the H3 pipeline. Run it from the folder that holds
 your projects, with the pipeline scripts beside it (see the README).
 
+    python h3.py new      Shows\\ep02            # a new episode: series.json + ep02.md that build
     python h3.py align    Shows\\ep05 audio\\ep05_dialogue.wav   # h3align: time the script to a recording
     python h3.py build    Shows\\ep05            # h3build: shotlist + refs_todo (final AND proxy)
     python h3.py check    Shows\\ep05            # h3build --check and --pace, writes nothing
@@ -150,6 +151,12 @@ def stage(name: str, ep: str, extra: list[str], skip_build: bool = False) -> int
 
 def main() -> int:
     argv = sys.argv[1:]
+    if argv and argv[0] == "new":
+        # the folder is the show's, its last part the new episode's name; the
+        # template is the newest episode already there, else examples/starter
+        sys.path.insert(0, HERE)
+        import h3source
+        return h3source.cmd_new(argv[1:])
     if argv and argv[0] == "targets":
         # the episode is optional: it adds its series config (pass blocks,
         # model_families) and marks its target

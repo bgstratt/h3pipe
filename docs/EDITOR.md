@@ -10,17 +10,18 @@ editor rather than using it.
 
 ## The order things happen in
 
-The editor renders an episode. It does not invent one, so the first three steps happen
-outside it:
+The editor renders an episode. The writing is still yours, but it can make the episode for
+you to write into:
 
 1. **Install the node pack** and the model files ([INSTALL.md](../INSTALL.md)).
-2. **Write the two files** — `Shows\ep01\series.json` and `Shows\ep01\ep01.md`
-   ([AUTHORING.md](AUTHORING.md) opens with a complete pair to copy).
-3. **Restart ComfyUI**, or reload the browser tab if it was already running. The two
+2. **Restart ComfyUI**, or reload the browser tab if it was already running. The two
    sidebar buttons only appear once the node pack has loaded: **h3 Shots** (a film frame)
    and **h3 Refs** (stacked pictures).
-4. **Open h3 Shots → the folder button** and add the folder that *contains* your episode
+3. **Open h3 Shots → the folder button** and add the folder that *contains* your episode
    folders (the root), then pick the episode from the drop-down beside it.
+4. **No episode yet? New episode…** in that same window writes the two files for you — see
+   below. Otherwise write them yourself: `Shows\ep01\series.json` and `Shows\ep01\ep01.md`
+   ([AUTHORING.md](AUTHORING.md) opens with a complete pair to copy).
 5. **Build.** This runs `h3build` for both passes and fills the shot bin.
 6. **Go to h3 Refs and make the references** — character sheets, props, plates, voices.
    Renders are blocked until the pictures a shot needs are on disk, so this comes before
@@ -53,6 +54,75 @@ Left to right:
 | film | **Open the timeline** |
 | images | **Open the Refs tab** |
 | refresh | **Refresh** — re-read the episode from disk |
+
+### New episode
+
+In **Project folders** (the folder-open button), browse to the folder your episodes live in
+— the show's folder, not an episode's — and press **New episode…**. It offers the next
+number it can see (`ep03` after `ep02`), takes an optional episode title, and writes two
+files:
+
+- **A series config of its own.** If the show already has an episode, that episode's
+  `series.json` is copied, so the cast, the look, the render profiles and the targets carry
+  over and you only add what is new — a prop, a plate, a character. With no episode there
+  yet, you get the starter config: one character, one prop, one location.
+- **A script.** From a neighbour, a one-shot skeleton naming that show's own first
+  character and location — valid, buildable, and meant to be written over. From the
+  starter, three shots, one of them with a line of dialogue.
+
+Both are honest about pictures: nothing is on disk yet, so the refs are listed as missing,
+which is the next thing to do. The dialog says where they go — `../refs/...` in the
+starter, meaning **one `refs` folder beside the episodes, shared by all of them**, while
+each episode keeps its own config. That is the layout to want: shared references, per
+episode cast lists.
+
+Press **Create** and the new episode opens, unbuilt, with Build waiting. If the folder
+isn't inside a project root the dialog says so instead of failing at the server — add it as
+a root first. `python h3.py new Shows\ep02 --title "…"` does the same thing without the UI.
+
+One thing to know about sharing: a ref's *live file* is shared, its candidates and its pick
+record are not. Picking a new take of a shared sheet in one episode replaces the file every
+other episode reads, and their takes go `stale: ref`. That is usually what you want (fix
+the sheet once, **Re-render stale** everywhere); when an episode genuinely needs its own
+look for a character, give it an episode-local path (`refs/walker_ep02_sheet.png`, no `../`).
+
+### Rendering the shots that need it
+
+Two buttons beside Build ask for work in bulk:
+
+| Button | What it queues |
+|---|---|
+| **Render missing (n)** | every shot with no finished take and nothing queued — the first pass, and anything that failed |
+| **Re-render stale (n)** | every shot whose newest take is out of date: the script, a reference, the preset or the target changed since it rendered |
+
+**Re-render stale** is the other half of the edit loop: change a line, rebuild, and the takes
+that no longer match are badged `stale` — this queues exactly those. It renders each shot at
+its **built seed** (`stable_seed`, the one a first take uses), so the new take differs from the
+old one by your edit and nothing else. A take that was itself a redo on a rolled seed goes back
+to the built seed, which is the shot as it would render now.
+
+A take badged only `unknown` (no provenance: it predates take sidecars) is left out — it isn't
+evidence of anything. A shot with a take already queued is left out too. Hover the button for
+the reasons behind the count ("12 script, 3 ref").
+
+### How far through a pass you are
+
+Beside the filter box, the Shots tab reads out the pass as it goes:
+
+```
+37/240 · 12q · 24m · ~20s/shot · ~68m left
+```
+
+Shots with a finished take out of the shots in the pass, then takes queued on ComfyUI, failed
+shots when there are any, how long this run has been going, its rate, and what is left at that
+rate. The timeline header shows the same line while anything is queued, since that is the
+window you watch a long pass from. Hover either for the arithmetic.
+
+The rate is **wall clock per finished take**, not how long a take takes: with 200 prompts in
+ComfyUI's queue most of a take's own clock is waiting its turn, and that would read far slower
+than the pass really goes. Takes from an earlier sitting don't count — a gap of more than
+15 minutes starts a new run — and no rate is shown until two takes of a run have finished.
+With nothing queued you see the last run's rate and no estimate.
 
 ### Shots and takes
 

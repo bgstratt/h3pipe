@@ -12,7 +12,7 @@ its own (data only, proposed from a workflow by `h3inspect.py`).
 
 ## Layout
 
-- `h3.py` — one CLI for every stage (`build`, `check`, `refs`, `render`, `assemble`, `all`)
+- `h3.py` — one CLI for every stage (`new`, `build`, `check`, `refs`, `render`, `assemble`, `all`)
 - `h3core/` — model-free core: script parser → story IR (`shotlist/shots.json`), series config loading, speech pacing
 - `h3build.py` — script + series config → story IR → H3 compile → `shotlist/*.json`, `refs_todo.*`
 - `h3render.py` — queues shots on ComfyUI through the shot's target (`targets/video/<id>/`: template, recipe,
@@ -22,7 +22,8 @@ its own (data only, proposed from a workflow by `h3inspect.py`).
   (episode status, pick/override, the `takes`/`pick`/`override` commands),
   `h3refs.py` (refs as takes, driven by the series config), `h3track.py` (attach a recording, run h3align),
   `h3source.py` (read/check/save the script and
-  series config), `h3promote.py` (overrides → script/series config) — shared by the CLI and the routes
+  series config; `new_episode` makes one from a template — `examples/starter/`, or the
+  episode beside it), `h3promote.py` (overrides → script/series config) — shared by the CLI and the routes
 - `comfy_nodes/h3pipe_api.py` + `h3pipe_routes.py` — the editor's HTTP API (`docs/API.md`);
   `web/` — the editor UI (React/Vite), built into `comfy_nodes/web/h3pipe-editor.js`
 - `kreagen.py`, `mksheet.py` — reference images
@@ -35,7 +36,10 @@ its own (data only, proposed from a workflow by `h3inspect.py`).
   `/h3pipe/peaks`); its `clip_audio` is assemble's `--audio auto` rule
 - `comfy_nodes/` — the ComfyUI custom node pack (loader, info, save)
 - `docs/AUTHORING.md` — the script/series config format (source of truth; `prompts/` is
-  generated from it by `python tools/make_prompts.py`)
+  generated from it by `python tools/make_prompts.py`). Its opening example is
+  `examples/starter/`, the pair `h3.py new` writes: copy it in with
+  `python tools/sync_starter_doc.py` (`--check` in `tests/test_new_episode.py`), then
+  regenerate `prompts/`
 - `INSTALL.md` — setting up on a fresh machine; its model list is generated from each
   target's `downloads` by `python tools/make_models_md.py` (`--check` in `tests/test_docs.py`)
 

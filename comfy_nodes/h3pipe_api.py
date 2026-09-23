@@ -453,6 +453,38 @@ def post_build(ctx: Context, body):
     return 200, result
 
 
+@handler
+def post_episode_new(ctx: Context, body):
+    """A new episode: `<parent>/<name>/` with a series config and a script that
+    build (h3source.new_episode, docs/polish_Plan.md "P5").
+
+    `parent` is the folder the episodes live in — the show's folder, not the
+    episode's — and must be inside a configured root. 400 for a name that isn't
+    a folder name, 409 when the folder is already there."""
+    body = body_dict(body)
+    parent = check_folder(ctx, body.get("parent"), "parent")
+    res = P.H.new_episode(parent, body.get("name"),
+                          series_id=body.get("series_id") or None,
+                          title=body.get("title") or None)
+    episode_event(ctx, res["ep"])
+    return 200, res
+
+
+def check_folder(ctx: Context, path, what: str = "folder") -> str:
+    """An existing folder inside a configured root (the same check as an
+    episode's, for a folder that isn't an episode yet)."""
+    if not path or not isinstance(path, str):
+        raise ApiError(400, f"{what} is required: an absolute folder path")
+    if not os.path.isabs(path):
+        raise ApiError(400, f"{what} must be an absolute path, not {path!r}")
+    if not any(_inside(_real(path), _real(r)) for r in load_roots(ctx)):
+        raise ApiError(403, f"{path} is not inside a configured root "
+                            "(set them with PUT /h3pipe/config)")
+    if not os.path.isdir(path):
+        raise ApiError(404, f"no folder at {path}")
+    return os.path.abspath(path)
+
+
 # ---------------------------------------------------------------------------
 # files
 # ---------------------------------------------------------------------------
@@ -485,18 +517,40 @@ def ep_file(ctx: Context, ep: str, rel, escape_status: int = 403) -> tuple[str, 
     return full, "/".join(p for p in parts if p not in ("", "."))
 
 
+# The folders a series config may point at outside its own episode. A show with
+# one refs folder and a series config per episode (each naming `../refs/...`) is
+# the arrangement a multi-episode series wants: the sheets and plates are shared,
+# while an episode can still add props and locations of its own.
+SHARED_DIRS = ("refs", "audio")
+
+
 def _in_series_home(ctx: Context, ep: str, parts: list[str]) -> bool:
-    """A path like ../refs/x.png is allowed when the episode's series config lives in its
-    parent folder (a series folder, where series refs live) and the file is
-    inside that folder and inside a configured root."""
+    """Whether a path that climbs out of the episode may still be served.
+
+    Two arrangements are allowed, both of them ways a series config legitimately
+    names a file above its episode, and neither reaching anything the API
+    doesn't already serve for some episode:
+
+    - the series config lives in the episode's **parent** (one config for the
+      show): anything inside that folder;
+    - the series config lives in the **episode** but names `../refs/...` or
+      `../audio/...` (shared assets, per-episode config): only those two
+      folders of the parent, so a sibling episode's renders and the show
+      folder's own files stay out of reach.
+
+    Either way the file must also be inside a configured root.
+    """
     series_cfg = E.episode_series_config(ep)
     if not series_cfg:
         return False
     home = _real(os.path.dirname(os.path.abspath(series_cfg)))
-    if home == _real(ep):
-        return False
     full = _real(os.path.join(ep, *[p for p in parts if p not in ("", ".")]))
-    return _inside(full, home) and any(_inside(full, _real(r)) for r in load_roots(ctx))
+    if not any(_inside(full, _real(r)) for r in load_roots(ctx)):
+        return False
+    if home != _real(ep):
+        return _inside(full, home)
+    show = os.path.dirname(os.path.abspath(ep))
+    return any(_inside(full, _real(os.path.join(show, d))) for d in SHARED_DIRS)
 
 
 # ---------------------------------------------------------------------------
@@ -2087,6 +2141,7 @@ ROUTES = [
     ("GET", "/h3pipe/episode", get_episode, "query"),
     ("GET", "/h3pipe/shot", get_shot, "query"),
     ("POST", "/h3pipe/build", post_build, "body"),
+    ("POST", "/h3pipe/episode/new", post_episode_new, "body"),
     ("GET", "/h3pipe/file", get_file, "query"),
     ("POST", "/h3pipe/render", post_render, "body"),
     ("POST", "/h3pipe/cancel", post_cancel, "body"),

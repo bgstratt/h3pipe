@@ -132,6 +132,12 @@ FAMILIES: dict[str, dict] = {
     "ltx2.3-ic-lora-ingredients": {"label": "LTX 2.3 ingredients IC-LoRA"},
     "ltx2.5-ic-lora-ingredients": {"label": "LTX 2.5 ingredients IC-LoRA"},
     "wan2.2-i2v-lightx2v-lora": {"label": "Wan 2.2 I2V lightx2v 4-step LoRA"},
+    # lightx2v's Wan2.2-Lightning pair for the T2V A14B experts, which Fun VACE
+    # is built on (the I2V pair above does not fit it). Its releases all ship as
+    # high_noise_model / low_noise_model, so the variant lives in the file name
+    # you save it under: `250928` (natural colour, finer detail) or `seko_v2`
+    # (better on stylised and synthetic work).
+    "wan2.2-t2v-lightx2v-lora": {"label": "Wan 2.2 T2V lightx2v 4-step LoRA"},
 }
 
 # Signatures, first match wins (so a checkpoint, which carries VAEs too, is

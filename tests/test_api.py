@@ -181,6 +181,61 @@ class ConfigAndRootsTest(ApiTest):
         self.assertIn("script", data["error"])
 
 
+
+class NewEpisodeTest(ApiTest):
+    """P5: POST /h3pipe/episode/new. `parent` is the show's folder, and the
+    checks are every other path route's: inside a configured root, or 403."""
+
+    def test_makes_one_and_lists_it(self):
+        data = self.ok(A.post_episode_new(self.ctx, {"parent": self.shows, "name": "ep09",
+                                                     "title": "Nine"}))
+        ep = os.path.join(self.shows, "ep09")
+        self.assertEqual(os.path.normcase(data["ep"]), os.path.normcase(ep))
+        self.assertEqual(data["files"], ["series.json", "ep09.md"])
+        for f in data["files"]:
+            self.assertTrue(os.path.isfile(os.path.join(ep, f)), f)
+        # kitchen_sink's config names `refs/...`, inside the episode, so that is
+        # where this show's pictures go (`../refs/...` would put them one up)
+        self.assertEqual(os.path.normcase(data["refs"]),
+                         os.path.normcase(os.path.join(ep, "refs")))
+        self.assertTrue(os.path.isdir(data["refs"]))
+        self.assertTrue(data["check"]["ok"], data["check"])
+        self.assertEqual(data["episode"]["name"], "ep09")
+        self.assertEqual(data["episode"]["built"], {"final": False, "proxy": False})
+        self.assertIn({"ep": ep}, self.events_of("h3pipe.episode"))
+        listed = {e["name"] for e in self.ok(A.get_episodes(self.ctx, {}))}
+        self.assertIn("ep09", listed)
+
+    def test_the_episode_beside_it_is_the_template(self):
+        """kitchen_sink is already there, so its config carries over."""
+        data = self.ok(A.post_episode_new(self.ctx, {"parent": self.shows, "name": "ep09"}))
+        self.assertEqual(data["template"], "episode")
+        self.assertEqual(os.path.normcase(data["from"]), os.path.normcase(self.ep))
+        with open(os.path.join(data["ep"], "series.json"), encoding="utf-8") as fh:
+            new = json.load(fh)
+        with open(os.path.join(self.ep, "series.json"), encoding="utf-8") as fh:
+            old = json.load(fh)
+        self.assertEqual(new["subjects"], old["subjects"])
+
+    def test_it_builds_straight_away(self):
+        data = self.ok(A.post_episode_new(self.ctx, {"parent": self.shows, "name": "ep09"}))
+        built = self.ok(A.post_build(self.ctx, {"ep": data["ep"]}))
+        self.assertTrue(built["ok"], built)
+
+    def test_outside_every_root(self):
+        self.err(A.post_episode_new(self.ctx, {"parent": self.tmp, "name": "ep09"}), 403)
+        self.assertFalse(os.path.exists(os.path.join(self.tmp, "ep09")))
+
+    def test_a_relative_parent_and_a_missing_one(self):
+        self.err(A.post_episode_new(self.ctx, {"parent": "Shows", "name": "ep09"}), 400)
+        self.err(A.post_episode_new(self.ctx, {"parent": os.path.join(self.shows, "nope"),
+                                               "name": "ep09"}), 404)
+
+    def test_a_name_that_is_no_folder_name_and_one_already_there(self):
+        self.err(A.post_episode_new(self.ctx, {"parent": self.shows, "name": "../ep09"}), 400)
+        self.err(A.post_episode_new(self.ctx, {"parent": self.shows}), 400)
+        self.err(A.post_episode_new(self.ctx, {"parent": self.shows, "name": "ks01"}), 409)
+
 class ReadTest(ApiTest):
     def test_episodes(self):
         eps = self.ok(A.get_episodes(self.ctx, {}))
@@ -205,6 +260,29 @@ class ReadTest(ApiTest):
         self.err(A.get_file(self.ctx, {"ep": self.ep, "path": "renders/none.mp4"}), 404)
         self.err(A.get_file(self.ctx, {"ep": self.ep, "path": "shotlist"}), 404)
         self.err(A.get_file(self.ctx, {"ep": self.ep}), 400)
+
+    def test_file_shared_refs_one_level_up(self):
+        """A show with one refs folder and a series config per episode: the config
+        names ../refs/..., and those files have to be servable or every sheet and
+        plate in the Refs tab is a broken image. Only refs/ and audio/ of the show
+        folder open up — not a sibling episode, not the show's own files."""
+        show = os.path.join(self.shows, "Show")
+        ep = os.path.join(show, "ep01")
+        os.makedirs(os.path.join(show, "refs", "ada"), exist_ok=True)
+        os.makedirs(os.path.join(show, "audio"), exist_ok=True)
+        os.makedirs(os.path.join(show, "ep02", "renders"), exist_ok=True)
+        os.makedirs(ep, exist_ok=True)
+        shutil.copy(os.path.join(self.ep, "series.json"), ep)     # the config is IN the episode
+        for rel in (("refs", "ada", "sheet.png"), ("audio", "mix.wav"),
+                    ("ep02", "renders", "x.mp4"), ("secret.txt",)):
+            with open(os.path.join(show, *rel), "w") as fh:
+                fh.write("x")
+        served = self.ok(A.get_file(self.ctx, {"ep": ep, "path": "../refs/ada/sheet.png"}))
+        self.assertEqual(os.path.normcase(served["path"]),
+                         os.path.normcase(os.path.join(show, "refs", "ada", "sheet.png")))
+        self.ok(A.get_file(self.ctx, {"ep": ep, "path": "../audio/mix.wav"}))
+        for bad in ("../secret.txt", "../ep02/renders/x.mp4", "../../secret.txt"):
+            self.err(A.get_file(self.ctx, {"ep": ep, "path": bad}), 400)
 
     def test_file_after_render(self):
         (q,) = self.render("sh010")["queued"]

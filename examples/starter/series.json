@@ -1,0 +1,36 @@
+{
+  "series": {
+    "id": "first_light",
+    "title": "First Light",
+    "fps": 24,
+    "width": 1344,
+    "height": 768
+  },
+  "proxy": { "width": 448, "height": 256 },
+  "style": {
+    "look": "a 2D hand-drawn cartoon animation with flat 2D illustration, clean black line art, flat solid colors, and cel-shaded artwork"
+  },
+  "subjects": {
+    "ada": {
+      "kind": "character",
+      "name": "Ada",
+      "pronoun": "her",
+      "design": "a nine-year-old girl with short curly black hair, a green raincoat, and yellow rain boots, drawn with thick confident outlines",
+      "sheet": "../refs/ada/ada_sheet_4panel.png",
+      "voice": "bright, quick, a little breathless"
+    },
+    "lantern": {
+      "kind": "prop",
+      "name": "the porch lantern",
+      "design": "a dented brass hurricane lantern with a smoke-stained glass chimney and a wire handle",
+      "sheet": "../refs/props/lantern.png"
+    }
+  },
+  "locations": {
+    "porch": {
+      "description": "a wooden front porch at dawn, wet boards, a hanging lamp still lit, mist over the lawn beyond",
+      "plate": "../refs/_bg/porch.png"
+    }
+  },
+  "audio": { "mode": "generate" }
+}

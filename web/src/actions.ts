@@ -6,6 +6,7 @@ import { audioOf } from "./lib/audioSource";
 import { epRelative, reachable, sameDir } from "./lib/browse";
 import { absPath, promptText, sameEp, tn } from "./lib/format";
 import { normPath, splitByMissingRefs } from "./lib/missingRefs";
+import { staleShots } from "./lib/progress";
 import { buildPlaylist, startOf, totalDuration, type PlayItem } from "./lib/playlist";
 import { type RefTargetKind } from "./lib/imageTargets";
 import {
@@ -21,7 +22,7 @@ import {
   type CompareMode, type RefTakeRef, type VoiceClipState,
 } from "./store";
 import type {
-  AlignEvent, AlignMissing, AlignRequest, BuildResult, CutAudioSource, EpisodeStatus, Lora, SourceFile, OverrideFields, Pass,
+  AlignEvent, AlignMissing, AlignRequest, BuildResult, CutAudioSource, EpisodeStatus, Lora, NewEpisodeResult, SourceFile, OverrideFields, Pass,
   ProgressEvent, PromptEvent, Ref, RefEvent, RefGenerateRequest, RefTake, RenderRequest, RenderResult, RenderSkip, Seed,
   SeedMode, ShotDetail, TakeEvent, TakeRef, TargetProposal, TrackResult,
   VoiceFromTakeRequest, WorkflowFile,
@@ -872,10 +873,12 @@ export async function queueRender(req: RenderRequest): Promise<RenderResult | un
   });
 }
 
-export function renderShots(shots: string[], redo = false, allowMissingRefs = false, target: string | null = null) {
+export function renderShots(shots: string[], redo = false, allowMissingRefs = false,
+                            target: string | null = null, seedMode: SeedMode = "auto") {
   const s = get();
   if (!s.ep || !shots.length) return Promise.resolve(undefined);
-  return queueRender({ ...baseRender(s.ep, s.pass, shots, allowMissingRefs, target), redo });
+  return queueRender({ ...baseRender(s.ep, s.pass, shots, allowMissingRefs, target), redo,
+                       seed_mode: seedMode });
 }
 
 /**
@@ -883,7 +886,8 @@ export function renderShots(shots: string[], redo = false, allowMissingRefs = fa
  * dialog (which lists what will be skipped and offers "render anyway");
  * otherwise queue straight away (confirming big batches).
  */
-export function requestRender(shots: string[], redo = false, title?: string) {
+export function requestRender(shots: string[], redo = false, title?: string,
+                              seedMode: SeedMode = "auto") {
   const s = get();
   const st = s.ep ? s.status[statusKey(s.ep, s.pass)] : undefined;
   if (!s.ep || !shots.length) return;
@@ -892,11 +896,28 @@ export function requestRender(shots: string[], redo = false, title?: string) {
   const def = seriesDefaultTarget(s.targets, st);
   const notReady = shots.some((id) => readinessOf(s.targets, shotTarget(st?.shots.find((x) => x.shot === id), def))?.status === "not_ready");
   if (blocked.length || notReady) {
-    set({ renderAsk: { shots, pass: s.pass, redo, title: title ?? `Render ${shots.length === 1 ? shots[0] : `${shots.length} shots`}` }, menu: null });
+    set({ renderAsk: { shots, pass: s.pass, redo, seedMode,
+                       title: title ?? `Render ${shots.length === 1 ? shots[0] : `${shots.length} shots`}` }, menu: null });
     return;
   }
   if (shots.length > 8 && !confirm(`Queue ${shots.length} ${s.pass} renders?`)) return;
-  void renderShots(shots, redo);
+  void renderShots(shots, redo, false, null, seedMode);
+}
+
+/**
+ * P2: re-render the shots whose newest take is stale — the script, a reference,
+ * the preset or the target changed since it rendered. At each shot's **built**
+ * seed (`seed_mode: "same"`, which is `stable_seed`), so the new take differs
+ * from the old one by the edit and nothing else. A take that was itself a redo
+ * on a rolled seed therefore goes back to the built seed: that is the shot as it
+ * would render now, which is the question being asked.
+ */
+export function renderStale() {
+  const s = get();
+  const st = s.ep ? s.status[statusKey(s.ep, s.pass)] : undefined;
+  const ids = staleShots(st?.shots);
+  if (!ids.length) return;
+  requestRender(ids, true, `Re-render ${ids.length} stale shot(s)`, "same");
 }
 
 export function closeRenderAsk() {
@@ -1359,6 +1380,30 @@ export async function addRoot(path: string): Promise<boolean> {
 export async function removeRoot(path: string): Promise<boolean> {
   const roots = get().config?.roots ?? [];
   return saveRoots(roots.filter((r) => !sameDir(r, path)));
+}
+
+/**
+ * P5: a new episode in `parent` (the show's folder, not the episode's), from a
+ * template — the newest episode already there, else the shipped starter. On
+ * success the new episode is opened, so the next thing on screen is Build.
+ */
+export async function makeEpisode(parent: string, name: string, title: string): Promise<NewEpisodeResult | null> {
+  setBusy("newEpisode", true);
+  try {
+    const res = await api().newEpisode({ parent, name, title: title.trim() || null });
+    const from = res.template === "starter"
+      ? "from the starter template"
+      : `from ${res.from.replace(/[\\/]+$/, "").split(/[\\/]/).pop()}`;
+    host().toast("success", `Made ${res.episode.name}`, `${res.ep}\n${from}`);
+    await loadEpisodes();
+    await openEpisodeAt(res.ep, parent);
+    return res;
+  } catch (e) {
+    report("The episode wasn't made", e);
+    return null;
+  } finally {
+    setBusy("newEpisode", false);
+  }
 }
 
 /**

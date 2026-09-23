@@ -9,6 +9,7 @@ import type { Api } from "../api";
 import { ApiError, UPLOAD_LIMIT, parseJsonSeedSafe, targetsQuery } from "../api";
 import type { HostEvent } from "../host";
 import { reachable } from "../lib/browse";
+import { insideRoot, nameError } from "../lib/newEpisode";
 import { promptText } from "../lib/format";
 import type {
   BuildResult, CutAudioSource, CutEntry, EpisodeStatus, EpisodeSummary, Lora, MissingRef, Override, OverrideResult, Pass,
@@ -87,6 +88,9 @@ export function createMockApi(emit: Emit, opts: MockOptions = {}): Api & { outsi
   /** series.json's `series.target` */
   let seriesTarget = SERIES_TARGET;
   let roots: string[] = opts.firstRun ? [] : [EP.replace(/[\\/][^\\/]+[\\/][^\\/]+$/, "")];
+  // P5: episodes made through newEpisode. The mock has one real episode; a new
+  // one is listed and opens as what it is on disk — unbuilt and empty.
+  const made: { ep: string; name: string; title: string }[] = [];
   const status: Partial<Record<Pass, EpisodeStatus>> = clone(fx.status);
   const detail: Partial<Record<Pass, Record<string, ShotDetail>>> = clone(fx.detail);
   const cut: Record<Pass, CutEntry[]> = { final: [], proxy: [] };
@@ -226,7 +230,25 @@ export function createMockApi(emit: Emit, opts: MockOptions = {}): Api & { outsi
 
   function need(ep: string) {
     if (!roots.length) throw new MockError("No project roots are configured.", 403);
-    if (ep !== EP) throw new MockError(`Unknown episode ${ep}`, 404);
+    if (ep !== EP && !made.some((m) => m.ep === ep)) {
+      throw new MockError(`Unknown episode ${ep}`, 404);
+    }
+  }
+
+  function madeSummary(m: { ep: string; name: string; title: string }): EpisodeSummary {
+    return {
+      ep: m.ep, name: m.name, series: fx.summary.series, title: m.title,
+      built: { final: false, proxy: false }, shots: 0, script: `${m.name}.md`,
+    };
+  }
+
+  function emptyStatus(m: { ep: string; title: string }, pass: Pass): EpisodeStatus {
+    const base = st("proxy");
+    return {
+      episode: m.title, title: m.title, pass, fps: base.fps, width: base.width,
+      height: base.height, folder: m.ep, shots: [], target: base.target,
+      target_source: base.target_source, series_target: base.series_target ?? null, track: null,
+    };
   }
 
   function st(pass: Pass): EpisodeStatus {
@@ -764,11 +786,16 @@ export function createMockApi(emit: Emit, opts: MockOptions = {}): Api & { outsi
     },
     async episodes() {
       await wait();
-      return reachable(EP, roots) ? [clone(fx.summary)] : [];
+      return [
+        ...(reachable(EP, roots) ? [clone(fx.summary)] : []),
+        ...made.filter((m) => reachable(m.ep, roots)).map(madeSummary),
+      ];
     },
     async episode(ep, pass) {
       await wait();
       need(ep);
+      const m = made.find((x) => x.ep === ep);
+      if (m) return emptyStatus(m, pass);
       return with9b(withMissing(clone(st(pass))));
     },
     async shot(ep, pass, shot) {
@@ -790,6 +817,35 @@ export function createMockApi(emit: Emit, opts: MockOptions = {}): Api & { outsi
           final: { ok: true, report, error: "" },
           proxy: { ok: true, report: report.replace("shotlist.json", "shotlist_proxy.json"), error: "" },
         },
+      };
+    },
+    // P5: a new episode from a template. No filesystem here, so the mock keeps
+    // the folder in memory and lists it as what it would be: unbuilt, no shots.
+    async newEpisode(req) {
+      await wait(400);
+      if (!roots.length) throw new MockError("No project roots are configured.", 403);
+      if (!req.parent || !insideRoot(req.parent, roots)) {
+        throw new MockError(`${req.parent} is not inside a configured root`, 403);
+      }
+      const bad = nameError(req.name ?? "");
+      if (bad) throw new MockError(bad, 400);
+      const name = req.name.trim();
+      const sep = req.parent.includes("\\") ? "\\" : "/";
+      const ep = `${req.parent.replace(/[\\/]+$/, "")}${sep}${name}`;
+      if (ep === EP || made.some((m) => m.ep === ep) || fsExists(ep)) {
+        throw new MockError(`${ep} is already there`, 409);
+      }
+      const first = !fsExists(`${req.parent.replace(/[\\/]+$/, "")}${sep}ep01`) && !made.length;
+      const m = { ep, name, title: req.title?.trim() || fx.summary.series };
+      made.push(m);
+      emit("h3pipe.episode", { ep });
+      return {
+        ep, template: first ? "starter" : "episode",
+        from: first ? "examples/starter" : EP,
+        files: ["series.json", `${name}.md`],
+        refs: `${req.parent.replace(/[\\/]+$/, "")}${sep}refs`,
+        check: { ok: true, errors: [], warnings: [], shots: [] },
+        episode: madeSummary(m),
       };
     },
     fileUrl(_ep, path) {

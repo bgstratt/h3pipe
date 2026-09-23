@@ -541,8 +541,17 @@ class RenderTest(unittest.TestCase):
         trim = g[J.node_of(g, "TrimVideoLatent")]["inputs"]
         self.assertEqual(trim["trim_amount"], [J.node_of(g, "WanVaceToVideo"), 3])
         s1 = titled(g, "KSamplerAdvanced", "Wan high noise sampler")
-        self.assertEqual((s1["steps"], s1["end_at_step"], s1["cfg"]), (10, 5, 3.5))
-        self.assertFalse(of(g, "LoraLoaderModelOnly"))
+        # 2026-09-22: the T2V A14B 4-step pair is VACE's accelerator, so the proxy
+        # is 4 steps at cfg 1 (split at 2), not the 20 / 10 at cfg 3.5 it shipped
+        # with -- those are its `base`, for a machine without the LoRAs.
+        self.assertEqual((s1["steps"], s1["end_at_step"], s1["cfg"]), (4, 2, 1.0))
+        loras = {(g[n]["_meta"]["title"], g[n]["inputs"]["lora_name"])
+                 for n in of(g, "LoraLoaderModelOnly")}
+        self.assertEqual(loras, {
+            ("Wan high noise LoRA",
+             "wan2.2_t2v_lightx2v_4steps_lora_250928_high_noise.safetensors"),
+            ("Wan low noise LoRA",
+             "wan2.2_t2v_lightx2v_4steps_lora_250928_low_noise.safetensors")})
         self.saver(g, 16.0)
         # re-picking a view makes the take ref-stale
         png(os.path.join(self.root, "refs", "ada", "ada_sheet_4panel.png"), (256, 64), ((1, 2, 3),))

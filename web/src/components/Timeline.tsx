@@ -14,6 +14,7 @@ import {
 } from "../lib/format";
 import { missingRefsSummary } from "../lib/missingRefs";
 import { clipTake, locate, totalDuration, type PlayItem } from "../lib/playlist";
+import { passProgress, progressLine, progressTitle } from "../lib/progress";
 import { targetBadges } from "../lib/targets";
 import { ZOOM_MAX, ZOOM_MIN, renderingTakes, statusKey, store, useApp } from "../store";
 import type { EpisodeStatus, Pass, ShotStatus, TakeSummary, TargetList } from "../types";
@@ -284,6 +285,7 @@ export function Timeline() {
   const clipH = Math.max(24, (size.height || 150) - 6 - 16 - RULER_H - (waves ? WAVE_H + 2 : 0) - 2);
   const aspect = aspectOf(st);
   const total = items.length ? totalDuration(items) : st?.shots.reduce((n, s) => n + (shotSeconds(s, st.fps) ?? 0), 0) ?? 0;
+  const prog = useMemo(() => passProgress(st?.shots), [st]);
   const missing = useMemo(() => missingRefsSummary(st?.shots ?? []), [st]);
   const moved = useMemo(() => (st?.shots ?? []).filter((s) => s.cut?.out_of_order && !s.orphan).length, [st]);
 
@@ -462,6 +464,13 @@ export function Timeline() {
       <div className="h3-bar">
         <span className="h3-title h3-ell" title={ep ?? ""}>{st ? `${st.episode}` : "Timeline"}</span>
         {st && <span className="h3-muted h3-small">{st.shots.length} shots · {fmtSeconds(total)}</span>}
+        {st && prog.queued > 0 && (
+          // P1: watching a pass is what this window is for, so the rate and the
+          // estimate live here too — only while something is actually queued
+          <span className="h3-muted h3-small h3-nowrap" title={progressTitle(prog)}>
+            {progressLine(prog)}
+          </span>
+        )}
         <button
           className={`h3-btn${playing ? " h3-on" : ""}`}
           disabled={!st?.shots.length}

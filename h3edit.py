@@ -107,7 +107,12 @@ def episode_series_config(root: str) -> str | None:
 
 
 def find_episodes(roots: list[str], depth: int = 2) -> list[dict]:
-    """Every folder under `roots` (to `depth` levels) with a series config and a script."""
+    """Every folder under `roots` (to `depth` levels) with a series config and a script.
+
+    The config may be the folder's own or, as episode_series_config allows, the
+    one in its parent (a series folder shared by every episode under it). In
+    that case the script has to be named after the folder, so a folder of loose
+    notes beside the episodes isn't taken for one."""
     out, seen = [], set()
 
     def visit(d: str, level: int):
@@ -119,9 +124,14 @@ def find_episodes(roots: list[str], depth: int = 2) -> list[dict]:
             return
         if "series.json" in names:
             script = episode_script(d)
-            if script and os.path.normcase(d) not in seen:
-                seen.add(os.path.normcase(d))
-                out.append(episode_summary(d, script))
+        else:
+            named = f"{os.path.basename(os.path.normpath(d))}.md".lower()
+            script = next((os.path.join(d, n) for n in names if n.lower() == named), None)
+            if script and not episode_series_config(d):
+                script = None
+        if script and os.path.normcase(d) not in seen:
+            seen.add(os.path.normcase(d))
+            out.append(episode_summary(d, script))
         for n in names:
             if n.startswith((".", "_")) or n in ("refs", "renders", "renders_proxy",
                                                  "shotlist", "views", "audio"):

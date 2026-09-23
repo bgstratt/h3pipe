@@ -53,7 +53,8 @@ function RenderBody() {
     try {
       // everything goes to the server, which skips the blocked shots itself
       // (and reports them) unless allow_missing_refs is set
-      await renderShots(ask.shots, ask.redo, allow, target && target !== own ? target : null);
+      await renderShots(ask.shots, ask.redo, allow, target && target !== own ? target : null,
+                        ask.seedMode ?? "auto");
       closeRenderAsk();
     } finally {
       setBusy(false);

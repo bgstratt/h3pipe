@@ -2,10 +2,11 @@
 // episode, and picking a file on the ComfyUI machine to import as a ref.
 
 import { useCallback, useEffect, useState } from "react";
-import { addRoot, attachTrack, closeBrowse, importRef, openEpisodeAt, refLabel, removeRoot, useClipAudioFile } from "../actions";
+import { addRoot, attachTrack, closeBrowse, importRef, makeEpisode, openEpisodeAt, refLabel, removeRoot, useClipAudioFile } from "../actions";
 import { errText } from "../api";
 import { api } from "../host";
 import { AUDIO_EXT, CLIP_AUDIO_EXT, IMAGE_EXT, crumbs } from "../lib/browse";
+import { insideRoot, nameError, suggestName, willBeListed } from "../lib/newEpisode";
 import { TRACK_EXT } from "../lib/track";
 import { viewLabel } from "../lib/refs";
 import { useApp, type BrowseState } from "../store";
@@ -47,6 +48,11 @@ function BrowseBody({ b }: { b: BrowseState }) {
   const [err, setErr] = useState<string | null>(null);
   const [sel, setSel] = useState<Sel>(null);
   const [typed, setTyped] = useState("");
+  // P5: New episode… — the folder it goes in is the show's, not the episode's
+  const [making, setMaking] = useState(false);
+  const [epName, setEpName] = useState("");
+  const [epTitle, setEpTitle] = useState("");
+  const busyNew = useApp((s) => !!s.busy.newEpisode);
   const forTrack = b.purpose === "track";
   const busyTrack = useApp((s) => !!s.busy.track);
   // Phase 9d: picking one clip's audio file — the same file list, but the
@@ -106,6 +112,22 @@ function BrowseBody({ b }: { b: BrowseState }) {
   // "Open episode" works on the selected folder, else the one we're in
   const epTarget = selDir?.episode ? { path: selDir.path, parent: here || null } : res?.episode ? { path: here, parent: res.parent || null } : null;
   const rootTarget = selDir?.path ?? (here || null);
+  // a new episode goes in the show's folder: the selected one, unless that is
+  // itself an episode (then the folder we're in is the show's)
+  const newParent = selDir && !selDir.episode ? selDir.path : here;
+  const nameProblem = nameError(epName);
+  const outsideRoots = !!newParent && !insideRoot(newParent, roots);
+  const deep = !!newParent && !outsideRoots && !willBeListed(newParent, roots);
+
+  const startMaking = () => {
+    setEpName(suggestName(res?.dirs ?? []));
+    setEpTitle("");
+    setMaking(true);
+  };
+  const create = async () => {
+    if (!newParent || nameProblem || outsideRoots) return;
+    if (await makeEpisode(newParent, epName.trim(), epTitle)) closeBrowse();
+  };
 
   const title = forClip
     ? <>A file for {b.shot ?? "this clip"}'s audio <span className="h3-muted h3-small">inside the episode</span></>
@@ -144,6 +166,14 @@ function BrowseBody({ b }: { b: BrowseState }) {
           ) : (
             <>
               <span className="h3-muted h3-small h3-grow">Double-click an episode to open it.</span>
+              <button
+                className="h3-btn"
+                disabled={!newParent || making}
+                title={newParent ? `Make a new episode in ${newParent}` : "Browse to the folder your episodes live in"}
+                onClick={startMaking}
+              >
+                <i className="pi pi-file-plus" /> New episode…
+              </button>
               <button className="h3-btn" disabled={!rootTarget || busyRoots} title={rootTarget ? `Add ${rootTarget} as a project root` : "Browse into a folder first"} onClick={() => rootTarget && void addRoot(rootTarget)}>
                 <i className="pi pi-plus" /> Add as root
               </button>
@@ -238,6 +268,45 @@ function BrowseBody({ b }: { b: BrowseState }) {
           </button>
         )}
       </div>
+      {!importing && making && (
+        <div className="h3-col" style={{ gap: 4 }}>
+          <div className="h3-h">New episode in {newParent}</div>
+          <div className="h3-row">
+            <input
+              className="h3-in h3-mono"
+              style={{ width: 130 }}
+              placeholder="ep02"
+              value={epName}
+              autoFocus
+              onChange={(e) => setEpName(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") void create(); }}
+            />
+            <input
+              className="h3-in h3-grow"
+              placeholder="episode title (optional)"
+              value={epTitle}
+              onChange={(e) => setEpTitle(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") void create(); }}
+            />
+            <button
+              className="h3-btn h3-primary"
+              disabled={!!nameProblem || outsideRoots || busyNew}
+              title={`Makes ${newParent}\\${epName || "epNN"}\\ with a series.json and a script that build`}
+              onClick={() => void create()}
+            >
+              <i className={busyNew ? "pi pi-spin pi-spinner" : "pi pi-check"} /> Create
+            </button>
+            <button className="h3-btn" onClick={() => setMaking(false)}>Cancel</button>
+          </div>
+          <div className={`h3-small${outsideRoots || nameProblem ? " h3-note-err" : " h3-muted"}`}>
+            {outsideRoots
+              ? `${newParent} isn't inside a project root — add it as a root first.`
+              : nameProblem
+                ? nameProblem
+                : `The name is the folder and the script (${epName}\\${epName}.md). It starts from the newest episode already there — its cast, look and profiles — or from the starter template when there is none.${deep ? " This folder is deeper than a root reaches, so opening the episode will add it as one." : ""}`}
+          </div>
+        </div>
+      )}
       {!importing && (
         <div className="h3-col" style={{ gap: 2 }}>
           <div className="h3-h">Project roots</div>

@@ -1,12 +1,13 @@
 import { memo, useMemo, useState, type MouseEvent } from "react";
 import {
   build, loadEpisodes, openBrowse, openInspector, openMenu, openSource, openViewer, pickTake, playAll, refreshEpisode,
-  requestRender, select, selectEpisode, setPass, toggleExpanded, toggleSequence,
+  renderStale, requestRender, select, selectEpisode, setPass, toggleExpanded, toggleSequence,
 } from "../actions";
 import { host } from "../host";
 import {
   ESTIMATE_TITLE, cutTake, fmtSeconds, fmtWhen, groupBySequence, lengthEstimated, realStale, shotBadges, staleTitle, tn,
 } from "../lib/format";
+import { missingShots, passProgress, progressLine, progressTitle, staleReasons, staleShots } from "../lib/progress";
 import { shotTarget, takeTargetBadge, targetBadges } from "../lib/targets";
 import { renderingTakes, statusKey, store, useApp } from "../store";
 import type { Pass, ShotStatus, TakeSummary, TargetList } from "../types";
@@ -107,7 +108,10 @@ function BuildBar() {
   const renderBusy = useApp((s) => Object.keys(s.busy).some((k) => k.startsWith("render|")));
   const [open, setOpen] = useState(true);
   if (!ep) return null;
-  const missing = st?.shots.filter((s) => !s.orphan && !s.takes.some((t) => t.status === "ok" || t.status === "queued")) ?? [];
+  const missing = missingShots(st?.shots);
+  // P2: shots whose newest take is stale for a reason a re-render settles
+  const stale = staleShots(st?.shots);
+  const why = staleReasons(st?.shots);
   const failed = b.result && !b.result.ok;
   return (
     <div className="h3-pad h3-col" style={{ gap: 4, paddingTop: 0 }}>
@@ -119,10 +123,22 @@ function BuildBar() {
         <button
           className="h3-btn"
           disabled={!missing.length || renderBusy}
-          title={missing.length ? `Queue a ${pass} take for each shot without one: ${missing.map((s) => s.shot).join(", ")}` : "Every shot has a take"}
-          onClick={() => requestRender(missing.map((s) => s.shot), false, "Render missing")}
+          title={missing.length ? `Queue a ${pass} take for each shot without one: ${missing.join(", ")}` : "Every shot has a take"}
+          onClick={() => requestRender(missing, false, "Render missing")}
         >
           <i className="pi pi-play" /> Render missing{missing.length ? ` (${missing.length})` : ""}
+        </button>
+        <button
+          className="h3-btn"
+          disabled={!stale.length || renderBusy}
+          title={stale.length
+            ? `Re-render the shots whose newest take is out of date (`
+              + Object.entries(why).map(([r, n]) => `${n} ${r}`).join(", ")
+              + `), each at its built seed so only the change shows: ${stale.join(", ")}`
+            : "No take is out of date"}
+          onClick={() => renderStale()}
+        >
+          <i className="pi pi-refresh" /> Re-render stale{stale.length ? ` (${stale.length})` : ""}
         </button>
       </div>
       {st && <MissingRefsSummary shots={st.shots} />}
@@ -315,17 +331,33 @@ function ShotBin() {
       </div>
     );
   }
-  if (!st) return <div className="h3-empty-state">{loading ? "Loading…" : ""}</div>;
+  // P5: a new episode lands here with nothing built, so say what comes next
+  // rather than showing an empty bin
+  if (!st) {
+    return (
+      <div className="h3-empty-state h3-col" style={{ gap: 6 }}>
+        {loading ? "Loading…" : (
+          <>
+            <div>The {pass} pass isn't built yet.</div>
+            <div className="h3-muted h3-small">
+              <b>Build</b> turns the script into shots. Then the <b>Refs</b> tab, for the pictures
+              every shot needs — nothing renders until its references are there.
+            </div>
+          </>
+        )}
+      </div>
+    );
+  }
   const aspect = aspectOf(st);
   const f = filter.trim().toLowerCase();
-  const withTakes = st.shots.filter((s) => s.takes.some((t) => t.status === "ok")).length;
-  const queued = st.shots.reduce((n, s) => n + s.takes.filter((t) => t.status === "queued").length, 0);
+  // P1: how far through the pass, how fast, how much left (lib/progress.ts)
+  const prog = passProgress(st.shots);
   return (
     <>
       <div className="h3-row h3-pad" style={{ paddingTop: 0 }}>
         <input className="h3-in h3-grow" placeholder="Filter shots (id, size, subject)" value={filter} onChange={(e) => setFilter(e.target.value)} />
-        <span className="h3-muted h3-small" title={`${withTakes} of ${st.shots.length} shots have a finished take; ${queued} queued`}>
-          {withTakes}/{st.shots.length}{queued ? ` · ${queued}q` : ""}
+        <span className="h3-muted h3-small h3-nowrap" title={progressTitle(prog)}>
+          {progressLine(prog)}
         </span>
         {loading && <i className="pi pi-spin pi-spinner h3-muted" />}
       </div>

@@ -479,6 +479,29 @@ export interface BuildResult {
   error?: string;
 }
 
+/** P5: POST /h3pipe/episode/new. `parent` is the show's folder, inside a root;
+ *  `name` becomes the folder and the script's stem. `series_id` and `title`
+ *  name the series only when this is its first episode. */
+export interface NewEpisodeRequest {
+  parent: string;
+  name: string;
+  title?: string | null;
+  series_id?: string | null;
+}
+
+export interface NewEpisodeResult {
+  ep: string;
+  /** "episode" = the newest episode beside it was the template, "starter" = the shipped pair */
+  template: "episode" | "starter";
+  /** the folder the template came from */
+  from: string;
+  files: string[];
+  /** where this config's reference pictures go, null when it names none */
+  refs: string | null;
+  check: SourceCheck;
+  episode: EpisodeSummary;
+}
+
 export type SeedMode = "auto" | "new" | "same";
 
 export interface RenderRequest {

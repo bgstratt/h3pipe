@@ -499,3 +499,254 @@ def save_source(ep: str, file: str, text: str, base_hash: str | None) -> dict:
     new_hash = write_source(src, text)
     return {"hash": new_hash, "check": check_text(ep, file, text),
             "changed": new_hash != src.hash}
+
+
+# ---------------------------------------------------------------------------
+# a new episode (docs/polish_Plan.md, "P5")
+# ---------------------------------------------------------------------------
+
+STARTER = os.path.join(os.path.dirname(os.path.abspath(__file__)), "examples", "starter")
+NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+SEP_RE = re.compile(r"[\\/]+")          # a config's paths may use either separator
+# An episode named like one of these would be walked past by find_episodes (or,
+# on Windows, is not a folder name at all), so it could never be opened again.
+RESERVED = ({"refs", "renders", "renders_proxy", "shotlist", "views", "audio", "targets",
+             "con", "prn", "aux", "nul"}
+            | {f"com{n}" for n in range(1, 10)} | {f"lpt{n}" for n in range(1, 10)})
+
+
+def check_name(name) -> str:
+    """An episode folder name, or SourceError 400. It is also the script's stem
+    (`ep02` -> `ep02.md`), which is what makes the episode discoverable."""
+    if not isinstance(name, str) or not NAME_RE.match(name.strip()):
+        raise SourceError(400, "the name must be a folder name: letters, digits, dot, dash "
+                               "or underscore, starting with a letter or digit")
+    name = name.strip()
+    if name.lower() in RESERVED or name.endswith("."):
+        raise SourceError(400, f"{name!r} can't be an episode folder name")
+    return name
+
+
+def episodes_under(parent: str) -> list[str]:
+    """The episode folders directly under `parent`, by name, each with a series
+    config of its own and a script."""
+    out = []
+    try:
+        names = sorted(os.listdir(parent), key=str.lower)
+    except OSError:
+        return out
+    for n in names:
+        d = os.path.join(parent, n)
+        if n.startswith((".", "_")) or not os.path.isdir(d):
+            continue
+        if os.path.isfile(os.path.join(d, "series.json")) and E.episode_script(d):
+            out.append(d)
+    return out
+
+
+def refs_folder(ep: str, raw: dict) -> str | None:
+    """Where this config's pictures go: the folder its first reference path
+    names `refs` in. `../refs/...` (the shared layout) puts it beside the
+    episode, `refs/...` inside it."""
+    paths = [s.get("sheet") for s in (raw.get("subjects") or {}).values() if isinstance(s, dict)]
+    paths += [loc.get("plate") for loc in (raw.get("locations") or {}).values()
+              if isinstance(loc, dict)]
+    for p in paths:
+        if not isinstance(p, str) or not p:
+            continue
+        parts = [x for x in re.split(SEP_RE, p) if x not in ("", ".")]
+        if "refs" in parts:
+            return os.path.abspath(os.path.join(ep, *parts[:parts.index("refs") + 1]))
+    return None
+
+
+def _first(block: dict, kind: str | None = None):
+    for key, val in (block or {}).items():
+        if key.startswith("_") or not isinstance(val, dict):
+            continue
+        if kind is None or val.get("kind") == kind:
+            return key, val
+    return None, None
+
+
+def skeleton_script(raw: dict, name: str, title: str) -> str | None:
+    """One shot that builds, using this series' own first character and
+    location -- a place to start writing, not a story. None when the config has
+    no character or no location to name (then the caller ships the starter)."""
+    who, subject = _first(raw.get("subjects") or {}, "character")
+    where, _loc = _first(raw.get("locations") or {})
+    if not who or not where:
+        return None
+    person = (subject or {}).get("name") or who
+    person = person[:1].upper() + person[1:]         # it opens a sentence
+    return (f"= {name}  {title}\n"
+            f"\n"
+            f"// A place to start: one shot that builds. Write the episode over it --\n"
+            f"// docs/AUTHORING.md is the format, `python h3.py check` says what is wrong,\n"
+            f"// and every subject and location comes from series.json by short name.\n"
+            f"\n"
+            f"# sq01  {where}\n"
+            f"\n"
+            f"## sh010\n"
+            f"who: {who}\n"
+            f"size: medium\n"
+            f"dur: 3\n"
+            f"{person} stands still, looking off to one side.\n"
+            f"camera: holds static\n"
+            f"sound: the room's own quiet\n")
+
+
+def new_episode(parent: str, name: str, series_id: str | None = None,
+                title: str | None = None) -> dict:
+    """Make `<parent>/<name>/` with a series config and a script that build.
+
+    The template is the newest episode already under `parent` -- its series
+    config copied, so the cast, look and render profiles carry over, with a
+    skeleton script to write into -- else the shipped `examples/starter` pair.
+    Either way the new episode gets a series config of its own, which is what
+    lets one episode add a character without touching its neighbours.
+
+    `title` titles the new episode (the script's `= <id>  <title>` line).
+    `series_id` and the series' own title are the series', so they are only
+    written when this is the first episode: a next episode belongs to the
+    series its neighbour already names.
+
+    SourceError 400 for a name that isn't a folder name or a parent that isn't
+    a folder, 409 when `<parent>/<name>` already exists. Returns
+    {"ep", "template", "from", "files", "refs", "check", "episode"}."""
+    name = check_name(name)
+    if not parent or not isinstance(parent, str) or not os.path.isdir(parent):
+        raise SourceError(400, f"no folder at {parent!r} to make the episode in")
+    ep = os.path.join(os.path.abspath(parent), name)
+    if os.path.exists(ep):
+        raise SourceError(409, f"{ep} is already there")
+
+    sibling = (episodes_under(parent) or [None])[-1]
+    raw = _template_config(sibling, series_id, title) if sibling \
+        else _template_config(STARTER, series_id, title, series=True)
+    ep_title = title or raw["series"].get("title") or name
+    script = None
+    if sibling:
+        _rename_track(raw, os.path.basename(os.path.normpath(sibling)), name)
+        script = skeleton_script(raw, name, ep_title)
+    template = "episode" if sibling and script else "starter"
+    if script is None:
+        if sibling:                                  # its config named nobody to write about
+            raw = _template_config(STARTER, series_id, title, series=True)
+            ep_title = title or raw["series"].get("title") or name
+        script = _retitled(_read_text(os.path.join(STARTER, "ep01.md")), name, ep_title)
+
+    os.makedirs(ep)
+    try:
+        atomic_write(os.path.join(ep, "series.json"), dump_series(raw, "\n").encode("utf-8"))
+        atomic_write(os.path.join(ep, f"{name}.md"), normalize(script).encode("utf-8"))
+        refs = refs_folder(ep, raw)
+        if refs:
+            os.makedirs(refs, exist_ok=True)
+    except BaseException:
+        for f in ("series.json", f"{name}.md"):
+            try:
+                os.remove(os.path.join(ep, f))
+            except OSError:
+                pass
+        try:
+            os.rmdir(ep)
+        except OSError:
+            pass
+        raise
+    return {"ep": ep, "template": template,
+            "from": os.path.abspath(sibling) if template == "episode" else STARTER,
+            "files": ["series.json", f"{name}.md"], "refs": refs,
+            "check": check_text(ep, "script", script),
+            "episode": E.episode_summary(ep)}
+
+
+def _template_config(src: str, series_id: str | None, title: str | None,
+                     series: bool = False) -> dict:
+    """The template's series config. `series` (a first episode, so the series is
+    being started here) lets the caller's id and title name the series too."""
+    raw = json.loads(_read_text(os.path.join(src, "series.json")))
+    if not isinstance(raw, dict) or not isinstance(raw.get("series"), dict):
+        raise SourceError(400, f"{os.path.join(src, 'series.json')} is not a series config")
+    if series and series_id:
+        raw["series"]["id"] = series_id
+    if series and title:
+        raw["series"]["title"] = title
+    return raw
+
+
+def _read_text(path: str) -> str:
+    try:
+        with open(path, "rb") as fh:
+            data = fh.read()
+    except OSError as e:
+        raise SourceError(400, f"{path} can't be read: {e}") from None
+    if data.startswith(BOM):
+        data = data[len(BOM):]
+    return normalize(data.decode("utf-8"))
+
+
+def _retitled(script: str, name: str, title: str) -> str:
+    """The template script's `= <id>  <title>` line, for the new episode."""
+    lines = script.split("\n")
+    for i, line in enumerate(lines):
+        if line.startswith("="):
+            lines[i] = f"= {name}  {title}".rstrip()
+            break
+    return "\n".join(lines)
+
+
+def _rename_track(raw: dict, old: str, new: str) -> None:
+    """A dialogue recording is per episode, so a copied config's track follows
+    the name (`audio/ep01_dialogue.wav` -> `audio/ep02_dialogue.wav`). Only
+    that: everything else in the config is the series', not the episode's."""
+    audio = raw.get("audio")
+    if not isinstance(audio, dict):
+        return
+    track = audio.get("track")
+    if isinstance(track, str) and old and old in track:
+        audio["track"] = track.replace(old, new)
+
+
+def cmd_new(argv: list[str]) -> int:
+    """`python h3.py new Shows\\ep02 [--title "..."] [--series-id ...]` — the CLI
+    side of new_episode: the path's folder is the show, its name the episode."""
+    args, title, series_id = [], None, None
+    i = 0
+    while i < len(argv):
+        a = argv[i]
+        if a in ("--title", "--series-id") and i + 1 < len(argv):
+            if a == "--title":
+                title = argv[i + 1]
+            else:
+                series_id = argv[i + 1]
+            i += 2
+            continue
+        if a.startswith("-"):
+            print(f"  !! unknown flag {a}")
+            return 2
+        args.append(a)
+        i += 1
+    if len(args) != 1:
+        print('  !! usage: python h3.py new <folder>\\<name> [--title "..."] [--series-id <id>]')
+        return 2
+    path = os.path.abspath(args[0])
+    parent, name = os.path.dirname(path), os.path.basename(path)
+    try:
+        res = new_episode(parent, name, series_id=series_id, title=title)
+    except SourceError as e:
+        print(f"  !! {e}")
+        return 1
+    where = "the episode beside it" if res["template"] == "episode" else "the starter template"
+    print(f"  -- {res['ep']}  (from {where})")
+    for f in res["files"]:
+        print(f"     {f}")
+    if res["refs"]:
+        print(f"  -- reference pictures go in {res['refs']}")
+    check = res["check"]
+    for e in check.get("errors") or []:
+        print(f"  !! {e.get('message', e)}")
+    for w in check.get("warnings") or []:
+        print(f"  ~~ {w.get('message', w)}")
+    print(f"  -- next: python h3.py build {res['ep']}")
+    return 0 if check.get("ok", True) else 1

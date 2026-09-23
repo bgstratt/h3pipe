@@ -27,7 +27,8 @@
 
 import type {
   AlignReady, AlignRequest, AlignResult, AssembleResult, BrowseFiles, BrowseResult, BuildResult, CancelResult, ComfyQueue, Config, CutEntry,
-  CutFile, CutWhat, DiscardResult, EpisodeStatus, EpisodeSummary, EpisodeTargetResult, ModelList, OverrideRequest, OverrideResult, Pass,
+  CutFile, CutWhat, DiscardResult, EpisodeStatus, EpisodeSummary, EpisodeTargetResult, ModelList, NewEpisodeRequest,
+  NewEpisodeResult, OverrideRequest, OverrideResult, Pass,
   PeaksResult, PickRequest, Ref, RefDefaults, RefDiscardRequest, RefGenerateMissingRequest, RefGenerateMissingResult, RefGenerateRequest,
   RefGenerateResult, RefImportRequest, RefKeyframeRequest, RefList, RefOverrideInfo, RefOverrideRequest, RefPickRequest, RefPickResult,
   RefTake, RefUploadRequest, RenderRequest, RenderResult, Seed, ShotDetail, TakeRef, TargetKind, TargetList, TrackResult,
@@ -53,6 +54,8 @@ export interface Api {
   episode(ep: string, pass: Pass): Promise<EpisodeStatus>;
   shot(ep: string, pass: Pass, shot: string): Promise<ShotDetail>;
   build(ep: string): Promise<BuildResult>;
+  /** P5: POST /h3pipe/episode/new — a new episode from a template, in `parent`. */
+  newEpisode(req: NewEpisodeRequest): Promise<NewEpisodeResult>;
   /** URL of a file inside the episode (for <img>/<video>); supports Range. */
   fileUrl(ep: string, path: string): string;
   /** A JSON file inside the episode (e.g. a frozen shotlist), seeds as strings. */
@@ -346,6 +349,7 @@ export function createHttpApi(t: Transport): Api {
     episode: (ep, pass) => get(`/h3pipe/episode?${qs({ ep, pass })}`),
     shot: (ep, pass, shot) => get(`/h3pipe/shot?${qs({ ep, pass, shot })}`),
     build: (ep) => call("POST", "/h3pipe/build", { ep }),
+    newEpisode: (req) => call("POST", "/h3pipe/episode/new", req),
     fileUrl: (ep, path) => t.url(`/h3pipe/file?${qs({ ep, path })}`),
     readJson: (ep, path) => get(`/h3pipe/file?${qs({ ep, path })}`),
     render: (req) => {

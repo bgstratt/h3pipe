@@ -6,7 +6,7 @@ import type { ToastAction } from "./host";
 import type { RefFilter } from "./lib/refs";
 import type {
   AlignReady, AlignResult, BuildResult, Config, CutAudioSource, EpisodeStatus, EpisodeSummary, ModelList, Pass, Ref,
-  RefDefaults, RefGenerateMissingResult, ShotDetail, SourceFile, TakeRef, TargetList,
+  RefDefaults, RefGenerateMissingResult, SeedMode, ShotDetail, SourceFile, TakeRef, TargetList,
 } from "./types";
 
 // ---------------------------------------------------------------------------
@@ -121,6 +121,8 @@ export interface RenderAsk {
   pass: Pass;
   redo: boolean;
   title: string;
+  /** P2: "same" for Re-render stale (each shot's built seed); "auto" otherwise */
+  seedMode?: SeedMode;
 }
 
 export interface RefTakeRef {
