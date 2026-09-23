@@ -50,6 +50,7 @@ import os
 import re
 import subprocess
 import tempfile
+import time
 
 import numpy as np
 import torch
@@ -469,21 +470,28 @@ class H3ShotListLoader:
 
         if not refs:
             # Plate-only shot: an establishing view with voiceover over it. The
-            # location fills every slot and becomes <Subject 1> in the prompt.
-            refs = [ref_bg]
-            ref_notes.append("no subjects — background fills all four slots")
+            # prompt makes the location <Subject 1>, sourced from <Picture 4>,
+            # and names no other picture — so the subject sockets stay empty.
+            ref_notes.append("no subjects — the background is the whole reference")
         if len(subject_ids) > 3:
             raise ValueError(
                 f"shot {shot.get('id')}: {len(subject_ids)} subjects but only 3 slots "
                 f"-- slot 4 is the background. Drop {len(subject_ids) - 3}."
             )
 
+        # A shot with fewer than three subjects leaves those sockets EMPTY (None),
+        # which MiniMaxH3ReferenceToVideo takes as "no such picture": it does not
+        # renumber the rest, so the plate stays <Picture 4> whatever comes before
+        # it. Until 2026-09-22 they were padded with the plate, which sent the
+        # same image up to three times -- measured on a one-subject shot at
+        # 864x480: S 12,942 -> 11,306, pinned blocks 63 -> 38, 17.6 s -> 14.0 s,
+        # with the clip unchanged to the eye.
         n_sub = len(refs)
         while len(refs) < 3:
-            refs.append(ref_bg)
+            refs.append(None)
         ref_notes.append(f"background {os.path.basename(bg_path or '') or '(none)'}"
                          f"{' MISSING -> flat grey' if 'Picture 4' in blanked else ''} -> <Picture 4>"
-                         + (f" (also fills slots {n_sub + 1}-3)" if n_sub < 3 else ""))
+                         + (f" (slots {n_sub + 1}-3 empty)" if n_sub < 3 else ""))
 
         # ---- audio -------------------------------------------------------
         policy = (shot.get("audio_policy") or defaults.get("audio_policy") or "generate")
@@ -733,10 +741,18 @@ class H3SaveShot:
         os.makedirs(shot_dir, exist_ok=True)
         stem = f"{safe}_t{take:02d}"
         notes: list[str] = []
+        # What this node spends, per step, in milliseconds (the sidecar's
+        # `save_ms`). ComfyUI's "Prompt executed in" covers the whole graph, so
+        # without this there is no way to tell an ffmpeg encode from eight
+        # LANCZOS resizes when a render feels slow. perf_counter is ~100 ns a
+        # call, so the measuring costs nothing worth counting.
+        ms: dict = {}
+        clock = time.perf_counter
 
         # ---- frames ------------------------------------------------------
         frame_dir = os.path.join(shot_dir, "frames")
         if save_frames:
+            t0 = clock()
             os.makedirs(frame_dir, exist_ok=True)
             arr = (images.clamp(0, 1).cpu().numpy() * 255.0 + 0.5).astype(np.uint8)
             for i, frame in enumerate(arr):
@@ -744,11 +760,13 @@ class H3SaveShot:
                     os.path.join(frame_dir, f"{stem}_{i:06d}.png"), compress_level=4
                 )
             notes.append(f"{len(arr)} frames -> frames/")
+            ms["frames"] = round((clock() - t0) * 1000)
 
         # ---- audio -------------------------------------------------------
         h3_wav = os.path.join(shot_dir, f"{stem}_h3.wav")
         mux_audio = None
         if audio is not None:
+            t0 = clock()
             save_audio(audio, h3_wav)
             notes.append("H3 mix -> _h3.wav")
             if audio_policy == "generate":
@@ -759,10 +777,13 @@ class H3SaveShot:
                 mux_audio = foley if os.path.isfile(foley) else None
             # 'dub' and 'clone' leave the mp4 mute: the real vocal is laid in
             # at conform, and muxing H3's competing vocal only gets in the way.
+            ms["audio"] = round((clock() - t0) * 1000)
 
         # ---- mp4 ---------------------------------------------------------
         mp4 = os.path.join(shot_dir, f"{stem}.mp4")
+        t0 = clock()
         status = self._encode(images, mp4, fps, mux_audio, frame_dir if save_frames else None)
+        ms["mp4"] = round((clock() - t0) * 1000)
         notes.append(status)
         mp4_ok = status.startswith("mp4 written") and os.path.isfile(mp4)
 
@@ -770,24 +791,29 @@ class H3SaveShot:
         # After the mp4, and never fatal: the render is the valuable thing.
         thumb = strip = None
         try:
+            t0 = clock()
             thumb = self._write_thumb(images, os.path.join(shot_dir, f"{stem}.jpg"))
+            ms["thumb"] = round((clock() - t0) * 1000)
         except Exception as exc:
             notes.append(f"thumbnail failed: {exc}")
         try:
+            t0 = clock()
             strip = self._write_strip(images, os.path.join(shot_dir, f"{stem}_strip.jpg"))
+            ms["strip"] = round((clock() - t0) * 1000)
         except Exception as exc:
             notes.append(f"strip failed: {exc}")
 
         # ---- sidecar -----------------------------------------------------
         sidecar = (sidecar or "").strip()
         if sidecar:
+            ms["total"] = round(sum(v for k, v in ms.items() if k != "total"))
             try:
                 self._finish_sidecar(
                     sidecar, os.path.normpath(project_root), shot_id, take, notes,
                     stem=stem, status="ok" if mp4_ok else "failed",
                     frames=int(images.shape[0]), fps=float(fps),
                     mp4=os.path.basename(mp4) if mp4_ok else None,
-                    thumb=thumb, strip=strip)
+                    thumb=thumb, strip=strip, save_ms=ms)
             except Exception as exc:
                 notes.append(f"sidecar update failed: {exc}")
             else:
@@ -823,7 +849,8 @@ class H3SaveShot:
     @staticmethod
     def _finish_sidecar(sidecar: str, root: str, shot_id: str, take: int,
                         notes: list[str], *, stem: str, status: str, frames: int,
-                        mp4, thumb, strip, fps: float | None = None) -> None:
+                        mp4, thumb, strip, fps: float | None = None,
+                        save_ms: dict | None = None) -> None:
         """Close the take's record: set the saver's fields, leave the rest alone.
 
         Warnings go into `notes` first, so they reach both save_notes and the
@@ -853,6 +880,11 @@ class H3SaveShot:
         if fps:
             # the mp4's frame rate (the target's: Wan 14B saves 16 fps)
             data["fps"] = float(fps)
+        if save_ms:
+            # what this node spent, in milliseconds, per step (frames, audio,
+            # mp4, thumb, strip, total). ComfyUI only reports the whole graph's
+            # time, so this is how a slow take is attributed.
+            data["save_ms"] = dict(save_ms)
         _write_json_atomic(path, data)
 
     # -- thumbnails --------------------------------------------------------
@@ -921,11 +953,28 @@ class H3SaveShot:
 
     @staticmethod
     def _encode(images, mp4, fps, audio_path, existing_frames):
-        from PIL import Image
+        """Write the take's mp4 with ffmpeg.
+
+        With a PNG sequence already on disk (`save_frames`) ffmpeg reads that.
+        Otherwise the frames are **piped in as raw RGB** rather than written out
+        as PNGs first: measured 2026-09-22 on 73 frames at 864x480, writing the
+        PNGs was 2.9 s of a 3.9 s encode, and the piped encode produces the same
+        file in 1.1 s. A clip that isn't plain 3-channel RGB, or whose size is
+        odd (yuv420p needs even sides), still goes the PNG way.
+        """
+        n_frames = int(images.shape[0])
+        h, w = int(images.shape[1]), int(images.shape[2])
+        channels = int(images.shape[3]) if images.ndim == 4 else 0
+        pipe = existing_frames is None and channels == 3 and w % 2 == 0 and h % 2 == 0
 
         tmpdir = existing_frames
         cleanup = False
-        if tmpdir is None:
+        raw = pattern = None
+        if pipe:
+            raw = (images.clamp(0, 1).cpu().numpy() * 255.0 + 0.5).astype(np.uint8).tobytes()
+        elif tmpdir is None:
+            from PIL import Image
+
             tmpdir = tempfile.mkdtemp(prefix="h3shot_")
             cleanup = True
             arr = (images.clamp(0, 1).cpu().numpy() * 255.0 + 0.5).astype(np.uint8)
@@ -936,8 +985,12 @@ class H3SaveShot:
             first = sorted(os.listdir(tmpdir))[0]
             pattern = os.path.join(tmpdir, re.sub(r"\d{6}", "%06d", first))
 
-        n_frames = int(images.shape[0])
-        cmd = ["ffmpeg", "-y", "-framerate", str(fps), "-i", pattern]
+        cmd = ["ffmpeg", "-y"]
+        if pipe:
+            cmd += ["-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{w}x{h}",
+                    "-framerate", str(fps), "-i", "-"]
+        else:
+            cmd += ["-framerate", str(fps), "-i", pattern]
         if audio_path:
             cmd += ["-i", audio_path, "-c:a", "aac", "-b:a", "192k"]
         # -frames:v pins the exact count. Never use -shortest here: H3's audio
@@ -947,14 +1000,25 @@ class H3SaveShot:
         cmd += ["-frames:v", str(n_frames),
                 "-c:v", "libx264", "-crf", "16", "-pix_fmt", "yuv420p", mp4]
 
+        proc = None
         try:
-            subprocess.run(cmd, check=True, capture_output=True, timeout=900)
+            if pipe:
+                proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                        stderr=subprocess.PIPE)
+                _, err = proc.communicate(input=raw, timeout=900)
+                if proc.returncode:
+                    raise subprocess.CalledProcessError(proc.returncode, cmd, b"", err)
+            else:
+                subprocess.run(cmd, check=True, capture_output=True, timeout=900)
             result = f"mp4 written ({'with audio' if audio_path else 'mute'})"
         except FileNotFoundError:
             result = "ffmpeg not found - mp4 skipped"
         except subprocess.CalledProcessError as exc:
-            result = f"ffmpeg failed: {exc.stderr.decode('utf-8', 'replace')[-160:]}"
+            result = f"ffmpeg failed: {(exc.stderr or b'').decode('utf-8', 'replace')[-160:]}"
         except subprocess.TimeoutExpired:
+            if proc is not None:
+                proc.kill()
+                proc.communicate()
             result = "ffmpeg timed out - mp4 skipped"
         finally:
             if cleanup:

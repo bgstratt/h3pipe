@@ -536,6 +536,15 @@ def compile_legacy(target, ep: dict, series_cfg: dict, pass_: str,
         "defaults": {
             "width": width, "height": height, "steps": steps,
             "model": model, "lora": lora, "sheet_panels": int(RECIPE["sheet_panels"]),
+            # How big H3 encodes each reference: `match` puts it on the render's
+            # own latent grid, `max` scales it toward 2048 on the short side.
+            # It is a per-pass cost, measured 2026-09-22: at 1344x768 the two
+            # are the same (~1,325 tokens a reference, the cap binds), but at
+            # 864x480 `max` costs ~1,825 against `match`'s ~522 — the video
+            # shrinks with the pass and `max` does not. So the proxy says
+            # `match` and the final says `max` (presets), and neither depends
+            # on what a saved canvas happens to hold.
+            "ref_image_size": preset.extra.get("ref_image_size", "max"),
             "audio_policy": "generate", "master_track": ctx.recording,
         },
         "subjects": {

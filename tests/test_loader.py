@@ -51,6 +51,20 @@ class LoaderMissingRefsTest(unittest.TestCase):
         with self.assertRaises(FileNotFoundError):
             self.load(self.frozen("sh020", blank=False))
 
+    def test_unused_subject_sockets_are_empty(self):
+        """A shot with fewer than three subjects sends nothing on the sockets it
+        doesn't use: the plate stays <Picture 4> (the node doesn't renumber), and
+        it used to be sent up to three times over. Measured 2026-09-22 on a
+        one-subject shot: two fewer latent frames, 3.6 s off the take."""
+        out = self.load(self.frozen("sh010", blank=True))   # ada only
+        refs, ref_bg, info = out[2:5], out[5], out[15]
+        self.assertIsNotNone(refs[0])                       # the one subject
+        self.assertIsNone(refs[1])
+        self.assertIsNone(refs[2])
+        self.assertIsNotNone(ref_bg)                        # the plate, still socket 4
+        self.assertIn("slots 2-3 empty", info)
+        self.assertIn("Picture 4", info)
+
     def test_render_anyway_substitutes_grey(self):
         out = self.load(self.frozen("sh020", blank=True))   # ada, bo + kettle, no files
         refs, ref_bg, info = out[2:5], out[5], out[15]

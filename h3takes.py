@@ -31,6 +31,11 @@ two queuers can't get the same number). H3SaveShot then sets:
     frames      int, frames written
     mp4, thumb, strip   file names (not paths) of what it wrote, or null
     save_notes  the node's status string
+    save_ms     what the saver spent, milliseconds per step: frames (the PNG
+                sequence, only with save_frames), audio (the wav, and Demucs
+                for dub_keep_foley), mp4 (the ffmpeg encode), thumb, strip,
+                and total. ComfyUI reports only the whole graph's time, so
+                this is how a slow take is attributed.
 
 and leaves every other field alone. Updates are atomic (write a temp file in
 the same folder, then os.replace). A queued take whose ComfyUI job is gone

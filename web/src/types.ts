@@ -496,6 +496,10 @@ export interface RenderRequest {
   note: string;
   /** Queue shots with missing refs anyway (flat grey pictures, no audio ref). */
   allow_missing_refs?: boolean;
+  /** Also write the take's frames as a PNG sequence (`<take>/frames/`), for
+   * retouching a shot that is right but for a frame or two. Absent leaves the
+   * workflow's own setting (off). Costs ~2.5 s a shot and 16-50 GB an episode. */
+  save_frames?: boolean;
   /** Phase 8: the video target for this run only, beating the override. Only
    * sent when set. */
   target?: string | null;

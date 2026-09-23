@@ -1034,6 +1034,10 @@ export interface RedoPlan {
   saveAsOverride: boolean;
   /** Phase 8: the target for this run (sent as `target`); null/absent = the shot's own */
   target?: string | null;
+  /** keep the take's frames as a PNG sequence (sent as `save_frames`): for a
+   * shot that is right but for a frame or two. Absent leaves the workflow's own
+   * setting, which is off. */
+  keepFrames?: boolean;
   /** The prompt isn't the user's to set: the shot is retargeted, or this run is on
    * another target (its prompt is compiled at queue time). Sent as null, never saved. */
   lockPrompt?: boolean;
@@ -1046,6 +1050,8 @@ export function planRedo(p: RedoPlan, ep: string, d: ShotDetail): { override: Ov
   const current = d.target || d.built_target || null;
   const target = p.target && p.target !== current ? p.target : null;
   const base = { ...baseRender(ep, p.pass, [p.shot], !!p.allowMissingRefs, target, !!p.allowModelMismatch), redo: true, parent_take: p.parent, note: p.note, seed_mode: seedMode, seed };
+  // only sent when asked for: the server leaves the workflow's value alone otherwise
+  if (p.keepFrames) base.save_frames = true;
   const prompt = p.lockPrompt ? null : p.prompt;
   // a one-off run on another target isn't saved: the override is the shot's own target's
   if (!p.saveAsOverride || target) {

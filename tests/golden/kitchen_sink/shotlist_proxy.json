@@ -9,6 +9,7 @@
     "model": "series_model.safetensors",
     "lora": "proxy_turbo_4step.safetensors",
     "sheet_panels": 4,
+    "ref_image_size": "match",
     "audio_policy": "generate",
     "master_track": "audio/ks01_mix.wav"
   },

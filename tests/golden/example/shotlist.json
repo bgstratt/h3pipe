@@ -9,6 +9,7 @@
     "model": "minimax_h3_ref2va_pruned_int8_convrot.safetensors",
     "lora": "minimax_h3_ref2v_turbo_8step_v1.0_768p_comfyui_bf16.safetensors",
     "sheet_panels": 4,
+    "ref_image_size": "max",
     "audio_policy": "generate",
     "master_track": "audio/ep01_dialogue_mix.wav"
   },

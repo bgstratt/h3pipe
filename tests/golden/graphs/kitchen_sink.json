@@ -319,6 +319,7 @@
      "lora": "series_turbo_8step.safetensors",
      "master_track": "audio/ks01_mix.wav",
      "model": "series_model.safetensors",
+     "ref_image_size": "max",
      "sheet_panels": 4,
      "steps": 6,
      "width": 1344
@@ -778,6 +779,7 @@
      "lora": "series_turbo_8step.safetensors",
      "master_track": "audio/ks01_mix.wav",
      "model": "series_model.safetensors",
+     "ref_image_size": "max",
      "sheet_panels": 4,
      "steps": 6,
      "width": 1344
@@ -1279,6 +1281,7 @@
      "lora": "series_turbo_8step.safetensors",
      "master_track": "audio/ks01_mix.wav",
      "model": "series_model.safetensors",
+     "ref_image_size": "max",
      "sheet_panels": 4,
      "steps": 6,
      "width": 1344
@@ -1752,6 +1755,7 @@
      "lora": "series_turbo_8step.safetensors",
      "master_track": "audio/ks01_mix.wav",
      "model": "series_model.safetensors",
+     "ref_image_size": "max",
      "sheet_panels": 4,
      "steps": 6,
      "width": 1344
@@ -2220,6 +2224,7 @@
      "lora": "series_turbo_8step.safetensors",
      "master_track": "audio/ks01_mix.wav",
      "model": "series_model.safetensors",
+     "ref_image_size": "max",
      "sheet_panels": 4,
      "steps": 6,
      "width": 1344
@@ -2713,6 +2718,7 @@
      "lora": "series_turbo_8step.safetensors",
      "master_track": "audio/ks01_mix.wav",
      "model": "series_model.safetensors",
+     "ref_image_size": "max",
      "sheet_panels": 4,
      "steps": 6,
      "width": 1344
@@ -3198,6 +3204,7 @@
      "lora": "series_turbo_8step.safetensors",
      "master_track": "audio/ks01_mix.wav",
      "model": "series_model.safetensors",
+     "ref_image_size": "max",
      "sheet_panels": 4,
      "steps": 6,
      "width": 1344
@@ -3684,6 +3691,7 @@
      "lora": "series_turbo_8step.safetensors",
      "master_track": "audio/ks01_mix.wav",
      "model": "series_model.safetensors",
+     "ref_image_size": "max",
      "sheet_panels": 4,
      "steps": 6,
      "width": 1344
@@ -4152,6 +4160,7 @@
      "lora": "series_turbo_8step.safetensors",
      "master_track": "audio/ks01_mix.wav",
      "model": "series_model.safetensors",
+     "ref_image_size": "max",
      "sheet_panels": 4,
      "steps": 6,
      "width": 1344
@@ -4620,6 +4629,7 @@
      "lora": "series_turbo_8step.safetensors",
      "master_track": "audio/ks01_mix.wav",
      "model": "series_model.safetensors",
+     "ref_image_size": "max",
      "sheet_panels": 4,
      "steps": 6,
      "width": 1344
@@ -5079,6 +5089,7 @@
      "lora": "series_turbo_8step.safetensors",
      "master_track": "audio/ks01_mix.wav",
      "model": "series_model.safetensors",
+     "ref_image_size": "max",
      "sheet_panels": 4,
      "steps": 6,
      "width": 1344
@@ -5538,6 +5549,7 @@
      "lora": "series_turbo_8step.safetensors",
      "master_track": "audio/ks01_mix.wav",
      "model": "series_model.safetensors",
+     "ref_image_size": "max",
      "sheet_panels": 4,
      "steps": 6,
      "width": 1344
@@ -6043,6 +6055,7 @@
      "lora": "series_turbo_8step.safetensors",
      "master_track": "audio/ks01_mix.wav",
      "model": "series_model.safetensors",
+     "ref_image_size": "max",
      "sheet_panels": 4,
      "steps": 6,
      "width": 1344
@@ -6517,6 +6530,7 @@
      "lora": "series_turbo_8step.safetensors",
      "master_track": "audio/ks01_mix.wav",
      "model": "series_model.safetensors",
+     "ref_image_size": "max",
      "sheet_panels": 4,
      "steps": 6,
      "width": 1344
@@ -6999,6 +7013,7 @@
      "lora": "series_turbo_8step.safetensors",
      "master_track": "audio/ks01_mix.wav",
      "model": "series_model.safetensors",
+     "ref_image_size": "max",
      "sheet_panels": 4,
      "steps": 6,
      "width": 1344
@@ -7473,6 +7488,7 @@
      "lora": "series_turbo_8step.safetensors",
      "master_track": "audio/ks01_mix.wav",
      "model": "series_model.safetensors",
+     "ref_image_size": "max",
      "sheet_panels": 4,
      "steps": 6,
      "width": 1344
@@ -7720,7 +7736,7 @@
        "11",
        8
       ],
-      "ref_image_size": "max",
+      "ref_image_size": "match",
       "ref_images.ref_image_0": [
        "11",
        2
@@ -7961,6 +7977,7 @@
      "lora": "proxy_turbo_4step.safetensors",
      "master_track": "audio/ks01_mix.wav",
      "model": "series_model.safetensors",
+     "ref_image_size": "match",
      "sheet_panels": 4,
      "steps": 4,
      "width": 448
@@ -8179,7 +8196,7 @@
        "11",
        8
       ],
-      "ref_image_size": "max",
+      "ref_image_size": "match",
       "ref_images.ref_image_0": [
        "11",
        2
@@ -8420,6 +8437,7 @@
      "lora": "proxy_turbo_4step.safetensors",
      "master_track": "audio/ks01_mix.wav",
      "model": "series_model.safetensors",
+     "ref_image_size": "match",
      "sheet_panels": 4,
      "steps": 4,
      "width": 448
@@ -8657,7 +8675,7 @@
        "11",
        8
       ],
-      "ref_image_size": "max",
+      "ref_image_size": "match",
       "ref_images.ref_image_0": [
        "11",
        2
@@ -8898,6 +8916,7 @@
      "lora": "proxy_turbo_4step.safetensors",
      "master_track": "audio/ks01_mix.wav",
      "model": "series_model.safetensors",
+     "ref_image_size": "match",
      "sheet_panels": 4,
      "steps": 4,
      "width": 448
@@ -9118,7 +9137,7 @@
        "11",
        8
       ],
-      "ref_image_size": "max",
+      "ref_image_size": "match",
       "ref_images.ref_image_0": [
        "11",
        2
@@ -9359,6 +9378,7 @@
      "lora": "proxy_turbo_4step.safetensors",
      "master_track": "audio/ks01_mix.wav",
      "model": "series_model.safetensors",
+     "ref_image_size": "match",
      "sheet_panels": 4,
      "steps": 4,
      "width": 448
@@ -9586,7 +9606,7 @@
        "11",
        8
       ],
-      "ref_image_size": "max",
+      "ref_image_size": "match",
       "ref_images.ref_image_0": [
        "11",
        2
@@ -9827,6 +9847,7 @@
      "lora": "proxy_turbo_4step.safetensors",
      "master_track": "audio/ks01_mix.wav",
      "model": "series_model.safetensors",
+     "ref_image_size": "match",
      "sheet_panels": 4,
      "steps": 4,
      "width": 448
@@ -10056,7 +10077,7 @@
        "11",
        8
       ],
-      "ref_image_size": "max",
+      "ref_image_size": "match",
       "ref_images.ref_image_0": [
        "11",
        2
@@ -10297,6 +10318,7 @@
      "lora": "proxy_turbo_4step.safetensors",
      "master_track": "audio/ks01_mix.wav",
      "model": "series_model.safetensors",
+     "ref_image_size": "match",
      "sheet_panels": 4,
      "steps": 4,
      "width": 448
@@ -10518,7 +10540,7 @@
        "11",
        8
       ],
-      "ref_image_size": "max",
+      "ref_image_size": "match",
       "ref_images.ref_image_0": [
        "11",
        2
@@ -10759,6 +10781,7 @@
      "lora": "proxy_turbo_4step.safetensors",
      "master_track": "audio/ks01_mix.wav",
      "model": "series_model.safetensors",
+     "ref_image_size": "match",
      "sheet_panels": 4,
      "steps": 4,
      "width": 448
@@ -11004,7 +11027,7 @@
        "11",
        8
       ],
-      "ref_image_size": "max",
+      "ref_image_size": "match",
       "ref_images.ref_image_0": [
        "11",
        2
@@ -11245,6 +11268,7 @@
      "lora": "proxy_turbo_4step.safetensors",
      "master_track": "audio/ks01_mix.wav",
      "model": "series_model.safetensors",
+     "ref_image_size": "match",
      "sheet_panels": 4,
      "steps": 4,
      "width": 448
@@ -11472,7 +11496,7 @@
        "11",
        8
       ],
-      "ref_image_size": "max",
+      "ref_image_size": "match",
       "ref_images.ref_image_0": [
        "11",
        2
@@ -11713,6 +11737,7 @@
      "lora": "proxy_turbo_4step.safetensors",
      "master_track": "audio/ks01_mix.wav",
      "model": "series_model.safetensors",
+     "ref_image_size": "match",
      "sheet_panels": 4,
      "steps": 4,
      "width": 448
@@ -11940,7 +11965,7 @@
        "11",
        8
       ],
-      "ref_image_size": "max",
+      "ref_image_size": "match",
       "ref_images.ref_image_0": [
        "11",
        2
@@ -12181,6 +12206,7 @@
      "lora": "proxy_turbo_4step.safetensors",
      "master_track": "audio/ks01_mix.wav",
      "model": "series_model.safetensors",
+     "ref_image_size": "match",
      "sheet_panels": 4,
      "steps": 4,
      "width": 448
@@ -12399,7 +12425,7 @@
        "11",
        8
       ],
-      "ref_image_size": "max",
+      "ref_image_size": "match",
       "ref_images.ref_image_0": [
        "11",
        2
@@ -12640,6 +12666,7 @@
      "lora": "proxy_turbo_4step.safetensors",
      "master_track": "audio/ks01_mix.wav",
      "model": "series_model.safetensors",
+     "ref_image_size": "match",
      "sheet_panels": 4,
      "steps": 4,
      "width": 448
@@ -12858,7 +12885,7 @@
        "11",
        8
       ],
-      "ref_image_size": "max",
+      "ref_image_size": "match",
       "ref_images.ref_image_0": [
        "11",
        2
@@ -13099,6 +13126,7 @@
      "lora": "proxy_turbo_4step.safetensors",
      "master_track": "audio/ks01_mix.wav",
      "model": "series_model.safetensors",
+     "ref_image_size": "match",
      "sheet_panels": 4,
      "steps": 4,
      "width": 448
@@ -13329,7 +13357,7 @@
        "11",
        8
       ],
-      "ref_image_size": "max",
+      "ref_image_size": "match",
       "ref_images.ref_image_0": [
        "11",
        2
@@ -13570,6 +13598,7 @@
      "lora": "proxy_turbo_4step.safetensors",
      "master_track": "audio/ks01_mix.wav",
      "model": "series_model.safetensors",
+     "ref_image_size": "match",
      "sheet_panels": 4,
      "steps": 4,
      "width": 448
@@ -13789,7 +13818,7 @@
        "11",
        8
       ],
-      "ref_image_size": "max",
+      "ref_image_size": "match",
       "ref_images.ref_image_0": [
        "11",
        2
@@ -14044,6 +14073,7 @@
      "lora": "proxy_turbo_4step.safetensors",
      "master_track": "audio/ks01_mix.wav",
      "model": "series_model.safetensors",
+     "ref_image_size": "match",
      "sheet_panels": 4,
      "steps": 4,
      "width": 448
@@ -14273,7 +14303,7 @@
        "11",
        8
       ],
-      "ref_image_size": "max",
+      "ref_image_size": "match",
       "ref_images.ref_image_0": [
        "11",
        2
@@ -14514,6 +14544,7 @@
      "lora": "proxy_turbo_4step.safetensors",
      "master_track": "audio/ks01_mix.wav",
      "model": "series_model.safetensors",
+     "ref_image_size": "match",
      "sheet_panels": 4,
      "steps": 4,
      "width": 448
@@ -14735,7 +14766,7 @@
        "11",
        8
       ],
-      "ref_image_size": "max",
+      "ref_image_size": "match",
       "ref_images.ref_image_0": [
        "11",
        2
@@ -14976,6 +15007,7 @@
      "lora": "proxy_turbo_4step.safetensors",
      "master_track": "audio/ks01_mix.wav",
      "model": "series_model.safetensors",
+     "ref_image_size": "match",
      "sheet_panels": 4,
      "steps": 4,
      "width": 448

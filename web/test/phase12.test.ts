@@ -1,6 +1,7 @@
 // A show's own targets (Phase 12c): drafts stay out of the pickers, the wizard's
 // answers land in the target.json it saves, and the mock plays the whole flow.
 import { describe, expect, it } from "vitest";
+import { planRedo } from "../src/actions";
 import { createHttpApi, type Transport } from "../src/api";
 import { customTargets, videoTargets } from "../src/lib/targets";
 import { createMockApi } from "../src/mock/mockApi";
@@ -106,5 +107,19 @@ describe("the mock plays the flow", () => {
     const eps = await api.episodes();
     await expect(api.saveCustomTarget(eps[0].ep, { id: "minimax_h3_ref2va" }))
       .rejects.toThrow(/built-in/);
+  });
+});
+
+describe("keep frames (a per-render option)", () => {
+  it("is sent only when asked for", () => {
+    const d = {
+      shot: "sh010", pass: "proxy" as const, takes: [], override: { fields: [], stale: false, values: {} },
+    } as unknown as Parameters<typeof planRedo>[2];
+    const base = {
+      shot: "sh010", pass: "proxy" as const, parent: null, seed: { mode: "new" as const, seed: null },
+      model: "", loras: null, steps: 4, prompt: "", note: "", saveAsOverride: false,
+    };
+    expect(planRedo(base, "C:\Shows\ep01", d).render.save_frames).toBeUndefined();
+    expect(planRedo({ ...base, keepFrames: true }, "C:\Shows\ep01", d).render.save_frames).toBe(true);
   });
 });

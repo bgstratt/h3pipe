@@ -96,13 +96,36 @@ Everything you do to a shot lives here:
 ### Editing a prompt
 
 **Inspect shot** is where a shot's prompt, seed, model, LoRAs and steps are edited, per
-pass. Save, then **New take like this one…** to render it.
+pass. Save, then render it — the Inspector has two buttons for that:
+
+| Button | What it does |
+|---|---|
+| **Queue (new seed)** | queues another take immediately: the saved override and a new seed, no dialog ("Render" when the shot has no take yet) |
+| **New take…** | opens the settings dialog first — model, LoRAs, steps, seed, target, note, keep the frames |
 
 > **Don't edit while that shot is rendering.** A finishing render refreshes the panel and
 > your unsaved edit goes with it. Let the take finish (or cancel it) first.
 
 Story edits — action, camera, dialogue — belong in the **Script** window instead, not in an
 override. **Promote** moves overrides that the authored files can express back into them.
+
+### Keeping a take's frames
+
+**New take like this one…** (and the Inspector's **New take…**, which is the same dialog) has
+**Keep the frames (PNG sequence)**. It writes every frame of that take beside its mp4:
+
+```
+<episode>/renders[_proxy]/<shot>/frames/<shot>_t<NN>_000000.png …
+```
+
+For a shot that is right but for a frame or two: retouch those PNGs and re-encode the
+sequence yourself. It costs ~2.5 s a shot and a few hundred MB a take, so it is per render
+rather than a setting — the one-click **Queue (new seed)** never keeps frames.
+
+A render is reproducible, so you can also fetch the frames of a take you already like:
+re-render it with **that take's seed** (New take… → seed *same*, or type it) and tick the box.
+Verified 2026-09-22 on this machine — two renders at one seed gave byte-identical frames and
+mp4 — but it is worth confirming after a ComfyUI or driver update before you rely on it.
 
 ### The graph a model renders with
 

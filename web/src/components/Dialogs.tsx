@@ -55,6 +55,8 @@ interface RedoForm {
   save: boolean;
   /** Phase 8: the target for this run; "" = the shot's own */
   target: string;
+  /** keep this take's frames as a PNG sequence, for retouching a frame or two */
+  frames: boolean;
 }
 
 /** The settings a run on another target starts from: that target's preset for the pass. */
@@ -90,6 +92,7 @@ function initForm(d: ShotDetail, parent: TakeDetail | undefined, pass: Pass, cur
     source: "current",
     prompt: d.effective.prompt,
     save: true,
+    frames: false,
   };
 }
 
@@ -202,7 +205,7 @@ function RedoBody({ d, shot, openPass, parent }: { d: ShotDetail; shot: string; 
         shot, pass: f.pass, parent: f.parent, seed, model: pickers.models === null ? "" : f.model, loras, steps, prompt: f.prompt, note: f.note.trim(),
         saveAsOverride: f.save && !oneOff, allowMissingRefs: allowMissing,
         allowModelMismatch: mismatch && allowMismatch,
-        target: oneOff ? f.target : null, lockPrompt,
+        target: oneOff ? f.target : null, lockPrompt, keepFrames: f.frames,
       });
       if (ok) closeRedo();
     } finally {
@@ -331,6 +334,15 @@ function RedoBody({ d, shot, openPass, parent }: { d: ShotDetail; shot: string; 
       >
         <input type="checkbox" disabled={oneOff} checked={f.save && !oneOff} onChange={(e) => set({ save: e.target.checked })} />
         Save these as the shot's {f.pass} override{oneOff ? " (not for a one-off target)" : ""}
+      </label>
+      <label
+        className="h3-check"
+        title={"Also writes this take's frames as PNGs in its frames/ folder, so a shot that is "
+          + "right but for a frame or two can be retouched and re-encoded. Costs a couple of "
+          + "seconds and a few hundred MB a take."}
+      >
+        <input type="checkbox" checked={f.frames} onChange={(e) => set({ frames: e.target.checked })} />
+        Keep the frames (PNG sequence)
       </label>
       <MissingRefsNote blocked={missing.length ? [{ shot, refs: missing }] : []} allow={allowMissing} setAllow={setAllowMissing} />
       {mismatch && (

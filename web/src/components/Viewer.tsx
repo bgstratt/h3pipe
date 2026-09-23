@@ -358,9 +358,9 @@ function TakesView({ ep, v }: { ep: string; v: ViewerState }) {
           className="h3-btn"
           disabled={!takeA}
           onClick={() => takeA && openRedo(v.shot, takeA.take, v.pass)}
-          title="Open the redo dialog with A's settings"
+          title="Open the New take dialog with A's settings"
         >
-          <i className="pi pi-refresh" /> Redo from {takeA ? tn(takeA.take) : "A"}
+          <i className="pi pi-refresh" /> New take from {takeA ? tn(takeA.take) : "A"}…
         </button>
         <button
           className="h3-btn h3-primary"

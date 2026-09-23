@@ -330,6 +330,20 @@ class RenderTest(ApiTest):
         self.assertNotIn("SaveVideo", classes)
         self.assertNotIn("CreateVideo", classes)
 
+    def test_keep_frames_is_per_render(self):
+        """save_frames on the request reaches H3SaveShot, so a take can keep its
+        PNG sequence for retouching; absent leaves the workflow's own value."""
+        self.render("sh010")
+        si = next(v["inputs"] for v in self.comfy.graphs[-1].values()
+                  if v["class_type"] == J.SAVER)
+        self.assertFalse(si["save_frames"])               # the graph's own default
+        self.render("sh020", save_frames=True)
+        si = next(v["inputs"] for v in self.comfy.graphs[-1].values()
+                  if v["class_type"] == J.SAVER)
+        self.assertTrue(si["save_frames"])
+        self.err(A.post_render(self.ctx, {"ep": self.ep, "pass": "proxy", "shots": ["sh030"],
+                                          "save_frames": "yes"}), 400)
+
     def test_queue_skip_redo(self):
         data = self.render("sh010", "sh020", note="first")
         self.assertEqual([q["shot"] for q in data["queued"]], ["sh010", "sh020"])

@@ -441,7 +441,7 @@ function OverrideEditor({ d, shot }: { d: ShotDetail; shot: string }) {
           <i className="pi pi-file-edit" /> Show in script
         </button>
       </div>
-      {dirty && <div className="h3-small h3-muted">Unsaved edits. Render and Redo use the saved override; the Redo dialog can save these for you.</div>}
+      {dirty && <div className="h3-small h3-muted">Unsaved edits. Queue uses the saved override; the New take dialog can save these for you.</div>}
     </div>
   );
 }
@@ -495,16 +495,23 @@ export function Inspector() {
               disabled={renderBusy || !d}
               title={blocked
                 ? "Missing refs: the server will skip this shot (tick Render anyway to render with stand-ins)"
-                : hasUsable ? "Queue a redo with the saved override and a new seed" : "Queue the first take"}
+                : hasUsable
+                  ? "Queue another take now: the saved override and a new seed, no dialog"
+                  : "Queue the first take"}
               onClick={() => {
                 if (!hasUsable) void renderShots([shot], false, allowMissing);
                 else void queueRender({ ...baseRender(ep, pass, [shot], allowMissing), redo: true, seed_mode: "new", parent_take: ct?.take ?? null });
               }}
             >
-              <i className="pi pi-play" /> {hasUsable ? "Redo (new seed)" : "Render"}{blocked ? " (will skip)" : ""}
+              <i className="pi pi-play" /> {hasUsable ? "Queue (new seed)" : "Render"}{blocked ? " (will skip)" : ""}
             </button>
-            <button className="h3-btn" disabled={!d} onClick={() => openRedo(shot, ct?.take ?? s.takes[s.takes.length - 1]?.take ?? null)}>
-              <i className="pi pi-refresh" /> Redo…
+            <button
+              className="h3-btn"
+              disabled={!d}
+              title="Choose the settings first: model, LoRAs, steps, seed, target, whether to keep the frames"
+              onClick={() => openRedo(shot, ct?.take ?? s.takes[s.takes.length - 1]?.take ?? null)}
+            >
+              <i className="pi pi-refresh" /> New take…
             </button>
             <button className="h3-btn" disabled={!ct?.mp4} onClick={() => ct && openViewer(shot, ct.take, null, "single")}>
               <i className="pi pi-eye" /> View {ct ? tn(ct.take) : ""}

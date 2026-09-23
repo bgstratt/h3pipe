@@ -249,6 +249,14 @@ model family; see **Model families** at the end.)
 - **`POST /h3pipe/render`:**
   - `shots: null` renders every shot.
   - `loras` also accepts `"name:strength"` strings.
+  - `save_frames` (2026-09-22, optional): also write the take's frames as a PNG sequence in
+    `<take>/frames/`, for retouching a shot that is right but for a frame or two. Absent
+    leaves the workflow's own value (off in every shipped graph). The editor asks for it per
+    render (the redo dialog's "Keep the frames"), never as a setting: it costs ~2.5 s a shot
+    (measured; `save_ms.frames`) and 16-50 GB an episode. `h3render --save-frames` is the
+    same switch. A render is reproducible — two renders at one seed gave byte-identical
+    frames and mp4 (2026-09-22) — so the frames of a take you already have can be fetched by
+    re-rendering it at its own seed.
   - `skipped` and `errors` entries carry `take` when one was reserved.
   - The `h3pipe.take` event sent at queue time says `queued`.
 - **`PUT /h3pipe/override`:**
@@ -2382,6 +2390,66 @@ On this machine `H3_Ref2VA_Shotlist_v1.json` was already saved in ComfyUI, so ev
 render from the editor had been using that canvas copy rather than the repo's, and
 `krea2_refs_t2i.json` the same for reference images. Both agree with the repo's copies, but
 nothing said so. That is the case Phase 11 exists to make visible.
+
+## H3 reference cost, and `ref_image_size` per pass (measured 2026-09-22)
+
+What a shot costs on `minimax_h3_ref2va` is its **sequence length**, and the sparse-attention
+node (`H3SLAAttention`) makes that worse than linear: reference and prompt tokens are
+**pinned** — kept dense while video tokens are sparsified — so a token of conditioning costs
+several times a token of video.
+
+Measured on one shot (sh008, 73 frames, 4 references), fitting S = tokens-per-latent-frame ×
+(latent frames + references) + prompt:
+
+| render size | tokens per latent frame (= per reference) | S | pinned blocks |
+|---|---|---|---|
+| 672×384 (`match`) | 338 | 8,370 | — |
+| 864×480 (`match`) | ~522 | ~12,600 | ~50 |
+| 864×480 (`max`) | ~1,825 a reference | 17,808 | 140 |
+| 1344×768 (either) | 1,325 | 31,074 | 140 |
+
+Three things follow, all of them checked against renders rather than reasoned about:
+
+- **A reference costs exactly one latent frame** — four frames of video. Four references on a
+  73-frame shot are ~22% of the sequence.
+- **Under `match`, the file's own size is irrelevant.** A 4096×1024 character strip and a
+  1024×1024 filler both cost 833 tokens at 864×480: the node puts every reference on the
+  render's latent grid. So `panel_mode` is an identity lever, not a speed one.
+- **`max` only costs extra below full resolution.** At 1344×768 the cap binds and `max` and
+  `match` are the same; at 864×480 `max` is 3.5× per reference, because the video shrinks with
+  the pass and the references don't. A reduced-resolution pass on `max` is the worst case.
+
+So `ref_image_size` is a **binding param** (`MiniMaxH3ReferenceToVideo.ref_image_size`) with a
+value in each preset: `max` on `final`, `match` on `proxy`. The compile writes it into the
+shotlist's `defaults`, so it is frozen per take and no longer depends on what a saved canvas
+holds. The goldens moved for it on 2026-09-22 (proxy graphs and both shotlists' `defaults`).
+
+### Where a take's own time goes (`save_ms`, 2026-09-22)
+
+`H3SaveShot` times each thing it writes and records it in the take's sidecar:
+
+```json
+"save_ms": {"audio": 120, "mp4": 1840, "thumb": 60, "strip": 410, "total": 2430}
+```
+
+Only the steps that ran appear (`frames` just with `save_frames`, `audio` only when the model
+made some, and `dub_keep_foley`'s Demucs pass is inside `audio`); `total` is their sum, in
+whole milliseconds. **What it found straight away** (73 frames at 864x480): the thumbnail and
+the timeline's contact strip are 85 ms together, the wav is 2 ms, and the mp4 was **4.5 s** —
+because the encoder wrote the whole clip out as PNGs to feed ffmpeg. It now pipes raw RGB
+instead (`_encode`), measured at 3.9 s -> 1.1 s for the same file, so a take saves ~2.8 s and a
+240-shot proxy pass about 11 minutes. `save_frames` still feeds ffmpeg the PNG sequence it
+wrote, since those files are wanted anyway. ComfyUI reports only the whole graph's "Prompt executed in", so this is
+what tells an ffmpeg encode from the strip's eight full-frame LANCZOS resizes when a take
+feels slow — the pipeline's saver writes an mp4, a wav, a thumbnail and the timeline's contact
+strip where a stock graph writes one mp4. `time.perf_counter` costs ~100 ns a call, so the
+measuring is free. The same fields reach `h3takes`' sidecar contract.
+
+**Still on the table** (not done): the loader pads unused subject sockets with the plate
+(`while len(refs) < 3`), because the prompt names it `<Picture 4>` — so a one-subject shot
+sends the plate three times. On a 229-shot episode that is 379 duplicate references, ~4.7
+minutes of proxy and an estimated ~12 minutes of final. Fixing it means numbering the
+pictures by how many are wired, which moves every H3 prompt.
 
 ## Phase 12: a show's own targets, from any ComfyUI workflow (as built, 2026-09-21)
 

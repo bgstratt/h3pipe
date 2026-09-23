@@ -588,6 +588,11 @@ def post_render(ctx: Context, body):
     allow_mismatch = body.get("allow_model_mismatch", False)
     if not isinstance(allow_mismatch, bool):
         raise ApiError(400, "allow_model_mismatch must be true or false")
+    # keep the frames as a PNG sequence beside the take (H3SaveShot's
+    # save_frames). Absent leaves the workflow's own setting alone.
+    save_frames = body.get("save_frames")
+    if save_frames is not None and not isinstance(save_frames, bool):
+        raise ApiError(400, "save_frames must be true or false")
     template = J.RenderRequest(
         shot_id="", redo=redo, seed=seed_in(body.get("seed")), seed_mode=seed_mode,
         model=_opt_str(body, "model") or None, loras=_opt_loras(body.get("loras")),
@@ -622,7 +627,8 @@ def post_render(ctx: Context, body):
 
     result = E.queue_shots(ep, pass_, shots, template, ctx.comfy, base_for,
                            model_resolve=ctx.model_resolve, model_cache=ctx.model_cache,
-                           model_list=ctx.model_choices, review_copy=review_copy(ctx))
+                           model_list=ctx.model_choices, review_copy=review_copy(ctx),
+                           save_frames=save_frames)
     for q in result["queued"]:
         # "queued" even if the job has already finished: the saver sends its own event
         take_event(ctx, ep, T.get_take(ep, pass_, q["shot"], q["take"]), "queued")

@@ -139,10 +139,18 @@ class SaveNodeTest(unittest.TestCase):
         self.assertEqual(sc["thumb"], "sh020_t01.jpg")
         self.assertEqual(sc["strip"], "sh020_t01_strip.jpg")
         self.assertEqual(sc["save_notes"], status)
+        # what the saver spent, per step (docs/API.md; h3takes' SIDECAR notes):
+        # every step it ran is timed, in whole milliseconds, and `total` is their sum
+        ms = sc["save_ms"]
+        # only the steps that ran: this take has no audio and no PNG sequence
+        self.assertEqual(set(ms) - {"total"}, {"mp4", "thumb", "strip"})
+        self.assertTrue(all(isinstance(v, int) and v >= 0 for v in ms.values()), ms)
+        self.assertEqual(ms["total"], sum(v for k, v in ms.items() if k != "total"))
         self.assertRegex(sc["finished"], r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d[+-]\d\d:\d\d$")
         self.assertEqual(len(sc["finished"]), len(T.now()))
         # every queuer field survives, unchanged
-        saver = {"status", "finished", "frames", "fps", "mp4", "thumb", "strip", "save_notes"}
+        saver = {"status", "finished", "frames", "fps", "mp4", "thumb", "strip", "save_notes",
+                 "save_ms"}
         for k, v in before.items():
             if k not in saver:
                 self.assertEqual(sc[k], v, k)
@@ -163,10 +171,39 @@ class SaveNodeTest(unittest.TestCase):
         self.assertEqual(T.latest_usable(takes).take, 1)
         self.assertEqual(T.sweep_queued(takes, alive=set()), [])
 
+    @needs_ffmpeg
+    def test_piped_and_png_paths_agree(self):
+        """The piped encode (no PNG round trip) and the save_frames path, which
+        feeds ffmpeg the PNGs it just wrote, produce the same clip."""
+        piped, _ = self.save(clip(24), shot="sh040")
+        pngs = N.H3SaveShot().save(clip(24), "sh050", "generate", self.root, "renders",
+                                   1, 24.0, True, audio=None)[0]
+        for shot, folder in (("sh040", piped), ("sh050", pngs)):
+            tp = T.take_paths(self.root, "final", shot, 1)
+            self.assertTrue(os.path.isfile(tp.mp4), shot)
+            out = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0",
+                                  "-count_frames", "-show_entries",
+                                  "stream=nb_read_frames,width,height",
+                                  "-of", "csv=p=0", tp.mp4],
+                                 capture_output=True, text=True)
+            if out.returncode == 0:                        # ffprobe ships with ffmpeg
+                self.assertEqual(out.stdout.strip().rstrip(","), f"{W},{H},24", shot)
+        # the piped path leaves nothing behind; save_frames keeps its sequence
+        self.assertFalse(os.path.isdir(os.path.join(piped, "frames")))
+        self.assertEqual(len(os.listdir(os.path.join(pngs, "frames"))), 24)
+
     def test_mp4_failure(self):
+        """A frame batch is piped to ffmpeg (no PNG round trip), so a failure
+        comes back through Popen rather than subprocess.run."""
         t = self.reserve()
-        err = subprocess.CalledProcessError(1, ["ffmpeg"], stderr=b"boom: encoder exploded")
-        with mock.patch.object(N.subprocess, "run", side_effect=err):
+
+        class Boom:
+            returncode = 1
+
+            def communicate(self, input=None, timeout=None):
+                return b"", b"boom: encoder exploded"
+
+        with mock.patch.object(N.subprocess, "Popen", return_value=Boom()):
             _, status = self.save(clip(24), sidecar=t.paths.sidecar)
         self.assertIn("ffmpeg failed", status)
         sc = T.read_json(t.paths.sidecar)
@@ -191,7 +228,7 @@ class SaveNodeTest(unittest.TestCase):
         self.assertIn("missing", status)
         sc = T.read_json(path)
         self.assertEqual(set(sc), {"shot", "take", "status", "finished", "frames", "fps",
-                                   "mp4", "thumb", "strip", "save_notes"})
+                                   "mp4", "thumb", "strip", "save_notes", "save_ms"})
         self.assertEqual((sc["shot"], sc["take"]), ("sh030", 2))
         self.assertEqual(sc["status"], "failed")
         self.assertEqual(sc["frames"], 10)

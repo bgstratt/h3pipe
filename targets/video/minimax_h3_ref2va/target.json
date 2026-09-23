@@ -59,6 +59,7 @@
       "steps": {"via": "loader"},
       "seed": {"via": "loader"},
       "sampler": {"class_type": "KSamplerSelect", "field": "sampler_name"},
+    "ref_image_size": {"class_type": "MiniMaxH3ReferenceToVideo", "field": "ref_image_size"},
       "text_encoder": {"class_type": "CLIPLoader", "field": "clip_name"},
       "video_vae": {"class_type": "VAELoader", "field": "vae_name", "feeds": ["VAEDecode", "vae"]},
       "audio_vae": {"class_type": "VAELoader", "field": "vae_name", "feeds": ["VAEDecodeAudio", "vae"]}
@@ -85,11 +86,13 @@
     "final": {
       "model": "minimax_h3_ref2va_pruned_int8_convrot.safetensors",
       "lora": "minimax_h3_ref2v_turbo_8step_v1.0_768p_comfyui_bf16.safetensors",
+      "ref_image_size": "max",
       "steps": 8, "width": 1344, "height": 768,
       "base": {"loras": [], "steps": 20, "sampler": "res_multistep"}
     },
     "proxy": {
       "lora": "minimax_h3_ref2v_lightx2v_turbo_4step_v0.1_resized_avg_rank_20_bf16.safetensors",
+      "ref_image_size": "match",
       "steps": 4, "width": 512, "height": 288,
       "base": {"loras": [], "steps": 20, "sampler": "res_multistep"}
     }

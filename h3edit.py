@@ -1316,7 +1316,7 @@ def queue_shots(root: str, pass_: str, shot_ids: list[str] | None,
                 template: J.RenderRequest, comfy, base,
                 folder: str | None = None, model_resolve=J.DEFAULT,
                 model_cache=J.DEFAULT, model_list=None,
-                review_copy: bool = False) -> dict:
+                review_copy: bool = False, save_frames: bool | None = None) -> dict:
     """Plan and queue a take for each shot (every shot when `shot_ids` is
     None), as h3render does, without waiting for any of them.
 
@@ -1336,6 +1336,10 @@ def queue_shots(root: str, pass_: str, shot_ids: list[str] | None,
     `review_copy` keeps the workflow's own SaveVideo branch, so ComfyUI writes a
     second copy of the video into its output folder (only a target with
     `review_nodes` has one; off by default, since the take is already saved).
+    `save_frames` (None: whatever the workflow says) also writes the take's
+    frames as a PNG sequence in `<take>/frames/`, for retouching a shot that is
+    right but for a frame or two. It costs ~2.5 s a shot and ~16-50 GB an
+    episode, so it is asked for per render.
 
     Returns {"queued": [{shot, take, prompt_id, seed, seed_source, target}],
     "skipped": [{shot, take, reason}], "errors": [{shot, error, take?}]}. A
@@ -1394,7 +1398,8 @@ def queue_shots(root: str, pass_: str, shot_ids: list[str] | None,
             out["errors"].append({"shot": sid, "error": str(e)[:800]})
             continue
         try:
-            pid = comfy.queue(J.graph_for(graph, job, take, review_copy=review_copy))
+            pid = comfy.queue(J.graph_for(graph, job, take, review_copy=review_copy,
+                                          save_frames=save_frames))
             J.mark_queued(take, pid)
         except Exception as e:
             J.mark_failed(take, str(e)[:800])
