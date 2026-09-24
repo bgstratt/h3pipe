@@ -258,6 +258,9 @@ def main() -> int:
                     help="move a candidate to refs/_takes/_trash/ (e.g. location:kitchen:3, "
                          "subject:ada:02_side:2, shot:sh020:first:1); nothing is deleted, and "
                          "if it was the pick the ref is cleared as --clear does; repeatable")
+    ap.add_argument("--yes", action="store_true",
+                    help="don't stop when --clear would remove a live file other episodes "
+                         "read (they are blocked until something is picked again)")
     ap.add_argument("--negative-file",
                     help="text file with a negative prompt; only bites at --cfg > 1, so "
                          "it is for non-distilled models, not krea2 turbo")
@@ -304,13 +307,34 @@ def main() -> int:
 
     if args.clear:
         failed = 0
+        shared = R.shared_context(ep)
         for spec in args.clear:
             rid, view = spec, None
             m = re.fullmatch(r"(subject:[^:]+):(\d\d_[a-z]+)", spec)
             if m:
                 rid, view = m.group(1), m.group(2)
             try:
-                res = R.clear_pick(s, R.find_ref(s, rid), view)
+                ref = R.find_ref(s, rid)
+            except (R.RefError, R.UnknownRef) as e:
+                print(f"  !! {spec}: {e}")
+                failed += 1
+                continue
+            # clearing removes the live file, and with `../refs/...` paths that
+            # file is one every other episode of the show reads
+            others = shared["shared"].get(R._real_path(ref.file)) if ref.file else None
+            if others and not args.yes:
+                live = ref.file and os.path.isfile(ref.file)
+                owner = shared["owner"].get(R.T.file_sha1(ref.file)) if live else None
+                print(f"  !! {spec}: {os.path.relpath(ref.file, ep)} is read by "
+                      f"{', '.join(others)}. Clearing removes it and blocks them until "
+                      f"something is picked."
+                      + (f" {owner} can re-pick its own take." if owner
+                         else " Nothing has a candidate for it: it can't be got back.")
+                      + " Pass --yes to do it anyway.")
+                failed += 1
+                continue
+            try:
+                res = R.clear_pick(s, ref, view)
             except (R.RefError, R.UnknownRef) as e:
                 print(f"  !! {spec}: {e}")
                 failed += 1

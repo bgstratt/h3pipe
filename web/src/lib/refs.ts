@@ -23,7 +23,15 @@ export const VIEWS: { view: string; label: string }[] = [
   { view: "04_face", label: "face" },
 ];
 
+/**
+ * P8: the reserved pseudo-view for a character's whole supplied sheet
+ * (h3refs.SHEET_VIEW). Not one of VIEWS: nothing generates a sheet, it is the
+ * four views stitched -- or one you supply ready-made.
+ */
+export const SHEET_VIEW = "sheet";
+
 export function viewLabel(view: string | null | undefined): string {
+  if (view === SHEET_VIEW) return "sheet";
   if (!view) return "";
   return VIEWS.find((v) => v.view === view)?.label ?? view.replace(/^\d+_/, "");
 }
@@ -94,9 +102,20 @@ export function viewOf(r: Ref, view: string | null | undefined): RefView | undef
   return view ? r.views?.find((v) => v.view === view) : undefined;
 }
 
-/** The candidates of a ref, or of one of a character's views. */
+/**
+ * The candidates of a ref, or of one of a character's views. P8: a character's
+ * supplied sheets are the ref's OWN takes (`takes` / `picked` in the listing),
+ * so SHEET_VIEW reads them from there rather than from a `views` entry.
+ */
 export function takesOf(r: Ref, view: string | null | undefined): RefTake[] {
-  return view ? viewOf(r, view)?.takes ?? [] : r.takes;
+  if (!view || view === SHEET_VIEW) return r.takes;
+  return viewOf(r, view)?.takes ?? [];
+}
+
+/** Which take is live for a ref, one of its views, or its supplied sheet. */
+export function pickedOf(r: Ref, view: string | null | undefined): number | null {
+  if (!view || view === SHEET_VIEW) return r.picked ?? null;
+  return viewOf(r, view)?.picked ?? null;
 }
 
 /** Views of a character with no pick yet (the sheet is stitched when none are left). */

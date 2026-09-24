@@ -12,10 +12,10 @@
 // `path: null`, `can_generate: false`.
 
 import seriesCfgRaw from "../../../tests/fixtures/kitchen_sink/series.json?raw";
-import { VIEWS } from "../lib/refs";
+import { SHEET_VIEW, VIEWS, hasViews, viewLabel } from "../lib/refs";
 import type {
   EditRef, Lora, MissingRef, Override, OverrideFields, Pass, Ref, RefDefaultSource, RefDefaults, RefEffective, RefGenerateRequest,
-  RefGenerateResult, RefFrameSource, RefImportRequest, RefPickRequest, RefPickResult, RefTake, RefView, SeedMode,
+  RefGenerateResult, RefFrameSource, RefImportRequest, RefMatchResult, RefPickRequest, RefPickResult, RefTake, RefView, SeedMode,
   VoiceFromTakeResult, VoiceLineSource,
 } from "../types";
 import { fsFileExists } from "./mockFs";
@@ -184,6 +184,8 @@ export interface MockRefs {
   dependents(ref: string): number[];
   /** Phase 9a: every ref override (and a character view's), for promote */
   overrideList(): { ref: string; view: string | null; subject: string | null; kind: string; values: Override }[];
+  /** P8: POST /h3pipe/refs/match, approximated for the dev page (see `match`) */
+  match(names: string[]): RefMatchResult;
   /** Phase 9a: drop some fields of a ref's (or a view's) override (promoted) */
   dropOverrideFields(ref: string, view: string | null, fields: string[]): void;
 }
@@ -576,10 +578,17 @@ export function createMockRefs(opts: {
         ? r.views!.map((v): RefView => {
           const m = merged(r, v.view);
           const ve = why ? null : effective(r, v.view, tgt);
+          // the series config's wording for this view, before any override: what
+          // a prompt edit is diffed against (P9)
+          const built = `${r.base_prompt} View: ${v.view.replace(/^\d+_/, "")}.`;
           return {
             view: v.view, picked: v.picked, cleared: !!vcleared[v.view],
-            prompt: ve?.prompt ?? `${r.base_prompt} View: ${v.view.replace(/^\d+_/, "")}.`,
-            override: { fields: fieldsOf(m), stale: false, values: m },
+            prompt: ve?.prompt ?? built,
+            built_prompt: built,
+            // `fields` is the character's merged with the view's; `own` is what
+            // was set on the view itself
+            override: { fields: fieldsOf(m), stale: false, values: m,
+                        own: fieldsOf(r.vov[v.view] ?? {}) },
             effective: ve,
             takes: v.takes,
           };
@@ -923,6 +932,65 @@ export function createMockRefs(opts: {
         else (dst as Record<string, unknown>)[k] = k === "loras" ? (val as Lora[]) : val;
       }
       return { ...merged(r, v ?? null), stale: false };
+    },
+    /**
+     * P8: which slot each file name means. The real rules are
+     * `h3refs.match_files` (one implementation, called through
+     * POST /h3pipe/refs/match); this is the dev page's stand-in for them and
+     * stays deliberately simple -- slug equality against the path's stem, the
+     * ref id, and a view's tag or word.
+     */
+    match(names: string[]): RefMatchResult {
+      const slug = (n: string) =>
+        (n.split(/[\\/]/).pop() ?? "").replace(/\.[^.]*$/, "").toLowerCase()
+          .replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+      type Slot = { ref: MRef; view: string | null; names: string[]; audio: boolean };
+      const slots: Slot[] = [];
+      for (const r of refs) {
+        if (!r.path && r.kind !== "voice") continue;
+        const id = slug(r.subject ?? r.id.split(":").pop() ?? "");
+        const stem = r.path ? slug(r.path) : "";
+        const audio = r.kind === "voice";
+        const own = [stem, id].filter(Boolean);
+        if (hasViews(r)) {
+          slots.push({ ref: r, view: SHEET_VIEW, audio,
+                       names: [...own, `${id}_sheet`, `${id}_sheet_4panel`, `${id}_4panel`] });
+          for (const v of VIEWS) {
+            slots.push({ ref: r, view: v.view, audio,
+                         names: [`${id}_${v.view}`, `${id}_${v.label.replace(/-/g, "")}`] });
+          }
+        } else if (audio) {
+          slots.push({ ref: r, view: null, audio, names: [...own, `${id}_voice`] });
+        } else {
+          slots.push({ ref: r, view: null, audio, names: [...own, `${id}_plate`] });
+        }
+      }
+      const matched: RefMatchResult["matched"] = [];
+      const unmatched: RefMatchResult["unmatched"] = [];
+      for (const file of names) {
+        const s = slug(file);
+        const audio = /\.(wav|mp3|flac|ogg|m4a)$/i.test(file);
+        const image = /\.(png|jpe?g|webp)$/i.test(file);
+        if (!audio && !image) {
+          unmatched.push({ file, why: `${file.split(".").pop()} is not a picture or a sound` });
+          continue;
+        }
+        const hits = slots.filter((x) => x.names.includes(s) && x.audio === audio);
+        if (hits.length !== 1) {
+          unmatched.push({
+            file,
+            why: hits.length ? `'${s}' could be more than one slot` : `no ref or view is named '${s}'`,
+          });
+          continue;
+        }
+        const h = hits[0];
+        matched.push({
+          file, ref: h.ref.id, view: h.view, name: h.ref.name, kind: h.ref.kind,
+          audio: h.audio, path: h.ref.path ?? null,
+          why: `'${s}' is ${h.ref.name}${h.view ? ` ${viewLabel(h.view)}` : ""}`,
+        });
+      }
+      return { matched, unmatched };
     },
     overrideList() {
       const out: ReturnType<MockRefs["overrideList"]> = [];

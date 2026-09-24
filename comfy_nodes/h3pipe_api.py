@@ -48,6 +48,7 @@ try:
                           f"({getattr(_spec, 'origin', None)})")
     import h3edit as E  # noqa: E402
     import h3inspect as IN  # noqa: E402
+    import h3issues as IS  # noqa: E402
     import h3jobs as J  # noqa: E402
     import h3peaks as PK  # noqa: E402
     import h3promote as P  # noqa: E402
@@ -56,7 +57,7 @@ try:
     import h3track as K  # noqa: E402
     import targets as TG  # noqa: E402
 except Exception as exc:                                  # pragma: no cover
-    E = IN = J = K = P = PK = R = T = TG = None
+    E = IN = IS = J = K = P = PK = R = T = TG = None
     IMPORT_ERROR = (f"h3pipe: can't import the pipeline from {HOME} "
                     f"({exc.__class__.__name__}: {exc}); set H3PIPE_HOME to the repo")
 
@@ -188,7 +189,11 @@ def handler(fn):
         except FileNotFoundError as e:
             return 404, {"error": str(e)}
         except Exception as e:                            # the message is for a person
+            # the modules that carry their own HTTP status (h3source's Conflict,
+            # h3issues' refusals) answer with it rather than a 500
             if P is not None and isinstance(e, P.H.SourceError):
+                return e.status, dict({"error": str(e)}, **e.data)
+            if IS is not None and isinstance(e, IS.IssueError):
                 return e.status, dict({"error": str(e)}, **e.data)
             return 500, {"error": f"{e.__class__.__name__}: {e}"}
         finally:
@@ -420,11 +425,16 @@ def get_episode(ctx: Context, query: dict):
 
 @handler
 def get_shot(ctx: Context, query: dict):
+    """The inspector's detail for one shot. `target` (P9, optional) answers for a
+    ONE-OFF run on that video target instead of the shot's own -- the size and
+    length a redo there would really produce, since the frame grid is the
+    target's. Nothing is saved; 400 for a target that isn't there."""
     ep = check_ep(ctx, query.get("ep"))
     pass_ = check_pass(query.get("pass"))
     shot = check_shot(query.get("shot"))
+    target = _opt_target(query.get("target"))
     try:
-        detail = E.shot_detail(ep, pass_, shot)
+        detail = E.shot_detail(ep, pass_, shot, target=target)
     except KeyError as e:
         raise ApiError(404, e.args[0])
     return 200, seeds_out(detail)
@@ -1392,11 +1402,14 @@ def _ref(s, ref_id):
         raise ApiError(404, str(e))
 
 
-def _view(ref, v, required: bool = False):
+def _view(ref, v, required: bool = False, sheet: bool = False):
+    """A view for this ref, or 400. `sheet` also takes `"sheet"`, a character's
+    whole supplied sheet (P8): the routes that move a file or a pick around take
+    it, the ones that generate or word a view do not."""
     if v is not None and not isinstance(v, str):
         raise ApiError(400, "view must be a view name or null")
     try:
-        return R.check_view(ref, v, required=required)
+        return R.check_view(ref, v, required=required, allow_sheet=sheet)
     except R.RefError as e:
         raise ApiError(400, str(e))
 
@@ -1488,7 +1501,7 @@ def delete_refs_pick(ctx: Context, query: dict):
     ep = check_ep(ctx, query.get("ep"))
     s = _series(ep)
     ref = _ref(s, query.get("ref"))
-    view = _view(ref, query.get("view") or None)
+    view = _view(ref, query.get("view") or None, sheet=True)
     try:
         res = R.clear_pick(s, ref, view)
     except R.RefError as e:
@@ -1578,7 +1591,7 @@ def put_refs_pick(ctx: Context, body):
     ep = check_ep(ctx, body.get("ep"))
     s = _series(ep)
     ref = _ref(s, body.get("ref"))
-    view = _view(ref, body.get("view"), required=True)
+    view = _view(ref, body.get("view"), required=True, sheet=True)
     take = check_take(body.get("take"))
     force = body.get("force", False)
     if not isinstance(force, bool):
@@ -1606,6 +1619,7 @@ def put_refs_pick(ctx: Context, body):
 
 
 MAX_UPLOAD = 64 * 1024 * 1024        # POST /h3pipe/refs/import as multipart
+MATCH_LIMIT = 500                    # names in one POST /h3pipe/refs/match
 
 
 class Upload:
@@ -1638,7 +1652,7 @@ def post_refs_import(ctx: Context, body):
     ep = check_ep(ctx, body.get("ep"))
     s = _series(ep)
     ref = _ref(s, body.get("ref"))
-    view = _view(ref, body.get("view") or None, required=True)
+    view = _view(ref, body.get("view") or None, required=True, sheet=True)
     pick = _pick_flag(body.get("pick"))
     up = body.get("file")
     if isinstance(up, Upload):
@@ -1680,6 +1694,22 @@ def post_refs_import(ctx: Context, body):
 
 
 @handler
+def post_refs_match(ctx: Context, body):
+    """P8: which slot does each of these file names mean? Body `{ep, names}`,
+    answer `{matched, unmatched}` (h3refs.match_files). Read-only, and the names
+    are names -- no file is sent, so the editor can show the table it is about
+    to act on before a single byte is uploaded."""
+    body = body_dict(body)
+    ep = check_ep(ctx, body.get("ep"))
+    names = body.get("names")
+    if not isinstance(names, list) or not all(isinstance(n, str) for n in names):
+        raise ApiError(400, "names must be a list of file names")
+    if len(names) > MATCH_LIMIT:
+        raise ApiError(400, f"{len(names)} names is more than {MATCH_LIMIT} at a time")
+    return 200, R.match_files(_series(ep), names)
+
+
+@handler
 def post_refs_discard(ctx: Context, body):
     """Move a ref candidate to refs/_takes/_trash/ (h3refs.discard_take); if it
     was the pick, the ref (view) is cleared as DELETE /h3pipe/refs/pick does.
@@ -1688,7 +1718,7 @@ def post_refs_discard(ctx: Context, body):
     ep = check_ep(ctx, body.get("ep"))
     s = _series(ep)
     ref = _ref(s, body.get("ref"))
-    view = _view(ref, body.get("view") or None, required=True)
+    view = _view(ref, body.get("view") or None, required=True, sheet=True)
     take = check_take(body.get("take"))
     try:
         res = R.discard_take(s, ref, view, take)
@@ -2131,6 +2161,66 @@ def post_align(ctx: Context, body):
                  "track": E.track_info(ep, pass_), "build": build, "log": res.get("log", "")}
 
 
+
+# ---------------------------------------------------------------------------
+# issues: a pass's notepad (P10)
+# ---------------------------------------------------------------------------
+
+@handler
+def get_issues(ctx: Context, query: dict):
+    """The issues noted for a pass (h3issues.list_issues), each with
+    `addressed`: its shot has been rebuilt or rendered again since."""
+    ep = check_ep(ctx, query.get("ep"))
+    pass_ = query.get("pass")
+    return 200, {"issues": IS.list_issues(ep, check_pass(pass_) if pass_ else None)}
+
+
+@handler
+def post_issues(ctx: Context, body):
+    """Note what is wrong with a shot as it was rendered. Body
+    `{ep, pass, shot, note, take?}`; the answer is the issue, snapshotted. 404
+    for a shot that isn't in the pass, 400 for a note that says nothing."""
+    body = body_dict(body)
+    ep = check_ep(ctx, body.get("ep"))
+    item = IS.add(ep, check_pass(body.get("pass")), check_shot(body.get("shot")),
+                  body.get("note"), check_take(body.get("take"), nullable=True))
+    ctx.emit("h3pipe.issues", {"ep": ep, "pass": item["pass"], "shot": item["shot"],
+                               "id": item["id"]})
+    return 200, item
+
+
+@handler
+def delete_issues(ctx: Context, query: dict):
+    """Drop issues: `id` (one, repeatable as a comma-separated list), or
+    `clear=1` for a whole pass, or `clear=1&addressed=1` for only the ones whose
+    shot has moved on. Answers what is left."""
+    ep = check_ep(ctx, query.get("ep"))
+    pass_ = check_pass(query["pass"]) if query.get("pass") else None
+    ids = [x for x in str(query.get("id") or "").split(",") if x]
+    if ids:
+        gone = IS.resolve(ep, ids)
+    elif _flag(query.get("clear")):
+        gone = IS.clear(ep, pass_, _flag(query.get("addressed")))
+    else:
+        raise ApiError(400, "give an `id` to resolve, or clear=1 to empty the pass")
+    ctx.emit("h3pipe.issues", {"ep": ep, "pass": pass_, "removed": gone})
+    return 200, {"removed": gone, "issues": IS.list_issues(ep, pass_)}
+
+
+@handler
+def get_issues_export(ctx: Context, query: dict):
+    """One document to hand to an assistant: `format=md` (default) or `json`.
+    Generated from the file every time, one way -- nothing parses it back."""
+    ep = check_ep(ctx, query.get("ep"))
+    pass_ = check_pass(query["pass"]) if query.get("pass") else None
+    fmt = (query.get("format") or "md").lower()
+    if fmt not in ("md", "markdown", "json"):
+        raise ApiError(400, "format must be 'md' or 'json'")
+    everything = _flag(query.get("addressed"))
+    if fmt == "json":
+        return 200, IS.export_json(ep, pass_, everything)
+    return 200, {"format": "md", "text": IS.export_markdown(ep, pass_, everything)}
+
 # (method, path, handler, what it takes: "query", "body" (JSON) or "form" (JSON, or
 # multipart/form-data whose file field arrives as an Upload))
 ROUTES = [
@@ -2142,6 +2232,10 @@ ROUTES = [
     ("GET", "/h3pipe/shot", get_shot, "query"),
     ("POST", "/h3pipe/build", post_build, "body"),
     ("POST", "/h3pipe/episode/new", post_episode_new, "body"),
+    ("GET", "/h3pipe/issues", get_issues, "query"),
+    ("POST", "/h3pipe/issues", post_issues, "body"),
+    ("DELETE", "/h3pipe/issues", delete_issues, "query"),
+    ("GET", "/h3pipe/issues/export", get_issues_export, "query"),
     ("GET", "/h3pipe/file", get_file, "query"),
     ("POST", "/h3pipe/render", post_render, "body"),
     ("POST", "/h3pipe/cancel", post_cancel, "body"),
@@ -2169,6 +2263,7 @@ ROUTES = [
     ("DELETE", "/h3pipe/refs/pick", delete_refs_pick, "query"),
     ("PUT", "/h3pipe/refs/defaults", put_refs_defaults, "body"),
     ("POST", "/h3pipe/refs/import", post_refs_import, "form"),
+    ("POST", "/h3pipe/refs/match", post_refs_match, "body"),
     ("POST", "/h3pipe/refs/discard", post_refs_discard, "body"),
     ("POST", "/h3pipe/refs/generate-missing", post_refs_generate_missing, "body"),
     ("POST", "/h3pipe/refs/keyframe", post_refs_keyframe, "body"),

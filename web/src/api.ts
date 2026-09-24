@@ -2,35 +2,19 @@
 // interface is implemented by the mock (src/mock/) for the dev page.
 //
 // What the contract still leaves open (the UI works around each one):
-//  - TODO(contract): shot_detail has no pre-override ("built") model/LoRAs/steps
-//    once an override sets them; `built` is the raw shotlist entry, which omits
-//    the series config's defaults. The inspector shows the effective values.
 //  - TODO(contract): a placeholder cut entry's take lives in the other pass;
 //    episode_status gives its number but not its thumb/strip/mp4, so the UI
 //    loads the other pass's status to draw it.
-//  - TODO(contract): `GET /h3pipe/shot` takes no `target`, so the redo/render
-//    dialogs can't show the size and length a one-off run on *another* target
-//    would use (they show the target's preset size instead).
 //  - TODO(contract): there is no prompt override per target: a retargeted
 //    shot's per-pass prompt override is ignored, so the inspector shows its
 //    `effective.prompt` read-only.
-//  - TODO(contract): Phase 9d asks the editor's file picker to "upload as
-//    /refs/import does", but no route puts a media file inside the episode
-//    without making it a ref candidate. `uploadClipAudio` posts to
-//    POST /h3pipe/audio/import (ep + file, answering {path}); until a server
-//    serves it the window says so and offers Browse instead.
-//  - TODO(contract): a character view's `override.values` in `GET /h3pipe/refs`
-//    are the character's own fields merged with the view's, and a view has no
-//    `built_prompt`. The per-view editor can't tell a view's own field from an
-//    inherited one, nor diff an overridden view prompt against the series
-//    config's text.
 
 import type {
   AlignReady, AlignRequest, AlignResult, AssembleResult, BrowseFiles, BrowseResult, BuildResult, CancelResult, ComfyQueue, Config, CutEntry,
-  CutFile, CutWhat, DiscardResult, EpisodeStatus, EpisodeSummary, EpisodeTargetResult, ModelList, NewEpisodeRequest,
+  CutFile, CutWhat, DiscardResult, EpisodeStatus, EpisodeSummary, EpisodeTargetResult, Issue, IssueAddRequest, ModelList, NewEpisodeRequest,
   NewEpisodeResult, OverrideRequest, OverrideResult, Pass,
   PeaksResult, PickRequest, Ref, RefDefaults, RefDiscardRequest, RefGenerateMissingRequest, RefGenerateMissingResult, RefGenerateRequest,
-  RefGenerateResult, RefImportRequest, RefKeyframeRequest, RefList, RefOverrideInfo, RefOverrideRequest, RefPickRequest, RefPickResult,
+  RefGenerateResult, RefImportRequest, RefKeyframeRequest, RefList, RefMatchResult, RefOverrideInfo, RefOverrideRequest, RefPickRequest, RefPickResult,
   RefTake, RefUploadRequest, RenderRequest, RenderResult, Seed, ShotDetail, TakeRef, TargetKind, TargetList, TrackResult,
   CustomTargetResult, TargetProposal, VoiceFromTakeRequest, VoiceFromTakeResult,
   WorkflowFile, WorkflowInstallResult,
@@ -52,7 +36,9 @@ export interface Api {
   putConfig(roots: string[]): Promise<Config>;
   episodes(): Promise<EpisodeSummary[]>;
   episode(ep: string, pass: Pass): Promise<EpisodeStatus>;
-  shot(ep: string, pass: Pass, shot: string): Promise<ShotDetail>;
+  /** P9: `target` answers for a one-off run on that video target -- the size and
+   * length it would really produce. Nothing is saved. */
+  shot(ep: string, pass: Pass, shot: string, target?: string | null): Promise<ShotDetail>;
   build(ep: string): Promise<BuildResult>;
   /** P5: POST /h3pipe/episode/new — a new episode from a template, in `parent`. */
   newEpisode(req: NewEpisodeRequest): Promise<NewEpisodeResult>;
@@ -97,6 +83,20 @@ export interface Api {
   /** POST /h3pipe/refs/import as multipart (drag and drop, a file picker), with
    * upload progress where the transport can report it. */
   refsUpload(req: RefUploadRequest, onProgress?: UploadProgress): Promise<ImportedTake>;
+  // ---- P10: a pass's issues (the notepad) ----
+  /** GET /h3pipe/issues: what was noted for a pass, each with `addressed`. */
+  issues(ep: string, pass?: Pass | null): Promise<Issue[]>;
+  /** POST /h3pipe/issues: note what is wrong with a shot as it was rendered. */
+  addIssue(req: IssueAddRequest): Promise<Issue>;
+  /** DELETE /h3pipe/issues: drop one by id. */
+  resolveIssue(ep: string, id: string): Promise<Issue[]>;
+  /** DELETE /h3pipe/issues?clear=1: empty a pass, or only what has been addressed. */
+  clearIssues(ep: string, pass?: Pass | null, addressedOnly?: boolean): Promise<Issue[]>;
+  /** GET /h3pipe/issues/export: the markdown to hand to an assistant. */
+  exportIssues(ep: string, pass?: Pass | null): Promise<string>;
+  /** P8: POST /h3pipe/refs/match -- which slot each file name means. Read-only,
+   * names only (no file bodies), so the table can be shown before anything is sent. */
+  refsMatch(ep: string, names: string[]): Promise<RefMatchResult>;
   /** POST /h3pipe/refs/discard: move a candidate to `_trash/`; its pick is cleared.
    * Returns the ref as `refs` lists it. */
   refsDiscard(req: RefDiscardRequest): Promise<Ref>;
@@ -347,7 +347,7 @@ export function createHttpApi(t: Transport): Api {
     putConfig: (roots) => call("PUT", "/h3pipe/config", { roots }),
     episodes: () => get("/h3pipe/episodes"),
     episode: (ep, pass) => get(`/h3pipe/episode?${qs({ ep, pass })}`),
-    shot: (ep, pass, shot) => get(`/h3pipe/shot?${qs({ ep, pass, shot })}`),
+    shot: (ep, pass, shot, target) => get(`/h3pipe/shot?${qs({ ep, pass, shot, target: target || undefined })}`),
     build: (ep) => call("POST", "/h3pipe/build", { ep }),
     newEpisode: (req) => call("POST", "/h3pipe/episode/new", req),
     fileUrl: (ep, path) => t.url(`/h3pipe/file?${qs({ ep, path })}`),
@@ -462,6 +462,19 @@ export function createHttpApi(t: Transport): Api {
       form.append("file", req.file, name);
       return postForm("/h3pipe/refs/import", form, onProgress);
     },
+    issues: (ep, pass) => get<{ issues: Issue[] }>(`/h3pipe/issues?${qs({ ep, pass: pass || undefined })}`)
+      .then((r) => r.issues),
+    addIssue: (req) => call("POST", "/h3pipe/issues", req),
+    resolveIssue: (ep, id) => call<{ issues: Issue[] }>("DELETE", `/h3pipe/issues?${qs({ ep, id })}`)
+      .then((r) => r.issues),
+    clearIssues: (ep, pass, addressedOnly) => call<{ issues: Issue[] }>(
+      "DELETE",
+      `/h3pipe/issues?${qs({ ep, pass: pass || undefined, clear: "1",
+                             addressed: addressedOnly ? "1" : undefined })}`,
+    ).then((r) => r.issues),
+    exportIssues: (ep, pass) => get<{ text: string }>(`/h3pipe/issues/export?${qs({ ep, pass: pass || undefined })}`)
+      .then((r) => r.text),
+    refsMatch: (ep, names) => call("POST", "/h3pipe/refs/match", { ep, names }),
     refsDiscard: ({ ep, ref, view, take }) => call("POST", "/h3pipe/refs/discard", view ? { ep, ref, view, take } : { ep, ref, take }),
     refsKeyframe: (req) => call("POST", "/h3pipe/refs/keyframe", req),
     refsUnpick: (ep, ref, view) => call("DELETE", `/h3pipe/refs/pick?${qs({ ep, ref, view: view || undefined })}`),

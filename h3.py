@@ -4,6 +4,12 @@ h3.py — one front door for the H3 pipeline. Run it from the folder that holds
 your projects, with the pipeline scripts beside it (see the README).
 
     python h3.py new      Shows\\ep02            # a new episode: series.json + ep02.md that build
+    python h3.py supply   Shows\\ep05 C:\\sheets   # pictures you already have into their ref slots
+                                                    # (a folder is matched by file name; --dry-run
+                                                    #  prints the table, --ref id[:view] names one)
+    python h3.py issues   Shows\\ep05 --proxy     # the notepad for the pass you are reviewing:
+                                                    # --add sh0140 "the truck is on the wrong side",
+                                                    # --export to paste into an assistant, --clear
     python h3.py align    Shows\\ep05 audio\\ep05_dialogue.wav   # h3align: time the script to a recording
     python h3.py build    Shows\\ep05            # h3build: shotlist + refs_todo (final AND proxy)
     python h3.py check    Shows\\ep05            # h3build --check and --pace, writes nothing
@@ -157,6 +163,20 @@ def main() -> int:
         sys.path.insert(0, HERE)
         import h3source
         return h3source.cmd_new(argv[1:])
+    if argv and argv[0] == "issues":
+        if len(argv) < 2 or argv[1].startswith("-"):
+            sys.exit("  !! usage: python h3.py issues <episode> [--proxy] "
+                     "[--add <shot> <note> | --export | --clear | --resolve <id>]")
+        sys.path.insert(0, HERE)
+        import h3issues
+        return h3issues.cmd_issues(os.path.abspath(argv[1]), argv[2:])
+    if argv and argv[0] == "supply":
+        if len(argv) < 2 or argv[1].startswith("-"):
+            sys.exit("  !! usage: python h3.py supply <episode> <file-or-folder>... "
+                     "[--ref id[:view]] [--no-pick] [--dry-run]")
+        sys.path.insert(0, HERE)
+        import h3refs
+        return h3refs.cmd_supply(os.path.abspath(argv[1]), argv[2:])
     if argv and argv[0] == "targets":
         # the episode is optional: it adds its series config (pass blocks,
         # model_families) and marks its target

@@ -4,7 +4,7 @@
 
 import { memo, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import {
-  clearRef, copyText, discardRefTake, dismissMissingResult, generateMissing, generateRef, keyframeFromTake, loadRefs, openBrowse,
+  clearRef, copyText, discardRefTake, dismissMissingResult, dropFilesFromDrag, generateMissing, generateRef, keyframeFromTake, loadRefs, openBrowse,
   openImageCompare, openRefFile, pickRef, revertRefOverride, saveRefOverride, selectRefTake, setRefDefault, setRefsFilter, toggleRefOpen,
 } from "../actions";
 import {
@@ -20,11 +20,12 @@ import {
 } from "../lib/imageTargets";
 import { audioTargets, voiceCapNotes, voiceModeText } from "../lib/voice";
 import { VoiceCandidate, VoiceGenerateBar, VoiceLive } from "./VoiceRef";
-import { missingResultText } from "../lib/lookback";
+import { dragHasFiles, missingResultText } from "../lib/lookback";
 import { formFromDetail, isDirty, overrideFields, type OverrideForm, type OverrideSource } from "../lib/overrideForm";
 import { pickWarning, readinessBadge, targetOptionText } from "../lib/readiness";
+import { sharedNote } from "../lib/shared";
 import {
-  VIEWS, blockedShots, canGenerate, groupRefs, hasViews, missingPlan, isAudioRef, pickedTake, refCounts, takeFile, takeUsable, takesOf,
+  SHEET_VIEW, VIEWS, blockedShots, canGenerate, groupRefs, hasViews, missingPlan, isAudioRef, pickedOf, pickedTake, refCounts, takeFile, takeUsable, takesOf,
   unpickedViews, usedBy, viewLabel, viewOf, type RefFilter,
 } from "../lib/refs";
 import { findTarget, targetLabel, targetShort } from "../lib/targets";
@@ -35,7 +36,7 @@ import { useTargets } from "./Targets";
 import { OverrideFields } from "./OverrideFields";
 import { PassToggle } from "./ShotsTab";
 import { Progress } from "./Thumb";
-import { DropSlot, UploadButton } from "./Upload";
+import { DropSlot, SupplyPicker, UploadButton } from "./Upload";
 
 const FILTERS: { id: RefFilter; label: string; title: string }[] = [
   { id: "episode", label: "this episode", title: "Refs used by this episode's shots (this pass)" },
@@ -124,6 +125,32 @@ function ImageModelBar() {
           </div>
         );
       })}
+    </div>
+  );
+}
+
+/**
+ * P8: where a character's live sheet came from -- one supplied as a take, the
+ * four views stitched, or (no take at all) a file put in the folder by hand,
+ * which is a perfectly good way to supply one and is left alone.
+ */
+function SheetLine({ r }: { r: Ref }) {
+  if (!r.exists) return null;
+  if (r.live_from === SHEET_VIEW) {
+    const t = r.picked;
+    return (
+      <div className="h3-small h3-muted">
+        The live sheet is a supplied one{t ? ` (${tn(t)})` : ""}. Picking all four views stitches over it.
+      </div>
+    );
+  }
+  if (r.live_from === "views") {
+    return <div className="h3-small h3-muted">The live sheet is stitched from the four picked views.</div>;
+  }
+  return (
+    <div className="h3-small h3-muted">
+      The live sheet was put there outside the editor — it is used as it is. Drop one here to
+      keep it as a candidate instead.
     </div>
   );
 }
@@ -306,11 +333,6 @@ const Candidate = memo(function Candidate({ ep, r, view, t, live, selected }: {
   );
 });
 
-function pickedOf(r: Ref, view: string | null): number | null {
-  return (view ? viewOf(r, view)?.picked : r.picked) ?? null;
-}
-
-
 function CandidateGrid({ ep, r, view, cols }: { ep: string; r: Ref; view: string | null; cols?: boolean }) {
   const sel = useApp((s) => s.refSel);
   const takes = takesOf(r, view);
@@ -465,8 +487,17 @@ function GenerateBar({ r }: { r: Ref }) {
       >
         <i className="pi pi-download" /> Import…
       </button>
-      {!isChar && (
+      {!isChar ? (
         <UploadButton refId={r.id} view={null} kind={kind} title={`Upload ${kind === "audio" ? "an audio file" : "an image"} from this computer as a new candidate, live at once (or drop one on this row)`} />
+      ) : (
+        // P8: a finished 4-panel sheet, instead of generating four views
+        <UploadButton
+          refId={r.id}
+          view={SHEET_VIEW}
+          kind="image"
+          label="Upload sheet…"
+          title="Upload a finished 4-panel sheet from this computer: it becomes a candidate and goes live, without stitching"
+        />
       )}
     </div>
   );
@@ -545,7 +576,7 @@ function RefSettingsForm({ r, view }: { r: Ref; view: string | null }) {
   // a character's own level has no prompt (a prompt override is per view)
   const noPrompt = chars && !view;
   // everything from `r`, so a refetch (a new `r`) is the only thing that rebases the form
-  const { ovInfo, eff, ovFields, src } = useMemo(() => {
+  const { ovInfo, eff, ovFields, src, inherited } = useMemo(() => {
     const v = view ? viewOf(r, view) : undefined;
     const ovInfo = v ? v.override : r.override;
     const values = (v ? v.override?.values : r.override_values ?? r.override.values) ?? {};
@@ -556,10 +587,17 @@ function RefSettingsForm({ r, view }: { r: Ref; view: string | null }) {
     const src: OverrideSource = {
       override: values,
       effective: { prompt },
-      // a view lists no series-config prompt: without a prompt override its prompt is it
-      built_prompt: v ? (overridden ? "" : prompt) : r.built_prompt ?? (overridden ? "" : prompt),
+      // P9: a view now carries the series config's wording for itself, so an
+      // overridden view prompt can be diffed and put back. (It used to send ""
+      // here, which left Diff and Series config with nothing to work from.)
+      built_prompt: v
+        ? v.built_prompt ?? (overridden ? "" : prompt)
+        : r.built_prompt ?? (overridden ? "" : prompt),
     };
-    return { ovInfo, eff, ovFields, src };
+    // P9: which of the fields on show are this view's own; the rest come from
+    // the character and are changed on its row
+    const inherited = v ? ovFields.filter((f) => !(ovInfo?.own ?? ovFields).includes(f)) : [];
+    return { ovInfo, eff, ovFields, src, inherited };
   }, [r, view]);
   const initial = useMemo(() => formFromDetail(src), [src]);
   const [form, setForm] = useState<OverrideForm>(initial);
@@ -597,8 +635,11 @@ function RefSettingsForm({ r, view }: { r: Ref; view: string | null }) {
       {ovInfo?.stale && <div className="h3-note"><b>Override stale.</b> The series config's text for {view ? "this view" : "this ref"} changed since the override was written.</div>}
       {view && (
         <div className="h3-small h3-muted">
-          What {viewLabel(view)} generates with. Seed, model, LoRAs and steps set for all views show here too; a change here is this view's own.
-          {promptOverridden && " (The series config's text for this view shows again once its prompt is reverted.)"}
+          What {viewLabel(view)} generates with.{" "}
+          {inherited.length
+            ? <>Its {inherited.join(", ")} {inherited.length > 1 ? "come" : "comes"} from {r.name} and {inherited.length > 1 ? "are" : "is"} shared by all four views — changing {inherited.length > 1 ? "them" : "it"} here makes {inherited.length > 1 ? "them" : "it"} this view's own.</>
+            : <>A change here is this view's own; {r.name}'s row sets what all four share.</>}
+          {promptOverridden && " The series config's text is under Diff, and Series config puts it back."}
         </div>
       )}
       <OverrideFields
@@ -655,6 +696,13 @@ function RefDetail({ ep, r }: { ep: string; r: Ref }) {
       {isAudioRef(r) && <VoiceLive ep={ep} r={r} />}
       {hasViews(r) ? (
         <>
+          <SheetLine r={r} />
+          {r.takes.length > 0 && (
+            <div className="h3-col" style={{ gap: 2 }}>
+              <div className="h3-h h3-small">Supplied sheets</div>
+              <CandidateGrid ep={ep} r={r} view={SHEET_VIEW} />
+            </div>
+          )}
           {missingViews.length > 0 && missingViews.length < 4 && (
             <div className="h3-small h3-muted">The sheet is stitched when every view has a pick: {missingViews.map(viewLabel).join(", ")} still to pick.</div>
           )}
@@ -718,15 +766,22 @@ function RefRow({ ep, r }: { ep: string; r: Ref }) {
   // an optional keyframe with no file isn't "missing": the shot renders without it
   const showMissing = !r.exists && !!r.path && (!kf || r.need !== "optional" || !!r.requested) && r.method !== "none";
   const chars = hasViews(r);
+  const note = sharedNote(r, ep);
   return (
     <DropSlot
       refId={r.id}
-      view={null}
+      // P8: a character's row takes a ready-made 4-panel sheet, on the reserved
+      // `sheet` view -- the file it names IS a sheet, so dropping one there is
+      // the obvious thing to try. Its four views are still below.
+      view={chars ? SHEET_VIEW : null}
       kind={isAudioRef(r) ? "audio" : "image"}
-      refuse={chars
-        ? (open ? "Drop onto one of the views below" : "A character takes a picture per view: open it and drop onto a view")
+      refuse={!r.path && !isAudioRef(r)
         // a voice with no sample yet still takes one: picking it writes the series config
-        : !r.path && !isAudioRef(r) ? "The series config names no file for this ref" : null}
+        ? "The series config names no file for this ref"
+        : null}
+      title={chars
+        ? "Drop a finished 4-panel sheet here, or open the row and drop one picture per view"
+        : undefined}
       className={`h3-ref${open ? " h3-open" : ""}`}
       dataRef={r.id}
     >
@@ -783,6 +838,8 @@ function RefRow({ ep, r }: { ep: string; r: Ref }) {
               </span>
             )}
             {showMissing && <span className="h3-badge h3-b-failed" title={`${r.path} isn't on disk`}>missing</span>}
+            {/* P9: the live file isn't this episode's own pick, and others read it */}
+            {note && <span className={`h3-badge ${note.label === "not from here" ? "h3-b-override-stale" : "h3-b-override"}`} title={note.title}>{note.label}</span>}
             {blocked.length > 0 && <span className="h3-badge h3-b-missing-refs" title={`Renders of these shots are skipped until this ref exists:\n${blocked.join(", ")}`}>blocks {blocked.length}</span>}
             {queued > 0 && <span className="h3-badge h3-b-queued">queued ×{queued}</span>}
             {r.override.fields.length > 0 && <span className="h3-badge h3-b-override" title={`Override: ${r.override.fields.join(", ")}`}>override</span>}
@@ -823,6 +880,9 @@ export function RefsTab() {
   const lastMissing = useApp((s) => (s.ep ? s.missingResult[s.ep] : undefined));
   const focus = useApp((s) => s.refFocus);
   const scrollRef = useRef<HTMLDivElement>(null);
+  // P8: the tab itself takes a bulk drop (a folder, or a pile of files)
+  const [bulkOver, setBulkOver] = useState(false);
+  const bulkDepth = useRef(0);
 
   // the inspector's "Refs this shot uses": scroll to the ref (its group opened)
   useEffect(() => {
@@ -868,6 +928,7 @@ export function RefsTab() {
                 ))}
               </span>
               <span className="h3-grow" />
+              <SupplyPicker />
               {(planLabels.length > 0 || counts.missing > 0) && (
                 <button
                   className="h3-btn h3-primary"
@@ -899,7 +960,28 @@ It lists what it will do first.${planLabels.length ? `\n${planLabels.join(", ")}
             )}
             {err && <div className="h3-note h3-note-err">{err} <button className="h3-link" onClick={() => void loadRefs()}>Retry</button></div>}
           </div>
-          <div className="h3-scroll h3-sep" ref={scrollRef}>
+          <div
+            className={`h3-scroll h3-sep${bulkOver ? " h3-drop-over" : ""}`}
+            ref={scrollRef}
+            onDragEnter={(e) => { if (dragHasFiles(e.dataTransfer)) { e.preventDefault(); bulkDepth.current++; setBulkOver(true); } }}
+            onDragLeave={(e) => { if (dragHasFiles(e.dataTransfer) && --bulkDepth.current <= 0) { bulkDepth.current = 0; setBulkOver(false); } }}
+            onDragOver={(e) => { if (dragHasFiles(e.dataTransfer)) { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; } }}
+            onDrop={(e) => {
+              // a drop that a ref row handled has already stopped propagating;
+              // this is the bulk path -- files matched to slots by name (P8)
+              if (!dragHasFiles(e.dataTransfer)) return;
+              e.preventDefault();
+              bulkDepth.current = 0;
+              setBulkOver(false);
+              void dropFilesFromDrag(e.dataTransfer);
+            }}
+          >
+            {bulkOver && (
+              <div className="h3-note h3-note-info h3-small">
+                Drop pictures and voice samples here: each is matched to a ref by its file name,
+                and you see the table before anything is sent.
+              </div>
+            )}
             {!refs && !err && <div className="h3-empty-state">{loading ? "Loading…" : ""}</div>}
             {refs && groups.map((g) => {
               const isCollapsed = !!collapsed[g.id];

@@ -20,6 +20,7 @@ import {
   sameAudio, soundShots, startOf, takeAudioFile, takesWithSound, timeToX, xToTime, RECORDING_IGNORES_AUDIO,
 } from "../lib/audioSource";
 import { fmtSeconds, tn } from "../lib/format";
+import { dragHasFiles } from "../lib/lookback";
 import { MAX_BINS } from "../lib/peaks";
 import { clipTake } from "../lib/playlist";
 import { needsResync } from "../lib/recording";
@@ -552,12 +553,31 @@ function NumberRow({ draft, clipSeconds, duration, patch }: {
   );
 }
 
-/** The file source: browse the ComfyUI machine, upload from here, or type a path. */
+/** The file source: browse the ComfyUI machine, upload from here, drop a file
+ *  on it (P8: the recording has always taken a drop; this makes 9d match), or
+ *  type a path. */
 function FilePicker({ shot, path, onPath }: { shot: string; path: string; onPath: (p: string) => void }) {
   const up = useApp((s) => s.clipAudio?.upload ?? null);
   const input = useRef<HTMLInputElement>(null);
+  const [over, setOver] = useState(false);
+  const depth = useRef(0);
   return (
-    <div className="h3-col" style={{ gap: 3 }}>
+    <div
+      className={`h3-col h3-drop${over ? " h3-drop-over" : ""}`}
+      style={{ gap: 3 }}
+      onDragEnter={(e) => { if (dragHasFiles(e.dataTransfer)) { e.preventDefault(); depth.current++; setOver(true); } }}
+      onDragLeave={(e) => { if (dragHasFiles(e.dataTransfer) && --depth.current <= 0) { depth.current = 0; setOver(false); } }}
+      onDragOver={(e) => { if (dragHasFiles(e.dataTransfer)) { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; } }}
+      onDrop={(e) => {
+        if (!dragHasFiles(e.dataTransfer)) return;
+        e.preventDefault();
+        depth.current = 0;
+        setOver(false);
+        const f = e.dataTransfer.files?.[0];
+        if (f) void uploadClipAudio(f);
+      }}
+    >
+      {over && <div className="h3-drop-hint">Drop a file: it goes into the episode and becomes this clip's audio</div>}
       <div className="h3-row h3-wrap h3-small">
         <input
           className="h3-in h3-grow h3-mono"

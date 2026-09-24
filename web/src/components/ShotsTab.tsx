@@ -1,6 +1,6 @@
-import { memo, useMemo, useState, type MouseEvent } from "react";
+import { memo, useEffect, useMemo, useState, type MouseEvent } from "react";
 import {
-  build, loadEpisodes, openBrowse, openInspector, openMenu, openSource, openViewer, pickTake, playAll, refreshEpisode,
+  build, loadEpisodes, loadIssues, openBrowse, openInspector, openIssues, openMenu, openSource, openViewer, pickTake, playAll, refreshEpisode,
   renderStale, requestRender, select, selectEpisode, setPass, toggleExpanded, toggleSequence,
 } from "../actions";
 import { host } from "../host";
@@ -12,6 +12,7 @@ import { shotTarget, takeTargetBadge, targetBadges } from "../lib/targets";
 import { renderingTakes, statusKey, store, useApp } from "../store";
 import type { Pass, ShotStatus, TakeSummary, TargetList } from "../types";
 import { aspectOf, useStatus } from "./hooks";
+import { useIssueCount } from "./Issues";
 import { MissingRefsSummary } from "./MissingRefs";
 import { EpisodeTarget } from "./Readiness";
 import { useTargets } from "./Targets";
@@ -387,6 +388,30 @@ function ShotBin() {
   );
 }
 
+/**
+ * P10: the pass's issue notepad. The count is the open ones — an issue whose
+ * shot has been rebuilt or re-rendered reads "addressed" and isn't counted.
+ */
+function IssuesButton() {
+  const n = useIssueCount();
+  const ep = useApp((s) => s.ep);
+  const pass = useApp((s) => s.pass);
+  useEffect(() => {
+    if (ep) void loadIssues(ep, pass);
+  }, [ep, pass]);
+  return (
+    <button
+      className={`h3-btn h3-icon${n ? " h3-on" : ""}`}
+      title={n
+        ? `${n} issue${n === 1 ? "" : "s"} noted for this pass — open the list, or copy the export`
+        : "Issues: what is wrong with this pass (select a clip and press n while you watch)"}
+      onClick={() => openIssues(true)}
+    >
+      <i className="pi pi-flag" />{n ? <span className="h3-small">&nbsp;{n}</span> : null}
+    </button>
+  );
+}
+
 export function ShotsTab() {
   const ep = useApp((s) => s.ep);
   return (
@@ -401,6 +426,7 @@ export function ShotsTab() {
             <button className="h3-btn h3-icon" title="Inspect the selected shot" onClick={() => openInspector()}><i className="pi pi-sliders-h" /></button>
             <button className="h3-btn h3-icon" title="Play all: the cut from its takes" onClick={() => playAll()}><i className="pi pi-play" /></button>
             <button className="h3-btn h3-icon" title="Open the timeline" onClick={() => host().show("timeline")}><i className="h3-ico-film" /></button>
+            <IssuesButton />
             <button className="h3-btn h3-icon" title="Open the Refs tab" onClick={() => host().show("refs")}><i className="h3-ico-images" /></button>
             <button className="h3-btn h3-icon" title="Refresh" onClick={() => void refreshEpisode()}><i className="pi pi-refresh" /></button>
           </span>

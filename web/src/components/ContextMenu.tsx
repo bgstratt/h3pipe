@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   cancelTake, clearRef, closeMenu, copyText, discardTake, generateKeyframe, keyframeFromTake, loadRefs, openClipAudio,
+  openIssue,
   openInspector, openRedo, openSidecar, openViewer, pickTake, playAll, requestRender, showInScript, showMissingRefs,
 } from "../actions";
 import { clearClipAudio, nudgeClip, setTrims, toggleLock } from "../cutActions";
@@ -155,6 +156,12 @@ export function ContextMenu() {
           <i className="pi pi-arrows-h" /> Clear trims
         </button>
       )}
+      <button
+        title={`Note what is wrong with ${menu.shot} as it rendered (n on the selected clip)`}
+        onClick={run(() => openIssue(menu.shot, curPass, menu.take))}
+      >
+        <i className="pi pi-flag" /> Add issue…
+      </button>
       <button
         disabled={!cutShot}
         title={clipAudio

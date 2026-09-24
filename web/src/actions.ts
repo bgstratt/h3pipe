@@ -14,6 +14,8 @@ import {
 } from "./lib/keyframes";
 import { discardRefText, discardTakeText, fileKindProblem, missingResultText } from "./lib/lookback";
 import { passesFilter, usedBy, viewLabel, type RefFilter } from "./lib/refs";
+import { filesFromDrag } from "./lib/dropped";
+import { sharedWarning } from "./lib/shared";
 import { folderPath, isMissingFileSkip, readinessOf, skipMissingFiles } from "./lib/readiness";
 import { overrideTargetValue, seriesDefaultTarget, shotTarget } from "./lib/targets";
 import { buildError, changedShots, needsAlignBuild, resultSummary, scriptClash, trackFileProblem, trackName } from "./lib/track";
@@ -24,7 +26,7 @@ import {
 import type {
   AlignEvent, AlignMissing, AlignRequest, BuildResult, CutAudioSource, EpisodeStatus, Lora, NewEpisodeResult, SourceFile, OverrideFields, Pass,
   ProgressEvent, PromptEvent, Ref, RefEvent, RefGenerateRequest, RefTake, RenderRequest, RenderResult, RenderSkip, Seed,
-  SeedMode, ShotDetail, TakeEvent, TakeRef, TargetProposal, TrackResult,
+  Issue, SeedMode, ShotDetail, TakeEvent, TakeRef, TargetProposal, TrackResult,
   VoiceFromTakeRequest, WorkflowFile,
 } from "./types";
 
@@ -546,12 +548,13 @@ export async function refreshQueue() {
   }
 }
 
-export async function loadDetail(shot: string, pass = get().pass, force = false, ep = get().ep): Promise<ShotDetail | undefined> {
+export async function loadDetail(shot: string, pass = get().pass, force = false, ep = get().ep,
+                                 target: string | null = null): Promise<ShotDetail | undefined> {
   if (!ep) return undefined;
-  const key = detailKey(ep, pass, shot);
+  const key = detailKey(ep, pass, shot, target);
   if (!force && get().details[key]) return get().details[key];
   try {
-    const d = await api().shot(ep, pass, shot);
+    const d = await api().shot(ep, pass, shot, target);
     set((s) => {
       const detailError = { ...s.detailError };
       delete detailError[key];
@@ -1665,11 +1668,18 @@ export async function clearRef(ref: string, view: string | null = null, ask = tr
   if (!ep) return false;
   const r = s.refs[ep]?.find((x) => x.id === ref);
   const kf = isKeyframeRef(r ?? { id: ref, kind: "keyframe", scope: "shot" }) && /^shot:/.test(ref);
-  const text = kf
+  let text = kf
     ? clearKeyframeText(r ?? { id: ref, need: null })
     : clearSeriesRefText(refLabel(ref, view), r ? usedBy(r, s.pass).length : 0);
+  // other episodes read this live file: clearing it blocks them too
+  const warn = r ? sharedWarning(r, ep, "clear") : null;
+  if (warn) text = `${warn.title}
+
+${warn.body}
+
+${text}`;
   set({ menu: null });
-  if (ask && !confirm(text)) return false;
+  if ((ask || warn) && !confirm(text)) return false;
   return withBusy(`refclear|${ref}`, async () => {
     try {
       replaceRef(ep, await api().refsUnpick(ep, ref, view));
@@ -1733,7 +1743,16 @@ export async function discardRefTake(ref: string, view: string | null, take: num
   // image — except a voice the series config names no sample for (nothing to clear)
   const clearable = !!r && (r.kind !== "voice" || !!r.path);
   const live = clearable && (view ? r!.views?.find((v) => v.view === view)?.picked : r!.picked) === take;
-  if (ask && !confirm(discardRefText(refLabel(ref, view), take, live, r && isKeyframeRef(r) ? "keyframe" : "ref"))) return false;
+  let text = discardRefText(refLabel(ref, view), take, live, r && isKeyframeRef(r) ? "keyframe" : "ref");
+  // discarding the live take clears the ref, which removes a file other
+  // episodes may be reading
+  const warn = live && r ? sharedWarning(r, ep, "clear") : null;
+  if (warn) text = `${warn.title}
+
+${warn.body}
+
+${text}`;
+  if ((ask || warn) && !confirm(text)) return false;
   return withBusy(`refdiscard|${ref}|${view ?? ""}|${take}`, async () => {
     try {
       replaceRef(ep, await api().refsDiscard({ ep, ref, view, take }));
@@ -1775,6 +1794,13 @@ export async function uploadRef(ref: string, view: string | null, file: File, pi
     return false;
   }
   if (get().uploads[key] && !get().uploads[key].error && get().uploads[key].take == null) return false; // one at a time per slot
+  // an upload that picks overwrites the live file, which other episodes may read
+  if (pick && r) {
+    const warn = sharedWarning(r, ep, "pick");
+    if (warn && !confirm(`${warn.title}
+
+${warn.body}`)) return false;
+  }
   put({ name: file.name, sent: 0, total: file.size });
   try {
     const t = await api().refsUpload({ ep, ref, view, pick, file, name: file.name }, (sent, total) => {
@@ -1798,6 +1824,230 @@ export async function uploadRef(ref: string, view: string | null, file: File, pi
   }
 }
 
+// ---------------------------------------------------------------------------
+// P8: supplying files in bulk
+// ---------------------------------------------------------------------------
+
+/**
+ * Files dropped in bulk (or picked). The server says which slot each name means
+ * (POST /h3pipe/refs/match) and the window shows that table before a byte is
+ * sent: routing a picture by guessing its name is only safe if the guess is on
+ * screen first.
+ *
+ * One file is not bulk -- `slot` sends it straight to that slot, as a drop on a
+ * single ref row always has.
+ */
+export async function openSupply(files: File[]): Promise<void> {
+  const ep = get().ep;
+  if (!ep || !files.length) return;
+  set({ supply: { files, match: null, error: null, busy: null, done: [] } });
+  try {
+    const match = await api().refsMatch(ep, files.map((f) => f.name));
+    if (get().supply) set({ supply: { ...get().supply!, match } });
+  } catch (e) {
+    if (get().supply) set({ supply: { ...get().supply!, error: errText(e) } });
+  }
+}
+
+export function closeSupply() {
+  set({ supply: null });
+}
+
+/**
+ * Upload every matched file, one at a time so a 68-file supply can't flood
+ * ComfyUI, picking each so it goes live. The window fills in as it goes and the
+ * summary names anything that failed.
+ */
+export async function runSupply(): Promise<void> {
+  const st = get().supply;
+  const ep = get().ep;
+  if (!st || !ep || !st.match || st.busy) return;
+  const byName = new Map(st.files.map((f) => [f.name, f]));
+  const done: NonNullable<AppState["supply"]>["done"] = [];
+  for (const m of st.match.matched) {
+    const file = byName.get(m.file);
+    if (!file) continue;
+    if (!get().supply) return;                       // closed while we worked
+    set({ supply: { ...get().supply!, busy: m.file, done: [...done] } });
+    let ok = false;
+    let why: string | undefined;
+    try {
+      const t = await api().refsUpload(
+        { ep, ref: m.ref, view: m.view, pick: true, file, name: file.name });
+      ok = t?.take != null;
+    } catch (e) {
+      why = errText(e);
+    }
+    done.push({ file: m.file, ref: m.ref, view: m.view, ok, why });
+  }
+  if (!get().supply) return;
+  set({ supply: { ...get().supply!, busy: null, done } });
+  const good = done.filter((d) => d.ok).length;
+  const bad = done.length - good;
+  await loadRefs(ep);
+  scheduleRefresh(0);
+  if (good) {
+    host().toast(bad ? "info" : "success", `Supplied ${good} reference${good === 1 ? "" : "s"}`,
+                 bad ? `${bad} didn't go in — the window says which.` : "Each one is live.");
+  } else if (bad) {
+    host().toast("error", "Nothing was supplied", done[0]?.why ?? "");
+  }
+  if (!bad) closeSupply();
+}
+
+/** A drop, following any folders in it (P8). Reads the entries before the drop
+ *  event is over, so callers hand over the DataTransfer, not a file list. */
+export async function dropFilesFromDrag(dt: DataTransfer | null,
+                                        slot?: { ref: string; view: string | null }): Promise<void> {
+  const files = await filesFromDrag(dt);
+  await dropFiles(files, slot);
+}
+
+/** A drop or a file pick anywhere that takes many: one file keeps the old
+ *  single-slot path when a slot is given, otherwise it goes through Supply. */
+export async function dropFiles(files: FileList | File[] | null,
+                               slot?: { ref: string; view: string | null }): Promise<void> {
+  const list = Array.from(files ?? []);
+  if (!list.length) return;
+  if (slot && list.length === 1) {
+    await uploadRef(slot.ref, slot.view, list[0]);
+    return;
+  }
+  await openSupply(list);
+}
+
+// ---------------------------------------------------------------------------
+// P10: a pass's issues — the notepad you fill while watching
+// ---------------------------------------------------------------------------
+
+export async function loadIssues(ep = get().ep, pass = get().pass): Promise<void> {
+  if (!ep) return;
+  try {
+    const issues = await api().issues(ep, pass);
+    set((s) => ({ issues: { ...s.issues, [statusKey(ep, pass)]: issues } }));
+  } catch {
+    // a server without the routes (an older node pack): no notepad, no noise
+  }
+}
+
+/** The issues on screen now, newest last. */
+export function issuesOf(ep: string | null, pass: Pass): Issue[] {
+  return (ep ? get().issues[statusKey(ep, pass)] : undefined) ?? [];
+}
+
+/**
+ * Open the note box for a shot. `n` on the selected clip and the clip menu's
+ * **Add issue…** both come here; the take defaults to the one the cut plays,
+ * which is what the person is looking at.
+ */
+export function openIssue(shot: string, pass = get().pass, take?: number | null) {
+  const s = get();
+  const st = s.ep ? s.status[statusKey(s.ep, pass)] : undefined;
+  const sh = st?.shots.find((x) => x.shot === shot);
+  set({
+    menu: null,
+    issueDraft: {
+      shot, pass,
+      take: take ?? sh?.cut.take ?? null,
+      text: "", error: null,
+    },
+  });
+}
+
+export function setIssueText(text: string) {
+  const d = get().issueDraft;
+  if (d) set({ issueDraft: { ...d, text, error: null } });
+}
+
+export function closeIssue() {
+  set({ issueDraft: null });
+}
+
+/** Save the note. The box stays open with the reason if it is refused. */
+export async function saveIssue(): Promise<boolean> {
+  const d = get().issueDraft;
+  const ep = get().ep;
+  if (!d || !ep || d.busy) return false;
+  if (!d.text.trim()) {
+    set({ issueDraft: { ...d, error: "Say what is wrong with the shot." } });
+    return false;
+  }
+  set({ issueDraft: { ...d, busy: true, error: null } });
+  try {
+    await api().addIssue({ ep, pass: d.pass, shot: d.shot, note: d.text.trim(), take: d.take });
+    set({ issueDraft: null });
+    await loadIssues(ep, d.pass);
+    host().toast("success", `Noted for ${d.shot}`, "It is in this pass's issues.");
+    return true;
+  } catch (e) {
+    set({ issueDraft: { ...get().issueDraft!, busy: false, error: errText(e) } });
+    return false;
+  }
+}
+
+export function openIssues(open = true) {
+  set({ issuesOpen: open });
+  if (open) void loadIssues();
+}
+
+export async function resolveIssue(id: string): Promise<void> {
+  const ep = get().ep;
+  if (!ep) return;
+  const pass = get().pass;
+  try {
+    await api().resolveIssue(ep, id);
+    await loadIssues(ep, pass);
+  } catch (e) {
+    report("The issue wasn't resolved", e);
+  }
+}
+
+export async function clearIssues(addressedOnly: boolean): Promise<void> {
+  const ep = get().ep;
+  if (!ep) return;
+  const pass = get().pass;
+  const n = issuesOf(ep, pass).filter((x) => !addressedOnly || x.addressed).length;
+  if (!n) return;
+  const what = addressedOnly
+    ? `Clear ${n} addressed issue${n === 1 ? "" : "s"}?`
+    : `Clear all ${n} issue${n === 1 ? "" : "s"} of the ${pass} pass?`;
+  if (!confirm(`${what}\n\nThe notes go; nothing else is touched.`)) return;
+  try {
+    await api().clearIssues(ep, pass, addressedOnly);
+    await loadIssues(ep, pass);
+  } catch (e) {
+    report("The issues weren't cleared", e);
+  }
+}
+
+/**
+ * The markdown on the clipboard, to paste into an assistant. It is pages long,
+ * so this does its own copy rather than `copyText` (whose toast shows the text)
+ * and says what to do when the clipboard is blocked.
+ */
+export async function copyIssueExport(): Promise<void> {
+  const ep = get().ep;
+  if (!ep) return;
+  const pass = get().pass;
+  let text: string;
+  try {
+    text = await api().exportIssues(ep, pass);
+  } catch (e) {
+    report("The export didn't come", e);
+    return;
+  }
+  const n = issuesOf(ep, pass).filter((x) => !x.addressed).length;
+  try {
+    await navigator.clipboard.writeText(text);
+    host().toast("success", `${n} issue${n === 1 ? "" : "s"} copied`,
+                 "Paste it into an assistant; it carries the script and prompt for each shot.");
+  } catch {
+    // no clipboard (no focus, insecure context): the CLI writes the same document
+    host().toast("warn", "The clipboard is blocked",
+                 `Run: python h3.py issues "${ep}" --${pass} --export -o issues.md`);
+  }
+}
+
 export function dismissUpload(ref: string, view: string | null) {
   const key = uploadKey(ref, view);
   set((s) => {
@@ -1811,6 +2061,13 @@ export function dismissUpload(ref: string, view: string | null) {
 export async function pickRef(ref: string, view: string | null, take: number): Promise<boolean> {
   const ep = get().ep;
   if (!ep) return false;
+  // P9: the live file may be one other episodes read, and may be one nothing has
+  // a candidate for. Silent when it is this episode's own pick (the usual case).
+  const r = get().refs[ep]?.find((x) => x.id === ref);
+  const warn = r ? sharedWarning(r, ep, "pick") : null;
+  if (warn && !confirm(`${warn.title}
+
+${warn.body}`)) return false;
   return withBusy(`refpick|${ref}`, async () => {
     try {
       const r = await api().refsPick({ ep, ref, view, take });

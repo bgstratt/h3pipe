@@ -441,17 +441,40 @@ def find_ref(s: Series, ref_id) -> Ref:
     raise UnknownRef(f"{ref_id} is not in {os.path.basename(s.config_file)}")
 
 
-def check_view(ref: Ref, view, required: bool = False) -> str | None:
-    """A view for this ref: one of VIEW_TAGS for a character, None otherwise."""
+# P8: a reserved pseudo-view for a character's whole sheet, so a ready-made
+# 4-panel sheet can be supplied the way every other reference is -- as a take,
+# with a sidecar recording where it came from, a _trash/ instead of deletion and
+# candidates to compare. Its takes are `<key>_sheet_tNN.png` (take_base) and its
+# pick lives beside the views in _picks.json, but it is NOT one of them: nothing
+# generates a sheet (that is four views stitched), so `allow_sheet` is off by
+# default and the generate paths never accept it.
+#
+# A sheet copied into the folder by hand stays entirely valid and needs none of
+# this: the pipeline reads the live file off disk. It simply has no take behind
+# it, which `live_from` reports as None.
+SHEET_VIEW = "sheet"
+
+
+def check_view(ref: Ref, view, required: bool = False,
+               allow_sheet: bool = False) -> str | None:
+    """A view for this ref: one of VIEW_TAGS for a character, None otherwise.
+    `allow_sheet` also takes SHEET_VIEW (a supplied whole sheet); see there."""
     if view in (None, ""):
         if required and ref.has_views:
             raise RefError(f"{ref.id} is a character: give a view "
-                           f"({', '.join(VIEW_TAGS)})")
+                           f"({', '.join(VIEW_TAGS)}"
+                           f"{' or ' + SHEET_VIEW if allow_sheet else ''})")
         return None
     if not ref.has_views:
         raise RefError(f"{ref.id} has no views (only characters do)")
+    if view == SHEET_VIEW:
+        if allow_sheet:
+            return view
+        raise RefError(f"{SHEET_VIEW!r} is a supplied sheet, not a view to generate: "
+                       f"a sheet is the four views stitched")
     if view not in VIEW_TAGS:
-        raise RefError(f"view must be one of {', '.join(VIEW_TAGS)}, not {view!r}")
+        raise RefError(f"view must be one of {', '.join(VIEW_TAGS)}"
+                       f"{', or ' + SHEET_VIEW if allow_sheet else ''}, not {view!r}")
     return view
 
 
@@ -1157,15 +1180,28 @@ def _tidy(refs: dict, ref_id: str) -> None:
         del refs[ref_id]
 
 
+def view_own_fields(data: dict, ref_id: str, view: str | None) -> list[str]:
+    """P9: the override fields set on a character's VIEW itself. `ref_override`
+    merges the character's fields over the view's, so `fields` alone can't say
+    which of them a person set here -- and "revert this view" only drops these."""
+    if not view:
+        return []
+    block = ((data.get("refs", {}).get(ref_id) or {}).get("views") or {}).get(view) or {}
+    return sorted(k for k in OVERRIDE_FIELDS if block.get(k) is not None)
+
+
 def override_view(s: Series, ref: Ref, view: str | None, data: dict,
                   view_size=VIEW_SIZE) -> dict:
-    """{fields: [...], stale: bool} for the listing; `values` has the fields."""
+    """{fields: [...], stale: bool} for the listing; `values` has the fields.
+    `own` is the subset set on this view rather than inherited from the
+    character (empty for a ref that has no views)."""
     eff = ref_override(data, ref.id, view)
     stale = False
     if eff.get("base_hash") and "prompt" in eff:
         stale = eff["base_hash"] != prompt_hash(built_prompt(s, ref, view, view_size))
     values = {k: v for k, v in eff.items() if k != "base_hash"}
-    return {"fields": sorted(values), "stale": stale, "values": values}
+    return {"fields": sorted(values), "stale": stale, "values": values,
+            "own": view_own_fields(data, ref.id, view)}
 
 
 # ---------------------------------------------------------------------------
@@ -1256,7 +1292,7 @@ def pick_take(s: Series, ref: Ref, view: str | None, take: int,
     A voice whose character has no `voice_sample` yet is copied to
     refs/voices/<id>.wav and the series config gains that line, through the
     Phase 9a save path (set_voice_sample); the result says `series_changed`."""
-    view = check_view(ref, view, required=True)
+    view = check_view(ref, view, required=True, allow_sheet=True)
     t = get_take(ref, view, take)
     if not os.path.isfile(t.paths.image):
         raise NotUsable(f"{ref.id}{' ' + view if view else ''} t{take:02d} has no file")
@@ -1271,6 +1307,16 @@ def pick_take(s: Series, ref: Ref, view: str | None, take: int,
     block = picks["refs"].setdefault(ref.id, {})
     block.pop("cleared", None)                          # a pick ends a clear
     res = PickResult(t)
+    if view == SHEET_VIEW:
+        # a supplied sheet IS the live file: copied as it is, never stitched.
+        # The views keep their own picks, and picking all four of them later
+        # stitches over this (the row says which one the live file came from).
+        _atomic_copy(t.paths.image, ref.file)
+        block.setdefault("views", {})[SHEET_VIEW] = {
+            "take": take, "sha1": T.file_sha1(ref.file), "picked": T.now()}
+        save_picks(ref.home, picks)
+        res.live = ref.file
+        return res
     if view:
         block.setdefault("views", {})[view] = {
             "take": take, "sha1": T.file_sha1(t.paths.image), "picked": T.now()}
@@ -1340,6 +1386,26 @@ def auto_pick(s: Series, ref: Ref, mksheet: str | None = None) -> list[PickResul
     return out
 
 
+def live_from(picks: dict, ref: Ref) -> str | None:
+    """Which route wrote a character's live sheet, judged from the file itself:
+    SHEET_VIEW (a sheet supplied as a take), "views" (stitched from the four
+    picks), or None. None covers both "no file" and "a file this tool didn't
+    write" -- a sheet copied into the folder by hand, which is a perfectly good
+    way to supply one and stays untouched by everything here.
+
+    The file's own sha1 decides, not the newest timestamp, so a hand edit or a
+    re-copy outside the editor is reported honestly rather than assumed."""
+    if not ref.has_views or not ref.file or not os.path.isfile(ref.file):
+        return None
+    now = T.file_sha1(ref.file)
+    block = picks.get("refs", {}).get(ref.id) or {}
+    if ((block.get("views") or {}).get(SHEET_VIEW) or {}).get("sha1") == now:
+        return SHEET_VIEW
+    if block.get("sha1") == now:
+        return "views"
+    return None
+
+
 def is_cleared(picks: dict, ref_id: str, view: str | None = None) -> bool:
     """True when the ref (or the view) was cleared and not picked since: its
     "no file" is the user's choice, so auto-pick leaves it alone."""
@@ -1364,12 +1430,14 @@ def clear_pick(s: Series, ref: Ref, view: str | None = None) -> ClearResult:
     no longer uses a keyframe (a required one blocks it again). A
     character's view: that view is unpicked and the stitched sheet (which
     showed it) removed; a character with no view: every view and the sheet.
+    SHEET_VIEW: the supplied sheet is forgotten, and its file removed only if
+    it is still the live one (a stitch that replaced it is left alone).
     A voice: its live sample is removed and the clear recorded; the series
     config's `voice_sample` line is left alone (the editor never unwrites
     it), so the ref still lists and a later pick puts a file back.
     RefError for a ref with no file named; UnknownRef never (a ref with
     nothing picked is cleared all the same)."""
-    view = check_view(ref, view)
+    view = check_view(ref, view, allow_sheet=True)
     if not ref.path:
         raise RefError(f"{ref.id} names no file to clear")
     picks = load_picks(ref.home)
@@ -1377,16 +1445,22 @@ def clear_pick(s: Series, ref: Ref, view: str | None = None) -> ClearResult:
     was = picked_take(picks, ref.id, view)
     stamp = T.now()
     removed = []
-    if ref.file and os.path.isfile(ref.file):
+    # clearing the supplied sheet must not delete a stitch that replaced it: the
+    # live file only goes if it is still the file this pick wrote
+    keep_live = (view == SHEET_VIEW and ref.file and os.path.isfile(ref.file)
+                 and live_from(picks, ref) != SHEET_VIEW)
+    if ref.file and os.path.isfile(ref.file) and not keep_live:
         os.remove(ref.file)
         removed.append(ref.file)
     if ref.has_views:
         views = block.setdefault("views", {})
-        for v in ([view] if view else list(VIEW_TAGS)):
+        # a whole-ref clear takes the supplied sheet with it (its file is gone)
+        for v in ([view] if view else list(VIEW_TAGS) + [SHEET_VIEW]):
             if v in views or view:
                 views[v] = {"cleared": stamp}
-        block.pop("sha1", None)
-        block.pop("stitched", None)
+        if view != SHEET_VIEW:
+            block.pop("sha1", None)
+            block.pop("stitched", None)
         if not view:
             block["cleared"] = stamp
     else:
@@ -1410,7 +1484,7 @@ def discard_take(s: Series, ref: Ref, view: str | None, take: int) -> DiscardRes
     not given out again, and it can be put back by hand. If it is the ref's
     (the view's) pick, the ref is cleared as clear_pick does. Raises
     UnknownRef (no such take), T.StillQueued (queued: let it finish first)."""
-    view = check_view(ref, view, required=True)
+    view = check_view(ref, view, required=True, allow_sheet=True)
     t = get_take(ref, view, take)
     if t.status == "queued":
         raise T.StillQueued(f"{ref.id}{' ' + view if view else ''} t{take:02d} is queued: "
@@ -1584,7 +1658,7 @@ def import_take(s: Series, ref: Ref, view: str | None, source_path: str,
     `original_name` is an upload's own file name (POST /h3pipe/refs/import
     as multipart): `source_path` is then the upload's temporary file, which
     is not recorded, and the type is judged by the original name."""
-    view = check_view(ref, view, required=True)
+    view = check_view(ref, view, required=True, allow_sheet=True)
     if not isinstance(source_path, str) or not source_path:
         raise RefError("source_path is required: a file on this machine")
     if not os.path.isabs(source_path):
@@ -2968,7 +3042,7 @@ def edit_refs(s: Series, ref: Ref, target) -> list[dict]:
 def ref_json(s: Series, ref: Ref, usage: dict | None = None,
              ov_data: dict | None = None, picks: dict | None = None,
              view_size=VIEW_SIZE, needs: dict | None = None, ready=None,
-             defaults: dict | None = None) -> dict:
+             defaults: dict | None = None, shared: dict | None = None) -> dict:
     ov_data = ov_data if ov_data is not None else load_overrides(ref.home)
     picks = picks if picks is not None else load_picks(ref.home)
     if defaults is None:
@@ -3005,13 +3079,22 @@ def ref_json(s: Series, ref: Ref, usage: dict | None = None,
                 "view": v, "picked": picked_take(picks, ref.id, v),
                 "cleared": is_cleared(picks, ref.id, v),
                 "prompt": eff["prompt"] if eff else built_prompt(s, ref, v, view_size),
+                # P9: the series config's wording for THIS view, before any
+                # override -- what a prompt edit is diffed against and reverted to
+                "built_prompt": built_prompt(s, ref, v, view_size),
                 "override": {"fields": vo["fields"], "stale": vo["stale"],
-                             "values": vo["values"]},
+                             "values": vo["values"], "own": vo["own"]},
                 "effective": eff,
                 "takes": [take_json(s.ep, ref, t) for t in list_takes(ref, v)]})
         # the image target the views generate with (they share one)
         first = next((v["effective"] for v in out["views"] if v["effective"]), None)
         out["effective"] = {"target": first["target"]} if first else None
+        # P8: the ref's own takes are its supplied whole sheets (nothing else
+        # can be a take of a character), and `live_from` says which route wrote
+        # the file that is live now
+        out["takes"] = [take_json(s.ep, ref, t) for t in list_takes(ref, SHEET_VIEW)]
+        out["picked"] = picked_take(picks, ref.id, SHEET_VIEW)
+        out["sheet_cleared"] = is_cleared(picks, ref.id, SHEET_VIEW)
     else:
         out["takes"] = [take_json(s.ep, ref, t) for t in list_takes(ref)]
         out["picked"] = picked_take(picks, ref.id)
@@ -3019,6 +3102,13 @@ def ref_json(s: Series, ref: Ref, usage: dict | None = None,
         if out["effective"]:
             out["prompt"] = out["effective"]["prompt"]
     out["cleared"] = is_cleared(picks, ref.id)
+    out["live_from"] = live_from(picks, ref)
+    # who else reads this live file, and whose pick wrote the one there now
+    # (a pick or a clear here is a change every one of them sees)
+    if shared is None:
+        shared = shared_context(s.ep)
+    out["shared_with"] = shared["shared"].get(_real_path(live), []) if live else []
+    out["live_owner"] = shared["owner"].get(out["sha1"]) if out["sha1"] else None
     if ref.kind == "keyframe":
         shot, which = ref_shot(ref)
         need = (needs if needs is not None else keyframe_needs(s.ep)).get((shot, which))
@@ -3056,13 +3146,14 @@ def refs_listing(ep: str, view_size=VIEW_SIZE, ready=None) -> dict:
     needs = keyframe_needs(s.ep)
     refs = series_refs(s) + keyframe_refs(s.ep, needs)
     usage = used_by(s, refs)
+    shared = shared_context(s.ep)
     cache: dict[str, tuple[dict, dict]] = {}
     out = []
     for r in refs:
         if r.home not in cache:
             cache[r.home] = (load_overrides(r.home), load_picks(r.home))
         ov, pk = cache[r.home]
-        out.append(ref_json(s, r, usage, ov, pk, view_size, needs, ready, defaults))
+        out.append(ref_json(s, r, usage, ov, pk, view_size, needs, ready, defaults, shared))
     return {"refs": out, "defaults": defaults}
 
 
@@ -3076,3 +3167,431 @@ def get_ref_json(ep: str, ref_id: str) -> dict:
     s = load_series(ep)
     ref = find_ref(s, ref_id)
     return ref_json(s, ref, used_by(s, [ref]))
+
+
+# ---------------------------------------------------------------------------
+# P8: supplying files in bulk -- which slot does a file name mean?
+# ---------------------------------------------------------------------------
+#
+# One implementation, in Python, called by both the editor (POST
+# /h3pipe/refs/match) and the CLI (`h3.py supply`). The rules are worth stating
+# once and being able to argue with, and two copies of them would drift.
+#
+# Matching is exact on a normalised name, never fuzzy: a file matches a slot
+# when its name IS one of that slot's names. Anything that matches two slots is
+# reported unmatched rather than guessed, because the cost of a wrong guess is a
+# render with the wrong character in it.
+
+# a trailing revision marker people add and don't mean: walker_sheet_v2.png
+REV_RE = re.compile(r"_(?:v\d+|\d+|copy|final|new|edit|edited|fixed)$")
+# the word in a view tag, without its sheet-order number (01_threequarter)
+VIEW_WORDS = {v: v.split("_", 1)[1] if "_" in v else v for v in VIEW_TAGS}
+
+
+def slugify(name: str) -> str:
+    """A file name as matching sees it: no folders, no extension, lower case,
+    every run of anything but letters and digits a single underscore."""
+    stem = os.path.splitext(os.path.basename(str(name or "")))[0]
+    return re.sub(r"[^a-z0-9]+", "_", stem.lower()).strip("_")
+
+
+def _path_stem(ref: Ref, view: str | None = None) -> str | None:
+    """The slug of the file the series config names for this ref -- the
+    strongest signal there is, because it is the name the show already uses."""
+    if view and view != SHEET_VIEW:
+        return None
+    return slugify(ref.path) if ref.path else None
+
+
+def slot_names(ref: Ref, view: str | None) -> list[str]:
+    """Every name that means this slot, best first."""
+    out = []
+    stem = _path_stem(ref, view)
+    if stem:
+        out.append(stem)
+    rid = slugify(ref.subject or ref.id.split(":", 1)[-1])
+    if ref.kind == "keyframe":
+        shot, which = ref_shot(ref)
+        out += [f"{slugify(shot)}_{which}", f"{which}_{slugify(shot)}"]
+        return list(dict.fromkeys(out))
+    if view and view != SHEET_VIEW:
+        word = VIEW_WORDS[view]
+        out += [f"{rid}_{view}", f"{rid}_{word}", f"{view}_{rid}", f"{word}_{rid}"]
+        return list(dict.fromkeys(out))
+    # the ref's own file: a character's sheet, a prop, a plate, a voice sample
+    out.append(rid)
+    if ref.has_views:
+        out += [f"{rid}_sheet", f"{rid}_sheet_4panel", f"{rid}_4panel", f"sheet_{rid}"]
+    elif ref.is_audio:
+        out += [f"{rid}_voice", f"{rid}_sample", f"voice_{rid}"]
+    elif ref.kind == "location":
+        out += [f"{rid}_plate", f"bg_{rid}", f"plate_{rid}"]
+    return list(dict.fromkeys(out))
+
+
+def supply_slots(s: Series, refs: list[Ref] | None = None) -> list[dict]:
+    """Every slot a supplied file could go into, with the names that mean it:
+    each ref, each of a character's four views, and a character's whole sheet."""
+    refs = refs if refs is not None else series_refs(s) + keyframe_refs(s.ep)
+    out = []
+    for ref in refs:
+        if not ref.path and not ref.is_audio:
+            continue                    # nothing to be live: nowhere to put a file
+        views = [SHEET_VIEW, *VIEW_TAGS] if ref.has_views else [None]
+        for v in views:
+            out.append({"ref": ref, "view": v, "audio": ref.is_audio,
+                        "names": slot_names(ref, v)})
+    return out
+
+
+def _slot_json(slot: dict) -> dict:
+    ref = slot["ref"]
+    return {"ref": ref.id, "view": slot["view"], "name": ref.name,
+            "kind": ref.kind, "audio": bool(slot["audio"]),
+            "path": ep_rel(ref.home, ref.file) if ref.file else None}
+
+
+def match_files(s: Series, names: list[str], refs: list[Ref] | None = None) -> dict:
+    """Which slot each supplied file name means (P8).
+
+    {"matched": [{"file", "ref", "view", "name", "kind", "audio", "path",
+                  "why"}],
+     "unmatched": [{"file", "why"}]}
+
+    A name matches a slot when its slug is one of the slot's names (see
+    slot_names); the file's extension has to suit the slot (audio for a voice,
+    an image for everything else). A trailing revision marker (`_v2`, `_final`)
+    is ignored, and said so in `why`. Two slots matching the same name, or two
+    files matching the same slot, leave both files unmatched with the reason:
+    nothing is guessed and nothing is written here."""
+    slots = supply_slots(s, refs)
+    by_name: dict[str, list[dict]] = {}
+    for slot in slots:
+        for n in slot["names"]:
+            by_name.setdefault(n, []).append(slot)
+
+    matched, unmatched = [], []
+    claimed: dict[tuple, list[str]] = {}
+    for f in names or []:
+        name = str(f)
+        slug = slugify(name)
+        if not slug:
+            unmatched.append({"file": name, "why": "the file has no name to match on"})
+            continue
+        ext = os.path.splitext(name)[1].lower()
+        audio, image = ext in AUDIO_EXTS, ext in IMAGE_EXTS
+        if not (audio or image):
+            unmatched.append({"file": name,
+                              "why": f"{ext or 'a file with no extension'} is not a picture "
+                                     f"({', '.join(IMAGE_EXTS)}) or a sound "
+                                     f"({', '.join(AUDIO_EXTS)})"})
+            continue
+        trimmed, note = slug, ""
+        if slug not in by_name:
+            cut = REV_RE.sub("", slug)
+            if cut != slug and cut in by_name:
+                trimmed, note = cut, f", ignoring the trailing '{slug[len(cut) + 1:]}'"
+        hits = by_name.get(trimmed) or []
+        if not hits:
+            unmatched.append({"file": name, "why": f"no ref or view is named '{slug}'"})
+            continue
+        fit = [h for h in hits if h["audio"] == audio]
+        if not fit:
+            kinds = "audio" if hits[0]["audio"] else "an image"
+            unmatched.append({"file": name,
+                              "why": f"{_slot_json(hits[0])['name']} takes {kinds}, "
+                                     f"and this file isn't"})
+            continue
+        if len(fit) > 1:
+            where = ", ".join(sorted(f"{h['ref']}{' ' + h['view'] if h['view'] else ''}"
+                                     for h in fit))
+            unmatched.append({"file": name, "why": f"'{trimmed}' could be {where}"})
+            continue
+        slot = fit[0]
+        key = (slot["ref"].id, slot["view"])
+        claimed.setdefault(key, []).append(name)
+        matched.append(dict(_slot_json(slot), file=name,
+                           why=f"'{trimmed}' is {_slot_json(slot)['name']}"
+                               f"{' ' + slot['view'] if slot['view'] else ''}{note}"))
+
+    # two files for one slot: neither wins, because which one went live would
+    # come down to the order the browser handed them over
+    clash = {k: v for k, v in claimed.items() if len(v) > 1}
+    if clash:
+        keep = []
+        for m in matched:
+            key = (m["ref"], m["view"])
+            if key in clash:
+                others = [x for x in clash[key] if x != m["file"]]
+                unmatched.append({"file": m["file"],
+                                  "why": f"so is {', '.join(others)}: rename one"})
+            else:
+                keep.append(m)
+        matched = keep
+    unmatched.sort(key=lambda x: str(x["file"]).lower())
+    return {"matched": matched, "unmatched": unmatched}
+
+
+def match_names(ep: str, names: list[str]) -> dict:
+    """POST /h3pipe/refs/match: match_files for an episode on disk."""
+    return match_files(load_series(ep), names)
+
+
+def supply_files(ep: str, paths: list[str], ref_id: str | None = None,
+                 view: str | None = None, pick: bool = True,
+                 dry_run: bool = False) -> dict:
+    """P8: put files that already exist into their ref slots.
+
+    With `ref_id` (and `view` for a character), one file goes into that slot.
+    Without it, every file is matched to a slot by name (match_files) and only
+    the matches are taken; the rest are reported and left alone. Each file
+    becomes an imported take, picked by default, so it goes live.
+
+    {"matched": [...], "unmatched": [...], "supplied": [{file, ref, view, take,
+     live}], "failed": [{file, ref, view, error}]}. `dry_run` fills matched and
+    unmatched and writes nothing."""
+    s = load_series(ep)
+    files = []
+    for p in paths:
+        full = os.path.abspath(p)
+        if os.path.isdir(full):
+            for n in sorted(os.listdir(full), key=str.lower):
+                f = os.path.join(full, n)
+                if os.path.isfile(f) and os.path.splitext(n)[1].lower() in IMAGE_EXTS + AUDIO_EXTS:
+                    files.append(f)
+        elif os.path.isfile(full):
+            files.append(full)
+        else:
+            raise FileNotFoundError(f"no file or folder at {p}")
+    if not files:
+        raise RefError("no image or audio files to supply")
+
+    if ref_id:
+        if len(files) != 1:
+            raise RefError(f"--ref takes one file, not {len(files)}")
+        ref = find_ref(s, ref_id)
+        view = check_view(ref, view, required=True, allow_sheet=True)
+        plan = [{"file": files[0], "ref": ref.id, "view": view, "name": ref.name,
+                 "why": "named on the command line"}]
+        out = {"matched": list(plan), "unmatched": []}
+    else:
+        out = match_files(s, files)
+        plan = out["matched"]
+    out["supplied"], out["failed"] = [], []
+    if dry_run:
+        return out
+
+    for m in plan:
+        ref = find_ref(s, m["ref"])
+        try:
+            t = import_take(s, ref, m["view"], m["file"],
+                            original_name=os.path.basename(m["file"]))
+            live = None
+            if pick:
+                live = pick_take(s, ref, m["view"], t.take).live
+            out["supplied"].append({"file": m["file"], "ref": ref.id, "view": m["view"],
+                                    "take": t.take, "live": live})
+        except (RefError, NotUsable, StitchError, OSError) as e:
+            out["failed"].append({"file": m["file"], "ref": ref.id, "view": m["view"],
+                                  "error": str(e)})
+    return out
+
+
+def cmd_supply(root: str, argv: list[str]) -> int:
+    """`python h3.py supply <episode> <file-or-folder>... [--ref id[:view]]
+    [--no-pick] [--dry-run]` -- the CLI half of P8, and the way to fill a show
+    whose pictures are already on disk."""
+    paths, ref_id, view, pick, dry = [], None, None, True, False
+    i = 0
+    while i < len(argv):
+        a = argv[i]
+        if a == "--ref" and i + 1 < len(argv):
+            spec = argv[i + 1]
+            # subject:ada:02_side -- the view is the part after the ref id
+            bits = spec.split(":")
+            if len(bits) > 2:
+                ref_id, view = ":".join(bits[:2]), bits[2]
+            else:
+                ref_id = spec
+            i += 2
+            continue
+        if a == "--view" and i + 1 < len(argv):
+            view = argv[i + 1]
+            i += 2
+            continue
+        if a in ("--no-pick", "--dry-run"):
+            pick, dry = (pick and a != "--no-pick"), (dry or a == "--dry-run")
+            i += 1
+            continue
+        if a.startswith("-"):
+            print(f"  !! unknown flag {a}")
+            return 2
+        paths.append(a)
+        i += 1
+    if not paths:
+        print("  !! usage: python h3.py supply <episode> <file-or-folder>... "
+              "[--ref id[:view]] [--no-pick] [--dry-run]")
+        return 2
+    try:
+        r = supply_files(root, paths, ref_id, view, pick, dry)
+    except (RefError, UnknownRef, FileNotFoundError) as e:
+        print(f"  !! {e}")
+        return 1
+
+    for m in r["matched"]:
+        where = f"{m['ref']}{' ' + m['view'] if m['view'] else ''}"
+        print(f"  {os.path.basename(m['file']):34} -> {where:30} {m['why']}")
+    for u in r["unmatched"]:
+        print(f"  {os.path.basename(u['file']):34} -- {u['why']}")
+    if dry:
+        print(f"\n  -- dry run: {len(r['matched'])} would be supplied, "
+              f"{len(r['unmatched'])} left alone")
+        return 0
+    for sup in r["supplied"]:
+        print(f"  -> {sup['ref']}{' ' + sup['view'] if sup['view'] else ''} "
+              f"take {sup['take']}{' (live)' if sup['live'] else ''}")
+    for f in r["failed"]:
+        print(f"  !! {os.path.basename(f['file'])}: {f['error']}")
+    print(f"\n  -- {len(r['supplied'])} supplied, {len(r['unmatched'])} unmatched, "
+          f"{len(r['failed'])} failed")
+    return 1 if r["failed"] else 0
+
+
+# ---------------------------------------------------------------------------
+# a live file shared with other episodes
+# ---------------------------------------------------------------------------
+#
+# With the layout the shows use -- a series config per episode, pictures named
+# `../refs/...` one level up -- one live file is read by every episode that
+# names it, so in a real show nearly every ref is shared and saying so is not
+# worth a word on its own. What is worth saying is who owns the file that is
+# live NOW:
+#
+#   * Generating candidates is private to an episode: they go to its own
+#     `refs/_takes/`, and auto_pick refuses to act when a live file exists.
+#     Nothing about a regenerate reaches a neighbour.
+#   * A pick, an upload or supply with `pick`, and a stitch of the fourth view
+#     OVERWRITE the shared file. The other episodes' takes then go `stale: ref`.
+#     Recoverable, as long as whoever owned the file still has that take.
+#   * A clear, and a discard of the pick, DELETE it -- blocking every episode
+#     that needs it until something is picked again.
+#   * A file nobody's pick record matches (put there by hand, or replaced
+#     outside the editor) has no candidate behind it anywhere. Overwriting that
+#     one loses it for good, and that is the case worth stopping for.
+#
+# This layer only reports. The editor confirms and the CLI asks for --yes.
+
+def sibling_episodes(ep: str) -> list[str]:
+    """The other episode folders beside `ep`: a sibling with a series config of
+    its own or sharing the one above, and a script."""
+    parent = os.path.dirname(os.path.abspath(os.path.normpath(ep)))
+    here = os.path.normcase(os.path.abspath(ep))
+    out = []
+    try:
+        names = sorted(os.listdir(parent), key=str.lower)
+    except OSError:
+        return out
+    for n in names:
+        d = os.path.join(parent, n)
+        if n.startswith((".", "_")) or not os.path.isdir(d):
+            continue
+        if os.path.normcase(os.path.abspath(d)) == here:
+            continue
+        if E.episode_series_config(d) and E.episode_script(d):
+            out.append(d)
+    return out
+
+
+def ep_name(ep: str) -> str:
+    return os.path.basename(os.path.normpath(os.path.abspath(ep)))
+
+
+# Both of these are read for every episode beside this one on every listing, so
+# each is memoised on the file it came from (its path, mtime and size): a
+# neighbour's config hardly ever changes, its picks change on every pick, and a
+# change to either is picked up on the next call. Measured on a 10-episode show
+# with 131 refs each: 0.6s a listing cold, ~0.01s warm.
+_PATHS: dict[str, tuple[tuple, set]] = {}
+_SHA1S: dict[str, tuple[tuple, set]] = {}
+
+
+def _stamp(path: str | None) -> tuple:
+    if not path:
+        return ()
+    try:
+        st = os.stat(path)
+        return (os.path.normcase(os.path.abspath(path)), st.st_mtime_ns, st.st_size)
+    except OSError:
+        return (os.path.normcase(os.path.abspath(path)), 0, -1)
+
+
+def _live_paths(ep: str) -> set[str]:
+    """The absolute live file of every ref an episode names."""
+    key = os.path.normcase(os.path.abspath(ep))
+    sig = _stamp(E.episode_series_config(ep))
+    hit = _PATHS.get(key)
+    if hit and hit[0] == sig:
+        return hit[1]
+    try:
+        s = load_series(ep)
+        out = {_real_path(r.file) for r in series_refs(s) if r.file}
+    except Exception:                    # a neighbour we can't read says nothing
+        out = set()
+    _PATHS[key] = (sig, out)
+    return out
+
+
+def _real_path(path: str) -> str:
+    return os.path.normcase(os.path.realpath(os.path.abspath(path)))
+
+
+def _recorded_sha1s(ep: str) -> set[str]:
+    """Every sha1 an episode's picks recorded -- what it believes it wrote into
+    a live file (a view's stitch and a supplied sheet included)."""
+    cfg = E.episode_series_config(ep)
+    home = os.path.dirname(os.path.abspath(cfg)) if cfg else ep
+    key = os.path.normcase(os.path.abspath(ep))
+    sig = _stamp(os.path.join(home, PICKS_FILE))
+    hit = _SHA1S.get(key)
+    if hit and hit[0] == sig:
+        return hit[1]
+    out = set()
+    for block in (load_picks(home).get("refs") or {}).values():
+        if not isinstance(block, dict):
+            continue
+        out.update(x for x in [block.get("sha1")] if x)
+        for v in (block.get("views") or {}).values():
+            if isinstance(v, dict) and v.get("sha1"):
+                out.add(v["sha1"])
+    _SHA1S[key] = (sig, out)
+    return out
+
+
+def shared_context(ep: str) -> dict:
+    """Who else reads this episode's live files, computed ONCE for a listing:
+
+    {"shared": {an absolute live path: [the other episodes reading it]},
+     "owner":  {a sha1: the episode whose pick wrote it}}
+
+    `owner` covers this episode and its siblings, so a ref's owner is a lookup
+    on the sha1 the listing already computed -- no extra file reads per ref.
+    Empty `shared` is the one-folder layout, where nothing is shared.
+
+    Two episodes that picked byte-identical files record one sha1 between them,
+    and this episode wins it. That is arbitrary and it does not matter: the file
+    they would write over each other is the same file."""
+    mine = _live_paths(ep)
+    owner = {sha: ep_name(ep) for sha in _recorded_sha1s(ep)}
+    shared: dict[str, list[str]] = {}
+    if not mine:
+        return {"shared": shared, "owner": owner}
+    for sib in sibling_episodes(ep):
+        name = ep_name(sib)
+        both = mine & _live_paths(sib)      # one load of that config, not two
+        if not both:
+            continue
+        for path in both:
+            shared.setdefault(path, []).append(name)
+        for sha in _recorded_sha1s(sib):
+            owner.setdefault(sha, name)
+    return {"shared": {k: sorted(set(v)) for k, v in shared.items()}, "owner": owner}

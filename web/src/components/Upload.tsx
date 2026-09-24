@@ -1,9 +1,12 @@
 // Phase 8.6: files into ref slots. Drop an image (or, on a voice, an audio file)
 // onto a ref, a character's view or a keyframe, or pick one with the file
 // picker: it uploads (multipart POST /h3pipe/refs/import, pick=1) and goes live.
+//
+// P8: a drop or a pick of SEVERAL files goes through Supply instead, which
+// matches them to slots by name and shows that before sending anything.
 
-import { useRef, useState, type DragEvent, type ReactNode } from "react";
-import { dismissUpload, uploadRef } from "../actions";
+import { useRef, useState, type ClipboardEvent, type DragEvent, type ReactNode } from "react";
+import { dismissUpload, dropFiles, dropFilesFromDrag, openSupply } from "../actions";
 import { ACCEPT, dragHasFiles, uploadText } from "../lib/lookback";
 import { uploadKey, useApp } from "../store";
 import { Progress } from "./Thumb";
@@ -61,8 +64,20 @@ export function DropSlot({ refId, view, kind, refuse, className, children, title
     depth.current = 0;
     setOver(false);
     if (refuse) return;
-    const f = e.dataTransfer.files?.[0];
-    if (f) void uploadRef(refId, view, f);
+    // P8: one file is this slot's, several (or a folder) are a bulk supply
+    // matched by name -- dropping four views on a character should fill four
+    void dropFilesFromDrag(e.dataTransfer, { ref: refId, view });
+  };
+  // P8: Ctrl+V into a focused slot. The slot has to be focusable for the browser
+  // to send it a paste, hence tabIndex; an image on the clipboard arrives as a
+  // file with a made-up name, so it is sent straight to this slot.
+  const paste = (e: ClipboardEvent<HTMLDivElement>) => {
+    if (refuse) return;
+    const files = Array.from(e.clipboardData?.files ?? []);
+    if (!files.length) return;
+    e.preventDefault();
+    e.stopPropagation();
+    void dropFiles(files, { ref: refId, view });
   };
   return (
     <div
@@ -71,6 +86,8 @@ export function DropSlot({ refId, view, kind, refuse, className, children, title
       onDragLeave={leave}
       onDragOver={overFn}
       onDrop={drop}
+      onPaste={paste}
+      tabIndex={-1}
       title={title}
       data-drop={refuse ? undefined : kind}
       data-ref={dataRef}
@@ -133,10 +150,55 @@ export function UploadButton({ refId, view, kind, label = "Upload…", disabled,
         accept={ACCEPT[kind]}
         style={{ display: "none" }}
         onClick={(e) => e.stopPropagation()}
+        multiple
         onChange={(e) => {
-          const f = e.target.files?.[0];
+          const picked = Array.from(e.target.files ?? []);
           e.target.value = ""; // the same file can be picked again
-          if (f) void uploadRef(refId, view, f);
+          void dropFiles(picked, { ref: refId, view });
+        }}
+      />
+    </>
+  );
+}
+
+
+/**
+ * P8: "Supply files…" -- the bulk path's file picker, for when dragging isn't
+ * handy. It takes many files; `folder` asks for a whole folder instead (Chrome
+ * and Edge; elsewhere it behaves as the file picker).
+ */
+export function SupplyPicker({ label = "Supply files…", folder = false, title }: {
+  label?: string;
+  folder?: boolean;
+  title?: string;
+}) {
+  const input = useRef<HTMLInputElement>(null);
+  const busy = useApp((s) => !!s.supply && !!s.supply.busy);
+  return (
+    <>
+      <button
+        className="h3-btn"
+        disabled={busy}
+        title={title ?? "Pick the pictures you already have: each is matched to a ref by its file name, and you see the table before anything is sent"}
+        onClick={(e) => {
+          e.stopPropagation();
+          input.current?.click();
+        }}
+      >
+        <i className={busy ? "pi pi-spin pi-spinner" : "pi pi-folder-open"} /> {label}
+      </button>
+      <input
+        ref={input}
+        type="file"
+        multiple
+        accept={`${ACCEPT.image},${ACCEPT.audio}`}
+        {...(folder ? { webkitdirectory: "", directory: "" } : {})}
+        style={{ display: "none" }}
+        onClick={(e) => e.stopPropagation()}
+        onChange={(e) => {
+          const picked = Array.from(e.target.files ?? []);
+          e.target.value = "";
+          void openSupply(picked);
         }}
       />
     </>

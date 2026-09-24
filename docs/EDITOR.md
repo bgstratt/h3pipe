@@ -85,6 +85,7 @@ record are not. Picking a new take of a shared sheet in one episode replaces the
 other episode reads, and their takes go `stale: ref`. That is usually what you want (fix
 the sheet once, **Re-render stale** everywhere); when an episode genuinely needs its own
 look for a character, give it an episode-local path (`refs/walker_ep02_sheet.png`, no `../`).
+The Refs tab now warns you before that happens — see **Sharing refs between episodes**.
 
 ### Rendering the shots that need it
 
@@ -178,6 +179,54 @@ pass. Save, then render it — the Inspector has two buttons for that:
 
 Story edits — action, camera, dialogue — belong in the **Script** window instead, not in an
 override. **Promote** moves overrides that the authored files can express back into them.
+
+### Rendering one shot on another model
+
+The render and redo dialogs have **Target for this run**: a one-off, sent with the render,
+leaving the shot's own target alone. Under it, the size and length are **that target's, for
+this shot** — not a preset. That matters because a target's frame grid decides the length: one
+shot came out 448×256 at 124 frames on H3, 448×256 at 129 on LTX and 640×352 at 125 on Wan.
+The dialog asks the server for the real numbers (P9), so what it prints is what you get.
+
+An override you set on the shot doesn't travel: overrides belong to a target, so a one-off run
+on another one uses that target's own defaults. The Inspector says the same thing the other way
+round — when a field is overridden it shows **Built: steps 4 · model …**, what the build
+compiled, so you can see what you have changed it from.
+
+### Noting what's wrong with a pass
+
+A proxy pass exists to show you structure: what happens where, and what is wrong. **P10** gives
+that review a notepad — `<episode>/_issues.json`, filled while you watch and emptied when the
+problems are fixed.
+
+**While you watch:** select a clip and press **n**, or right-click it and choose **Add issue…**.
+A small box opens with the shot and the take it is about; type a sentence and press **Enter**
+(Shift+Enter for a second line). `i` and `o` are still trim-in and trim-out at the playhead, as
+in any NLE, which is why the note key is `n`.
+
+**The flag button** in the h3 Shots toolbar shows how many are open and opens the list, where
+**Copy export** puts the whole document on the clipboard for an assistant, **✕** resolves one,
+and **Clear addressed** empties the ones whose shots you have already fixed.
+
+The same thing from the command line:
+
+```
+python h3.py issues Shows\ep05 --proxy --add sh0140 "Kell enters from the wrong side"
+python h3.py issues Shows\ep05 --proxy --add-from notes.txt    # one "sh0140: …" per line
+python h3.py issues Shows\ep05 --proxy                         # the list
+python h3.py issues Shows\ep05 --proxy --export                # one document to paste
+python h3.py issues Shows\ep05 --clear --addressed             # empty what is done
+```
+
+Each note **snapshots what produced the take**: the script's lines for that shot, the prompt the
+pipeline compiled from them, the reference pictures it used, and the rendered file. That is
+deliberate — the note is about the shot *as it was rendered*, so when you paste the export into
+an assistant it sees what actually caused the problem, not whatever the script says after you
+have started editing. Editing the script later never rewrites a note.
+
+A shot that has since been rebuilt or re-rendered reads **(addressed)**. Nothing is deleted for
+you: `--clear --addressed` empties those when you are satisfied, and an episode with no issues
+has no issue file at all.
 
 ### Keeping a take's frames
 
@@ -277,7 +326,76 @@ script call for is listed here.
 - **Generate missing** fills everything the episode needs in one go. It does the pictures —
   **not the voices.** Generate a voice from its own ref row.
 - **Clear** unpicks a ref; **Discard** bins a candidate.
-- A character's sheet is stitched automatically once all four views are picked.
+- A character's sheet is stitched automatically once all four views are picked — or you
+  supply a finished one, below.
+- **A view's settings vs the character's.** Seed, model, LoRAs and steps set on a character's
+  row are shared by all four views; open a view and its editor says which of the values on
+  show it inherited ("Its steps come from Ada and are shared by all four views"). Change one
+  there and it becomes that view's own; **Remove this view's own settings** drops only those
+  and leaves the character's. A view's prompt has the series config's wording behind it, so
+  **Diff** shows what you changed and **Series config** puts it back.
+
+### References you already have
+
+Three routes, and all of them are supported:
+
+1. **Copy the file into the folder** `series.json` names. This has always worked and still
+   does: the build counts it, renders read it, and if you replace it later the takes that
+   used it go `stale: ref` so **Re-render stale** offers them. The row says the live file was
+   "put there outside the editor", which is not a complaint — it means there is no candidate
+   behind it to compare or go back to.
+2. **Drop one file on a slot** (or **Upload…**). A prop, a plate, a voice, a keyframe, one of
+   a character's four views — and, since P8, **a character's row takes a whole 4-panel
+   sheet**: drop it there, or use **Upload sheet…**. It becomes a candidate and goes live
+   without being stitched, so a second one can sit beside it and you can switch between them.
+   Picking all four views afterwards stitches over it; the row always says which of the two
+   the live file came from.
+3. **Drop the whole lot on the Refs tab** (or **Supply files…**, which also takes a folder).
+   Every file is matched to a slot by its name and you get the table *before* anything is
+   sent: what goes where and why, and what was left alone with the reason. Press **Supply n**
+   and they upload one at a time, each going live. Nothing is guessed — a name that could
+   mean two slots, or two files wanting the same slot, are listed as left alone for you to
+   rename.
+
+Names are matched against the file each ref already names in the series config
+(`walker_sheet_4panel.png`), the ref's id (`walker.png`), a view's tag or word
+(`walker_02_side.png`, `walker_side.png`), a plate (`highway_dawn.png`, `bg_highway_dawn.png`)
+and a voice (`walker.wav`). A trailing `_v2` or `_final` is ignored. The extension decides
+between a picture and a sound, so `walker.png` is the sheet and `walker.wav` the voice.
+
+`python h3.py supply <episode> <folder> --dry-run` prints the same table from the command
+line, which is the quickest way to fill a show whose pictures are already on disk.
+
+You can also paste an image onto a slot with Ctrl+V.
+
+### Sharing refs between episodes
+
+With one `refs` folder beside the episodes, a ref's **live file is the whole show's** — in a
+real series that is every ref, so the editor does not badge them all as "shared". What it
+tells you instead is when the file that is live *isn't your episode's doing*:
+
+| On the row | What it means |
+|---|---|
+| **from ep03** | ep03's pick wrote the file that is live now |
+| **not from here** | nothing has a candidate for it: it was copied in by hand, or replaced outside the editor |
+
+**Generating candidates never touches it.** Candidates are private to the episode, and the
+one automatic pick only happens for a ref with no live file at all. So regenerate freely — it
+is picking, uploading, supplying and clearing that the other episodes feel.
+
+You get a confirm when:
+
+- **you pick over a file another episode picked.** Their pick loses and their takes go
+  `stale: ref` — they can re-pick their own take to get it back.
+- **you pick over a file nothing has a candidate for** (the "not from here" case). There is no
+  copy anywhere: this one is gone for good, which is why the wording is blunter.
+- **you clear, or discard the take that is live, on a shared file.** That *deletes* it, and
+  every episode that needs it is blocked until something is picked again — so this one asks
+  whoever owns it.
+
+Picking over your own episode's pick says nothing, which is the case you are in all day while
+making refs. On the command line, `kreagen.py --clear` refuses a shared live file unless you
+pass `--yes`.
 
 ### Choosing a model
 

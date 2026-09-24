@@ -6,7 +6,7 @@ import type { ToastAction } from "./host";
 import type { RefFilter } from "./lib/refs";
 import type {
   AlignReady, AlignResult, BuildResult, Config, CutAudioSource, EpisodeStatus, EpisodeSummary, ModelList, Pass, Ref,
-  RefDefaults, RefGenerateMissingResult, SeedMode, ShotDetail, SourceFile, TakeRef, TargetList,
+  Issue, RefDefaults, RefGenerateMissingResult, RefMatchResult, SeedMode, ShotDetail, SourceFile, TakeRef, TargetList,
 } from "./types";
 
 // ---------------------------------------------------------------------------
@@ -216,6 +216,35 @@ export interface ClipAudioState {
   upload?: { name: string; sent: number; total: number; error?: string } | null;
 }
 
+/**
+ * P8: the Supply window -- files dropped in bulk, matched to ref slots by name
+ * (POST /h3pipe/refs/match) and shown before anything is sent. `done` fills in
+ * as the uploads go through, one file at a time.
+ */
+export interface SupplyState {
+  files: File[];
+  /** null while the match is in flight */
+  match: RefMatchResult | null;
+  error: string | null;
+  /** the file being uploaded now, and what has finished */
+  busy: string | null;
+  done: { file: string; ref: string; view: string | null; ok: boolean; why?: string }[];
+}
+
+/**
+ * P10: the "what's wrong with this shot" box. Opened from the clip's menu or by
+ * `n` on the selected clip; `shot` and `take` are what it is about, `text` what
+ * has been typed. Nothing is written until Save.
+ */
+export interface IssueDraft {
+  shot: string;
+  pass: Pass;
+  take: number | null;
+  text: string;
+  busy?: boolean;
+  error?: string | null;
+}
+
 export interface AppState {
   config: Config | null;
   configError: string | null;
@@ -326,6 +355,14 @@ export interface AppState {
   voiceClip: VoiceClipState | null;
   /** Phase 9d: the "Audio from…" window for one clip (null: closed) */
   clipAudio: ClipAudioState | null;
+  /** P8: the Supply window for files dropped in bulk (null: closed) */
+  supply: SupplyState | null;
+  /** P10: a pass's issues, keyed by statusKey(ep, pass) */
+  issues: Record<string, Issue[]>;
+  /** P10: the note being written (null: no box open) */
+  issueDraft: IssueDraft | null;
+  /** P10: the Issues window is open */
+  issuesOpen: boolean;
 }
 
 export const ZOOM_MIN = 8;
@@ -405,6 +442,10 @@ export function initialState(prefs: Prefs = {}): AppState {
     trackBuild: {},
     voiceClip: null,
     clipAudio: null,
+    supply: null,
+    issues: {},
+    issueDraft: null,
+    issuesOpen: false,
   };
 }
 
@@ -412,8 +453,10 @@ export function statusKey(ep: string, pass: Pass): string {
   return `${ep}|${pass}`;
 }
 
-export function detailKey(ep: string, pass: Pass, shot: string): string {
-  return `${ep}|${pass}|${shot}`;
+/** P9: a one-off `target` changes the answer (its frame grid decides the shot's
+ *  length), so it is part of the key -- the shot's own detail stays cached. */
+export function detailKey(ep: string, pass: Pass, shot: string, target?: string | null): string {
+  return `${ep}|${pass}|${shot}${target ? `|${target}` : ""}`;
 }
 
 export function clampZoom(z: number): number {

@@ -454,6 +454,13 @@ export interface ShotDetail {
   override: Override;
   override_stale: boolean;
   effective: Effective;
+  /**
+   * P9: the same shape as `effective` with every override dropped — what the
+   * build compiled, on `built_target`. Absent when the shot has no override
+   * (it would only repeat `effective`). It comes from the same planner as
+   * `effective`, so a field can be compared to it directly.
+   */
+  built_values?: Effective;
   takes: TakeDetail[];
   /** Phase 7/8 (see ShotStatus) */
   target?: string | null;
@@ -777,6 +784,12 @@ export interface RefOverrideInfo {
   fields: string[];
   stale: boolean;
   values?: Override;
+  /**
+   * P9, a character's view only: the fields set on THIS view, as opposed to
+   * inherited from the character (`fields` and `values` are the two merged).
+   * "Remove this view's own settings" drops exactly these.
+   */
+  own?: string[];
 }
 
 export interface RefView {
@@ -787,6 +800,12 @@ export interface RefView {
   cleared?: boolean;
   /** what this view generates with now */
   prompt?: string | null;
+  /**
+   * P9: the series config's wording for this view, before any override — what a
+   * prompt edit is diffed against and reverted to. (Before P9 the editor had no
+   * text to compare an overridden view prompt with.)
+   */
+  built_prompt?: string;
   /** the view's override: its values are the character's own fields, then the view's */
   override?: RefOverrideInfo;
   effective?: RefEffective | null;
@@ -884,8 +903,37 @@ export interface Ref {
   override: RefOverrideInfo;
   /** a character's four views; `[]` for every other ref */
   views?: RefView[];
+  /**
+   * The ref's own takes. For a character (P8) these are supplied whole sheets
+   * on the reserved `sheet` view -- nothing else can be a take of a character,
+   * since its views each have their own.
+   */
   takes: RefTake[];
   picked: number | null;
+  /** a character: its supplied sheet was cleared */
+  sheet_cleared?: boolean;
+  /**
+   * The OTHER episodes beside this one whose series config names the same live
+   * file (the `../refs/...` layout). Empty when nothing is shared. A pick or a
+   * clear here is a change every one of them sees, and their takes then go
+   * `stale: ref`.
+   */
+  shared_with?: string[];
+  /**
+   * Which episode's pick wrote the file that is live now, by sha1 -- this one, a
+   * sibling, or null. Null means nobody's record matches it: it was put there by
+   * hand or replaced outside the editor, so no candidate anywhere can put it
+   * back. See `web/src/lib/shared.ts` for what that changes.
+   */
+  live_owner?: string | null;
+  /**
+   * P8, a character only: which route wrote the sheet that is live now --
+   * "sheet" (one supplied as a take), "views" (stitched from the four picks),
+   * or null. Null also covers a sheet copied into the folder by hand, which is
+   * a perfectly good way to supply one: the file is used, it just has no take
+   * behind it.
+   */
+  live_from?: "sheet" | "views" | null;
   /** Clear removed its pick (auto-pick leaves it alone until something is picked) */
   cleared?: boolean;
   /** the ref's own override values (the same as `override.values`) */
@@ -973,6 +1021,27 @@ export interface RefGenerateMissingResult {
   errors: { ref?: string; view?: string | null; error: string; take?: number; missing_files?: MissingFile[] }[];
 }
 
+
+/** P8: POST /h3pipe/refs/match -- which slot does each file name mean? */
+export interface RefMatch {
+  file: string;
+  ref: string;
+  view: string | null;
+  /** the slot's display name */
+  name: string;
+  kind: RefKind;
+  /** the slot takes audio (a voice), not an image */
+  audio: boolean;
+  /** the live file, relative to the episode */
+  path: string | null;
+  /** why it matched, in words -- shown in the table before anything is sent */
+  why: string;
+}
+
+export interface RefMatchResult {
+  matched: RefMatch[];
+  unmatched: { file: string; why: string }[];
+}
 
 export interface RefPickRequest {
   ep: string;
@@ -1383,6 +1452,47 @@ export interface SourceMessage {
 }
 
 /** POST /h3pipe/source/check (and `check` of PUT /h3pipe/source) */
+/**
+ * P10: an issue noted while watching a pass — what is wrong with a shot **as it
+ * was rendered**. The snapshot fields are taken when the note is made and never
+ * updated: the note is about that render, so editing the script afterwards must
+ * not rewrite it.
+ */
+export interface Issue {
+  id: string;
+  shot: string;
+  pass: Pass;
+  /** the take it is about (null: nothing had rendered yet) */
+  take: number | null;
+  note: string;
+  when: string;
+  /** the shot's story hash when the note was made */
+  shot_hash?: string;
+  target?: string | null;
+  /** the script's lines for that shot, as they were */
+  script?: string;
+  /** what the pipeline compiled from them */
+  prompt?: string;
+  seed?: Seed | null;
+  refs?: { role?: string | null; id?: string | null; path?: string | null }[];
+  /** the rendered file, relative to the episode */
+  take_file?: string | null;
+  /**
+   * The shot has been rebuilt or rendered again since: computed on every read,
+   * never stored. The list fades these and **Clear addressed** empties them —
+   * nothing is dropped for you.
+   */
+  addressed?: boolean;
+}
+
+export interface IssueAddRequest {
+  ep: string;
+  pass: Pass;
+  shot: string;
+  note: string;
+  take?: number | null;
+}
+
 export interface SourceCheck {
   ok: boolean;
   errors: SourceMessage[];

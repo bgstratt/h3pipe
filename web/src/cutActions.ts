@@ -4,7 +4,9 @@
 // (optimistic) and rolled back if the server refuses it.
 
 import { ApiError } from "./api";
-import { currentPlaylist, playAll, refreshEpisode, report, seekCut, setCutPlaying, setStatusHook } from "./actions";
+import {
+  currentPlaylist, openIssue, playAll, refreshEpisode, report, seekCut, setCutPlaying, setStatusHook,
+} from "./actions";
 import { api, host } from "./host";
 import { audioOf, audioWhy, normalizeAudio, sameAudio } from "./lib/audioSource";
 import {
@@ -474,6 +476,13 @@ export function cutKey(e: KeyLike): boolean {
   if (k === "i" || k === "o") {
     if (!e.repeat) void trimAtPlayhead(k === "i" ? "in" : "out");
     return true;
+  }
+  // P10: `n` notes what is wrong with the selected clip. Not `i` — that is
+  // trim-in at the playhead, which every NLE binds the same way.
+  if (k === "n") {
+    const shot = get().shot;
+    if (shot && !e.repeat) openIssue(shot);
+    return !!shot;
   }
   return false;
 }

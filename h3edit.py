@@ -642,19 +642,49 @@ def reference_image(root: str, sidecar: dict | None) -> str | None:
     return None
 
 
-def shot_detail(root: str, pass_: str, shot_id: str, folder: str | None = None) -> dict:
+def _job_view(job) -> dict:
+    """A planned job as the inspector reads it. One shape for `effective` and
+    `built_values`, so the two can always be compared field by field."""
+    return {"prompt": prompt_text(job.prompt), "seed": job.seed,
+            "seed_source": job.seed_source, "model": job.model,
+            "loras": job.loras, "steps": job.steps, "target": job.target,
+            "width": job.width, "height": job.height, "length": job.frames,
+            # request | override | negative.txt | series | preset | none
+            "negative": (None if job.negative_source == "none"
+                         else J.job_values(job).get("negative") or ""),
+            "negative_source": job.negative_source,
+            **({"model_low": J.job_values(job).get("model_low")}
+               if J.job_target(job).binding.specs("model_low") else {}),
+            **({"error": job.error} if job.error else {}),
+            **({"notes": list(job.notes)} if job.notes else {})}
+
+
+def shot_detail(root: str, pass_: str, shot_id: str, folder: str | None = None,
+                target: str | None = None) -> dict:
     """Everything the inspector shows for one shot in one pass: the built entry,
     the prompt it builds to, the override and the prompt a render would use now,
     and each take's full sidecar. `target` is what the next render uses,
     `built_target` what the build compiled it for; `effective` is that
-    render's settings (a retargeted shot's are its new target's)."""
+    render's settings (a retargeted shot's are its new target's).
+
+    `target` (P9) sizes the answer for a ONE-OFF run on that target instead of
+    the shot's own, the way a render request's would: the frame grid is the
+    target's, so `effective.length` and the size are what that run would really
+    produce, not the preset's. Nothing is saved.
+
+    `built_values` is the same shape as `effective` with every override
+    dropped -- what the build compiled, on `built_target`. It comes from the
+    same planner as `effective`, so the pair can't drift; it is absent when no
+    override applies to the run being described, because it would then only
+    repeat `effective`. That includes a one-off `target`: an override belongs to
+    a target, so on another one none of them is in force."""
     try:
         doc, idx = J.find_shot(root, pass_, shot_id)
     except KeyError:
         raise KeyError(f"{shot_id} is not in {J.shotlist_rel(pass_)}") from None
     shot = doc["shots"][idx]
     ov = T.load_overrides(root)
-    job = J.plan_job(root, pass_, doc, idx, J.RenderRequest(shot_id), ov, folder)
+    job = J.plan_job(root, pass_, doc, idx, J.RenderRequest(shot_id, target=target), ov, folder)
     eff = T.shot_override(ov, shot_id, pass_, job.target)
     cache: dict = {}
     takes = []
@@ -676,20 +706,14 @@ def shot_detail(root: str, pass_: str, shot_id: str, folder: str | None = None) 
         "built_target": job.built_target,
         "profile": shot.get("profile"), "built": shot,
         "built_prompt": prompt_text(shot.get("prompt")),
+        # what the build compiled, for the inspector to show an override against
+        # (the raw `built` entry above omits the series config's defaults)
+        **({"built_values": _job_view(
+                J.plan_job(root, pass_, doc, idx, J.RenderRequest(shot_id), {}, folder))}
+           if view else {}),
         "override": view,
         "override_stale": bool(eff.get("base_hash")) and eff["base_hash"] != J.story_hash(job.shot),
-        "effective": {"prompt": prompt_text(job.prompt), "seed": job.seed,
-                      "seed_source": job.seed_source, "model": job.model,
-                      "loras": job.loras, "steps": job.steps, "target": job.target,
-                      "width": job.width, "height": job.height, "length": job.frames,
-                      # request | override | negative.txt | series | preset | none
-                      "negative": (None if job.negative_source == "none"
-                                   else J.job_values(job).get("negative") or ""),
-                      "negative_source": job.negative_source,
-                      **({"model_low": J.job_values(job).get("model_low")}
-                         if J.job_target(job).binding.specs("model_low") else {}),
-                      **({"error": job.error} if job.error else {}),
-                      **({"notes": list(job.notes)} if job.notes else {})},
+        "effective": _job_view(job),
         "refs_used": refs_used(root, job),
         "takes": takes,
     }

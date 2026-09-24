@@ -127,6 +127,22 @@ queued takes whose ComfyUI job is gone (`h3takes.sweep_queued`, with `as_of` tak
 - `takes`: each with its full `sidecar` and `files` (relative paths of mp4, thumb,
   strip, shotlist, h3_wav).
 
+### `GET /h3pipe/shot`: a one-off target, and what the build compiled (P9, 2026-09-23)
+Two additions to the inspector's detail, both from the same planner as `effective`
+(`h3edit.shot_detail` → `h3jobs.plan_job`), so every field can be compared directly.
+
+- **`?target=<video target>`** answers for a **one-off run on that target** instead of the
+  shot's own, exactly as a render request's `target` would: the size is that target's, and the
+  length is the shot's on **its** frame grid. That is the part a preset can't tell you — the
+  same shot measured on three targets gave 448×256/124 frames, 448×256/129 and 640×352/125.
+  Nothing is saved, and an unknown target is 400. The redo and render dialogs use it, so the
+  size and length they print for a one-off retarget are the real ones.
+- **`built_values`**: the same shape as `effective` with every override dropped — what the
+  build compiled, on `built_target`. Absent when no override applies to the run being
+  described, since it would only repeat `effective`; that includes a one-off `target`, because
+  an override belongs to a target and none of the shot's is in force on another one. The
+  inspector reads it to say what a value is deviating from ("Built: steps 4").
+
 ### `POST /h3pipe/build`
 Body `{"ep"}`. Runs `h3build` for the final pass, then the proxy pass, on the
 episode's series config and script (`h3edit.episode_series_config` / `episode_script`).
@@ -173,6 +189,49 @@ what makes the episode discoverable; a name that isn't a folder name, or is one
 - `check` is `check_text` on what was written, so the editor can show at once that it
   builds. `h3pipe.episode` is emitted for the new folder. Same thing from the CLI:
   `python h3.py new Shows\ep02 [--title "…"] [--series-id …]`.
+
+## Issues: a pass's notepad (P10, 2026-09-23)
+
+`<ep>/_issues.json` — what is wrong with a shot **as it was rendered**, filled while watching a
+pass and emptied once fixed. `h3issues.py` is the module; the file doesn't exist until the first
+note and is removed when the last one goes.
+
+An issue **snapshots** what produced the take: the script's lines for that shot, the prompt the
+pipeline compiled from them, the reference files and the rendered mp4. That is the point — the
+note describes that render, so deriving the text later (right for anything durable) would
+destroy what the note is about. Editing the script never rewrites an issue.
+
+`addressed` is computed on **every read** and never stored: true when the shot's `story_hash`
+has moved (a rebuild) or a newer usable take exists (a re-render). It is per shot, not per
+episode, so a rebuild on its own addresses nothing. Nothing is deleted for the user.
+
+### `GET /h3pipe/issues?ep=&pass=`
+`{"issues": [{id, shot, pass, take, note, when, shot_hash, target, script, prompt, seed, refs,
+take_file, addressed}]}`, in the order noted. No `pass` lists both.
+
+### `POST /h3pipe/issues`
+`{ep, pass, shot, note, take?}` → the issue, snapshotted. `take` defaults to the one the cut
+plays, else the newest usable, and may be null (a note before anything has rendered is worth
+keeping). 404 for a shot that isn't in the pass, 400 for a note that says nothing or is over
+4000 characters. Emits `h3pipe.issues`.
+
+### `DELETE /h3pipe/issues?ep=&id=` / `?ep=&pass=&clear=1[&addressed=1]`
+`id` resolves one (comma-separated for several); `clear=1` empties the pass, and `addressed=1`
+with it takes only the ones whose shot has moved on. Answers `{removed, issues}`. 400 when
+neither is given — there is no "delete everything by accident" shape.
+
+### `GET /h3pipe/issues/export?ep=&pass=&format=md|json`
+One document to hand to an assistant: `{"format": "md", "text"}` by default, or the JSON bundle.
+Markdown is the default because the script excerpt is multi-line — in JSON it is `
+`-escaped
+soup you can't eyeball before pasting — and because it carries its own instruction line. It is
+generated from the file every time, one way: it has **no machine markers, and nothing parses it
+back**. Addressed issues are left out unless `addressed=1`.
+
+### CLI
+`python h3.py issues <episode> [--proxy|--final]` with `--add <shot> <note>`,
+`--add-from <file>` (one `sh0140: what is wrong` per line), `--export [--json] [-o FILE]`,
+`--resolve <id>` and `--clear [--addressed]`.
 
 ## Files
 
@@ -443,6 +502,20 @@ take.
 
 ### `PUT /h3pipe/refs/override` and `DELETE /h3pipe/refs/override`
 Same shape as the shot override routes, keyed by `ref` (and `view`).
+
+**A view's overrides, and whose they are (P9, 2026-09-23).** A character's fields are inherited
+by all four views (`ref_override` merges the character's under the view's), which left the
+editor unable to say where a value came from or what an edited prompt had replaced. Two
+additions to each entry of a character's `views`:
+
+- **`override.own`**: the fields set on **this view**, a subset of `override.fields` (the
+  merge). The rest belong to the character and are changed on its row, and
+  `DELETE /h3pipe/refs/override` with a `view` drops exactly `own`. Absent on a ref's own
+  override block, and on a character's, because there every field is its own.
+- **`built_prompt`**: the series config's wording for that view, before any override — what a
+  prompt edit is diffed against and what "Series config" puts back. It used to be unavailable
+  precisely when it was needed: the editor substituted `""` for an overridden view, so Diff
+  and revert had nothing to work with.
 
 ### References: as built (Phase 5), where the text above left room
 - **Extra fields on a ref:** `key`, `subject`, `can_generate`, `why_not`, and `effective`
@@ -1246,6 +1319,110 @@ that is `queued` (cancel it first).
   voice). Same result as the JSON form: a new take with `source: "imported"`, plus
   `original_name`. 400 for a file type the ref can't use; 413 over 64 MB. The JSON form
   also takes `pick`.
+
+## Supplying references you already have (P8, 2026-09-23)
+
+A picture copied into the folder `series.json` names has always been fully supplied: the
+build counts it, renders read it, and `stale: ref` follows it (a take's sidecar records the
+path and sha1 it used, which is independent of picks). None of this replaces that. What it
+adds is the same thing **through the editor**, for a character, and in bulk.
+
+### The `sheet` pseudo-view
+A character's live file is a 4-panel sheet, and until now the only way the tool could write
+one was to stitch four picked views. `h3refs.SHEET_VIEW` (`"sheet"`) is a reserved view that
+holds a **ready-made sheet** as an ordinary take:
+
+- `POST /h3pipe/refs/import`, `PUT /h3pipe/refs/pick`, `POST /h3pipe/refs/discard` and
+  `DELETE /h3pipe/refs/pick` accept `view: "sheet"` for a character. The takes are
+  `<key>_sheet_tNN.png` beside the views'.
+- **`POST /h3pipe/refs/generate` refuses it** (400), as does any other path that words or
+  generates a view: nothing draws a sheet, it is four views stitched — or one you supply.
+- Picking a sheet take **copies it to the live file with no stitching**. The pick is recorded
+  in `_picks.json` under `refs.<id>.views.sheet`, beside the four views, which keep their own
+  picks: picking all four later stitches over the supplied sheet, and that is allowed.
+- `GET /h3pipe/refs` reports a character's sheet takes as the ref's **own** `takes` and
+  `picked` (they were always `[]` / `null` before — a character's candidates live in its
+  views), plus `sheet_cleared`.
+- **`live_from`** on a character says which route wrote the file that is live now, judged
+  from the file's own sha1, not from timestamps: `"sheet"`, `"views"`, or `null`. Null covers
+  no file *and* a file this tool didn't write — the Explorer route, which is left exactly as
+  it is and shown as "put there outside the editor".
+- Clearing or discarding a supplied sheet removes the live file **only if that pick still
+  wrote it**; a stitch that replaced it is left alone.
+
+### `POST /h3pipe/refs/match`
+Body `{"ep", "names": [...]}` (at most `MATCH_LIMIT`, 500), answer
+`{"matched": [{"file", "ref", "view", "name", "kind", "audio", "path", "why"}],
+"unmatched": [{"file", "why"}]}`. Names only — no file bodies — so the editor can show the
+table it is about to act on before uploading a byte. It writes nothing.
+
+`h3refs.match_files` is the one implementation of the rules, called by this route and by the
+CLI, so the two cannot drift. A file matches a slot when its **slug** (basename, no
+extension, lower case, every run of non-alphanumerics an underscore) is one of that slot's
+names:
+
+| Slot | Names that mean it |
+|---|---|
+| a character's sheet | the stem of the path `series.json` names (`ada_sheet_4panel`), the id, `<id>_sheet`, `<id>_sheet_4panel`, `<id>_4panel`, `sheet_<id>` |
+| one of its views | `<id>_<tag>` / `<tag>_<id>` (`ada_02_side`), and the tag's word (`ada_side`) |
+| a prop or vehicle | the path's stem, the id |
+| a location | the path's stem, the id, `<id>_plate`, `bg_<id>`, `plate_<id>` |
+| a voice | the sample's stem, the id, `<id>_voice`, `<id>_sample`, `voice_<id>` |
+| a shot keyframe | `<shot>_first` / `<shot>_last` |
+
+- The extension decides between an image slot and an audio one, so `ada.png` is the sheet and
+  `ada.wav` the voice. A file that is neither is refused for its type, not its name.
+- A trailing revision marker (`_v2`, `_3`, `_final`, `_copy`, `_new`, `_edit`, `_fixed`) is
+  ignored when the rest matches, and `why` says so.
+- **Nothing is guessed.** A name that could be two slots, or two files that want one slot,
+  leave every file involved unmatched with the reason. Matching is exact, never fuzzy: the
+  cost of a wrong guess is a render with the wrong character in it.
+- Measured on a real show (Porchlights ep01, 131 refs): all 110 of its own reference file
+  names match their own slot, with no ambiguity.
+
+### CLI: `h3.py supply`
+```
+python h3.py supply <episode> <file-or-folder>... [--ref id[:view]] [--no-pick] [--dry-run]
+```
+`h3refs.supply_files` — a folder is matched by name, `--ref` sends one file to one slot
+(`--ref subject:ada:sheet`), each file becomes an imported take and is picked unless
+`--no-pick`. `--dry-run` prints the same table and writes nothing. It answers
+`{matched, unmatched, supplied, failed}`.
+
+### A live file other episodes read (2026-09-23)
+
+With a series config per episode and `../refs/...` paths, one live file serves the whole
+show: in Porchlights ep01 **all 110** of its refs are read by the other nine episodes. So
+"this is shared" is not news; who wrote the copy that is there now is. Two fields per ref in
+`GET /h3pipe/refs`:
+
+- **`shared_with`**: the other episode folders whose series config resolves a ref to the same
+  absolute file (`[]` for the one-folder layout). Computed from the siblings beside the
+  episode — a sibling with a series config of its own or sharing the one above, and a script.
+- **`live_owner`**: the episode whose pick recorded the sha1 the live file has **now** — this
+  one, a sibling, or `null`. Null means nobody's record matches it: it was put there by hand
+  or replaced outside the editor, so no candidate anywhere can put it back.
+
+What touches a shared file, and what doesn't:
+
+| | The shared file |
+|---|---|
+| **Generate** candidates | untouched. Takes go to the episode's own `refs/_takes/`, and `auto_pick` returns immediately when a live file exists (`h3refs.py`) |
+| **Pick**, upload/supply with `pick`, the fourth view's stitch | overwritten; the other episodes' takes go `stale: ref` |
+| **Clear**, discard of the live take | deleted; every episode that needs it is blocked until something is picked |
+
+`h3refs.shared_context(ep)` builds both maps in one pass and is memoised on the files it read
+(each episode's series config and `_picks.json`, by path, mtime and size), so a listing pays
+for it once: measured on that 10-episode show, 0.44 s cold and 4 ms warm against a 2.7 s
+listing. A neighbour's pick or a new sibling shows up on the next call, with nothing to clear.
+
+Two episodes that picked byte-identical files share one sha1, and this episode wins it —
+arbitrary, and moot, since the file they would overwrite is the same file.
+
+**Nothing refuses.** The routes behave exactly as before; reporting is the contract and the
+caller decides. The editor confirms before a pick over a file it doesn't own and before any
+clear of a shared file (`web/src/lib/shared.ts` holds that rule, with tests), and
+`kreagen.py --clear` refuses a shared live file without `--yes`.
 
 ### Keyframe polish
 - The keyframe prompt states the framing more strongly (a close-up must fill the frame with

@@ -12,7 +12,7 @@ import { reachable } from "../lib/browse";
 import { insideRoot, nameError } from "../lib/newEpisode";
 import { promptText } from "../lib/format";
 import type {
-  BuildResult, CutAudioSource, CutEntry, EpisodeStatus, EpisodeSummary, Lora, MissingRef, Override, OverrideResult, Pass,
+  BuildResult, CutAudioSource, CutEntry, EpisodeStatus, EpisodeSummary, Issue, Lora, MissingRef, Override, OverrideResult, Pass,
   RefGenerateMissingResult, RefUsed, RenderResult, ShotDetail, ShotStatus, ShotTargetSource, SourceCheck, SourceFile,
   TakeDetail, TakeSummary, Target, TargetGraph, Track, TrackResult,
 } from "../types";
@@ -88,6 +88,10 @@ export function createMockApi(emit: Emit, opts: MockOptions = {}): Api & { outsi
   /** series.json's `series.target` */
   let seriesTarget = SERIES_TARGET;
   let roots: string[] = opts.firstRun ? [] : [EP.replace(/[\\/][^\\/]+[\\/][^\\/]+$/, "")];
+  // P10: the pass's notepad, in memory. The real one is `<ep>/_issues.json`;
+  // `addressed` is computed on read there too, so the mock does the same rather
+  // than storing it.
+  const issues: Issue[] = [];
   // P5: episodes made through newEpisode. The mock has one real episode; a new
   // one is listed and opens as what it is on disk — unbuilt and empty.
   const made: { ep: string; name: string; title: string }[] = [];
@@ -233,6 +237,15 @@ export function createMockApi(emit: Emit, opts: MockOptions = {}): Api & { outsi
     if (ep !== EP && !made.some((m) => m.ep === ep)) {
       throw new MockError(`Unknown episode ${ep}`, 404);
     }
+  }
+
+  /** P10: the shot was re-rendered since the note (the mock has no rebuild, so
+   *  a newer usable take is the whole rule here). */
+  function issueAddressed(x: Issue): boolean {
+    if (!x.take) return false;
+    const sh = status[x.pass]?.shots.find((y) => y.shot === x.shot);
+    if (!sh) return true;
+    return sh.takes.some((t) => t.take > (x.take ?? 0) && t.status === "ok");
   }
 
   function madeSummary(m: { ep: string; name: string; title: string }): EpisodeSummary {
@@ -798,12 +811,42 @@ export function createMockApi(emit: Emit, opts: MockOptions = {}): Api & { outsi
       if (m) return emptyStatus(m, pass);
       return with9b(withMissing(clone(st(pass))));
     },
-    async shot(ep, pass, shot) {
+    async shot(ep, pass, shot, target) {
       await wait();
       need(ep);
       const d = clone(det(pass, shot));
       refs.list(); // the keyframe needs follow the shot's target
-      d.refs_used = refsUsedOf(shot, shotTargetOf(shot, d.override).target);
+      d.refs_used = refsUsedOf(shot, target || shotTargetOf(shot, d.override).target);
+      // P9: what the build compiled, for the inspector to show an override
+      // against. Only when there is an override -- as the server does.
+      if (Object.keys(d.override ?? {}).length) {
+        const p = preset(d.built_target ?? shotTargetOf(shot, {}).target, pass);
+        d.built_values = {
+          ...d.effective,
+          target: d.built_target ?? d.effective.target,
+          steps: p?.steps ?? d.effective.steps,
+          model: p?.model ?? d.effective.model,
+          loras: p?.lora ? [{ name: p.lora, strength: 1 }] : [],
+          width: p?.width ?? d.effective.width,
+          height: p?.height ?? d.effective.height,
+          prompt: d.built_prompt,
+          seed_source: "stable",
+        };
+      }
+      // P9: a one-off target sizes the answer the way a render on it would --
+      // its preset's size, and the shot's length on ITS frame grid
+      if (target) {
+        const p = preset(target, pass);
+        d.effective = {
+          ...d.effective,
+          target,
+          steps: p?.steps ?? d.effective.steps,
+          model: p?.model ?? d.effective.model,
+          width: p?.width ?? d.effective.width,
+          height: p?.height ?? d.effective.height,
+          length: targetLength(target, d.effective.length ?? 0),
+        };
+      }
       return d;
     },
     async build(ep) {
@@ -1245,6 +1288,95 @@ export function createMockApi(emit: Emit, opts: MockOptions = {}): Api & { outsi
       const t = refs.upload({ ref: req.ref, view: req.view ?? null, name, pick: !!req.pick });
       emit("h3pipe.episode", { ep: EP });
       return t;
+    },
+    // ---- P10: a pass's issues (the notepad) ----
+    async issues(ep, pass) {
+      await wait();
+      need(ep);
+      return issues
+        .filter((x) => !pass || x.pass === pass)
+        .map((x) => ({ ...x, addressed: issueAddressed(x) }));
+    },
+    async addIssue(req) {
+      await wait();
+      need(req.ep);
+      if (!req.note?.trim()) {
+        throw new MockError("the note is the issue: say what is wrong with the shot", 400);
+      }
+      const sh = st(req.pass).shots.find((x) => x.shot === req.shot);
+      if (!sh) throw new MockError(`${req.shot} is not in the ${req.pass} shotlist`, 404);
+      const d = det(req.pass, req.shot);
+      const take = req.take ?? sh.cut.take ?? null;
+      const item: Issue = {
+        id: `mk${issues.length + 1}${Math.random().toString(16).slice(2, 6)}`,
+        shot: req.shot,
+        pass: req.pass,
+        take,
+        note: req.note.trim(),
+        when: new Date().toISOString(),
+        // the snapshot: what produced the take, kept as it was
+        shot_hash: `h${JSON.stringify(d.built).length}`,
+        target: d.effective?.target ?? null,
+        script: d.built_prompt || `## ${req.shot}`,
+        prompt: d.effective?.prompt ?? "",
+        seed: d.effective?.seed ?? null,
+        refs: (d.refs_used ?? []).map((r) => ({ role: r.role, id: r.id, path: r.path })),
+        take_file: take
+          ? `renders_proxy/${req.shot}/${req.shot}_t${String(take).padStart(2, "0")}.mp4`
+          : null,
+      };
+      issues.push(item);
+      emit("h3pipe.issues", { ep: EP, pass: item.pass, shot: item.shot, id: item.id });
+      return { ...item, addressed: false };
+    },
+    async resolveIssue(ep, id) {
+      await wait();
+      need(ep);
+      const i = issues.findIndex((x) => x.id === id);
+      if (i >= 0) issues.splice(i, 1);
+      emit("h3pipe.issues", { ep: EP, removed: i >= 0 ? 1 : 0 });
+      return issues.map((x) => ({ ...x, addressed: issueAddressed(x) }));
+    },
+    async clearIssues(ep, pass, addressedOnly) {
+      await wait();
+      need(ep);
+      for (let i = issues.length - 1; i >= 0; i--) {
+        if (pass && issues[i].pass !== pass) continue;
+        if (addressedOnly && !issueAddressed(issues[i])) continue;
+        issues.splice(i, 1);
+      }
+      emit("h3pipe.issues", { ep: EP, pass: pass ?? null });
+      return issues
+        .filter((x) => !pass || x.pass === pass)
+        .map((x) => ({ ...x, addressed: issueAddressed(x) }));
+    },
+    async exportIssues(ep, pass) {
+      await wait();
+      need(ep);
+      const items = issues
+        .filter((x) => (!pass || x.pass === pass) && !issueAddressed(x));
+      const out = [
+        `# ${fx.summary.name}: ${items.length} issue${items.length === 1 ? "" : "s"}`
+        + (pass ? ` (${pass} pass)` : ""),
+        "",
+        "These are notes taken while watching a rendered pass of an episode. For each shot, "
+        + "propose the smallest edit to the script or the series config that would fix what "
+        + "the note describes.",
+        "",
+      ];
+      for (const x of items) {
+        out.push(`## ${x.shot}${x.take ? ` · take ${x.take}` : ""}`, "", x.note, "");
+        if (x.script) out.push("**The script, as rendered:**", "", "```", x.script, "```", "");
+        if (x.prompt) {
+          out.push("**What the pipeline compiled from it:**", "", "```", x.prompt, "```", "");
+        }
+      }
+      return out.join("\n");
+    },
+    async refsMatch(ep, names) {
+      await wait();
+      need(ep);
+      return refs.match(names);
     },
     async refsDiscard(req) {
       await wait();

@@ -236,6 +236,206 @@ class NewEpisodeTest(ApiTest):
         self.err(A.post_episode_new(self.ctx, {"parent": self.shows}), 400)
         self.err(A.post_episode_new(self.ctx, {"parent": self.shows, "name": "ks01"}), 409)
 
+
+class RefMatchTest(ApiTest):
+    """P8: POST /h3pipe/refs/match, and the sheet view through the ref routes."""
+
+    def names(self, *names):
+        return self.ok(A.post_refs_match(self.ctx, {"ep": self.ep, "names": list(names)}))
+
+    def test_it_says_where_files_would_go_and_writes_nothing(self):
+        r = self.names("ada_sheet_4panel.png", "nothing_is_called_this.png")
+        self.assertEqual(len(r["matched"]), 1, r)
+        m = r["matched"][0]
+        self.assertEqual((m["ref"], m["view"]), ("subject:ada", "sheet"))
+        self.assertIn("ada_sheet_4panel", m["why"])
+        self.assertEqual(len(r["unmatched"]), 1)
+        self.assertEqual(self.events_of("h3pipe.ref"), [])
+
+    def test_an_empty_list_and_a_bad_one(self):
+        self.assertEqual(self.names(), {"matched": [], "unmatched": []})
+        self.err(A.post_refs_match(self.ctx, {"ep": self.ep, "names": "ada.png"}), 400)
+        self.err(A.post_refs_match(self.ctx, {"ep": self.ep, "names": [1, 2]}), 400)
+        self.err(A.post_refs_match(self.ctx, {"ep": self.ep}), 400)
+
+    def test_more_names_than_it_will_take(self):
+        self.err(A.post_refs_match(
+            self.ctx, {"ep": self.ep, "names": [f"f{i}.png" for i in range(A.MATCH_LIMIT + 1)]}), 400)
+
+    def test_outside_the_roots(self):
+        self.err(A.post_refs_match(self.ctx, {"ep": self.tmp, "names": ["x.png"]}), 403)
+
+    def test_a_supplied_sheet_through_import_and_pick(self):
+        src = os.path.join(self.tmp, "ada_sheet_4panel.png")
+        shutil.copy(os.path.join(self.ep, "refs", "ada", "ada_sheet_4panel.png"), src)
+        t = self.ok(A.post_refs_import(self.ctx, {"ep": self.ep, "ref": "subject:ada",
+                                                  "view": "sheet", "source_path": src,
+                                                  "pick": True}))
+        self.assertEqual(t["take"], 1)
+        ref = next(r for r in self.ok(A.get_refs(self.ctx, {"ep": self.ep}))["refs"]
+                   if r["id"] == "subject:ada")
+        self.assertEqual(len(ref["takes"]), 1)
+        self.assertEqual(ref["picked"], 1)
+        self.assertEqual(ref["live_from"], "sheet")
+
+    def test_generating_a_sheet_is_refused(self):
+        self.err(A.post_refs_generate(self.ctx, {"ep": self.ep, "ref": "subject:ada",
+                                                  "view": "sheet", "count": 1}), 400)
+
+    def test_a_view_that_is_not_one(self):
+        self.err(A.post_refs_import(self.ctx, {"ep": self.ep, "ref": "subject:ada",
+                                               "view": "sheets", "source_path": "x.png"}), 400)
+
+
+class ShotDetailP9Test(ApiTest):
+    """P9: `GET /h3pipe/shot?target=` answers for a one-off run on that target,
+    and `built_values` says what the build compiled where an override changed
+    it. Both come from the same planner as `effective`, so they can be compared
+    field by field."""
+
+    def detail(self, shot="sh010", **q):
+        return self.ok(A.get_shot(self.ctx, dict({"ep": self.ep, "pass": "proxy",
+                                                  "shot": shot}, **q)))
+
+    def test_a_one_off_target_sizes_the_answer_its_way(self):
+        own = self.detail()
+        other = self.detail(target="wan22_ti2v")
+        self.assertEqual(own["effective"]["target"], own["target"])
+        self.assertEqual(other["effective"]["target"], "wan22_ti2v")
+        # the frame grid is the target's, so the length is really different
+        self.assertNotEqual(other["effective"]["length"], own["effective"]["length"])
+        self.assertTrue(other["effective"]["width"])
+        # nothing is saved: asking again without the target is unchanged
+        self.assertEqual(self.detail()["effective"], own["effective"])
+        self.assertEqual(T.load_overrides(self.ep).get("shots", {}), {})
+
+    def test_the_shots_own_target_answers_the_same_either_way(self):
+        own = self.detail()
+        self.assertEqual(self.detail(target=own["target"])["effective"]["length"],
+                         own["effective"]["length"])
+
+    def test_a_target_that_is_not_there(self):
+        self.err(A.get_shot(self.ctx, {"ep": self.ep, "pass": "proxy", "shot": "sh010",
+                                       "target": "nope"}), 400)
+        self.err(A.get_shot(self.ctx, {"ep": self.ep, "pass": "proxy", "shot": "sh010",
+                                       "target": 7}), 400)
+
+    def test_no_built_values_without_an_override(self):
+        self.assertNotIn("built_values", self.detail())
+
+    def test_built_values_says_what_the_override_changed(self):
+        self.ok(A.put_override(self.ctx, {"ep": self.ep, "shot": "sh010", "pass": "proxy",
+                                          "fields": {"steps": 12}}))
+        d = self.detail()
+        self.assertEqual(d["effective"]["steps"], 12)
+        self.assertIn("built_values", d)
+        self.assertNotEqual(d["built_values"]["steps"], 12)
+        # the same shape as effective, so every field can be compared
+        self.assertEqual(sorted(d["built_values"]), sorted(d["effective"]))
+
+    def test_built_values_ignores_every_override_not_just_the_field(self):
+        self.ok(A.put_override(self.ctx, {"ep": self.ep, "shot": "sh010", "pass": "proxy",
+                                          "fields": {"steps": 12, "seed": "1234"}}))
+        d = self.detail()
+        self.assertEqual(d["effective"]["seed"], "1234")
+        self.assertNotEqual(d["built_values"]["seed"], "1234")
+        self.assertEqual(d["built_values"]["target"], d["built_target"])
+
+    def test_a_one_off_target_has_nothing_to_compare(self):
+        """An override belongs to a target: on a different one none applies, so
+        `built_values` would only repeat `effective` and is left out."""
+        self.ok(A.put_override(self.ctx, {"ep": self.ep, "shot": "sh010", "pass": "proxy",
+                                          "fields": {"steps": 12}}))
+        own = self.detail()
+        self.assertEqual(own["effective"]["steps"], 12)
+        self.assertIn("built_values", own)
+        other = self.detail(target="wan22_ti2v")
+        self.assertEqual(other["override"], {})
+        self.assertNotIn("built_values", other)
+
+
+class IssuesRouteTest(ApiTest):
+    """P10c: the issue routes the editor drives. The rules themselves are
+    tests/test_issues.py's; this is the HTTP shape, the statuses and the event."""
+
+    def add(self, shot="sh010", note="the truck is on the wrong side", **kw):
+        body = dict({"ep": self.ep, "pass": "proxy", "shot": shot, "note": note}, **kw)
+        return A.post_issues(self.ctx, body)
+
+    def test_add_list_and_the_event(self):
+        item = self.ok(self.add())
+        self.assertEqual(item["shot"], "sh010")
+        self.assertEqual(item["note"], "the truck is on the wrong side")
+        self.assertTrue(item["id"])
+        self.assertTrue(item["script"])
+        self.assertTrue(item["prompt"])
+        self.assertEqual(self.events_of("h3pipe.issues"),
+                         [{"ep": self.ep, "pass": "proxy", "shot": "sh010", "id": item["id"]}])
+        listed = self.ok(A.get_issues(self.ctx, {"ep": self.ep, "pass": "proxy"}))["issues"]
+        self.assertEqual([x["id"] for x in listed], [item["id"]])
+        self.assertIn("addressed", listed[0])
+
+    def test_listing_without_a_pass_is_everything(self):
+        self.add()
+        self.add(note="also this", **{"pass": "final"})
+        self.assertEqual(len(self.ok(A.get_issues(self.ctx, {"ep": self.ep}))["issues"]), 2)
+        self.assertEqual(len(self.ok(A.get_issues(
+            self.ctx, {"ep": self.ep, "pass": "proxy"}))["issues"]), 1)
+
+    def test_a_note_that_says_nothing_and_a_shot_that_is_not_there(self):
+        self.err(self.add(note="   "), 400)
+        self.err(self.add(shot="sh999"), 404)
+        self.err(A.post_issues(self.ctx, {"ep": self.ep, "pass": "proxy"}), 400)
+        self.err(A.post_issues(self.ctx, {"ep": self.ep, "pass": "draft", "shot": "sh010",
+                                          "note": "x"}), 400)
+
+    def test_a_take_can_be_named_and_must_be_a_take(self):
+        self.assertEqual(self.ok(self.add(take=2))["take"], 2)
+        self.err(self.add(take="soon"), 400)
+        self.err(self.add(take=0), 400)
+
+    def test_resolve_one(self):
+        a = self.ok(self.add())
+        self.ok(self.add(shot="sh020", note="too dark"))
+        left = self.ok(A.delete_issues(self.ctx, {"ep": self.ep, "id": a["id"]}))
+        self.assertEqual(left["removed"], 1)
+        self.assertEqual([x["shot"] for x in left["issues"]], ["sh020"])
+
+    def test_clear_a_pass(self):
+        self.add()
+        self.add(shot="sh020", note="x")
+        self.add(note="a final one", **{"pass": "final"})
+        left = self.ok(A.delete_issues(self.ctx, {"ep": self.ep, "pass": "proxy", "clear": "1"}))
+        self.assertEqual(left["removed"], 2)
+        self.assertEqual([x["pass"] for x in
+                          self.ok(A.get_issues(self.ctx, {"ep": self.ep}))["issues"]], ["final"])
+
+    def test_delete_with_nothing_to_do(self):
+        self.err(A.delete_issues(self.ctx, {"ep": self.ep}), 400)
+
+    def test_the_export_is_markdown_by_default(self):
+        self.ok(self.add())
+        data = self.ok(A.get_issues_export(self.ctx, {"ep": self.ep, "pass": "proxy"}))
+        self.assertEqual(data["format"], "md")
+        self.assertIn("the truck is on the wrong side", data["text"])
+        self.assertIn("**The script, as rendered:**", data["text"])
+        self.assertNotIn("<!--", data["text"])           # nothing parses it back
+
+    def test_the_export_as_json(self):
+        self.ok(self.add())
+        data = self.ok(A.get_issues_export(self.ctx, {"ep": self.ep, "pass": "proxy",
+                                                      "format": "json"}))
+        self.assertEqual(len(data["issues"]), 1)
+        self.assertTrue(data["instruction"])
+        self.err(A.get_issues_export(self.ctx, {"ep": self.ep, "format": "xml"}), 400)
+
+    def test_no_file_until_a_note_and_outside_the_roots(self):
+        self.assertEqual(self.ok(A.get_issues(self.ctx, {"ep": self.ep}))["issues"], [])
+        self.assertFalse(os.path.exists(os.path.join(self.ep, "_issues.json")))
+        self.err(A.get_issues(self.ctx, {"ep": self.tmp}), 403)
+        self.err(A.post_issues(self.ctx, {"ep": self.tmp, "pass": "proxy", "shot": "sh010",
+                                          "note": "x"}), 403)
+
 class ReadTest(ApiTest):
     def test_episodes(self):
         eps = self.ok(A.get_episodes(self.ctx, {}))

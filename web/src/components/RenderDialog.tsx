@@ -29,12 +29,22 @@ function RenderBody() {
   const [target, setTarget] = useState("");
   const { list, video, seriesDefault } = useTargets();
   const one = ask.shots.length === 1 ? ask.shots[0] : null;
-  const d = useDetail(one, ask.pass);
+  // the shot's own detail, and — when a one-off target is chosen — the detail
+  // for THAT target, which is what says the size and length it would produce
+  // (P9: GET /h3pipe/shot?target=…). Its frame grid changes the length, so the
+  // preset alone can't answer.
+  const ownDetail = useDetail(one, ask.pass);
+  const oneStatus = one ? st?.shots.find((s) => s.shot === one) : undefined;
+  const own = one ? shotTarget(ownDetail ?? oneStatus, seriesDefault) : null;
+  const oneOff = target && target !== own ? target : null;
+  const asTarget = useDetail(one, ask.pass, oneOff);
+  const d = oneOff ? asTarget ?? ownDetail : ownDetail;
   useEffect(() => {
     if (one) void loadDetail(one, ask.pass);
   }, [one, ask.pass]);
-  const oneStatus = one ? st?.shots.find((s) => s.shot === one) : undefined;
-  const own = one ? shotTarget(d ?? oneStatus, seriesDefault) : null;
+  useEffect(() => {
+    if (one && oneOff) void loadDetail(one, ask.pass, false, undefined, oneOff);
+  }, [one, ask.pass, oneOff]);
   const run = target || own || "";
   const { ready, blocked } = splitByMissingRefs(st?.shots ?? [], ask.shots);
   // the targets this run renders on: the chosen one, else each shot's own

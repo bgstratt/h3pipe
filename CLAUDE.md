@@ -12,7 +12,7 @@ its own (data only, proposed from a workflow by `h3inspect.py`).
 
 ## Layout
 
-- `h3.py` — one CLI for every stage (`new`, `build`, `check`, `refs`, `render`, `assemble`, `all`)
+- `h3.py` — one CLI for every stage (`new`, `build`, `check`, `refs`, `supply`, `render`, `issues`, `assemble`, `all`)
 - `h3core/` — model-free core: script parser → story IR (`shotlist/shots.json`), series config loading, speech pacing
 - `h3build.py` — script + series config → story IR → H3 compile → `shotlist/*.json`, `refs_todo.*`
 - `h3render.py` — queues shots on ComfyUI through the shot's target (`targets/video/<id>/`: template, recipe,
@@ -20,7 +20,8 @@ its own (data only, proposed from a workflow by `h3inspect.py`).
   voice refs: `targets/audio/ltx2_voice/`
 - `h3takes.py` (take/cut/override files), `h3jobs.py` (plan + queue a take), `h3edit.py`
   (episode status, pick/override, the `takes`/`pick`/`override` commands),
-  `h3refs.py` (refs as takes, driven by the series config), `h3track.py` (attach a recording, run h3align),
+  `h3refs.py` (refs as takes, driven by the series config; `match_files`/`supply_files` put
+  pictures you already have into their slots, `h3.py supply`), `h3track.py` (attach a recording, run h3align),
   `h3source.py` (read/check/save the script and
   series config; `new_episode` makes one from a template — `examples/starter/`, or the
   episode beside it), `h3promote.py` (overrides → script/series config) — shared by the CLI and the routes
@@ -30,6 +31,9 @@ its own (data only, proposed from a workflow by `h3inspect.py`).
 - `h3inspect.py` — reads a ComfyUI workflow and proposes the `target.json` that drives it
   (a show's own targets live in `<show>/targets/<id>/target.json`; `targets/generic/` holds
   the `builtin:` code such a target uses instead of shipping Python)
+- `h3issues.py` — a pass's notepad (`<ep>/_issues.json`): what is wrong with a shot as it
+  was rendered, snapshotting the script lines and compiled prompt, exported as markdown
+  to hand to an assistant (`h3.py issues`). Meant to be emptied, not kept
 - `h3align.py` — times the script against a dialogue recording
 - `h3assemble.py` — review cut (ffmpeg)
 - `h3peaks.py` — a media file's sound: has it any, duration, waveform peaks (the editor's

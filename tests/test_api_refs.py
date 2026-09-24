@@ -383,5 +383,84 @@ class Phase85ApiTest(ApiTest):
         self.assertEqual((m["param"], m["family"]), ("model_low", "wan2.2-i2v-14b-low"))
 
 
+
+class ViewOverrideProvenanceTest(ApiTest):
+    """P9: a character's view override says which fields are the VIEW's own (the
+    rest are the character's, merged in), and a view carries the series config's
+    wording for itself so an edited prompt can be diffed and put back."""
+
+    def refs(self):
+        return {r["id"]: r for r in self.ok(A.get_refs(self.ctx, {"ep": self.ep}))["refs"]}
+
+    def view(self, ref="subject:ada", view="03_back"):
+        return next(v for v in self.refs()[ref]["views"] if v["view"] == view)
+
+    def put(self, fields, view=None, ref="subject:ada"):
+        body = {"ep": self.ep, "ref": ref, "fields": fields}
+        if view:
+            body["view"] = view
+        return self.ok(A.put_refs_override(self.ctx, body))
+
+    def test_a_view_carries_the_series_configs_wording_for_itself(self):
+        v = self.view()
+        self.assertTrue(v["built_prompt"])
+        self.assertEqual(v["built_prompt"], v["prompt"])      # nothing overridden yet
+        # and it is this view's wording, not the character's sheet text
+        self.assertNotEqual(v["built_prompt"], self.refs()["subject:ada"]["built_prompt"])
+
+    def test_it_survives_an_override_so_the_edit_can_be_diffed(self):
+        self.put({"prompt": "Ada from behind, hood up"}, view="03_back")
+        v = self.view()
+        self.assertEqual(v["prompt"], "Ada from behind, hood up")
+        self.assertTrue(v["built_prompt"])
+        self.assertNotEqual(v["built_prompt"], v["prompt"])
+
+    def test_each_view_gets_its_own_wording(self):
+        rs = self.refs()["subject:ada"]["views"]
+        texts = [v["built_prompt"] for v in rs]
+        self.assertEqual(len(set(texts)), len(texts))
+
+    def test_own_is_the_views_fields_and_fields_is_the_merge(self):
+        self.put({"steps": 9})                                 # the character's, all four views
+        self.put({"prompt": "from behind"}, view="03_back")     # this view's
+        back = self.view()
+        side = self.view(view="02_side")
+        self.assertEqual(back["override"]["fields"], ["prompt", "steps"])
+        self.assertEqual(back["override"]["own"], ["prompt"])
+        self.assertEqual(side["override"]["fields"], ["steps"])
+        self.assertEqual(side["override"]["own"], [])
+        # the merged values are still there, unchanged
+        self.assertEqual(back["override"]["values"]["steps"], 9)
+
+    def test_a_view_field_shadowing_the_characters_is_its_own(self):
+        self.put({"steps": 9})
+        self.put({"steps": 30}, view="04_face")
+        face = self.view(view="04_face")
+        self.assertEqual(face["override"]["own"], ["steps"])
+        self.assertEqual(face["override"]["values"]["steps"], 30)
+
+    def test_reverting_the_view_drops_only_its_own(self):
+        self.put({"steps": 9})
+        self.put({"prompt": "from behind", "steps": 30}, view="03_back")
+        self.assertEqual(self.view()["override"]["own"], ["prompt", "steps"])
+        self.ok(A.delete_refs_override(self.ctx, {"ep": self.ep, "ref": "subject:ada",
+                                                  "view": "03_back"}))
+        back = self.view()
+        self.assertEqual(back["override"]["own"], [])
+        self.assertEqual(back["override"]["fields"], ["steps"])       # the character's stays
+        self.assertEqual(back["override"]["values"]["steps"], 9)
+
+    def test_own_is_a_views_idea_only(self):
+        """A ref's own override block has no `own`: every field on it IS its own.
+        The field exists to separate a view's from the character's."""
+        self.put({"steps": 9}, ref="location:kitchen")
+        r = self.refs()["location:kitchen"]
+        self.assertEqual(r["views"], [])
+        self.assertNotIn("own", r["override"])
+        self.assertEqual(r["override"]["fields"], ["steps"])
+        # nor on a character's own block, whose fields all four views inherit
+        self.put({"steps": 9})
+        self.assertNotIn("own", self.refs()["subject:ada"]["override"])
+
 if __name__ == "__main__":
     unittest.main()

@@ -2,7 +2,7 @@
 // `fields` out (only what changed; null clears a field, per docs/API.md).
 
 import { parseSeed } from "../api";
-import type { Lora, Override, OverrideFields } from "../types";
+import type { Effective, Lora, Override, OverrideFields } from "../types";
 
 /** What the form needs from a shot's detail (or a ref, adapted): the override
  * as stored, the prompt in effect, and the prompt without an override. */
@@ -99,4 +99,31 @@ export function overrideFields(form: OverrideForm, initial: OverrideForm, d: Pic
   if (form.negative !== initial.negative) f.negative = form.negative.trim() === "" ? null : form.negative;
   if (form.modelLow !== initial.modelLow) f.model_low = form.modelLow === "" ? null : form.modelLow;
   return f;
+}
+
+/**
+ * P9: what the build compiled, for the fields an override can change, so the
+ * inspector can say what a value is deviating FROM. `built_values` comes from
+ * the same planner as `effective`, so a difference here is a real difference.
+ *
+ * Returns the differing fields only, in a fixed order, or [] when nothing the
+ * form shows differs (then there is nothing worth saying).
+ */
+export function builtDiff(
+  eff: Pick<Effective, "model" | "loras" | "steps" | "seed"> | undefined,
+  built: Pick<Effective, "model" | "loras" | "steps" | "seed"> | undefined,
+): { field: string; built: string }[] {
+  if (!eff || !built) return [];
+  const loras = (l: Lora[] | null | undefined) =>
+    (l ?? []).map((x) => `${x.name}@${x.strength}`).join(", ");
+  const out: { field: string; built: string }[] = [];
+  if (built.model && built.model !== eff.model) out.push({ field: "model", built: built.model });
+  if (loras(built.loras) !== loras(eff.loras)) {
+    out.push({ field: "LoRAs", built: loras(built.loras) || "none" });
+  }
+  if (built.steps != null && built.steps !== eff.steps) {
+    out.push({ field: "steps", built: String(built.steps) });
+  }
+  if (built.seed && built.seed !== eff.seed) out.push({ field: "seed", built: built.seed });
+  return out;
 }

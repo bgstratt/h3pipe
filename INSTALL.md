@@ -634,6 +634,9 @@ python h3.py check    Shows\ep01          # validate + dialogue pacing; writes n
 python h3.py build    Shows\ep01          # story IR, shotlists (final AND proxy), refs_todo
 python h3.py refs     Shows\ep01 --list   # the reference images it would draw
 python h3.py refs     Shows\ep01          # draw them (ComfyUI)
+python h3.py supply   Shows\ep01 C:\sheets --dry-run
+                                          # pictures you already have: which ref each file
+                                          # name means (drop --dry-run to put them in)
 python h3.py render   Shows\ep01 --proxy  # queue the shots, one take each -> renders_proxy\
 python h3.py assemble Shows\ep01 --proxy  # join them -> renders_proxy\ep01_proxy.mp4
 ```

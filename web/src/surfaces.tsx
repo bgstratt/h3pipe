@@ -10,6 +10,8 @@ import { CutMenu } from "./components/CutMenu";
 import { Boundary } from "./components/ErrorBoundary";
 import { RedoDialog, SidecarDialog } from "./components/Dialogs";
 import { BrowseDialog } from "./components/Browse";
+import { SupplyDialog } from "./components/Supply";
+import { IssueDialog, IssuesWindow } from "./components/Issues";
 import { ClipAudioWindow } from "./components/ClipAudio";
 import { InspectorWindow } from "./components/Inspector";
 import { PromoteDialog } from "./components/Promote";
@@ -153,6 +155,9 @@ export const OVERLAY_WINDOWS: [string, ComponentType][] = [
   ["Redo", RedoDialog],
   ["Render", RenderDialog],
   ["Browse", BrowseDialog],
+  ["Supply", SupplyDialog],
+  ["Issues", IssuesWindow],
+  ["Add issue", IssueDialog],
   ["Take details", SidecarDialog],
   ["Promote", PromoteDialog],
   ["Toasts", Toasts],

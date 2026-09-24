@@ -12,7 +12,7 @@ import { ESTIMATE_TITLE, cutTake, fmtShotSeconds, lengthEstimated, shortName, sh
 import { KEYFRAME_ENDS, cutNeighbour, keyframeNote, keyframeRefId, shotKeyframes, usesKeyframes } from "../lib/keyframes";
 import { missingOf } from "../lib/missingRefs";
 import { negativeNoEffect, negativeSourceLabel, takesNegative } from "../lib/negative";
-import { formFromDetail, isDirty, overrideFields, type OverrideForm } from "../lib/overrideForm";
+import { builtDiff, formFromDetail, isDirty, overrideFields, type OverrideForm } from "../lib/overrideForm";
 import { shotRefTiles } from "../lib/refsUsed";
 import { findTarget, isRetargeted, retargetNote, shotTarget, targetBadges, targetLabel } from "../lib/targets";
 import { useApp } from "../store";
@@ -333,6 +333,8 @@ function OverrideEditor({ d, shot }: { d: ShotDetail; shot: string }) {
   const ov = d.override;
   const hasOverride = Object.keys(ov).length > 0;
   const eff = d.effective;
+  // P9: what the build compiled, where an override changed it
+  const diff = builtDiff(eff, d.built_values);
   const { list, seriesDefault } = useTargets();
   const target = shotTarget(d, seriesDefault);
   const pickers = useTargetPickers(target);
@@ -365,6 +367,11 @@ function OverrideEditor({ d, shot }: { d: ShotDetail; shot: string }) {
             <button className="h3-btn" disabled={busy} onClick={() => void saveOverride(shot, pass, false, { prompt: form.prompt })}>Keep (re-base)</button>
             <button className="h3-btn" disabled={busy} onClick={() => void saveOverride(shot, pass, false, { prompt: null })}>Use built prompt</button>
           </div>
+        </div>
+      )}
+      {diff.length > 0 && (
+        <div className="h3-small h3-muted" title="What the build compiled, before this shot's overrides (GET /h3pipe/shot's built_values)">
+          Built: {diff.map((x) => `${x.field} ${shortName(x.built, 36)}`).join(" · ")}
         </div>
       )}
       <OverrideFields

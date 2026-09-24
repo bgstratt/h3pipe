@@ -11,8 +11,13 @@ export function useShotStatus(shot: string | null | undefined, pass?: Pass): Sho
   return shot ? st?.shots.find((x) => x.shot === shot) : undefined;
 }
 
-export function useDetail(shot: string | null | undefined, pass?: Pass): ShotDetail | undefined {
-  return useApp((s) => (s.ep && shot ? s.details[detailKey(s.ep, pass ?? s.pass, shot)] : undefined));
+/** P9: `target` reads the detail for a one-off run on that target (its own
+ *  cache entry), so a dialog can show the size and length it would produce. */
+export function useDetail(shot: string | null | undefined, pass?: Pass,
+                          target?: string | null): ShotDetail | undefined {
+  return useApp((s) => (s.ep && shot
+    ? s.details[detailKey(s.ep, pass ?? s.pass, shot, target)]
+    : undefined));
 }
 
 export function useDetailError(shot: string | null | undefined, pass?: Pass): string | undefined {
