@@ -31,6 +31,13 @@ shares one `refs` folder while each keeps a series config of its own (a config i
 episode wins, the one beside it is the fallback), which is what lets episode four add
 a character without touching the first three.
 
+The folder can be called anything — `ep01` here, but `s2ep01`, `s3ep07` or `pilot`
+just as well, which is how a show with seasons keeps them apart. Name the script
+after the folder (`s2ep01\s2ep01.md`) and everything finds it: that is the only
+name that still works when the episodes share one `series.json` in the folder above
+them, and it is what lets `python h3.py build Shows --each` pick up every episode
+under a show at once.
+
 ```json
 {
   "series": {
