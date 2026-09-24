@@ -61,7 +61,7 @@ your projects, with the pipeline scripts beside it (see the README).
 The episode can be a folder (any name) holding series.json and one script .md,
 or several folders at once, or a parent with --each:
 
-    python h3.py build Shows --each              # every ep* folder under Shows
+    python h3.py build Shows --each              # every episode folder under Shows
 
 Anything after the episode is passed straight through to the underlying
 script, so every flag those scripts take still works here. `--proxy` is also
@@ -155,6 +155,18 @@ def stage(name: str, ep: str, extra: list[str], skip_build: bool = False) -> int
     sys.exit(f"  !! unknown stage {name}")
 
 
+def episode_folders(parent: str) -> list[str]:
+    """Every folder directly under `parent`, whatever it is called: ep05, but
+    also s2ep01 and the like. Hidden and generated folders are skipped; the
+    caller decides what makes one an episode."""
+    try:
+        names = sorted(os.listdir(parent), key=str.lower)
+    except OSError:
+        return []
+    return [os.path.join(parent, n) for n in names
+            if not n.startswith((".", "_")) and os.path.isdir(os.path.join(parent, n))]
+
+
 def main() -> int:
     argv = sys.argv[1:]
     if argv and argv[0] == "new":
@@ -226,7 +238,7 @@ def main() -> int:
     if not eps:
         sys.exit("  !! give an episode folder, e.g. Shows\\ep05")
     if each:
-        eps = sorted(p for parent in eps for p in glob.glob(os.path.join(parent, "ep*"))
+        eps = sorted(p for parent in eps for p in episode_folders(parent)
                      if os.path.isfile(os.path.join(p, "series.json")))
 
     failed = []

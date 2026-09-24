@@ -7,7 +7,7 @@ each with its video target's workflow, and wait for each render.
     python h3render.py Shows\\ep05 --proxy
     python h3render.py Shows\\ep05 --only sh040,sh050 --redo
     python h3render.py Shows\\ep05 --only sh040 --redo --lora a.safetensors --lora b.safetensors:0.6
-    python h3render.py --all Shows --proxy          # every ep* folder
+    python h3render.py --all Shows --proxy          # every episode folder
     python h3render.py Shows\\ep05 --list           # what would run
     python h3render.py Shows\\ep05 --dry-run        # write the API graph, queue nothing
     python h3render.py Shows\\ep05 --proxy --only sh040 --target ltx2 --dry-run --check-nodes
@@ -88,7 +88,6 @@ Workflow file
 from __future__ import annotations
 
 import argparse
-import glob
 import json
 import os
 import sys
@@ -103,6 +102,18 @@ from h3jobs import (  # noqa: E402,F401
     LOADER, SAVER, LORA, UNET, WORKFLOW_NAME, Comfy, RenderRequest, find_workflow,
     finish_job, graph_for, load_graph, load_shotlist, mark_failed, mark_queued, node_of,
     parse_lora, plan_episode, resolve_workflow, start_job, ui_to_api)
+
+
+def episode_folders(parent: str) -> list[str]:
+    """Every folder directly under `parent`, whatever it is called: ep05, but
+    also s2ep01 and the like. Hidden and generated folders are skipped; the
+    caller decides what makes one an episode."""
+    try:
+        names = sorted(os.listdir(parent), key=str.lower)
+    except OSError:
+        return []
+    return [os.path.join(parent, n) for n in names
+            if not n.startswith((".", "_")) and os.path.isdir(os.path.join(parent, n))]
 
 
 def fmt(sec: float) -> str:
@@ -144,7 +155,7 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("projects", nargs="*", help="episode folders (each holds shotlist/)")
-    ap.add_argument("--all", metavar="DIR", help="render every ep* folder under DIR")
+    ap.add_argument("--all", metavar="DIR", help="render every episode folder under DIR")
     ap.add_argument("--workflow", help="workflow .json (UI save or API export)")
     ap.add_argument("--comfy", default="http://127.0.0.1:8188",
                     help="ComfyUI address (default %(default)s)")
@@ -207,7 +218,7 @@ def main() -> int:
 
     roots = [os.path.abspath(p) for p in args.projects]
     if args.all:
-        roots += sorted(p for p in glob.glob(os.path.join(os.path.abspath(args.all), "ep*"))
+        roots += sorted(p for p in episode_folders(os.path.abspath(args.all))
                         if os.path.isdir(os.path.join(p, "shotlist")))
     if not roots:
         ap.error("give one or more episode folders, or --all DIR")
