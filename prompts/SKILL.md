@@ -911,6 +911,34 @@ action describes a *position* renders that position and then looks for something
 it. Write the state change: "Dex swings his boots onto the desk and settles back", not "Dex
 sits with his boots on the desk".
 
+### Every shot starts from an empty plate
+
+Plates are drawn empty, and the model sees one shot at a time. Whatever the scene established
+three cuts ago — who is in the car, the diners at the other tables, that Harold sat down — is
+gone unless this shot says it again.
+
+- **Everyone physically in frame is in `who:`**, even mostly unseen: the driver of a two-shot
+  in a car is both people, the passenger's shoulder included. Leave one out and the plate's empty
+  seat is all H3 gets, so they vanish for a shot and come back on the next. The same goes for
+  anyone the action touches or looks at in frame: "Harold reaches for Cora's elbow" with no
+  Cora in `who:` gets an invented stranger.
+- **Repeat `extras:` on every shot of a populated room**, closes included ("diners at the far
+  tables, blurred behind him"). It does not carry over from the previous shot, and without it
+  the room is empty on the cut.
+- **Say the posture.** A plate of a kitchen table is an empty table, and the sheet shows the
+  character standing. Open on the posture plus the movement: "Seated at the kitchen table,
+  Harold turns his head slowly…", not "Harold turns his head slowly…".
+- **Give every moving object a hand.** "The briefcase opens" opens by itself; "Mills lifts the
+  lid of the briefcase" puts Mills in `who:` and in frame.
+- **Settle carried props.** If a character's `design` has a bag on the arm and the shot seats
+  them, set the bag down in the action ("her handbag set beside the ledger"), or H3 draws a
+  second, standing copy of them to carry it.
+- **Write to the plate's angle.** A plate shot from the visitors' side sees the back of the
+  monitor; if the screen matters, have someone turn it.
+- **One or two physical steps per shot.** Crossing a lot, climbing steps and knocking is three
+  shots, not one 4-second shot; crammed motion smears into interlace-like lines. Start the shot
+  where its plate is.
+
 Reserve `camera: holds a static shot` for reactions where stillness is the point. On a wide
 you have just cut to, a slow push gives the space depth, and costs nothing extra.
 
@@ -962,9 +990,10 @@ masked dancers" is rebuilt as figures that compete with the subject and feed the
 — describe the empty space and let the far background fall off into bokeh. And **name the
 subject in the camera move**: "arcs around them" leaves the model to decide who "them" is.
 
-On H3 Ref2VA, `size:` also decides how hard the plate pulls: `partially_preserved` on a wide or medium,
-`weak_reference` on a close-up, because a plate declared authoritative behind a face competes
-with the sheet in exactly the shot where identity matters most.
+On H3 Ref2VA, `size:` also decides what the plate means: on a wide or medium the room's layout
+is kept, and on a close-up the background is a zoomed-in crop of the plate — the part of the room
+right behind the subject — and never the plain backdrop of the character sheet. A close-up
+still leaves the room's layout to the shots around it, so stage the space on a medium first.
 
 Add a prop to `with:` only when its exact design matters and recurs. A generic mug is better
 described in the action text, because every referenced prop spends a slot.

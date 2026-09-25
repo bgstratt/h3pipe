@@ -227,13 +227,22 @@ def build_prompt(shot: dict, seq: dict, series_cfg: dict, panels: int,
     # frame, and the plate then competes with the subject sheets for influence
     # in exactly the shots where identity matters most — the symptom being the
     # whole location rendered behind a face that should fill frame.
+    #
+    # But a close-up told to keep only the plate's colour loses to the sheet:
+    # the sheet's plain studio backdrop becomes the background, the room
+    # dissolves, and the sheet's pose comes with it. So a close-up keeps the
+    # plate as a magnified crop -- the part of the room right behind the
+    # subject, at close range -- and says the sheet's backdrop is not it.
+    close = shot["size"] in ("close", "cu")
     if no_plate:
         pass
-    elif shot["size"] in ("close", "cu"):
+    elif close:
         ret.append(
-            f"{bg_subj} (appears in [Shot 1]): weak_reference - only the color palette, "
-            f"lighting direction and material character of the location are retained; the "
-            f"layout of the space is not reproduced and most of it falls outside the frame.")
+            f"{bg_subj} (appears in [Shot 1]): partially_preserved - the background is a "
+            f"zoomed-in crop of the location: the surfaces, objects, color palette and "
+            f"lighting direction directly behind the subject are retained at close range, "
+            f"while the rest of the space falls outside the frame. The plain backdrop of a "
+            f"reference image is never used as the background.")
     else:
         ret.append(
             f"{bg_subj} (appears in [Shot 1]): partially_preserved - the layout, color palette "
@@ -277,6 +286,10 @@ def build_prompt(shot: dict, seq: dict, series_cfg: dict, panels: int,
     desc = ["detailed_description:", f"The target video is {look}."]
     body = (f"[Shot 1] The scene takes place in {env}. {shot['action']}" if no_plate else
             f"[Shot 1] The scene takes place in {bg_subj}, {env}. {shot['action']}")
+    if close and not no_plate:
+        body += (f" Behind the subject, the frame is filled by a magnified, softly focused "
+                 f"part of {bg_subj}, recognizably the same place, never a plain studio "
+                 f"backdrop.")
     cam = shot.get("camera", "").strip()
     body += f" The camera {cam}." if cam else " The camera holds a static shot with fixed composition."
     if shot.get("_continuation"):
