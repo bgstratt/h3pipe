@@ -103,7 +103,11 @@ def build_prompt(shot, seq, series_cfg: dict) -> str:
         else:
             verb = "says"
         delivery = (d.delivery or "").strip()
-        line = f'{who} {verb}{", " + delivery if delivery else ""}: "{d.line.strip()}"'
+        # A V.O./O.S. note ("on the truck radio") next to the line gets read
+        # aloud as part of it, so on those it goes with the speaker instead.
+        if delivery and d.mode in ("vo", "os"):
+            who, delivery = f"{who.rstrip(',')}, {delivery},", ""
+        line =f'{who} {verb}{", " + delivery if delivery else ""}: "{d.line.strip()}"'
         parts.append(line[0].upper() + line[1:])
 
     # the soundscape and music, integrated
