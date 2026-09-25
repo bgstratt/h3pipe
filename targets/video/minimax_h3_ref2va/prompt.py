@@ -301,18 +301,22 @@ def build_prompt(shot: dict, seq: dict, series_cfg: dict, panels: int,
         src = " in the recorded voice from <Audio 1>," if copying else ""
         label = speaker_label(d["who"])
         mode = d.get("mode", "")
+        # A V.O./O.S. note is usually where the voice comes from ("on the
+        # truck radio"). Next to <d> it was read aloud as part of the line, so
+        # on those two it rides with the speaker, before the verb.
+        pre = f",{deliv}" if mode and deliv else ""
         if mode == "vo":
             # Exact phrase required by the spec, plus the lips-closed clause --
             # but only when the speaker is actually visible, since that clause
             # exists to stop H3 animating an on-screen mouth over narration.
-            line = (f"{label} says in an off-screen voiceover{src.rstrip(',')}:{deliv} "
+            line = (f"{label}{pre} says in an off-screen voiceover{src.rstrip(',')}: "
                     f"<d>[English] {d['line']}</d>")
             if d["who"] in subj:
                 pron = (book[d["who"]].get("pronoun") or "their").strip()
                 line += f" while {pron} lips remain completely closed."
             desc.append(line)
         elif mode == "os":
-            desc.append(f"{label} says from off-screen, outside the frame,{src}{deliv} "
+            desc.append(f"{label}{pre} says from off-screen, outside the frame,{src} "
                         f"<d>[English] {d['line']}</d>")
         else:
             desc.append(f"{label} says,{src}{deliv} <d>[English] {d['line']}</d>")

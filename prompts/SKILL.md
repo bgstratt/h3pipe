@@ -566,7 +566,7 @@ sound: running footsteps on grass, fabric movement
 | `sound: …` | ambience and physical action sounds |
 | `music: …` | audience-only score; omit for none |
 | `extras: …` | other people in frame, described; see **Crowds and extras** |
-| `text: OPEN 24 HOURS` | on-screen text the picture must show (a sign, a title card), quoted into the prompt |
+| `text: OPEN 24 HOURS` | on-screen text the picture must show (a sign, a note, a screen), quoted into the prompt. Never the series title or credits: those are added in the edit, not rendered into a shot |
 | `policy: generate` | this shot's audio: `generate` (the model makes all of it), `dub` (lip sync to the recording's `audio:` window, which becomes the soundtrack), `dub_keep_foley` (the same, keeping the model's sound effects under it) or `clone` (spoken in each speaker's `voice_sample`). Without it, dialogue shots follow `audio.mode` and silent ones generate |
 | `retention: partially_copy` | how closely a dubbed shot copies the recording: `fully_copy`, `partially_copy` or `reference` (H3 Ref2VA; dub shots only) |
 | `model:`, `lora:`, `steps:` | per-shot render overrides; also valid under a `#` header |
@@ -577,7 +577,7 @@ sound: running footsteps on grass, fabric movement
 | `NAME (breathless): line` | a delivery direction, written into the prompt |
 | `NAME (V.O.): line` | voiceover: speaks, is not drawn, costs no reference slot |
 | `NAME (O.S.): line` | off-screen: in the space, outside the frame |
-| `NAME (V.O., into phone): line` | a voice marker and a delivery together |
+| `NAME (V.O., on the truck radio): line` | a voice marker and a delivery together; the note describes the voice and is never spoken |
 | `continuous: yes` | under a `#` header: the sequence is one unbroken take |
 | `// text` | comment |
 
@@ -893,6 +893,10 @@ slightly / strongly · takes the subject's POV · rolls clockwise / counterclock
 "Arcs around them with large amplitude at fast speed" beats "swoops around dramatically",
 because it names a move the model was trained on.
 
+On a wide full of big architecture (a plant, a street front, a church), prefer holding still,
+a pan or a slow push over a track, truck or arc. A camera that moves through the space makes
+the model redraw the buildings as it goes, and they build and unbuild themselves on screen.
+
 ## Breaking a scene into shots
 
 A scene with three paragraphs of action is six to ten shots, and deciding where they fall is
@@ -938,6 +942,24 @@ gone unless this shot says it again.
 - **One or two physical steps per shot.** Crossing a lot, climbing steps and knocking is three
   shots, not one 4-second shot; crammed motion smears into interlace-like lines. Start the shot
   where its plate is.
+- **Pick people up where the last shot left them.** If sh160 parks the truck by the building,
+  sh170 doesn't walk him across the lot. Name the spot in the first shot ("parks at the far
+  end of the lot") so the next one can start from it.
+- **The crowd is already there.** On an empty plate, people written as arriving materialise
+  in the middle of the shot. Write them as present from the first frame: "the line already
+  running, a worker at every station".
+
+### Vehicles in motion
+
+A moving vehicle with a loose description wanders: it swerves toward the people in frame,
+speeds up when it should stop, and smears.
+
+- **Give it one clean path**: direction across frame, lane and speed. "The pickup rolls slowly
+  left to right in the near lane, never leaving the road."
+- **Arriving and getting out are separate shots.** One shot drives in; the next opens with the
+  door already opening.
+- **Parking is its own beat**, and the shot starts with the vehicle already slowing. Say where
+  it stops, so the next shot can pick up from there.
 
 Reserve `camera: holds a static shot` for reactions where stillness is the point. On a wide
 you have just cut to, a slow push gives the space depth, and costs nothing extra.
@@ -989,6 +1011,12 @@ Two habits go with it. **Keep people out of the plate**: a location described as
 masked dancers" is rebuilt as figures that compete with the subject and feed the duplication
 — describe the empty space and let the far background fall off into bokeh. And **name the
 subject in the camera move**: "arcs around them" leaves the model to decide who "them" is.
+
+**Extras in the lead's wardrobe take the lead's face.** The prompt already tells H3 the extras
+look nothing like the subject, but twenty white smocks and hard hats around a man in a white
+smock and hard hat still turn into twenty of him. When the extras share the lead's uniform,
+vary them in `extras:`: men and women, different ages and builds, hairnets instead of hard
+hats, faces turned away or soft in the background.
 
 On H3 Ref2VA, `size:` also decides what the plate means: on a wide or medium the room's layout
 is kept, and on a close-up the background is a zoomed-in crop of the plate — the part of the room

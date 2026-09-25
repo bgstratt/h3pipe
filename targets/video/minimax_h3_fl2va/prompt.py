@@ -135,8 +135,12 @@ def build_prompt(shot, seq, series_cfg: dict, policy: str = "generate") -> str:
             label = f"The same off-screen voice {spk[d.speaker]}"
         verb = {"vo": "says in an off-screen voiceover",
                 "os": "says from off-screen, outside the frame"}.get(d.mode, "says")
-        mods = (["in the recorded voice"] if recorded else []) + (
-            [d.delivery.strip()] if (d.delivery or "").strip() else [])
+        deliv = (d.delivery or "").strip()
+        # A V.O./O.S. note ("on the truck radio") next to <d> gets read aloud
+        # as part of the line, so on those it goes with the speaker instead.
+        if deliv and d.mode in ("vo", "os"):
+            label, deliv = f"{label}, {deliv},", ""
+        mods = (["in the recorded voice"] if recorded else []) + ([deliv] if deliv else [])
         line = (f"{label} {verb}{''.join(', ' + m for m in mods)}: "
                 f"<d>[English] {d.line}</d>")
         if d.mode == "vo" and d.speaker in on_screen:
