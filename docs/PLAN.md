@@ -23,6 +23,8 @@ editing and taken back (and the editor says which copy is in force), and a show 
 **targets of its own** — `<show>/targets/<id>/target.json`, data only, proposed from any saved
 ComfyUI workflow by `h3inspect.py` and rendered by the builtin prose compile. 12d (subject
 reference sheets for such a target) is deferred on purpose.
+Phase 13 (planned 2026-09-26): an optional 2x upscale of a picked final take, from its
+saved latent or through the VAE, keeping the take's own audio.
 This is the working plan for the next round of development. `CLAUDE.md` points here.
 
 ## Goals
@@ -1554,6 +1556,136 @@ custom targets want the same ref recipe.
   offering them to an arbitrary graph would produce plausible text the graph mis-reads.
 - A custom target's id is scoped to its series root, so two shows may both have `my_wan`; take
   sidecars record the id only, which is fine while episodes live under their series.
+
+**Phase 13 — upscale: a final take refined at 2x** (planned 2026-09-26)
+
+Why: rendering at a higher resolution costs every take, rejects included. An upscale costs
+only the picked ones, once. It is a latent upscale and a short re-sample under the take's own
+prompt, references and seed, so it adds real detail (faces in wide shots, hands, earrings,
+door hardware) instead of sharpening pixels. It is **optional**: proxy stays, a final pass
+may still render at 1344×768 or higher when that is the better call, and assemble works with
+or without upscales.
+
+Spike, 2026-09-26 (Porchlights ep01 sh760, 3 s / 73 frames, h3pipe's own H3 graph from
+`h3render --dry-run`, no obvpm nodes in the render):
+
+| | time | size |
+|---|---|---|
+| render today | 53 s | 1344×768 |
+| render at 960×544 | ~20 s | 960×544 |
+| upscale, denoise 0.3, 8 turbo steps | 87 s | 1920×1088 |
+| **upscale, the turbo schedule from step 5 of 8 (3 steps)** | **35 s** | 1920×1088 |
+| obvpm's timeline upscale (10 steps, no turbo), for comparison | 123 s | 1920×1088 |
+
+The 3-step upscale was as sharp as the 8-step one and clearly sharper than the base stretched
+to 1920. Faces moved slightly (an expression on a small far figure).
+
+The lip-sync check (sh330, Kemp speaking, 90 frames, audio held): timing and head motion
+matched the take at every start step, and the held audio came out **bit-identical** to the
+take's (same MD5) at all of them. Mouth shapes did not: from step 5 (about 78% noise, 52.5 s)
+and step 6 (about 67%, 33.6 s) he laughs open-mouthed where the take has a half-open smile.
+**From step 7 (one step, about 46% noise, 22.5 s)** the mouth matches the take frame for frame,
+the face stays closest to it, and it is still visibly sharper than the base stretched to
+1920. Step 7 is the default.
+
+Core `SaveLatent`
+cannot write H3's joint AV latent (a NestedTensor), so the spike split it
+(`LTXVSeparateAVLatent`) and saved video (4.3 MB) and audio (0.04 MB) separately. The obvpm
+timeline's upscale is the same idea done over a whole timeline at once, for seamless
+extensions; our shots meet at hard cuts, so one shot at a time is right, and it needs none
+of their `.mctx` / `.cond` files: a take's frozen shotlist already says how it was made.
+
+**13a — a take's latent, optional**
+- `H3SaveShot` gains an optional `latent` input. Linked, it writes
+  `<shot>_tNN.latent.safetensors` into the take: `video` and `audio` tensors (split in the
+  node), with `width`, `height`, `frames`, `fps`, target and model in its metadata. The
+  sidecar records `latent: <file>`; without one, the key is absent.
+- Whether a render saves it: `save_latent`, default **on for final, off for proxy** (proxy is
+  never upscaled). The series config's `upscale.save_latents: "final" | "always" | "never"`
+  sets the default; `RenderRequest.save_latent`, `h3render --latent / --no-latent` and the
+  Render dialog override it for one run. About 4.3 MB per 3 s at 960×544, about twice that
+  at 1344×768.
+- The target's binding names where the latent comes from
+  (`binding.latent: {"class_type": "SamplerCustomAdvanced", "output": 0}`); `graph_for`
+  links it into the saver when `save_latent` is on. A target without the key never saves one.
+- Discarding a take deletes its latent. `h3.py upscale --prune-latents <ep>` deletes the
+  latents of takes the cut doesn't pick, and of takes whose upscale is done and fresh.
+
+**13b — the upscale of a take**
+- It is a **version of the take, not a new take**: `<shot>_tNN.up.mp4` beside the take, with
+  `<shot>_tNN.up.json` (the take's mp4 sha1, route `latent` | `vae`, scale, start step and
+  steps, seed, model, upscaler file, size, seconds, when). Picking t02 means t02's upscale
+  when it has a fresh one. It goes stale when the take's mp4 changes (an overwrite).
+  Discarding the take discards it.
+- Final takes only. A proxy take is not offered one.
+- The graph is the target's render graph with a different start, declared in `target.json`
+  (`upscale`: the upscaler class and file, default scale, start step): the loader reads the
+  take's **frozen shotlist** at `resolution_override` = the scaled size, so the prompt and
+  references are encoded exactly as for the take, at the new size; the take's seed; the
+  latent comes from a new `H3LoadTakeLatent` node (core `LoadLatent` only reads ComfyUI's
+  input folder), then `MinimaxH3LatentUpscaler3D` (temporal chunking on), rejoined with the
+  audio latent; the preset's sigmas through `SplitSigmas` at the start step (default 7 of 8: one step).
+- **The VAE route**, for a take with no latent: the take's frames through the video VAE and
+  its audio through the audio VAE, then the same graph. Slower and slightly lossier, and so
+  the log and the `.up.json` say which route was used. **Untested in the spike: the first
+  thing to prove.**
+- **Audio is the take's own, and the picture is re-sampled against it.** H3 samples picture
+  and sound together and the mouth follows the audio in the sample, so the take's audio
+  latent goes in **held**: masked out of the noise and seen clean at every step, the way the
+  spike held it (obvpm's `H3JointAudioMask` at `audio_denoise` 0). Lips are re-drawn to the
+  finished line; timing and frame count are the take's. This needs our own small node
+  (`H3HoldAudio`: a per-token noise mask that keeps the audio stream at zero denoise); the
+  obvpm pack is GPL and not a dependency. On the VAE route the held audio is the take's
+  audio encoded. When the job finishes the take's audio stream is copied onto the upscaled
+  picture (`ffmpeg -c:a copy`), so what plays is bit-identical to the take, not a VAE round
+  trip. A cut entry's `audio` source (Phase 9d) is unaffected: assemble lays it as it does
+  now.
+- Scale: 2x by default, 1.5x allowed, sizes aligned to 32. 960×544 → 1920×1088;
+  1344×768 → 2688×1536.
+- Targets: `minimax_h3_ref2va` first. `minimax_h3_fl2va` shares the model but conditions on
+  keyframes, `ltx2` has its own latent upscaler (already in INSTALL.md), Wan has none; each
+  is a follow-up. A target without `upscale` greys the menu item out and says why.
+- New requirement, for upscaling only: the `Comfyui_Minimax_h3_latent_Upscaler` pack
+  (LBH-123-AI, not the "Plus" fork: same node id, no temporal chunking) and
+  `minimax_h3_latent_upscaler_3d_fp16.safetensors` in `models/latent_upscale_models/`, in the
+  target's `downloads` (INSTALL.md regenerated). Readiness reports it; a render never needs it.
+
+**13c — where you run it**
+- CLI: `h3.py upscale <ep> [--only sh760,sh770] [--redo] [--scale 2] [--start-step 7]
+  [--check]`. Without `--only`: every take the final cut picks that has no fresh upscale.
+  `--check` lists the jobs, each one's route and an estimated time, and queues nothing.
+- Routes: `POST /h3pipe/upscale {ep, shots? | takes?, redo?, scale?}`, queued and reported
+  like renders; `DELETE /h3pipe/upscale {ep, shot, take}` removes one. Contract in
+  `docs/API.md`.
+- Editor: **Upscale** on a final take's context menu in the Shots tab and on a timeline
+  clip's, **Upscale the cut** in the cut menu; a `2x` badge on a take and a clip that has a
+  fresh upscale, and a stale badge when it isn't fresh; the Viewer toggles between the take
+  and its upscale.
+- Assemble: `--upscaled` uses each clip's fresh upscale. The output size is the upscale's
+  size (or `--size WxH`), and clips without one are scaled up by the existing `conform`,
+  which names them. Without the flag nothing changes. 1920×1088 to 1920×1080 is
+  `--size 1920x1080` through the same letterbox/crop path.
+
+**Exit check** (a scratch copy of an episode): render one final shot with a latent, and the
+file and the sidecar key are there; `h3.py upscale --only` it: `.up.mp4` at 2x whose audio
+stream is byte-identical to the take's; delete the latent, `--redo`, and the VAE route
+produces a comparable clip and says so; a proxy render writes no latent; the Shots tab and
+timeline menu items upscale one clip each; `h3assemble --upscaled` writes the cut at 2x with
+the one clip that wasn't upscaled scaled and named; `h3assemble` without it is unchanged.
+`python -m pytest` green; this phase changes no build output, so the goldens must not move.
+
+**Phase 13 risks**
+- **Lip sync.** Held audio fixes timing, and at step 7 the mouth matched the take on the one
+  dialogue shot measured (sh330). Earlier start steps re-draw it: more detail, and a mouth
+  that no longer matches the take. Check a few more dialogue shots, a true close-up among
+  them, before making step 7 the only default; a shot without dialogue could take step 6
+  for more detail.
+- **Faces move** as the start step goes down. `--start-step` is per run so one shot can
+  trade detail for fidelity.
+- **Length and VRAM.** Only a 3 s shot was measured. A 6–8 s shot at 2x may need
+  obvpm-style windowing (`H3ContextWindows`); measure before promising the long ones.
+- The upscaler pack is one author's, and its "Plus" fork registers the same node id with
+  different widgets. Readiness should check the node has `enable_temporal_chunking`.
 
 ## Story IR — `shotlist/shots.json` (Phase 6)
 

@@ -506,9 +506,59 @@ order to change the clothes. A variant keeps the identity lock and swaps the pic
 costs nothing on the other targets: LTX-2 and Wan have no reference images and read the
 `design` sentence, which is already the variant's.
 
-**A change that happens on camera** — a coat coming off mid-shot — stays in the action line.
-A variant is for a state a shot is *in*, not a change it *makes*. Cut to a new shot when the
-new state has to hold.
+A variant is for a state a shot is *in*, not a change it *makes*.
+
+### Never show the change itself
+
+No video model today can take a hat off, pull on a glove or shrug out of a jacket and keep it
+off. The item comes back, doubles, or melts into the hands, and the next shot puts the sheet's
+version straight back on him. So **a shot's wardrobe is fixed from its first frame to its last,
+and it is what the subject's sheet shows.** Don't write dressing or undressing into an action
+line: not taking off a hat, gloves or glasses, not hanging up a coat, not stepping into
+coveralls or tying on an apron. Small things matter most, because they are the easiest to
+forget. A mesh glove pulled off in one shot is back on in the next, because nothing told the
+next shot it was gone.
+
+When the story needs the change, cut around it:
+
+- **Start it, then cut.** Show only the beginning (his hand going to the brim, fingers on the
+  zipper) and end the shot there. The next shot is already in the new state.
+- **Land on an insert.** Cut to the item or the hands, not the face: the hard hat held against
+  his chest, framed below the chin, or a bare forearm hanging the navy jacket on a locker hook.
+  Make the item a prop (`with: hard_hat`) and keep the character out of `who:`, or frame it
+  tight enough that only the hands show. An insert has no face to drift and needs no new sheet.
+- **Cut away.** Go to the other character's line or reaction, then come back to the variant.
+- **Change off screen.** End one scene in the old clothes and open the next in the new ones.
+  Luis walks into the locker room in his jacket, and the next scene finds him on the line as
+  `luis_plant`.
+- **Don't change at all.** The gesture is often not needed. Glasses can be looked over or
+  pushed up instead of taken off, and a man can fold his hands and wait with his hat still on.
+
+Once the new state is on screen it holds. Every later shot of that character names the
+variant until another cut brings the old clothes back, so add the variant (a design sentence
+that says what is gone: "no hard hat, a hairnet over short grey hair") before writing the
+shots that need it. Its sheet is an edit of the original's views, so it's cheap.
+
+For example, the hat coming off in Kemp's office. Written as an action, the hat is on again
+two shots later:
+
+```
+## sh320
+who: luis_plant
+Standing just inside the door, Luis takes off his hard hat and holds it in both hands, ...
+```
+
+Instead, let Kemp's shot before it be the cut-away, and have Luis enter his next shot already
+bareheaded, holding the hat as a prop:
+
+```
+## sh320
+who: luis_plant_bareheaded
+with: hard_hat
+Standing just inside the door, Luis holds his hard hat in both hands against his chest, ...
+```
+
+and every later shot of him in the office is `luis_plant_bareheaded` too.
 
 ## The script: epNN.md
 
