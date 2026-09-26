@@ -214,6 +214,8 @@ which ones your ComfyUI can render.
   save the disk space, a few MB a take; an upscale then goes through the VAE).
 - Resolution must be a multiple of 32 on both axes for H3. **1280×720 is illegal**, because
   720 is not. 1344×768 is H3's native canvas. The other targets snap it to their own sizes.
+  Whether the final pass renders at the size you deliver, or smaller and is upscaled, is
+  **Final resolution** below.
 - `steps`, `lora` and `model` are optional per pass; see the README's **Steps, model and LoRA**.
 - `series.target` names the video model the episode renders on: `minimax_h3_ref2va`
   (MiniMax H3, the default: leave it out), `ltx2` (LTX-2.5 distilled), `ltx2_ingredients`
@@ -223,6 +225,46 @@ which ones your ComfyUI can render.
   character sheets). Single shots or sequences can render on another one; see
   **Rendering a shot on LTX-2**, **Rendering a shot on H3 from keyframes** and **Rendering a
   shot on Wan 2.2** below.
+
+### Final resolution: render at size, or render small and upscale
+
+`series.width` / `series.height` is the size every final take renders at. There are two
+ways to use it:
+
+| | final renders at | a 3 s take | the picked takes | you deliver |
+|---|---|---|---|---|
+| **Render at size** (the default) | 1344×768 | ~53 s | as rendered | 1344×768 |
+| **Render small, upscale** | 960×544 | ~20 s | `h3.py upscale`: 2x, ~25–35 s each, picks only | 1920×1088 (`h3.py assemble --upscaled --size 1920x1080`) |
+
+(Measured on an RTX 5090 with the 8-step turbo LoRA. The proxy pass stays 448×256 either way.)
+
+- **Render small and upscale** when the episode renders on `minimax_h3_ref2va` and this
+  ComfyUI has the latent upscaler (`python h3.py targets` says `upscale ready`; INSTALL.md,
+  **For upscaling**). Every take you try costs under half as much, and only the ones the cut
+  keeps are upscaled, once, after the cut is locked. The upscale re-samples the take from
+  late in its schedule under its own prompt, references and seed, with its audio held, so
+  the performance and the lip sync are the take's; it adds detail a 960×544 frame is short
+  of (faces in wide shots, hands, small props).
+- **Render at size** when shots render on other targets (LTX-2 and Wan can't be upscaled
+  yet: their clips are scaled up plainly in an upscaled cut), when the upscaler isn't
+  installed, or when 1344×768 is the delivery. Upscaling a 1344×768 take to 2688×1536 works
+  but adds little: that frame already holds most of what the model can draw.
+- The two don't mix within a pass: pick one per series. Switching later only changes the
+  takes rendered after the switch.
+
+**Writing a new series config for someone**, ask once which of the two they want, unless
+they already said (a delivery size, "upscale", "fast iterations"). With no answer, write
+1344×768: it renders on every target with nothing extra installed. For an existing series
+config, never change the size unasked.
+
+```json
+"series": { "id": "porchlight", "title": "Porchlight", "fps": 24,
+            "width": 960, "height": 544, "steps": 8 }
+```
+
+An upscale starts 7/8 of the way through the take's schedule (step 7 of 8), which keeps a
+speaking mouth exactly as the take had it. A shot with no dialogue can take more detail with
+`h3.py upscale <ep> --only sh100 --redo --start-step 5` (more change: check it).
 
 ### Render profiles
 

@@ -1700,6 +1700,41 @@ timeline menu items upscale one clip each; `h3assemble --upscaled` writes the cu
 the one clip that wasn't upscaled scaled and named; `h3assemble` without it is unchanged.
 `python -m pytest` green; this phase changes no build output, so the goldens must not move.
 
+**13d — upscale on LTX and Wan (planned 2026-09-26, not started).** What each needs, from
+what this machine and the repo have today. Nothing below is built; each target gets an
+`upscale` block in its target.json and its own graph surgery in h3upscale.
+
+- **`ltx2` (LTX-2.5 distilled): no new nodes, no new downloads.** Its render graph is
+  already two-stage: `LatentUpscaleModelLoader` + `LTXVLatentUpsampler` with
+  `ltx-2.5-latent-spatial-upscaler-x2-bf16-1.0.safetensors` (its required `upscaler`
+  param, installed) and a second `SamplerCustomAdvanced` on `ManualSigmas`. An upscale is
+  that second stage run again on the take: the take's latent (`saver.latent` names the
+  final sampler) through `LTXVLatentUpsampler`, then a short tail of the distilled sigmas at
+  2x, conditioned as the take was (the graph is loader-less: width/height patched as
+  widgets), audio held. LTX's AV latent is the same NestedTensor pair, so `H3HoldAudio`
+  works on it (worth a target-neutral name). 768×512 → 1536×1024. To find out: whether a
+  2x of the *final* output fits and is worth it, and how much of the tail keeps the mouth.
+- **`ltx2_ingredients` (LTX-2.3 + IC-LoRA): no new downloads**
+  (`ltx-2.3-spatial-upscaler-x2-1.1.safetensors` is in `latent_upscale_models`, and
+  `LTXVLatentUpsampler` is core). Harder: the reference sheet goes in as IC-LoRA guides
+  (`LTXVAddGuide` / `LTXVCropGuides`) that must be rebuilt at the new size.
+- **Wan 2.2 (`wan22_i2v`, `wan22_ti2v`, `wan22_vace`): the VAE route only.** No latent
+  upscaler for Wan's VAE is on record here, so: the take's frames scaled 2x in pixels (core
+  `ImageScaleBy`, lanczos; or an ESRGAN-class model through core `UpscaleModelLoader` +
+  `ImageUpscaleWithModel`, which needs a file in `models/upscale_models/`, empty on this
+  machine), `VAEEncode` with the Wan VAE, then the take's own model (the 14B low-noise
+  expert; the 5B for ti2v) through `KSamplerAdvanced` from late in the schedule at the new
+  size, with the take's prompt, and the first frame (i2v) or references (VACE) at the new
+  size. Silent, so no audio to hold: an upscale copies nothing. 832×480 → 1664×960; ti2v's
+  1280×704 → 2560×1408 is too big, so 1.5x (1920×1056) there.
+- **Any target, custom ones too: a pixel-space video upscaler, to evaluate.** SeedVR2
+  (ByteDance) is a one-step video restoration/upscale model with a community ComfyUI node
+  pack (numz's `ComfyUI-SeedVR2_VideoUpscaler`, 3B and 7B models); verify the pack, its
+  model files and its licence before depending on it. It needs no prompt or references (so
+  it can't pull a face toward a sheet, or away from one), works on any take and would give
+  Wan and custom targets an upscale without per-target graphs. To measure: VRAM and time
+  at 1080p, and whether it flickers across a 3–8 s clip.
+
 **Phase 13 risks**
 - **Lip sync.** Held audio fixes timing, and at step 7 the mouth matched the take on the one
   dialogue shot measured (sh330). Earlier start steps re-draw it: more detail, and a mouth

@@ -3,7 +3,7 @@
 From a clean ComfyUI to a rendered proxy episode. Windows first (the development
 machine); the Linux/macOS differences are called out where they exist.
 
-What you end up with: a `custom_nodes` pack that adds five nodes and the editor to
+What you end up with: a `custom_nodes` pack that adds nine nodes and the editor to
 ComfyUI, a `h3.py` command line, and one episode folder holding a series config, a
 script, and everything the pipeline generated from them.
 
@@ -51,6 +51,7 @@ Two different Pythons are in play, and it matters which one gets what:
 | `pip install pillow` | on the command line only, and only for the steps that cut pictures: picking the fourth view of a character sheet (it stitches), and generating a wardrobe variant's view as an edit of the character's (it crops that panel out of their sheet). The editor never needs it — ComfyUI's Python has PIL |
 | `pip install pytest` | `python -m pytest` for the test suite. Optional: `python -m unittest discover -s tests` runs the same tests with nothing installed |
 | Node.js 20+ and `npm install` in `web/` | rebuilding the editor UI. Only if you change `web/`; the built bundle is committed |
+| The Comfyui_Minimax_h3_latent_Upscaler node pack and its model (**The upscaler**, below) | `h3.py upscale` and the editor's Upscale: a final H3 take at 2x, so the final pass can render at 960×544 |
 
 **Which Python runs what.** There is no global "try ComfyUI's, fall back to system". Each
 part picks deliberately:
@@ -183,6 +184,28 @@ Three checks, weakest to strongest:
 Open **h3 Shots** and set your **project roots** — the folders holding your episodes. That
 is stored in `user/default/h3pipe/config.json`; every episode the editor touches has to
 live inside one of them.
+
+### The upscaler (optional)
+
+Only for upscaling final takes (`h3.py upscale`, the editor's **Upscale**); a render never
+needs it. Today it upscales takes made on `minimax_h3_ref2va`.
+
+1. Clone **LBH-123-AI/Comfyui_Minimax_h3_latent_Upscaler** into `custom_nodes`:
+   ```
+   cd C:\AI\ComfyUI\ComfyUI\custom_nodes
+   git clone https://github.com/LBH-123-AI/Comfyui_Minimax_h3_latent_Upscaler
+   ```
+   **Not its "Plus" fork**: that registers the same node without temporal chunking, and the
+   re-sample then invents detail (sparkles on hair, marks on faces). Only one of the two can
+   be installed.
+2. Put `minimax_h3_latent_upscaler_3d_fp16.safetensors` in `models/latent_upscale_models/`
+   (the pack's README links its Hugging Face repo; section 4, **For upscaling**).
+3. Restart ComfyUI. `python h3.py targets` then prints `upscale  ready` under
+   `minimax_h3_ref2va`, or names what's missing.
+
+The other nodes an upscale uses (H3 Load Take Latent, Load Take Video, Hold Audio, Save
+Upscale) are h3pipe's own and come with its node pack (section 2); after updating h3pipe,
+restart ComfyUI so it loads them.
 
 ---
 
@@ -652,6 +675,15 @@ Then the full-size pass, once the animatic reads right:
 ```
 python h3.py render   Shows\ep01
 python h3.py assemble Shows\ep01          # -> renders\ep01.mp4
+```
+
+With the upscaler installed and the final pass rendering at 960×544 (docs/AUTHORING.md,
+**Final resolution**), the picked takes go to 2x once the cut is locked:
+
+```
+python h3.py upscale  Shows\ep01 --check  # what it would upscale, and how
+python h3.py upscale  Shows\ep01          # the cut's final takes -> <take>.up.mp4
+python h3.py assemble Shows\ep01 --upscaled --size 1920x1080   # -> renders\ep01_up.mp4
 ```
 
 `python h3.py all Shows\ep01 --proxy` runs build → refs → render → assemble in one go.
