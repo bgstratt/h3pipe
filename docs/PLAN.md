@@ -1612,6 +1612,15 @@ of their `.mctx` / `.cond` files: a take's frozen shotlist already says how it w
 - Discarding a take deletes its latent. `h3.py upscale --prune-latents <ep>` deletes the
   latents of takes the cut doesn't pick, and of takes whose upscale is done and fresh.
 
+- **As built** (2026-09-26, commit 64b9295). Live check against the real ComfyUI on a scratch
+  copy of Porchlights ep01: sh760 at the final pass kept `sh760_t01.latent.safetensors`
+  (8.5 MB at 1344×768: video `(1, 24, 22, 48, 84)`, audio `(1, 32, 2, 122)`, written in
+  5 ms), and its sidecar says `save_latent: true` and `latent`; the proxy render kept none.
+  The mp4 is **byte-identical** to ep01's own sh760 t02 at the same seed, so linking the
+  latent changes nothing about a render. The Render dialog opens only when a batch has
+  something blocked, so the per-run switch is the redo dialog's; a batch follows the series
+  config.
+
 **13b — the upscale of a take**
 - It is a **version of the take, not a new take**: `<shot>_tNN.up.mp4` beside the take, with
   `<shot>_tNN.up.json` (the take's mp4 sha1, route `latent` | `vae`, scale, start step and
