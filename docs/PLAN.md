@@ -1634,7 +1634,7 @@ of their `.mctx` / `.cond` files: a take's frozen shotlist already says how it w
   references are encoded exactly as for the take, at the new size; the take's seed; the
   latent comes from a new `H3LoadTakeLatent` node (core `LoadLatent` only reads ComfyUI's
   input folder), then `MinimaxH3LatentUpscaler3D` (temporal chunking on), rejoined with the
-  audio latent; the preset's sigmas through `SplitSigmas` at the start step (default 7 of 8: one step).
+  audio latent; the preset's sigmas through `SplitSigmas` at the start step: `start` in target.json, a fraction of the take's own schedule (0.875: step 7 of 8, step 5 of 6, step 18 of the no-turbo base preset's 20), so every take starts at about the same noise level; `--start-step` is an exact step.
 - **The VAE route**, for a take with no latent: the take's frames through the video VAE and
   its audio through the audio VAE, then the same graph. Slower and slightly lossier, and so
   the log and the `.up.json` say which route was used. **Untested in the spike: the first

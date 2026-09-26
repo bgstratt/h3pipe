@@ -4,6 +4,10 @@ plus the h3pipe editor's routes (docs/API.md) and its frontend (web/)."""
 import logging
 
 from .h3_shotlist import NODE_CLASS_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS
+from .h3_upscale import NODE_CLASS_MAPPINGS as _UPSCALE, NODE_DISPLAY_NAME_MAPPINGS as _UPSCALE_NAMES
+
+NODE_CLASS_MAPPINGS = {**NODE_CLASS_MAPPINGS, **_UPSCALE}
+NODE_DISPLAY_NAME_MAPPINGS = {**NODE_DISPLAY_NAME_MAPPINGS, **_UPSCALE_NAMES}
 
 WEB_DIRECTORY = "./web"
 

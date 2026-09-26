@@ -120,6 +120,14 @@ class TakePaths:
     def strip(self) -> str: return self._p("_strip.jpg")
     @property
     def h3_wav(self) -> str: return self._p("_h3.wav")
+    # Phase 13: the take's kept latent, and its upscale (a version of the take,
+    # not a take: take_numbers doesn't match these names)
+    @property
+    def latent(self) -> str: return self._p(".latent.safetensors")
+    @property
+    def up_mp4(self) -> str: return self._p(".up.mp4")
+    @property
+    def up_sidecar(self) -> str: return self._p(".up.json")
 
 
 def take_paths(root: str, pass_: str, shot_id: str, take: int,
@@ -293,6 +301,31 @@ def get_take(root: str, pass_: str, shot_id: str, take: int,
     if not (os.path.isfile(tp.sidecar) or os.path.isfile(tp.mp4)):
         return None
     return Take(shot_id, take, pass_, tp, read_sidecar(tp.sidecar))
+
+
+def source_stamp(path: str) -> dict:
+    """What an upscale records about the take it was made from, so it can tell
+    later whether the take is still that one: size and mtime (cheap) and sha1."""
+    st = os.stat(path)
+    return {"source_size": st.st_size, "source_mtime_ns": st.st_mtime_ns,
+            "source_sha1": file_sha1(path)}
+
+
+def upscale_of(take: Take) -> dict | None:
+    """The take's upscale record (<stem>.up.json) with `fresh` added: finished,
+    its mp4 there, and made from the take's mp4 as it is now (size and mtime
+    match, or failing that its sha1). None: the take has never been upscaled."""
+    data = read_sidecar(take.paths.up_sidecar)
+    if data is None:
+        return None
+    fresh = False
+    if data.get("status") == "ok" and os.path.isfile(take.paths.up_mp4) and take.has_video:
+        st = os.stat(take.paths.mp4)
+        same = (data.get("source_size") == st.st_size
+                and data.get("source_mtime_ns") == st.st_mtime_ns)
+        fresh = same or (data.get("source_sha1") is not None
+                         and data.get("source_sha1") == file_sha1(take.paths.mp4))
+    return {**data, "fresh": fresh}
 
 
 def latest_usable(takes: list[Take]) -> Take | None:

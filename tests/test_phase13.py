@@ -6,6 +6,10 @@ config's `upscale.save_latents`, else final-only), only on a target whose
 binding says where its latent comes from (`saver.latent`), and the build's
 warning for a value it doesn't know. H3SaveShot's side (writing and loading
 the file) is in test_save_node.py; the route's in test_api.py.
+
+13b, the upscale of a take (h3upscale.py): what it refuses, when an upscale
+is fresh, and the graph it builds from the target's render graph on both
+routes. The nodes it adds are in test_upscale_nodes.py.
 """
 from __future__ import annotations
 
@@ -21,6 +25,7 @@ sys.path.insert(0, ROOT)
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(ROOT, "comfy_nodes"))
 import h3build  # noqa: E402
+import h3upscale as U  # noqa: E402
 import h3jobs as J  # noqa: E402
 import h3pipe_api as A  # noqa: E402
 import h3takes as T  # noqa: E402
@@ -103,6 +108,123 @@ class LatentRouteTest(ApiTest):
         sc = T.get_take(self.ep, "final", "sh010", 1).sidecar
         self.assertNotIn("save_latent", sc)
         self.assertTrue(any("no latent is kept" in n for n in sc.get("notes", [])), sc)
+
+
+WORKFLOW = os.path.join(ROOT, "targets", "video", "minimax_h3_ref2va", "workflow.json")
+
+
+class UpscaleTest(ApiTest):
+    def final_take(self, shot="sh010", latent=True, wav=True) -> T.Take:
+        self.render(shot, pass_="final")
+        t = T.get_take(self.ep, "final", shot, 1)
+        if latent:
+            with open(t.paths.latent, "wb") as fh:
+                fh.write(b"latent")
+            T.update_sidecar(t.paths.sidecar, latent=os.path.basename(t.paths.latent))
+        if wav:
+            with open(t.paths.h3_wav, "wb") as fh:
+                fh.write(b"RIFF")
+        return T.get_take(self.ep, "final", shot, 1)
+
+    def base(self) -> dict:
+        return J.graph_from(json.load(open(WORKFLOW, encoding="utf-8")))
+
+    def by_class(self, g, ctype):
+        return [k for k, v in g.items() if v["class_type"] == ctype]
+
+    def test_latent_route_graph(self):
+        t = self.final_take()
+        sc = t.sidecar
+        up = U.plan_upscale(self.ep, t)
+        # the start is 7/8 of the take's own schedule: kitchen_sink's final pass has 6 steps
+        self.assertEqual(sc["steps"], 6)
+        self.assertEqual((up.action, up.route, up.scale, up.start_step), ("upscale", "latent", 2.0, 5))
+        self.assertEqual((up.width, up.height), (sc["width"] * 2, sc["height"] * 2))
+        g = U.upscale_graph(self.base(), up)
+        loader = g[self.by_class(g, "H3ShotListLoader")[0]]["inputs"]
+        self.assertEqual(loader["resolution_override"], f"{up.width}x{up.height}")
+        self.assertEqual(os.path.normpath(os.path.join(self.ep, loader["shotlist_file"])),
+                         os.path.normpath(t.paths.shotlist))          # the take's frozen shotlist
+        sampler = g[self.by_class(g, "SamplerCustomAdvanced")[0]]["inputs"]
+        self.assertEqual(sampler["latent_image"], ["up_hold", 0])
+        self.assertEqual(sampler["sigmas"], ["up_sigmas", 1])
+        self.assertEqual(g["up_sigmas"]["inputs"]["step"], 5)
+        self.assertEqual(g["up_hold"]["inputs"]["latent"], ["up_join", 0])
+        self.assertEqual(g["up_join"]["inputs"]["audio_latent"], ["up_split_av", 1])  # audio untouched
+        self.assertEqual(g["up_scale"]["inputs"]["latent"], ["up_split_av", 0])
+        self.assertEqual(g["up_scale"]["inputs"]["mode.scale"], 2.0)
+        self.assertTrue(g["up_scale"]["inputs"]["enable_temporal_chunking"])
+        self.assertEqual(g["up_source"]["class_type"], "H3LoadTakeLatent")
+        save = g["up_save"]["inputs"]
+        self.assertTrue(save["out_mp4"].endswith(".up.mp4"))
+        self.assertTrue(save["sidecar"].endswith(".up.json"))
+        self.assertEqual(os.path.normpath(os.path.join(self.ep, save["source_mp4"])),
+                         os.path.normpath(t.paths.mp4))
+        # the take's own saver and audio decode are gone: the audio is copied
+        self.assertFalse(self.by_class(g, J.SAVER))
+        self.assertFalse(self.by_class(g, "VAEDecodeAudio"))
+
+    def test_vae_route_encodes_the_take_and_its_h3_mix(self):
+        t = self.final_take(latent=False)
+        up = U.plan_upscale(self.ep, t)
+        self.assertEqual(up.route, "vae")
+        g = U.upscale_graph(self.base(), up)
+        self.assertEqual(g["up_video"]["class_type"], "H3LoadTakeVideo")
+        self.assertTrue(g["up_video"]["inputs"]["audio_file"].endswith("_h3.wav"))
+        decode_vae = g[self.by_class(g, "VAEDecode")[0]]["inputs"]["vae"]
+        self.assertEqual(g["up_venc"]["inputs"]["vae"], decode_vae)
+        self.assertEqual(g["up_source"]["class_type"], "LTXVConcatAVLatent")
+        self.assertEqual(g["up_split_av"]["inputs"]["av_latent"], ["up_source", 0])
+        # a take with no H3 mix: the mp4's audio
+        os.remove(t.paths.h3_wav)
+        g = U.upscale_graph(self.base(), U.plan_upscale(self.ep, t))
+        self.assertEqual(g["up_video"]["inputs"]["audio_file"], "")
+
+    def test_refusals(self):
+        t = self.final_take(latent=False)
+        self.assertEqual(U.plan_upscale(self.ep, t, route="latent").action, "error")
+        self.assertEqual([U.start_of(n, {}) for n in (8, 6, 20, 4, 1)], [7, 5, 18, 3, 0])
+        bad = U.plan_upscale(self.ep, t, start_step=6)
+        self.assertEqual(bad.action, "error")
+        self.assertIn("start step", bad.why)
+        self.render("sh010")
+        proxy = U.plan_upscale(self.ep, T.get_take(self.ep, "proxy", "sh010", 1))
+        self.assertEqual(proxy.action, "error")
+        self.assertIn("only final takes", proxy.why)
+        with self.assertRaises(U.UpscaleError):
+            U.scaled(960, 544, 1.5)                      # 816 isn't a multiple of 32
+        self.assertEqual(U.scaled(1344, 768, 1.5), (2016, 1152))
+
+    def test_fresh_until_the_take_changes(self):
+        t = self.final_take()
+        self.assertIsNone(T.upscale_of(t))
+        up = U.plan_upscale(self.ep, t)
+        U.start(up)
+        self.assertEqual(T.upscale_of(t)["status"], "queued")
+        self.assertFalse(T.upscale_of(t)["fresh"])
+        with open(t.paths.up_mp4, "wb") as fh:
+            fh.write(b"up")
+        T.update_sidecar(t.paths.up_sidecar, status="ok")
+        self.assertTrue(T.upscale_of(t)["fresh"])
+        self.assertEqual(U.plan_upscale(self.ep, t).action, "skip")
+        self.assertEqual(U.plan_upscale(self.ep, t, redo=True).action, "upscale")
+        # the take re-rendered into the same number: the upscale is stale
+        with open(t.paths.mp4, "ab") as fh:
+            fh.write(b"more")
+        self.assertFalse(T.upscale_of(t)["fresh"])
+        self.assertEqual(U.plan_upscale(self.ep, t).action, "upscale")
+        # an upscale is never listed as a take, and discarding the take takes it along
+        self.assertEqual(T.take_numbers(self.ep, "final", "sh010"), [1])
+        stems = T.stem_files(t.paths.dir, t.paths.stem)
+        self.assertIn(t.paths.up_mp4, stems)
+        self.assertIn(t.paths.up_sidecar, stems)
+
+    def test_cut_takes_follow_the_final_cut(self):
+        self.final_take("sh010")
+        got = {shot: (take.take if take else None) for shot, take, _ in U.cut_takes(self.ep)}
+        self.assertEqual(got.get("sh010"), 1)
+        only = U.cut_takes(self.ep, {"sh010"})
+        self.assertEqual([s for s, _, _ in only], ["sh010"])
 
 
 if __name__ == "__main__":
