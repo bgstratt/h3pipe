@@ -1700,6 +1700,16 @@ timeline menu items upscale one clip each; `h3assemble --upscaled` writes the cu
 the one clip that wasn't upscaled scaled and named; `h3assemble` without it is unchanged.
 `python -m pytest` green; this phase changes no build output, so the goldens must not move.
 
+- **As built** (2026-09-26; commits 6e9ae25 backend, fe53f9c editor). Live against the real
+  ComfyUI on the scratch episode: `DELETE /h3pipe/upscale` removed sh760 t02's upscale (404
+  the second time); `POST /h3pipe/upscale {"shots": ["sh760"]}` queued it on the latent route
+  and the episode status showed it `ok` and fresh at 1920×1088 32 s later; `POST
+  /h3pipe/assemble` with `upscaled` and `size: 1920x1080` wrote `ep01_up.mp4` at 1920×1080;
+  `upscaled` on the proxy pass is a 400. `h3.py targets` reports `upscale ready`; `h3.py
+  upscale --check` and `--prune-latents --check` list what they would do. The editor's menus,
+  badges, viewer toggle and Export 2x were checked by type and unit tests and the mock API;
+  the look of them is the user's to confirm.
+
 **13d — upscale on LTX and Wan (planned 2026-09-26, not started).** What each needs, from
 what this machine and the repo have today. Nothing below is built; each target gets an
 `upscale` block in its target.json and its own graph surgery in h3upscale.
