@@ -16,6 +16,10 @@ your projects, with the pipeline scripts beside it (see the README).
     python h3.py refs     Shows\\ep05 --list     # kreagen: generate missing reference images
     python h3.py render   Shows\\ep05 --proxy    # h3render: queue shots on ComfyUI
     python h3.py assemble Shows\\ep05 --proxy    # h3assemble: join renders into one mp4
+    python h3.py upscale  Shows\\ep05            # h3upscale: the final cut's takes at 2x
+                                                    # (--only sh020, --take N, --start-step N,
+                                                    #  --vae, --redo, --check, --prune-latents)
+    python h3.py assemble Shows\\ep05 --upscaled # the final cut from its upscales
     python h3.py all      Shows\\ep05 --proxy    # build -> refs -> render -> assemble
     python h3.py all      Shows\\ep05 --proxy --skip-build
                                                     # refs -> render -> assemble, using the
@@ -189,6 +193,13 @@ def main() -> int:
         sys.path.insert(0, HERE)
         import h3refs
         return h3refs.cmd_supply(os.path.abspath(argv[1]), argv[2:])
+    if argv and argv[0] == "upscale":
+        if len(argv) < 2 or argv[1].startswith("-"):
+            sys.exit("  !! usage: python h3.py upscale <episode> [--only sh020,...] [--take N] "
+                     "[--start-step N] [--vae] [--redo] [--check] [--prune-latents]")
+        sys.path.insert(0, HERE)
+        import h3upscale
+        return h3upscale.main(argv[1:])
     if argv and argv[0] == "targets":
         # the episode is optional: it adds its series config (pass blocks,
         # model_families) and marks its target

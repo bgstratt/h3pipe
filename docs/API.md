@@ -318,6 +318,53 @@ when it's done (can take minutes).
 ```json
 {"ok": true, "output": "renders_proxy/ep05_proxy.mp4", "report": "…stdout…"}
 ```
+Phase 13 adds `"upscaled": true` (final pass only, else 400): each clip plays its take's
+fresh upscale, the cut is the upscales' size and is written as `<ep>_up.mp4`, and clips
+without one are scaled up (the report names them). `"size": "1920x1080"` sets the cut's
+size, letterboxing a clip whose aspect differs. `h3.py assemble <ep> --upscaled [--size WxH]`
+is the same.
+
+## Upscale (Phase 13)
+
+An upscale is a version of a final take, not a take: `<stem>.up.mp4` and `<stem>.up.json`
+beside it (h3upscale.py; docs/PLAN.md Phase 13). It re-samples the take at 2x from late in
+its own schedule (the target's `start`, 0.875: step 7 of 8) under the take's frozen
+shotlist, from its kept latent (Phase 13a) or, without one, its frames and `_h3.wav`
+through the VAE. The take's audio is held while it samples and its audio stream is copied
+onto the result unchanged. Only a target with an `upscale` block in its target.json
+(`minimax_h3_ref2va`) can upscale.
+
+### `POST /h3pipe/upscale`
+Body `{"ep", "shots"?: ["sh020"] | null, "takes"?: [{"shot", "take"}], "redo"?: false,
+"scale"?: 2, "start_step"?: null, "vae"?: false}`. `shots` upscales the final cut's take
+of each (the pick, else the latest usable; null: the whole final cut); `takes` names
+final takes directly and wins. A take with a fresh upscale is skipped unless `redo`.
+`vae` forces the VAE route; `start_step` is an exact step of the take's schedule.
+Queues and returns at once:
+```json
+{"queued": [{"shot": "sh020", "take": 3, "route": "latent", "scale": 2.0, "start_step": 7,
+             "width": 1920, "height": 1088, "prompt_id": "…"}],
+ "skipped": [{"shot": "sh030", "take": 1, "reason": "already upscaled"}],
+ "errors": [{"shot": "sh040", "take": 2, "error": "…"}]}
+```
+409 when the running ComfyUI can't upscale (the reason names what's missing: an
+h3pipe node, the latent upscaler pack or its model file, or the pack's "Plus" fork,
+which has no temporal chunking); 502 when ComfyUI doesn't answer.
+
+### `DELETE /h3pipe/upscale?ep=…&shot=sh020&take=3`
+Removes the take's upscale. 404 when it has none; 409 while ComfyUI still has it queued
+or running.
+
+### A take's `upscale`
+Every take in `GET /h3pipe/episode` has `upscale`: null (a proxy take, or never
+upscaled), else `{"status": "queued" | "ok" | "failed", "fresh", "width", "height",
+"route", "start_step", "comfy_prompt_id", "mp4", "save_notes"}`. `fresh` is false once
+the take's mp4 isn't the one it was made from (re-rendered into the same number).
+
+### Readiness
+`GET /h3pipe/targets?ready=1`: a target that can upscale has `upscale: {"status":
+"ready" | "not_ready" | "unknown", "missing": [sentences]}` beside its render
+readiness, which it never changes.
 
 ## Live updates
 
@@ -333,6 +380,9 @@ knows from `/h3pipe/render`. Two custom events come from the node pack:
   (`renders_proxy` means proxy, anything else final).
 - **`h3pipe.episode`**, `{"ep": "<abs path>"}`, sent after a build, pick, cut or override
   change, so every open editor view can refetch.
+- **`h3pipe.upscale`** (Phase 13), `{"ep", "shot", "take", "status"}`: "queued" from
+  `POST /h3pipe/upscale`, "ok" or "failed" from `H3SaveUpscale` when it closes the
+  `.up.json`, "deleted" from `DELETE /h3pipe/upscale`.
 
 ## Models
 

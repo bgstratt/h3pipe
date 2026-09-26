@@ -93,6 +93,42 @@ def start_of(steps: int, spec: dict) -> int:
     return min(steps - 1, max(0, round(steps * float(spec.get("start", 0.875)))))
 
 
+# the nodes an upscale graph adds to the target's (besides its upscaler)
+UPSCALE_NODES = ("H3LoadTakeLatent", "H3LoadTakeVideo", "H3HoldAudio", "H3SaveUpscale",
+                 "LTXVSeparateAVLatent", "LTXVConcatAVLatent", "SplitSigmas", "VAEEncode",
+                 "VAEEncodeAudio")
+
+
+def upscale_readiness(target: "TG.Target", object_info: dict | None) -> dict | None:
+    """Whether the running ComfyUI can upscale this target's takes (None: the
+    target can't upscale at all). {"status": "ready" | "not_ready" | "unknown",
+    "missing": [sentences]}. Separate from render readiness: a render never
+    needs any of it. The upscaler must be the pack with temporal chunking (its
+    "Plus" fork has the same node id without it, and the refine hallucinates)."""
+    spec = upscale_spec(target)
+    if spec is None:
+        return None
+    if object_info is None:
+        return {"status": "unknown", "missing": []}
+    u = spec["upscaler"]
+    missing = [f"node {c} (update h3pipe's node pack, or ComfyUI, and restart it)"
+               for c in UPSCALE_NODES if c not in object_info]
+    info = object_info.get(u["class_type"])
+    if info is None:
+        missing.append(f"node {u['class_type']}: install the Comfyui_Minimax_h3_latent_Upscaler "
+                       f"pack (LBH-123-AI), not its Plus fork")
+    else:
+        req = (info.get("input") or {}).get("required") or {}
+        if "enable_temporal_chunking" not in req:
+            missing.append(f"{u['class_type']} has no temporal chunking: that is the Plus fork. "
+                           f"Install LBH-123-AI's original pack instead")
+        want = (u.get("inputs") or {}).get("model_name")
+        choices = J.choices_in(object_info, u["class_type"], "model_name")
+        if want and choices is not None and want not in choices:
+            missing.append(f"{want} in models/latent_upscale_models/")
+    return {"status": "not_ready" if missing else "ready", "missing": missing}
+
+
 def plan_upscale(root: str, take: T.Take, *, scale: float | None = None,
                  start_step: int | None = None, route: str | None = None,
                  redo: bool = False) -> UpscaleJob:
@@ -253,6 +289,36 @@ def cut_takes(root: str, only: set[str] | None = None, take_n: int | None = None
     return out
 
 
+def prune_latents(root: str, only: set[str] | None = None,
+                  dry_run: bool = False) -> list[tuple[str, int, str]]:
+    """Delete the latents nothing needs: of final takes the cut doesn't use, and
+    of takes with a fresh upscale (either can still be upscaled, through the
+    VAE). Returns (path, bytes, why) for each; `dry_run` deletes nothing. The
+    sidecar's `latent` goes with the file (and `latent_pruned` says when)."""
+    picked = {shot: take.take for shot, take, _ in cut_takes(root, only) if take is not None}
+    out = []
+    for shot in J.script_order(root):
+        if only is not None and shot not in only:
+            continue
+        for t in T.list_takes(root, PASS, shot):
+            if not os.path.isfile(t.paths.latent):
+                continue
+            up = T.upscale_of(t)
+            why = ("not in the cut" if picked.get(shot) != t.take
+                   else "upscaled" if up and up["fresh"] else None)
+            if why is None:
+                continue
+            out.append((t.paths.latent, os.path.getsize(t.paths.latent), why))
+            if not dry_run:
+                os.remove(t.paths.latent)
+                if t.sidecar is not None and "latent" in t.sidecar:
+                    sc = dict(t.sidecar)
+                    sc.pop("latent")
+                    sc["latent_pruned"] = T.now()
+                    T.write_json(t.paths.sidecar, sc)
+    return out
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -268,6 +334,9 @@ def main(argv=None) -> int:
     ap.add_argument("--vae", action="store_true",
                     help="encode the take's frames even if it kept a latent")
     ap.add_argument("--check", action="store_true", help="list the jobs, queue nothing")
+    ap.add_argument("--prune-latents", action="store_true",
+                    help="delete the latents of final takes the cut doesn't use, and of takes "
+                         "whose upscale is fresh (with --check: only list them)")
     ap.add_argument("--comfy", default="http://127.0.0.1:8188")
     ap.add_argument("--timeout", type=int, default=3600)
     args = ap.parse_args(argv)
@@ -275,6 +344,14 @@ def main(argv=None) -> int:
     root = os.path.abspath(args.episode)
     TG.add_thread_root(root)
     only = {s.strip() for s in args.only.split(",")} if args.only else None
+    if args.prune_latents:
+        gone = prune_latents(root, only, dry_run=args.check)
+        for path, _, why in gone:
+            print(f"  {'-' if args.check else 'x'}  {rel(root, path)}  ({why})")
+        mb = sum(n for _, n, _ in gone) / 1e6
+        print(f"\n  {len(gone)} latent(s), {mb:.1f} MB"
+              + (" would be deleted" if args.check else " deleted"))
+        return 0
     jobs = []
     for shot, take, why in cut_takes(root, only, args.take):
         if take is None:
@@ -293,6 +370,18 @@ def main(argv=None) -> int:
         return 0
 
     comfy = J.Comfy(args.comfy)
+    try:
+        info = comfy.object_info()
+    except Exception as e:
+        print(f"  !! cannot reach ComfyUI at {args.comfy}: {e}")
+        return 1
+    for t in {j.target.id: j.target for j in todo}.values():
+        r = upscale_readiness(t, info)
+        if r and r["status"] == "not_ready":
+            print(f"  !! {t.short} can't upscale on this ComfyUI:")
+            for m in r["missing"]:
+                print(f"       {m}")
+            return 1
     bases: dict = {}
     done = failed = 0
     t_all = time.time()

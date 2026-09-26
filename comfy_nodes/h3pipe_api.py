@@ -54,6 +54,7 @@ try:
     import h3promote as P  # noqa: E402
     import h3refs as R  # noqa: E402
     import h3takes as T  # noqa: E402
+    import h3upscale as U  # noqa: E402
     import h3track as K  # noqa: E402
     import targets as TG  # noqa: E402
 except Exception as exc:                                  # pragma: no cover
@@ -749,6 +750,120 @@ def post_discard(ctx: Context, body):
 
 
 # ---------------------------------------------------------------------------
+# upscale (Phase 13)
+# ---------------------------------------------------------------------------
+
+def upscale_event(ctx: Context, ep: str, shot: str, take: int, status: str) -> None:
+    ctx.emit("h3pipe.upscale", {"ep": ep, "shot": shot, "take": take, "status": status})
+
+
+@handler
+def post_upscale(ctx: Context, body):
+    """Queue upscales of final takes (h3upscale): `shots` (their cut takes; null
+    for the whole final cut) or `takes` ([{shot, take}]), with optional `redo`,
+    `scale`, `start_step` and `vae`. 409 when this ComfyUI can't upscale."""
+    body = body_dict(body)
+    ep = check_ep(ctx, body.get("ep"))
+    shots, takes = body.get("shots"), body.get("takes")
+    if shots is not None and (not isinstance(shots, list)
+                              or not all(isinstance(s, str) and s for s in shots)):
+        raise ApiError(400, "shots must be a list of shot ids (or null for the final cut)")
+    if takes is not None and (not isinstance(takes, list) or not all(
+            isinstance(x, dict) and isinstance(x.get("shot"), str) for x in takes)):
+        raise ApiError(400, "takes must be a list of {shot, take}")
+    redo, vae = body.get("redo", False), body.get("vae", False)
+    if not isinstance(redo, bool) or not isinstance(vae, bool):
+        raise ApiError(400, "redo and vae must be true or false")
+    scale, start_step = body.get("scale"), body.get("start_step")
+    if scale is not None and (isinstance(scale, bool) or not isinstance(scale, (int, float))):
+        raise ApiError(400, "scale must be a number or null")
+    if start_step is not None and (isinstance(start_step, bool) or not isinstance(start_step, int)):
+        raise ApiError(400, "start_step must be a whole number or null")
+    if takes is not None:
+        found = []
+        for x in takes:
+            n = check_take(x.get("take"))
+            found.append((x["shot"], T.get_take(ep, "final", x["shot"], n),
+                          f"final take {n} of {x['shot']} doesn't exist"))
+    else:
+        found = U.cut_takes(ep, set(shots) if shots is not None else None)
+    jobs, skipped, errors = [], [], []
+    for shot, t, why in found:
+        if t is None:
+            skipped.append({"shot": shot, "reason": why})
+            continue
+        up = U.plan_upscale(ep, t, scale=scale, start_step=start_step,
+                            route="vae" if vae else None, redo=redo)
+        if up.action == "skip":
+            skipped.append({"shot": shot, "take": t.take, "reason": up.why})
+        elif up.action == "error":
+            errors.append({"shot": shot, "take": t.take, "error": up.why})
+        else:
+            jobs.append(up)
+    queued = []
+    if jobs:
+        try:
+            info = ctx.comfy.object_info()
+        except Exception as e:
+            raise ApiError(502, f"ComfyUI didn't answer: {e}")
+        for t in {j.target.id: j.target for j in jobs}.values():
+            r = U.upscale_readiness(t, info)
+            if r and r["status"] == "not_ready":
+                raise ApiError(409, f"{t.short} can't upscale on this ComfyUI: "
+                                    + "; ".join(r["missing"]))
+        bases: dict = {}
+        for up in jobs:
+            try:
+                if up.target.id not in bases:
+                    bases[up.target.id] = J.target_workflow(up.target, None, ctx.comfy_url)[0]
+                g = U.upscale_graph(bases[up.target.id], up)
+                U.start(up)
+                pid = ctx.comfy.queue(g)
+                U.mark_queued(up, pid)
+            except Exception as e:
+                if os.path.isfile(up.take.paths.up_sidecar):
+                    U.mark_failed(up, str(e)[:800])
+                errors.append({"shot": up.shot, "take": up.take.take, "error": str(e)})
+                continue
+            queued.append({"shot": up.shot, "take": up.take.take, "route": up.route,
+                           "scale": up.scale, "start_step": up.start_step,
+                           "width": up.width, "height": up.height, "prompt_id": pid})
+            upscale_event(ctx, ep, up.shot, up.take.take, "queued")
+    return 200, {"queued": queued, "skipped": skipped, "errors": errors}
+
+
+@handler
+def delete_upscale(ctx: Context, query: dict):
+    """Remove a take's upscale (<stem>.up.mp4 and .up.json). 409 while ComfyUI
+    still has it queued or running."""
+    ep = check_ep(ctx, query.get("ep"))
+    shot = check_shot(query.get("shot"))
+    try:
+        n = int(query.get("take"))
+    except (TypeError, ValueError):
+        raise ApiError(400, "take must be a take number")
+    t = T.get_take(ep, "final", shot, check_take(n))
+    if t is None:
+        raise ApiError(404, f"final take {n} of {shot} doesn't exist")
+    up = T.upscale_of(t)
+    if up is None:
+        raise ApiError(404, f"{shot} take {n} has no upscale")
+    pid = up.get("comfy_prompt_id")
+    if up.get("status") == "queued" and pid:
+        try:
+            alive = ctx.comfy.alive()
+        except Exception:
+            alive = set()
+        if pid in alive:
+            raise ApiError(409, f"{shot} take {n}'s upscale is still in ComfyUI's queue")
+    for p in (t.paths.up_mp4, t.paths.up_sidecar):
+        if os.path.isfile(p):
+            os.remove(p)
+    upscale_event(ctx, ep, shot, n, "deleted")
+    return 200, {"shot": shot, "take": n, "deleted": True}
+
+
+# ---------------------------------------------------------------------------
 # cut and overrides
 # ---------------------------------------------------------------------------
 
@@ -1380,8 +1495,17 @@ def post_assemble(ctx: Context, body):
     partial = body.get("partial", True)
     if not isinstance(partial, bool):
         raise ApiError(400, "partial must be true or false")
+    # Phase 13: the final cut from its upscales, and/or at a set size
+    upscaled = body.get("upscaled", False)
+    if not isinstance(upscaled, bool):
+        raise ApiError(400, "upscaled must be true or false")
+    if upscaled and pass_ != "final":
+        raise ApiError(400, "upscaled is for the final pass: proxy takes are never upscaled")
+    size = body.get("size")
+    if size is not None and (not isinstance(size, str) or not re.fullmatch(r"\d+x\d+", size)):
+        raise ApiError(400, "size must look like 1920x1080, or be null")
     J.load_shotlist(ep, pass_)
-    return 200, E.assemble_episode(ep, pass_, partial)
+    return 200, E.assemble_episode(ep, pass_, partial, upscaled=upscaled, size=size)
 
 
 # ---------------------------------------------------------------------------
@@ -2244,6 +2368,8 @@ ROUTES = [
     ("POST", "/h3pipe/render", post_render, "body"),
     ("POST", "/h3pipe/cancel", post_cancel, "body"),
     ("POST", "/h3pipe/discard", post_discard, "body"),
+    ("POST", "/h3pipe/upscale", post_upscale, "body"),
+    ("DELETE", "/h3pipe/upscale", delete_upscale, "query"),
     ("PUT", "/h3pipe/pick", put_pick, "body"),
     ("PUT", "/h3pipe/cut", put_cut, "body"),
     ("POST", "/h3pipe/cut/reset", post_cut_reset, "body"),

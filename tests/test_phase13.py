@@ -113,6 +113,12 @@ class LatentRouteTest(ApiTest):
 WORKFLOW = os.path.join(ROOT, "targets", "video", "minimax_h3_ref2va", "workflow.json")
 
 
+UPSCALER = {"input": {"required": {
+    "latent": ["*", {}],
+    "model_name": [["minimax_h3_latent_upscaler_3d_fp16.safetensors"], {}],
+    "enable_temporal_chunking": ["BOOLEAN", {"default": True}]}}}
+
+
 class UpscaleTest(ApiTest):
     def final_take(self, shot="sh010", latent=True, wav=True) -> T.Take:
         self.render(shot, pass_="final")
@@ -225,6 +231,81 @@ class UpscaleTest(ApiTest):
         self.assertEqual(got.get("sh010"), 1)
         only = U.cut_takes(self.ep, {"sh010"})
         self.assertEqual([s for s, _, _ in only], ["sh010"])
+
+
+class UpscaleRouteTest(UpscaleTest):
+    def setUp(self):
+        super().setUp()
+        self.comfy.nodes |= set(U.UPSCALE_NODES)
+        self.comfy.info["MinimaxH3LatentUpscaler3D"] = UPSCALER
+
+    def status_take(self, shot="sh010", n=1):
+        data = self.ok(A.get_episode(self.ctx, {"ep": self.ep, "pass": "final"}))
+        s = next(x for x in data["shots"] if x["shot"] == shot)
+        return next(t for t in s["takes"] if t["take"] == n)
+
+    def test_upscale_the_cut_take(self):
+        self.final_take()
+        self.assertIsNone(self.status_take()["upscale"])
+        res = self.ok(A.post_upscale(self.ctx, {"ep": self.ep, "shots": ["sh010"]}))
+        self.assertEqual([(q["shot"], q["take"], q["route"]) for q in res["queued"]],
+                         [("sh010", 1, "latent")])
+        self.assertEqual(self.events_of("h3pipe.upscale")[-1]["status"], "queued")
+        g = self.comfy.graphs[-1]
+        self.assertTrue(any(v["class_type"] == "H3SaveUpscale" for v in g.values()))
+        up = self.status_take()["upscale"]
+        self.assertEqual((up["status"], up["fresh"], up["route"]), ("ok", True, "latent"))
+        self.assertTrue(up["mp4"].endswith("sh010_t01.up.mp4"))
+        # fresh: asked again, it is skipped; redo queues it again
+        res = self.ok(A.post_upscale(self.ctx, {"ep": self.ep, "shots": ["sh010"]}))
+        self.assertEqual((res["queued"], res["skipped"][0]["reason"]), ([], "already upscaled"))
+        res = self.ok(A.post_upscale(self.ctx, {"ep": self.ep, "takes": [{"shot": "sh010", "take": 1}],
+                                                "redo": True, "vae": True, "start_step": 4}))
+        self.assertEqual((res["queued"][0]["route"], res["queued"][0]["start_step"]), ("vae", 4))
+
+    def test_errors_and_not_ready(self):
+        self.final_take()
+        res = self.ok(A.post_upscale(self.ctx, {"ep": self.ep, "shots": ["sh020"]}))
+        self.assertEqual(res["queued"], [])
+        self.assertEqual(res["skipped"][0]["shot"], "sh020")      # never rendered
+        res = self.ok(A.post_upscale(self.ctx, {"ep": self.ep, "shots": ["sh010"], "scale": 1.3}))
+        self.assertEqual(res["queued"], [])
+        self.assertIn("multiple of 32", res["errors"][0]["error"])
+        self.err(A.post_upscale(self.ctx, {"ep": self.ep, "shots": "sh010"}), 400)
+        res = self.ok(A.post_upscale(self.ctx, {"ep": self.ep, "takes": [{"shot": "sh010", "take": 9}]}))
+        self.assertIn("doesn't exist", res["skipped"][0]["reason"])
+        # the Plus fork: same node, no temporal chunking
+        self.comfy.info["MinimaxH3LatentUpscaler3D"] = {"input": {"required": {
+            "latent": ["*", {}], "model_name": [["minimax_h3_latent_upscaler_3d_fp16.safetensors"], {}]}}}
+        msg = self.err(A.post_upscale(self.ctx, {"ep": self.ep, "shots": ["sh010"]}), 409)
+        self.assertIn("Plus fork", msg)
+        self.assertFalse(os.path.exists(T.get_take(self.ep, "final", "sh010", 1).paths.up_sidecar))
+
+    def test_delete(self):
+        t = self.final_take()
+        self.ok(A.post_upscale(self.ctx, {"ep": self.ep, "shots": ["sh010"]}))
+        self.assertTrue(os.path.isfile(t.paths.up_mp4))
+        self.ok(A.delete_upscale(self.ctx, {"ep": self.ep, "shot": "sh010", "take": "1"}))
+        self.assertFalse(os.path.exists(t.paths.up_mp4))
+        self.assertFalse(os.path.exists(t.paths.up_sidecar))
+        self.assertIsNone(self.status_take()["upscale"])
+        self.err(A.delete_upscale(self.ctx, {"ep": self.ep, "shot": "sh010", "take": "1"}), 404)
+
+    def test_readiness_says_whether_it_can_upscale(self):
+        import h3edit as E
+        t = TG.load_target("minimax_h3_ref2va", "video")
+        info = {c: {"input": {}} for c in U.UPSCALE_NODES}
+        info["MinimaxH3LatentUpscaler3D"] = UPSCALER
+        self.assertEqual(U.upscale_readiness(t, info), {"status": "ready", "missing": []})
+        del info["H3HoldAudio"]
+        r = U.upscale_readiness(t, info)
+        self.assertEqual(r["status"], "not_ready")
+        self.assertIn("H3HoldAudio", r["missing"][0])
+        self.assertEqual(U.upscale_readiness(t, None)["status"], "unknown")
+        wan = next(x for x in TG.list_targets("video") if x.id.startswith("wan22"))
+        self.assertIsNone(U.upscale_readiness(wan, info))
+        self.assertNotIn("upscale", E.readiness([wan], info)[wan.id])
+        self.assertIn("upscale", E.readiness([t], info)[t.id])
 
 
 if __name__ == "__main__":

@@ -165,6 +165,20 @@ def copy_audio(picture: str, source: str, out: str) -> str:
     return "none"
 
 
+def _notify(root: str, shot, take, status: str) -> None:
+    """Tell open h3pipe editors an upscale is done (the `h3pipe.upscale` event
+    of docs/API.md). Only inside ComfyUI; never affects saving."""
+    try:
+        from server import PromptServer
+        server = getattr(PromptServer, "instance", None)
+        if server is None or not shot:
+            return
+        server.send_sync("h3pipe.upscale", {"ep": os.path.abspath(root), "shot": shot,
+                                            "take": take, "status": status})
+    except Exception:
+        pass
+
+
 class H3SaveUpscale:
     """Write an upscale beside its take: <stem>.up.mp4, whose audio is the
     take's own stream copied on (what plays is the take's, not a VAE round
@@ -227,6 +241,7 @@ class H3SaveUpscale:
                         height=int(images.shape[1]), mp4=stem if ok else None,
                         audio=audio, save_ms=ms, save_notes=f"{stem}: " + "; ".join(notes))
             _write_json_atomic(path, data)
+            _notify(root, data.get("shot"), data.get("take"), "ok" if ok else "failed")
         return (f"{stem}: " + "; ".join(notes),)
 
 
