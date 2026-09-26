@@ -1,7 +1,7 @@
 // Badges, grouping, paths, the override form and redo planning.
 import { describe, expect, it } from "vitest";
 import { planRedo } from "../src/actions";
-import { absPath, groupBySequence, sameEp, shotBadges, shotSeconds } from "../src/lib/format";
+import { absPath, groupBySequence, sameEp, shotBadges, shotSeconds, upscaleBadge } from "../src/lib/format";
 import { formFromDetail, overrideFields } from "../src/lib/overrideForm";
 import type { ShotDetail, ShotStatus, TakeSummary } from "../src/types";
 
@@ -24,6 +24,26 @@ function shot(over: Partial<ShotStatus> = {}): ShotStatus {
 }
 
 const kinds = (s: ShotStatus, r?: Set<number>) => shotBadges(s, r).map((b) => b.kind);
+
+describe("upscaleBadge (Phase 13)", () => {
+  const up = (over: object) => ({ status: "ok", fresh: true, width: 1920, height: 1088, route: "latent", start_step: 7,
+                                  comfy_prompt_id: null, mp4: "renders/sh020/sh020_t01.up.mp4", save_notes: "", ...over });
+  it("no upscale, no badge", () => {
+    expect(upscaleBadge(take(1))).toBeNull();
+    expect(upscaleBadge(take(1, { upscale: null }))).toBeNull();
+    expect(upscaleBadge(undefined)).toBeNull();
+  });
+  it("fresh, queued, stale and failed", () => {
+    expect(upscaleBadge(take(1, { upscale: up({}) as never }))).toMatchObject({ kind: "upscaled", label: "2x" });
+    expect(upscaleBadge(take(1, { upscale: up({ status: "queued", fresh: false }) as never }))!.label).toBe("upscaling");
+    expect(upscaleBadge(take(1, { upscale: up({ fresh: false }) as never }))).toMatchObject({ kind: "stale", label: "2x stale" });
+    expect(upscaleBadge(take(1, { upscale: up({ status: "failed", fresh: false }) as never }))!.kind).toBe("failed");
+  });
+  it("the cut take's upscale shows on the shot", () => {
+    expect(kinds(shot({ takes: [take(1, { upscale: up({}) as never })] }))).toContain("upscaled");
+    expect(kinds(shot({ takes: [take(1)] }))).not.toContain("upscaled");
+  });
+});
 
 describe("shotBadges", () => {
   it("no badges for a clean shot", () => {

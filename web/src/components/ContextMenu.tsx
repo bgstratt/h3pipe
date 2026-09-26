@@ -2,7 +2,8 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   cancelTake, clearRef, closeMenu, copyText, discardTake, generateKeyframe, keyframeFromTake, loadRefs, openClipAudio,
   openIssue,
-  openInspector, openRedo, openSidecar, openViewer, pickTake, playAll, requestRender, showInScript, showMissingRefs,
+  openInspector, openRedo, openSidecar, openViewer, pickTake, playAll, removeUpscale, requestRender, showInScript, showMissingRefs,
+  upscaleTake,
 } from "../actions";
 import { clearClipAudio, nudgeClip, setTrims, toggleLock } from "../cutActions";
 import { audioOf, audioWhy } from "../lib/audioSource";
@@ -243,6 +244,24 @@ export function ContextMenu() {
             <button onClick={run(() => void cancelTake({ ep, pass: menu.pass, shot: menu.shot, take: take.take }))}>
               <i className="pi pi-ban" /> Cancel this render
             </button>
+          )}
+          {menu.pass === "final" && (
+            <>
+              <button
+                disabled={!usable || take.upscale?.status === "queued"}
+                title={take.upscale?.status === "queued"
+                  ? "Its upscale is queued"
+                  : "Re-sample this take at 2x from late in its schedule: more detail, the same performance, its own audio"}
+                onClick={run(() => void upscaleTake({ ep, pass: menu.pass, shot: menu.shot, take: take.take }, !!take.upscale?.fresh))}
+              >
+                <i className="pi pi-arrow-up-right" /> {take.upscale?.fresh ? "Upscale again (2x)" : "Upscale (2x)"}
+              </button>
+              {take.upscale && take.upscale.status !== "queued" && (
+                <button onClick={run(() => void removeUpscale({ ep, pass: menu.pass, shot: menu.shot, take: take.take }))}>
+                  <i className="pi pi-times" /> Remove upscale
+                </button>
+              )}
+            </>
           )}
           <button
             className="h3-menu-danger"

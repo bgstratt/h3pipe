@@ -247,7 +247,12 @@ function TakesView({ ep, v }: { ep: string; v: ViewerState }) {
     else updateViewer({ a: t.take });
   };
 
-  const url = (t: TakeSummary | undefined) => (t?.mp4 ? api().fileUrl(ep, t.mp4) : undefined);
+  // Phase 13: show a take's fresh upscale instead of the take
+  const [hi, setHi] = useState(false);
+  const upOf = (t: TakeSummary | undefined) => (hi && t?.upscale?.fresh && t.upscale.mp4 ? t.upscale.mp4 : null);
+  const src = (t: TakeSummary | undefined) => upOf(t) ?? t?.mp4 ?? null;
+  const anyUp = [takeA, takeB].some((t) => t?.upscale?.fresh && t.upscale.mp4);
+  const url = (t: TakeSummary | undefined) => { const p = src(t); return p ? api().fileUrl(ep, p) : undefined; };
   const isCutTake = (n: number | undefined) =>
     n != null && !!cutSt && cutSt.cut.pass === v.pass && cutSt.cut.take === n;
   const aspect = aspectOf(st);
@@ -265,10 +270,11 @@ function TakesView({ ep, v }: { ep: string; v: ViewerState }) {
         )}
         {t && isCutTake(t.take) ? " · cut" : ""}
         {t?.seed ? ` · ${t.seed}` : ""}
+        {upOf(t) ? ` · 2x ${t!.upscale!.width}×${t!.upscale!.height}` : ""}
       </span>
       {t?.mp4 ? (
         <video
-          key={`${which}-${t.mp4}`}
+          key={`${which}-${src(t)}`}
           ref={which === "a" ? setAEl : setBEl}
           src={url(t)}
           preload="auto"
@@ -296,6 +302,11 @@ function TakesView({ ep, v }: { ep: string; v: ViewerState }) {
       <b>{v.shot}</b>
       <span className="h3-muted h3-small" title="The shot's current target">{v.pass}{shot?.seconds ? ` · ${shot.seconds}s` : ""}{targets ? ` · ${targetLabel(targets, shotCurrent)}` : ""}</span>
       <ModeButtons v={v} />
+      {anyUp && (
+        <button className={`h3-btn${hi ? " h3-primary" : ""}`} title="Play the take's upscale (2x) instead of the take" onClick={() => setHi((x) => !x)}>
+          2x
+        </button>
+      )}
       {mode !== "single" && takeB && (
         <button className="h3-btn h3-icon" title="Swap A and B" onClick={() => updateViewer({ a: v.b, b: v.a })}>⇄</button>
       )}

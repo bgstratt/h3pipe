@@ -10,12 +10,13 @@
 //    `effective.prompt` read-only.
 
 import type {
-  AlignReady, AlignRequest, AlignResult, AssembleResult, BrowseFiles, BrowseResult, BuildResult, CancelResult, ComfyQueue, Config, CutEntry,
+  AlignReady, AlignRequest, AlignResult, AssembleOptions, AssembleResult, BrowseFiles, BrowseResult, BuildResult, CancelResult, ComfyQueue, Config, CutEntry,
   CutFile, CutWhat, DiscardResult, EpisodeStatus, EpisodeSummary, EpisodeTargetResult, Issue, IssueAddRequest, ModelList, NewEpisodeRequest,
   NewEpisodeResult, OverrideRequest, OverrideResult, Pass,
   PeaksResult, PickRequest, Ref, RefDefaults, RefDiscardRequest, RefGenerateMissingRequest, RefGenerateMissingResult, RefGenerateRequest,
   RefGenerateResult, RefImportRequest, RefKeyframeRequest, RefList, RefMatchResult, RefOverrideInfo, RefOverrideRequest, RefPickRequest, RefPickResult,
   RefTake, RefUploadRequest, RenderRequest, RenderResult, Seed, ShotDetail, TakeRef, TargetKind, TargetList, TrackResult,
+  UpscaleRequest, UpscaleResult,
   CustomTargetResult, TargetProposal, VoiceFromTakeRequest, VoiceFromTakeResult,
   WorkflowFile, WorkflowInstallResult,
   PromoteHashes, PromotePlan, PromoteResult, SourceCheck, SourceDoc, SourceFile, SourceHash, SourceSaveRequest, SourceSaveResult,
@@ -64,7 +65,11 @@ export interface Api {
   uploadClipAudio(req: ClipAudioUploadRequest, onProgress?: UploadProgress): Promise<{ path: string }>;
   putOverride(req: OverrideRequest): Promise<OverrideResult>;
   deleteOverride(ep: string, shot: string, pass?: Pass): Promise<OverrideResult>;
-  assemble(ep: string, pass: Pass, partial: boolean): Promise<AssembleResult>;
+  assemble(ep: string, pass: Pass, partial: boolean, opts?: AssembleOptions): Promise<AssembleResult>;
+  /** Phase 13: POST /h3pipe/upscale: queue upscales of final takes (409: this ComfyUI can't). */
+  upscale(req: UpscaleRequest): Promise<UpscaleResult>;
+  /** Phase 13: DELETE /h3pipe/upscale: remove a take's upscale (409 while it is queued). */
+  deleteUpscale(ep: string, shot: string, take: number): Promise<{ shot: string; take: number; deleted: boolean }>;
   /** Folders on the ComfyUI machine; no path = the starting points. `files`
    * lists image or audio files too (for importing a ref). */
   browse(path?: string | null, files?: BrowseFiles | null): Promise<BrowseResult>;
@@ -392,7 +397,14 @@ export function createHttpApi(t: Transport): Api {
       return call("PUT", "/h3pipe/override", req);
     },
     deleteOverride: (ep, shot, pass) => call("DELETE", `/h3pipe/override?${qs({ ep, shot, pass })}`),
-    assemble: (ep, pass, partial) => call("POST", "/h3pipe/assemble", { ep, pass, partial }),
+    assemble: (ep, pass, partial, opts) => call("POST", "/h3pipe/assemble", {
+      ep, pass, partial,
+      // only when set: older servers don't know them
+      ...(opts?.upscaled ? { upscaled: true } : {}),
+      ...(opts?.size ? { size: opts.size } : {}),
+    }),
+    upscale: (req) => call("POST", "/h3pipe/upscale", req),
+    deleteUpscale: (ep, shot, take) => call("DELETE", `/h3pipe/upscale?${qs({ ep, shot, take: String(take) })}`),
     browse: (path, files) => get(`/h3pipe/browse?${qs({ path: path || undefined, files: files || undefined })}`),
     refs: (ep) => get(`/h3pipe/refs?${qs({ ep })}`),
     refFileUrl: (ep, path, version) => t.url(`/h3pipe/file?${qs({ ep, path, v: version || undefined })}`),

@@ -202,6 +202,26 @@ def block() -> str:
         lines += table(records_, with_size)
         lines += [""]
 
+    # Phase 13: what an upscale needs besides the target's own files (never a render)
+    ups = []
+    for t in TG.list_targets():
+        u = (t.spec.get("upscale") or {}).get("upscaler") or {}
+        name = (u.get("inputs") or {}).get("model_name")
+        if name:
+            dl = t.downloads.get(name) or {}
+            ups.append((t.id, u["class_type"], name, dl))
+    if ups:
+        lines += ["### For upscaling (optional)", "",
+                  "Only to upscale final takes (`python h3.py upscale`), never to render. The "
+                  "node comes from the Comfyui_Minimax_h3_latent_Upscaler pack (LBH-123-AI) — "
+                  "not its \"Plus\" fork, which has the same node without temporal chunking. "
+                  "`python h3.py targets` says whether this ComfyUI can upscale.", ""]
+        for tid, cls, name, dl in ups:
+            where = dl.get("url") or dl.get("source") or "no download record"
+            lines += [f"- `{name}` → `models/{dl.get('folder') or 'latent_upscale_models'}/` "
+                      f"({cls}, for `{tid}`) — {where}"]
+        lines += [""]
+
     nourl = [r for r in records if not r["url"]]
     if nourl:
         lines += ["#### Files with no recorded download URL", "",

@@ -1174,11 +1174,42 @@ export function createMockApi(emit: Emit, opts: MockOptions = {}): Api & { outsi
       emit("h3pipe.episode", { ep: EP });
       return overrideResult(shot);
     },
-    async assemble(ep, pass) {
+    async assemble(ep, pass, _partial, opts) {
       await wait(1500);
       need(ep);
       const n = st(pass).shots.filter((s) => s.cut.usable).length;
-      return { ok: true, output: `${st(pass).folder}/ep05_${pass}.mp4`, report: `  ${n} shots, partial cut\n  wrote ${st(pass).folder}/ep05_${pass}.mp4\n` };
+      const name = `ep05_${pass}${opts?.upscaled ? "_up" : ""}.mp4`;
+      return { ok: true, output: `${st(pass).folder}/${name}`, report: `  ${n} shots, partial cut\n  wrote ${st(pass).folder}/${name}\n` };
+    },
+    async upscale(req) {
+      await wait();
+      need(req.ep);
+      const fin = st("final");
+      const want = req.takes ?? fin.shots
+        .filter((s) => !req.shots || req.shots.includes(s.shot))
+        .flatMap((s) => (s.cut.take != null && !s.cut.placeholder ? [{ shot: s.shot, take: s.cut.take }] : []));
+      const out: import("../types").UpscaleResult = { queued: [], skipped: [], errors: [] };
+      for (const w of want) {
+        const t = fin.shots.find((s) => s.shot === w.shot)?.takes.find((x) => x.take === w.take);
+        if (!t || t.status !== "ok") { out.skipped.push({ shot: w.shot, reason: "not a finished final take" }); continue; }
+        if (t.upscale?.fresh && !req.redo) { out.skipped.push({ shot: w.shot, take: w.take, reason: "already upscaled" }); continue; }
+        const stem = `${fin.folder}/${w.shot}/${w.shot}_t${String(w.take).padStart(2, "0")}`;
+        t.upscale = { status: "ok", fresh: true, width: 1920, height: 1088, route: req.vae ? "vae" : "latent",
+                      start_step: req.start_step ?? 7, comfy_prompt_id: null, mp4: t.mp4 ?? `${stem}.mp4`, save_notes: "mock" };
+        out.queued.push({ shot: w.shot, take: w.take, route: t.upscale.route!, scale: 2, start_step: t.upscale.start_step!,
+                          width: 1920, height: 1088, prompt_id: `mock-up-${w.shot}` });
+        emit("h3pipe.upscale", { ep: EP, shot: w.shot, take: w.take, status: "ok" });
+      }
+      return out;
+    },
+    async deleteUpscale(ep, shot, take) {
+      await wait();
+      need(ep);
+      const t = st("final").shots.find((s) => s.shot === shot)?.takes.find((x) => x.take === take);
+      if (!t?.upscale) throw new MockError(`${shot} take ${take} has no upscale`, 404);
+      t.upscale = null;
+      emit("h3pipe.upscale", { ep: EP, shot, take, status: "deleted" });
+      return { shot, take, deleted: true };
     },
     async browse(path, files) {
       await wait();

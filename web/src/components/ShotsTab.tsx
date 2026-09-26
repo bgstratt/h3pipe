@@ -6,6 +6,7 @@ import {
 import { host } from "../host";
 import {
   ESTIMATE_TITLE, cutTake, fmtSeconds, fmtWhen, groupBySequence, lengthEstimated, realStale, shotBadges, staleTitle, tn,
+  upscaleBadge,
 } from "../lib/format";
 import { missingShots, passProgress, progressLine, progressTitle, staleReasons, staleShots } from "../lib/progress";
 import { shotTarget, takeTargetBadge, targetBadges } from "../lib/targets";
@@ -175,6 +176,7 @@ const TakeRow = memo(function TakeRow({ ep, pass, s, t, aspect, selected, render
   targets: TargetList | null; shotCurrent: string;
 }) {
   const tb = takeTargetBadge(t, shotCurrent, targets);
+  const ub = upscaleBadge(t);
   const isCut = !s.cut.placeholder && s.cut.take === t.take;
   const stale = realStale(t);
   const usable = t.status === "ok" && t.has_video;
@@ -198,6 +200,7 @@ const TakeRow = memo(function TakeRow({ ep, pass, s, t, aspect, selected, render
           <span className="h3-muted">{rendering ? "rendering" : t.status}</span>
           {isCut && <span className="h3-badge h3-b-cut" title={s.cut.picked ? "Picked in cut.json" : "The latest usable take"}>{s.cut.picked ? "cut (picked)" : "cut"}</span>}
           {tb && <span className="h3-badge h3-b-target" title={tb.title}>{tb.label}</span>}
+          {ub && <span className={`h3-badge h3-b-${ub.kind}`} title={ub.title}>{ub.label}</span>}
           <span className="h3-grow" />
           {usable && !isCut && (
             <button className="h3-btn" disabled={pickBusy} title="Use this take in the cut" onClick={(e) => { e.stopPropagation(); void pickTake(s.shot, t.take); }}>

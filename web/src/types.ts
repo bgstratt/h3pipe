@@ -56,6 +56,9 @@ export interface TakeSummary {
   /** Phase 9b: the file whose sound the cut plays for this take (the mp4 when
    * it has an audio stream, else its `_h3.wav`, else null), relative to the episode. */
   audio?: string | null;
+  /** Phase 13: the take's upscale (final takes only; null: never upscaled;
+   * absent from older servers). */
+  upscale?: TakeUpscale | null;
 }
 
 export interface CutInfo {
@@ -652,6 +655,54 @@ export interface AssembleResult {
   ok: boolean;
   output: string;
   report: string;
+}
+
+/** Phase 13: POST /h3pipe/assemble's extras. `upscaled` (final pass): each clip
+ * from its fresh upscale, as <ep>_up.mp4; `size`: the cut's size ("1920x1080"). */
+export interface AssembleOptions {
+  upscaled?: boolean;
+  size?: string | null;
+}
+
+/** Phase 13: a final take's upscale (<stem>.up.mp4), as GET /h3pipe/episode says it. */
+export interface TakeUpscale {
+  status: "queued" | "ok" | "failed";
+  /** made from the take's mp4 as it is now (false once the take is re-rendered) */
+  fresh: boolean;
+  width: number | null;
+  height: number | null;
+  route: "latent" | "vae" | null;
+  start_step: number | null;
+  comfy_prompt_id: string | null;
+  /** the upscale's mp4, relative to the episode (null until it is written) */
+  mp4: string | null;
+  save_notes: string;
+}
+
+/** Phase 13: POST /h3pipe/upscale. `shots`: their final-cut takes (null: the
+ * whole final cut); `takes`: final takes named directly (wins). */
+export interface UpscaleRequest {
+  ep: string;
+  shots?: string[] | null;
+  takes?: { shot: string; take: number }[];
+  redo?: boolean;
+  scale?: number | null;
+  start_step?: number | null;
+  vae?: boolean;
+}
+
+export interface UpscaleResult {
+  queued: { shot: string; take: number; route: "latent" | "vae"; scale: number; start_step: number;
+            width: number; height: number; prompt_id: string }[];
+  skipped: { shot: string; take?: number; reason: string }[];
+  errors: { shot: string; take?: number; error: string }[];
+}
+
+export interface UpscaleEvent {
+  ep: string;
+  shot: string;
+  take: number;
+  status: "queued" | "ok" | "failed" | "deleted";
 }
 
 // websocket events (docs/API.md "Live updates")

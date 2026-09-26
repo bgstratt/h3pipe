@@ -552,6 +552,12 @@ Every file any target names. `python h3.py targets` tells you which of these you
 |---|---|---|---|---|
 | `qwen_3_4b.safetensors` | `models/text_encoders/` | required | `z_image_turbo` | [Comfy-Org/z_image_turbo](https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/text_encoders/qwen_3_4b.safetensors) |
 
+### For upscaling (optional)
+
+Only to upscale final takes (`python h3.py upscale`), never to render. The node comes from the Comfyui_Minimax_h3_latent_Upscaler pack (LBH-123-AI) — not its "Plus" fork, which has the same node without temporal chunking. `python h3.py targets` says whether this ComfyUI can upscale.
+
+- `minimax_h3_latent_upscaler_3d_fp16.safetensors` → `models/latent_upscale_models/` (MinimaxH3LatentUpscaler3D, for `minimax_h3_ref2va`) — no URL: no ComfyUI template, saved workflow or ComfyUI-Manager model list on this machine records this file. Search Hugging Face for its exact name: the Comfyui_Minimax_h3_latent_Upscaler pack's README points to the LBH-123-AI/Minimax_h3_latent_Upscaler repo. Only needed to upscale (Phase 13), never to render.
+
 #### Files with no recorded download URL
 
 h3pipe only records a URL it can trace to a ComfyUI template, a saved workflow or ComfyUI-Manager's model list, so these are listed without one rather than with a guess:

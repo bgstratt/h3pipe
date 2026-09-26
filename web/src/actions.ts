@@ -24,10 +24,10 @@ import {
   type CompareMode, type RefTakeRef, type VoiceClipState,
 } from "./store";
 import type {
-  AlignEvent, AlignMissing, AlignRequest, BuildResult, CutAudioSource, EpisodeStatus, Lora, NewEpisodeResult, SourceFile, OverrideFields, Pass,
+  AlignEvent, AlignMissing, AlignRequest, AssembleOptions, BuildResult, CutAudioSource, EpisodeStatus, Lora, NewEpisodeResult, SourceFile, OverrideFields, Pass,
   ProgressEvent, PromptEvent, Ref, RefEvent, RefGenerateRequest, RefTake, RenderRequest, RenderResult, RenderSkip, Seed,
   Issue, SeedMode, ShotDetail, TakeEvent, TakeRef, TargetProposal, TrackResult,
-  VoiceFromTakeRequest, WorkflowFile,
+  UpscaleEvent, UpscaleRequest, VoiceFromTakeRequest, WorkflowFile,
 } from "./types";
 
 const set = store.set;
@@ -940,6 +940,58 @@ export async function cancelTake(ref: TakeRef) {
 }
 
 /**
+ * Phase 13: queue upscales (POST /h3pipe/upscale): named final takes, or the
+ * final cut's take of each of `shots` (null: the whole final cut). Says what
+ * was queued and why anything wasn't; the h3pipe.upscale events refresh the
+ * status as each one finishes.
+ */
+export async function upscale(req: Omit<UpscaleRequest, "ep">, busyKey: string) {
+  const s = get();
+  if (!s.ep) return;
+  const ep = s.ep;
+  set({ menu: null });
+  return withBusy(`upscale|${busyKey}`, async () => {
+    try {
+      const r = await api().upscale({ ep, ...req });
+      const n = r.queued.length;
+      const why = [...r.errors.map((x) => `${x.shot}: ${x.error}`), ...r.skipped.map((x) => `${x.shot}: ${x.reason}`)];
+      host().toast(r.errors.length ? "warn" : n ? "info" : "warn",
+                   n ? `Queued ${n} upscale${n === 1 ? "" : "s"}` : "Nothing to upscale",
+                   why.slice(0, 6).join("\n") + (why.length > 6 ? `\n… and ${why.length - 6} more` : ""));
+      scheduleRefresh(0);
+    } catch (e) {
+      report("Couldn't upscale", e);
+    }
+  });
+}
+
+/** Phase 13: upscale one final take (`redo`: again, though it has a fresh one). */
+export function upscaleTake(ref: TakeRef, redo = false) {
+  return upscale({ takes: [{ shot: ref.shot, take: ref.take }], redo }, `${ref.shot}|${ref.take}`);
+}
+
+/** Phase 13: upscale every take of the final cut that has no fresh upscale. */
+export function upscaleCut() {
+  const n = get().status[statusKey(get().ep ?? "", "final")]?.shots.filter((x) => x.cut.usable).length ?? 0;
+  if (n > 8 && !confirm(`Upscale the final cut's takes that aren't yet (up to ${n})? Each takes about half a minute on the GPU.`)) return;
+  return upscale({ shots: null }, "cut");
+}
+
+/** Phase 13: remove a take's upscale (DELETE /h3pipe/upscale). Asks first. */
+export async function removeUpscale(ref: TakeRef) {
+  set({ menu: null });
+  if (!confirm(`Remove ${ref.shot} ${tn(ref.take)}'s upscale? The take itself stays.`)) return;
+  return withBusy(`unupscale|${ref.shot}|${ref.take}`, async () => {
+    try {
+      await api().deleteUpscale(ref.ep, ref.shot, ref.take);
+      scheduleRefresh(0);
+    } catch (e) {
+      report(`Couldn't remove ${ref.shot} ${tn(ref.take)}'s upscale`, e);
+    }
+  });
+}
+
+/**
  * Discard a take (POST /h3pipe/discard): its files move to `_trash/` beside
  * them (nothing is deleted), and a cut that picked it goes back to the latest
  * usable take. Refused for a queued take (cancel it first). Asks first.
@@ -986,12 +1038,12 @@ export async function discardTake(ref: TakeRef, ask = true): Promise<boolean> {
   });
 }
 
-export async function assemble(partial = true) {
+export async function assemble(partial = true, opts?: AssembleOptions) {
   const s = get();
   if (!s.ep) return;
   set({ assemble: { busy: true, output: null, report: null, error: null } });
   try {
-    const r = await api().assemble(s.ep, s.pass, partial);
+    const r = await api().assemble(s.ep, s.pass, partial, opts);
     set({ assemble: { busy: false, output: r.output, report: r.report, error: r.ok ? null : r.report } });
     if (r.ok) host().toast("success", "Assembled", absPath(s.ep, r.output));
     else host().toast("error", "Assemble failed", r.report.slice(-400));
@@ -1227,6 +1279,13 @@ export function wireEvents() {
     const t = (d ?? {}) as TakeEvent;
     if (!sameEp(t.ep, get().ep)) return;
     if (t.status === "ok" && isTracked(t)) host().toast("success", `${t.shot} ${tn(t.take)} rendered`);
+    scheduleRefresh();
+  });
+  h.on("h3pipe.upscale", (d) => {
+    const u = (d ?? {}) as UpscaleEvent;
+    if (!sameEp(u.ep, get().ep)) return;
+    if (u.status === "ok") host().toast("success", `${u.shot} ${tn(u.take)} upscaled`);
+    if (u.status === "failed") host().toast("error", `${u.shot} ${tn(u.take)}'s upscale failed`, "Its .up.json says why (Show details).");
     scheduleRefresh();
   });
   h.on("h3pipe.episode", (d) => {
