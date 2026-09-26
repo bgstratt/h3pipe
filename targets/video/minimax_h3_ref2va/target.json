@@ -51,7 +51,8 @@
                "inputs": {"root": "project_root", "shotlist": "shotlist_file", "index": "index"}},
     "saver": {"class_type": "H3SaveShot",
               "inputs": {"root": "project_root", "subfolder": "subfolder", "take": "take",
-                         "sidecar": "sidecar"}},
+                         "sidecar": "sidecar"},
+              "latent": {"class_type": "SamplerCustomAdvanced", "output": 0}},
     "params": {
       "model": {"class_type": "UNETLoader", "field": "unet_name"},
       "loras": {"class_type": "LoraLoaderModelOnly", "name": "lora_name",

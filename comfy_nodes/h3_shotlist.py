@@ -650,6 +650,57 @@ def _write_json_atomic(path: str, data) -> None:
         raise
 
 
+LATENT_FORMAT = "h3pipe-latent/1"
+
+
+def save_latent(latent: dict, path: str, **meta) -> str:
+    """Write a sampler's LATENT to `path` (safetensors, atomically); return its
+    name. A joint AV latent (H3: a NestedTensor of video and audio) is stored
+    as `video` and `audio`; a plain one as `samples`. `meta` (width, height,
+    frames, fps) goes into the header with the format and the stream names."""
+    from safetensors.torch import save_file
+
+    samples = latent["samples"]
+    parts = list(samples.unbind()) if getattr(samples, "is_nested", False) else [samples]
+    if len(parts) == 2:
+        names = ["video", "audio"]
+    elif len(parts) == 1:
+        names = ["samples"]
+    else:
+        names = [f"stream_{i}" for i in range(len(parts))]
+    tensors = {n: t.detach().to("cpu").contiguous() for n, t in zip(names, parts)}
+    header = {"format": LATENT_FORMAT, "streams": ",".join(names)}
+    header.update({k: str(v) for k, v in meta.items()})
+    fd, tmp = tempfile.mkstemp(prefix=".tmp_", suffix=".safetensors",
+                               dir=os.path.dirname(os.path.abspath(path)))
+    os.close(fd)
+    try:
+        save_file(tensors, tmp, metadata=header)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise
+    return os.path.basename(path)
+
+
+def load_latent(path: str) -> dict:
+    """The LATENT save_latent wrote: `video` and `audio` back as one joint AV
+    latent (a NestedTensor), `samples` as a plain one."""
+    import comfy.nested_tensor
+    from safetensors import safe_open
+
+    with safe_open(path, framework="pt", device="cpu") as fh:
+        header = fh.metadata() or {}
+        names = (header.get("streams") or "").split(",") if header.get("streams") else list(fh.keys())
+        parts = [fh.get_tensor(n) for n in names]
+    if len(parts) == 1:
+        return {"samples": parts[0]}
+    return {"samples": comfy.nested_tensor.NestedTensor(parts)}
+
+
 def _now() -> str:
     """ISO-8601 local time with offset, seconds precision (as h3takes.now)."""
     return datetime.datetime.now().astimezone().isoformat(timespec="seconds")
@@ -665,6 +716,9 @@ class H3SaveShot:
         <shot_id>_t<take>.jpg          middle frame, longest side 480 px
         <shot_id>_t<take>_strip.jpg    STRIP_FRAMES frames side by side, 192 px
                                        wide each, for hover scrub
+        <shot_id>_t<take>.latent.safetensors
+                                       the sampled latent, when `latent` is
+                                       linked: what an upscale starts from
         <shot_id>_t<take>.json         the take's sidecar, when `sidecar` is set:
                                        status, finished, frames, fps, mp4,
                                        thumb, strip and save_notes are filled in,
@@ -695,6 +749,9 @@ class H3SaveShot:
                 "audio": ("AUDIO",),
                 # Last, so saved workflows keep their widget order.
                 "sidecar": ("STRING", {"default": ""}),
+                # the sampler's latent, kept for an upscale (h3jobs links it
+                # when the render asks for it)
+                "latent": ("LATENT",),
             },
         }
 
@@ -733,7 +790,7 @@ class H3SaveShot:
     # -- main --------------------------------------------------------------
 
     def save(self, images, shot_id, audio_policy, project_root, subfolder,
-             take, fps, save_frames, audio=None, sidecar=""):
+             take, fps, save_frames, audio=None, sidecar="", latent=None):
         from PIL import Image
 
         safe = re.sub(r"[^A-Za-z0-9_.-]", "_", shot_id) or "shot"
@@ -787,6 +844,22 @@ class H3SaveShot:
         notes.append(status)
         mp4_ok = status.startswith("mp4 written") and os.path.isfile(mp4)
 
+        # ---- latent ------------------------------------------------------
+        # After the mp4, and never fatal: without it the take can still be
+        # upscaled, through the VAE.
+        latent_file = None
+        if latent is not None and mp4_ok:
+            try:
+                t0 = clock()
+                latent_file = save_latent(latent, os.path.join(shot_dir, f"{stem}.latent.safetensors"),
+                                          width=int(images.shape[2]), height=int(images.shape[1]),
+                                          frames=int(images.shape[0]), fps=float(fps))
+                ms["latent"] = round((clock() - t0) * 1000)
+                mb = os.path.getsize(os.path.join(shot_dir, latent_file)) / 1e6
+                notes.append(f"latent -> .latent.safetensors ({mb:.1f} MB)")
+            except Exception as exc:
+                notes.append(f"latent failed: {exc}")
+
         # ---- thumbnails --------------------------------------------------
         # After the mp4, and never fatal: the render is the valuable thing.
         thumb = strip = None
@@ -813,7 +886,7 @@ class H3SaveShot:
                     stem=stem, status="ok" if mp4_ok else "failed",
                     frames=int(images.shape[0]), fps=float(fps),
                     mp4=os.path.basename(mp4) if mp4_ok else None,
-                    thumb=thumb, strip=strip, save_ms=ms)
+                    thumb=thumb, strip=strip, save_ms=ms, latent=latent_file)
             except Exception as exc:
                 notes.append(f"sidecar update failed: {exc}")
             else:
@@ -850,7 +923,7 @@ class H3SaveShot:
     def _finish_sidecar(sidecar: str, root: str, shot_id: str, take: int,
                         notes: list[str], *, stem: str, status: str, frames: int,
                         mp4, thumb, strip, fps: float | None = None,
-                        save_ms: dict | None = None) -> None:
+                        save_ms: dict | None = None, latent: str | None = None) -> None:
         """Close the take's record: set the saver's fields, leave the rest alone.
 
         Warnings go into `notes` first, so they reach both save_notes and the
@@ -880,6 +953,9 @@ class H3SaveShot:
         if fps:
             # the mp4's frame rate (the target's: Wan 14B saves 16 fps)
             data["fps"] = float(fps)
+        if latent:
+            # the take's latent file, beside it (an upscale starts from it)
+            data["latent"] = latent
         if save_ms:
             # what this node spent, in milliseconds, per step (frames, audio,
             # mp4, thumb, strip, total). ComfyUI only reports the whole graph's

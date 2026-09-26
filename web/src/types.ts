@@ -535,6 +535,9 @@ export interface RenderRequest {
   target?: string | null;
   /** Queue shots whose model file is another family than the target needs. Only sent when set. */
   allow_model_mismatch?: boolean;
+  /** Phase 13: keep the take's latent beside it for an upscale later. Absent: the
+   * server's default (the series config's upscale.save_latents; final pass only). */
+  save_latent?: boolean;
 }
 
 export interface RenderSkip {

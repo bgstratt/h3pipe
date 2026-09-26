@@ -1603,7 +1603,8 @@ of their `.mctx` / `.cond` files: a take's frozen shotlist already says how it w
 - Whether a render saves it: `save_latent`, default **on for final, off for proxy** (proxy is
   never upscaled). The series config's `upscale.save_latents: "final" | "always" | "never"`
   sets the default; `RenderRequest.save_latent`, `h3render --latent / --no-latent` and the
-  Render dialog override it for one run. About 4.3 MB per 3 s at 960×544, about twice that
+  redo dialog's "Keep the latent" override it for one run. (The Render dialog only opens when
+  a batch has something blocked, so a batch follows the series config.) About 4.3 MB per 3 s at 960×544, about twice that
   at 1344×768.
 - The target's binding names where the latent comes from
   (`binding.latent: {"class_type": "SamplerCustomAdvanced", "output": 0}`); `graph_for`

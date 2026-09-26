@@ -365,6 +365,17 @@ model family; see **Model families** at the end.)
     same switch. A render is reproducible — two renders at one seed gave byte-identical
     frames and mp4 (2026-09-22) — so the frames of a take you already have can be fetched by
     re-rendering it at its own seed.
+  - `save_latent` (Phase 13a, 2026-09-26, optional `true` / `false` / `null`): keep the
+    take's sampled latent beside it as `<stem>.latent.safetensors`, for an upscale later
+    (video and audio streams; about 4 MB per 3 s at 960×544, twice that at 1344×768).
+    Absent or null: the series config's `upscale.save_latents` (`"final"`, the default:
+    final pass only; `"always"`; `"never"`). Only a target whose binding names its latent
+    source (`saver.latent`: `{"class_type", "output"}`, today `minimax_h3_ref2va`) can
+    keep one; asked for on another, the take's `notes` say so and nothing is linked. The
+    queuer records `save_latent: true` on the sidecar, and H3SaveShot records the file as
+    `latent` (absent if writing it failed, which is never fatal: an upscale can still go
+    through the VAE). The editor's redo dialog has "Keep the latent", sent only when
+    changed; `h3render --latent / --no-latent` is the same switch.
   - `skipped` and `errors` entries carry `take` when one was reserved.
   - The `h3pipe.take` event sent at queue time says `queued`.
 - **`PUT /h3pipe/override`:**

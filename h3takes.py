@@ -36,6 +36,8 @@ two queuers can't get the same number). H3SaveShot then sets:
                 for dub_keep_foley), mp4 (the ffmpeg encode), thumb, strip,
                 and total. ComfyUI reports only the whole graph's time, so
                 this is how a slow take is attributed.
+    latent      file name of the take's latent (<stem>.latent.safetensors),
+                when the render kept one (the queuer's save_latent: true)
 
 and leaves every other field alone. Updates are atomic (write a temp file in
 the same folder, then os.replace). A queued take whose ComfyUI job is gone

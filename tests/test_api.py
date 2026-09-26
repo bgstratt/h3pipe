@@ -622,6 +622,32 @@ class RenderTest(ApiTest):
         self.err(A.post_render(self.ctx, {"ep": self.ep, "pass": "proxy", "shots": ["sh030"],
                                           "save_frames": "yes"}), 400)
 
+    def test_latent_is_kept_on_final_by_default(self):
+        """Phase 13a: a final render links the sampler's latent into H3SaveShot
+        and says so in the sidecar; proxy doesn't; save_latent overrides both."""
+        def saver_inputs():
+            return next(v["inputs"] for v in self.comfy.graphs[-1].values()
+                        if v["class_type"] == J.SAVER)
+
+        def sampler_id():
+            return next(k for k, v in self.comfy.graphs[-1].items()
+                        if v["class_type"] == "SamplerCustomAdvanced")
+
+        self.render("sh010")
+        self.assertNotIn("latent", saver_inputs())
+        self.assertNotIn("save_latent", T.get_take(self.ep, "proxy", "sh010", 1).sidecar)
+
+        self.render("sh010", pass_="final")
+        self.assertEqual(saver_inputs()["latent"], [sampler_id(), 0])
+        self.assertIs(T.get_take(self.ep, "final", "sh010", 1).sidecar["save_latent"], True)
+
+        self.render("sh020", pass_="final", save_latent=False)
+        self.assertNotIn("latent", saver_inputs())
+        self.render("sh020", save_latent=True)
+        self.assertEqual(saver_inputs()["latent"], [sampler_id(), 0])
+        self.err(A.post_render(self.ctx, {"ep": self.ep, "pass": "final", "shots": ["sh030"],
+                                          "save_latent": "yes"}), 400)
+
     def test_queue_skip_redo(self):
         data = self.render("sh010", "sh020", note="first")
         self.assertEqual([q["shot"] for q in data["queued"]], ["sh010", "sh020"])

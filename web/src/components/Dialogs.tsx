@@ -57,6 +57,8 @@ interface RedoForm {
   target: string;
   /** keep this take's frames as a PNG sequence, for retouching a frame or two */
   frames: boolean;
+  /** keep this take's latent for an upscale; null = the server's default (final pass) */
+  latent: boolean | null;
 }
 
 /** The settings a run on another target starts from: that target's preset for the pass. */
@@ -93,6 +95,7 @@ function initForm(d: ShotDetail, parent: TakeDetail | undefined, pass: Pass, cur
     prompt: d.effective.prompt,
     save: true,
     frames: false,
+    latent: null,
   };
 }
 
@@ -205,7 +208,7 @@ function RedoBody({ d, shot, openPass, parent }: { d: ShotDetail; shot: string; 
         shot, pass: f.pass, parent: f.parent, seed, model: pickers.models === null ? "" : f.model, loras, steps, prompt: f.prompt, note: f.note.trim(),
         saveAsOverride: f.save && !oneOff, allowMissingRefs: allowMissing,
         allowModelMismatch: mismatch && allowMismatch,
-        target: oneOff ? f.target : null, lockPrompt, keepFrames: f.frames,
+        target: oneOff ? f.target : null, lockPrompt, keepFrames: f.frames, keepLatent: f.latent,
       });
       if (ok) closeRedo();
     } finally {
@@ -343,6 +346,15 @@ function RedoBody({ d, shot, openPass, parent }: { d: ShotDetail; shot: string; 
       >
         <input type="checkbox" checked={f.frames} onChange={(e) => set({ frames: e.target.checked })} />
         Keep the frames (PNG sequence)
+      </label>
+      <label
+        className="h3-check"
+        title={"Also writes the take's latent beside it (a few MB), so the take can be upscaled "
+          + "later without going back through the VAE. On for the final pass unless the series "
+          + "config's upscale.save_latents says otherwise."}
+      >
+        <input type="checkbox" checked={f.latent ?? f.pass === "final"} onChange={(e) => set({ latent: e.target.checked })} />
+        Keep the latent (for an upscale)
       </label>
       <MissingRefsNote blocked={missing.length ? [{ shot, refs: missing }] : []} allow={allowMissing} setAllow={setAllowMissing} />
       {mismatch && (

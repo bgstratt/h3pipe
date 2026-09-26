@@ -1062,6 +1062,9 @@ export interface RedoPlan {
    * shot that is right but for a frame or two. Absent leaves the workflow's own
    * setting, which is off. */
   keepFrames?: boolean;
+  /** keep the take's latent for an upscale (sent as `save_latent`); null/absent
+   * leaves the server's default: the final pass only, or the series config's rule */
+  keepLatent?: boolean | null;
   /** The prompt isn't the user's to set: the shot is retargeted, or this run is on
    * another target (its prompt is compiled at queue time). Sent as null, never saved. */
   lockPrompt?: boolean;
@@ -1076,6 +1079,8 @@ export function planRedo(p: RedoPlan, ep: string, d: ShotDetail): { override: Ov
   const base = { ...baseRender(ep, p.pass, [p.shot], !!p.allowMissingRefs, target, !!p.allowModelMismatch), redo: true, parent_take: p.parent, note: p.note, seed_mode: seedMode, seed };
   // only sent when asked for: the server leaves the workflow's value alone otherwise
   if (p.keepFrames) base.save_frames = true;
+  // only when the user chose: the series config's rule applies otherwise
+  if (p.keepLatent != null) base.save_latent = p.keepLatent;
   const prompt = p.lockPrompt ? null : p.prompt;
   // a one-off run on another target isn't saved: the override is the shot's own target's
   if (!p.saveAsOverride || target) {

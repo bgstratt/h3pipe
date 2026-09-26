@@ -149,6 +149,14 @@ describe("planRedo", () => {
     expect(p.override).toEqual({ prompt: "tweaked", steps: 10, seed: "77" });
     expect(p.render).toMatchObject({ prompt: null, model: null, loras: null, steps: null, seed: "77", parent_take: 2, redo: true });
   });
+  it("keep the latent is only sent when chosen (Phase 13a)", () => {
+    const dflt = planRedo({ ...base, seed: { mode: "new" }, saveAsOverride: false }, "E", detail());
+    expect("save_latent" in dflt.render).toBe(false);
+    const on = planRedo({ ...base, seed: { mode: "new" }, saveAsOverride: false, keepLatent: true }, "E", detail());
+    expect(on.render.save_latent).toBe(true);
+    const off = planRedo({ ...base, seed: { mode: "new" }, saveAsOverride: true, keepLatent: false }, "E", detail());
+    expect(off.render.save_latent).toBe(false);
+  });
   it("save as override with nothing changed and a new seed writes no override", () => {
     const p = planRedo({ ...base, seed: { mode: "new" }, saveAsOverride: true }, "E", detail());
     expect(p.override).toBeNull();

@@ -657,6 +657,10 @@ def post_render(ctx: Context, body):
     save_frames = body.get("save_frames")
     if save_frames is not None and not isinstance(save_frames, bool):
         raise ApiError(400, "save_frames must be true or false")
+    # keep each take's latent for an upscale (null: the pass's default)
+    save_latent = body.get("save_latent")
+    if save_latent is not None and not isinstance(save_latent, bool):
+        raise ApiError(400, "save_latent must be true, false or null")
     template = J.RenderRequest(
         shot_id="", redo=redo, seed=seed_in(body.get("seed")), seed_mode=seed_mode,
         model=_opt_str(body, "model") or None, loras=_opt_loras(body.get("loras")),
@@ -664,7 +668,7 @@ def post_render(ctx: Context, body):
         parent_take=check_take(body.get("parent_take"), "parent_take", nullable=True),
         note=_opt_str(body, "note") or "", allow_missing_refs=allow_missing,
         target=_opt_target(body.get("target")), allow_model_mismatch=allow_mismatch,
-        negative=_opt_negative(body.get("negative")))
+        negative=_opt_negative(body.get("negative")), save_latent=save_latent)
     J.load_shotlist(ep, pass_)                           # 404 before anything else
     workflows: dict = {}
 

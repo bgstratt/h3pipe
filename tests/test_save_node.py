@@ -44,6 +44,27 @@ def clip(n: int) -> torch.Tensor:
     return x
 
 
+class FakeNested:
+    """comfy.nested_tensor.NestedTensor's shape, for running outside ComfyUI."""
+    is_nested = True
+
+    def __init__(self, tensors):
+        self.tensors = list(tensors)
+
+    def unbind(self):
+        return self.tensors
+
+
+def fake_comfy_nested() -> dict:
+    """sys.modules entries that make `import comfy.nested_tensor` find FakeNested."""
+    import types
+    comfy = types.ModuleType("comfy")
+    nested = types.ModuleType("comfy.nested_tensor")
+    nested.NestedTensor = FakeNested
+    comfy.nested_tensor = nested
+    return {"comfy": comfy, "comfy.nested_tensor": nested}
+
+
 def red_of(n: int, i: int) -> float:
     return 255.0 * i / max(1, n - 1)
 
@@ -89,9 +110,14 @@ class SaveNodeTest(unittest.TestCase):
         self.assertEqual(N.H3SaveShot.strip_indices(107)[-1], 100)
 
     def test_input_is_last_optional_with_empty_default(self):
+        """`sidecar` is the last optional *widget*, so saved workflows keep their
+        widget order; `latent` after it is a link, which has no widget value."""
         opt = N.H3SaveShot.INPUT_TYPES()["optional"]
-        self.assertEqual(list(opt)[-1], "sidecar")
+        widgets = [k for k, v in opt.items() if v[0] in ("STRING", "INT", "FLOAT", "BOOLEAN")]
+        self.assertEqual(widgets[-1], "sidecar")
         self.assertEqual(opt["sidecar"], ("STRING", {"default": ""}))
+        self.assertEqual(list(opt)[-1], "latent")
+        self.assertEqual(opt["latent"], ("LATENT",))
 
     def test_saved_workflow_still_converts(self):
         path = os.path.join(REPO, "targets", "video", "minimax_h3_ref2va", "workflow.json")
@@ -170,6 +196,51 @@ class SaveNodeTest(unittest.TestCase):
         self.assertTrue(takes[0].usable)
         self.assertEqual(T.latest_usable(takes).take, 1)
         self.assertEqual(T.sweep_queued(takes, alive=set()), [])
+
+    @needs_ffmpeg
+    def test_latent_kept_and_loads_back(self):
+        """Phase 13a: a linked latent is written beside the take, named in the
+        sidecar, and load_latent gives back the same joint AV latent."""
+        video, audio = torch.randn(1, 4, 3, 6, 12), torch.randn(1, 8, 20)
+        t = self.reserve()
+        _, status = self.save(clip(24), take=t.take, sidecar=t.paths.sidecar,
+                              latent={"samples": FakeNested((video, audio))})
+        self.assertIn("latent -> .latent.safetensors", status)
+        sc = T.read_json(t.paths.sidecar)
+        self.assertEqual(sc["latent"], "sh020_t01.latent.safetensors")
+        self.assertIn("latent", sc["save_ms"])
+        path = os.path.join(t.paths.dir, sc["latent"])
+        from safetensors import safe_open
+        with safe_open(path, framework="pt") as fh:
+            meta = fh.metadata()
+        self.assertEqual(meta["format"], N.LATENT_FORMAT)
+        self.assertEqual(meta["streams"], "video,audio")
+        self.assertEqual((meta["width"], meta["height"], meta["frames"]), (str(W), str(H), "24"))
+        with mock.patch.dict(sys.modules, fake_comfy_nested()):
+            back = N.load_latent(path)
+        self.assertTrue(torch.equal(back["samples"].tensors[0], video))
+        self.assertTrue(torch.equal(back["samples"].tensors[1], audio))
+        # it belongs to the take: discarding moves it with the rest
+        self.assertIn(path, T.stem_files(t.paths.dir, "sh020_t01"))
+
+    @needs_ffmpeg
+    def test_latent_failure_is_not_fatal(self):
+        t = self.reserve()
+        _, status = self.save(clip(24), take=t.take, sidecar=t.paths.sidecar,
+                              latent={"samples": object()})
+        self.assertIn("latent failed", status)
+        sc = T.read_json(t.paths.sidecar)
+        self.assertEqual(sc["status"], "ok")
+        self.assertNotIn("latent", sc)
+        self.assertEqual([f for f in os.listdir(t.paths.dir) if f.startswith(".tmp_")], [])
+
+    def test_plain_latent_loads_back_plain(self):
+        x = torch.randn(1, 16, 4, 8)
+        path = os.path.join(self.root, "x.latent.safetensors")
+        N.save_latent({"samples": x}, path, frames=1)
+        with mock.patch.dict(sys.modules, fake_comfy_nested()):
+            back = N.load_latent(path)
+        self.assertTrue(torch.equal(back["samples"], x))
 
     @needs_ffmpeg
     def test_piped_and_png_paths_agree(self):
