@@ -203,13 +203,16 @@ def block() -> str:
         lines += [""]
 
     # Phase 13: what an upscale needs besides the target's own files (never a render)
-    ups = []
+    ups, own = [], []
     for t in TG.list_targets():
-        u = (t.spec.get("upscale") or {}).get("upscaler") or {}
+        spec = t.spec.get("upscale") or {}
+        u = spec.get("upscaler") or {}
         name = (u.get("inputs") or {}).get("model_name")
         if name:
             dl = t.downloads.get(name) or {}
             ups.append((t.id, u["class_type"], name, dl))
+        elif spec.get("mode") == "second_stage":
+            own.append(t.id)
     if ups:
         lines += ["### For upscaling (optional)", "",
                   "Only to upscale final takes (`python h3.py upscale`), never to render. The "
@@ -220,6 +223,9 @@ def block() -> str:
             where = dl.get("url") or dl.get("source") or "no download record"
             lines += [f"- `{name}` → `models/{dl.get('folder') or 'latent_upscale_models'}/` "
                       f"({cls}, for `{tid}`) — {where}"]
+        for tid in own:
+            lines += [f"- `{tid}`: nothing extra. Its render already has a latent upsampler, "
+                      f"and an upscale runs that second stage again on the take"]
         lines += [""]
 
     nourl = [r for r in records if not r["url"]]

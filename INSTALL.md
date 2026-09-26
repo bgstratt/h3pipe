@@ -188,7 +188,8 @@ live inside one of them.
 ### The upscaler (optional)
 
 Only for upscaling final takes (`h3.py upscale`, the editor's **Upscale**); a render never
-needs it. Today it upscales takes made on `minimax_h3_ref2va`.
+needs it. It is for takes made on `minimax_h3_ref2va`. Takes made on `ltx2` upscale with
+what LTX-2 already has (its own latent upsampler), so they need nothing from here.
 
 1. Clone **LBH-123-AI/Comfyui_Minimax_h3_latent_Upscaler** into `custom_nodes`:
    ```
@@ -580,6 +581,7 @@ Every file any target names. `python h3.py targets` tells you which of these you
 Only to upscale final takes (`python h3.py upscale`), never to render. The node comes from the Comfyui_Minimax_h3_latent_Upscaler pack (LBH-123-AI) — not its "Plus" fork, which has the same node without temporal chunking. `python h3.py targets` says whether this ComfyUI can upscale.
 
 - `minimax_h3_latent_upscaler_3d_fp16.safetensors` → `models/latent_upscale_models/` (MinimaxH3LatentUpscaler3D, for `minimax_h3_ref2va`) — no URL: no ComfyUI template, saved workflow or ComfyUI-Manager model list on this machine records this file. Search Hugging Face for its exact name: the Comfyui_Minimax_h3_latent_Upscaler pack's README points to the LBH-123-AI/Minimax_h3_latent_Upscaler repo. Only needed to upscale (Phase 13), never to render.
+- `ltx2`: nothing extra. Its render already has a latent upsampler, and an upscale runs that second stage again on the take
 
 #### Files with no recorded download URL
 

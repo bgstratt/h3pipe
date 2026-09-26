@@ -96,8 +96,8 @@ class LatentRouteTest(ApiTest):
     def test_a_target_without_a_latent_source_keeps_none(self):
         """Asked for on a target whose binding names no latent: nothing is
         linked and the sidecar says why."""
-        target = next(t.id for t in TG.list_targets("video")
-                      if not t.binding.saver.get("latent"))
+        target = "wan22_ti2v"                               # silent, keeps no latent
+        self.assertFalse(TG.load_target(target, "video").binding.saver.get("latent"))
         self.ok(A.post_render(self.ctx, {"ep": self.ep, "pass": "final", "shots": ["sh010"],
                                          "target": target, "save_latent": True,
                                          "allow_missing_refs": True,
@@ -306,6 +306,76 @@ class UpscaleRouteTest(UpscaleTest):
         self.assertIsNone(U.upscale_readiness(wan, info))
         self.assertNotIn("upscale", E.readiness([wan], info)[wan.id])
         self.assertIn("upscale", E.readiness([t], info)[t.id])
+
+
+class LtxUpscaleTest(UpscaleTest):
+    """13d: LTX-2.5's upscale is its own second stage run again on the take."""
+    LTX_WORKFLOW = os.path.join(ROOT, "targets", "video", "ltx2", "workflow.json")
+
+    def ltx_take(self, latent=True) -> T.Take:
+        self.ok(A.post_render(self.ctx, {"ep": self.ep, "pass": "final", "shots": ["sh010"],
+                                         "target": "ltx2", "allow_missing_refs": True,
+                                         "allow_model_mismatch": True}))
+        g = self.comfy.graphs[-1]
+        saver = next(k for k, v in g.items() if v["class_type"] == J.SAVER)
+        final = g[saver]["inputs"]["latent"][0]
+        # the saver keeps the FINAL sampler's latent, not the first stage's
+        self.assertEqual(g[final]["class_type"], "SamplerCustomAdvanced")
+        self.assertEqual(g[g[final]["inputs"]["sigmas"][0]]["inputs"]["sigmas"], "0.85, 0.7250, 0.4219, 0.0")
+        t = T.get_take(self.ep, "final", "sh010", 1)
+        self.assertEqual(t.sidecar["target"], "ltx2")
+        if latent:
+            with open(t.paths.latent, "wb") as fh:
+                fh.write(b"latent")
+            T.update_sidecar(t.paths.sidecar, latent=os.path.basename(t.paths.latent))
+        return T.get_take(self.ep, "final", "sh010", 1)
+
+    def ltx_base(self) -> dict:
+        return J.graph_from(json.load(open(self.LTX_WORKFLOW, encoding="utf-8")))
+
+    def test_second_stage_graph(self):
+        t = self.ltx_take()
+        up = U.plan_upscale(self.ep, t)
+        self.assertEqual((up.action, up.route, up.start_step), ("upscale", "latent", 2))
+        self.assertEqual((up.width, up.height), (t.sidecar["width"] * 2, t.sidecar["height"] * 2))
+        g = U.upscale_graph(self.ltx_base(), up)
+        samplers = self.by_class(g, "SamplerCustomAdvanced")
+        self.assertEqual(len(samplers), 1)                             # stage 1 is gone
+        self.assertFalse(self.by_class(g, "EmptyLTXVLatentVideo"))
+        si = g[samplers[0]]["inputs"]
+        self.assertEqual(si["latent_image"], ["up_hold", 0])
+        join = g["up_hold"]["inputs"]["latent"][0]
+        self.assertEqual(g[join]["class_type"], "LTXVConcatAVLatent")
+        self.assertEqual(g[join]["inputs"]["audio_latent"], ["up_split_av", 1])   # the take's audio
+        ups = self.by_class(g, "LTXVLatentUpsampler")
+        self.assertEqual(len(ups), 1)
+        self.assertEqual(g[ups[0]]["inputs"]["samples"], ["up_split_av", 0])
+        self.assertEqual(g[si["sigmas"][0]]["inputs"]["sigmas"], "0.4219, 0.0")
+        self.assertEqual(g["up_source"]["class_type"], "H3LoadTakeLatent")
+        self.assertTrue(self.by_class(g, "H3SaveUpscale"))
+        self.assertFalse(self.by_class(g, J.SAVER))
+        # a longer tail by hand; past the end is refused
+        g = U.upscale_graph(self.ltx_base(), U.plan_upscale(self.ep, t, start_step=0))
+        s = self.by_class(g, "SamplerCustomAdvanced")[0]
+        self.assertEqual(g[g[s]["inputs"]["sigmas"][0]]["inputs"]["sigmas"], "0.85, 0.7250, 0.4219, 0.0")
+        self.assertEqual(U.plan_upscale(self.ep, t, start_step=3).action, "error")
+        self.assertEqual(U.plan_upscale(self.ep, t, scale=1.5).action, "error")   # fixed 2x
+
+    def test_vae_route_uses_ltx_audio_encoder(self):
+        t = self.ltx_take(latent=False)
+        up = U.plan_upscale(self.ep, t)
+        self.assertEqual(up.route, "vae")
+        g = U.upscale_graph(self.ltx_base(), up)
+        self.assertEqual(g["up_aenc"]["class_type"], "LTXVAudioVAEEncode")
+        self.assertIn("audio_vae", g["up_aenc"]["inputs"])
+        self.assertEqual(g["up_venc"]["class_type"], "VAEEncode")
+
+    def test_readiness_needs_no_extra_pack(self):
+        t = TG.load_target("ltx2", "video")
+        info = {c: {"input": {}} for c in U.UPSCALE_NODES + ("LTXVLatentUpsampler", "LTXVAudioVAEEncode")}
+        self.assertEqual(U.upscale_readiness(t, info), {"status": "ready", "missing": []})
+        del info["LTXVAudioVAEEncode"]
+        self.assertEqual(U.upscale_readiness(t, info)["status"], "not_ready")
 
 
 if __name__ == "__main__":

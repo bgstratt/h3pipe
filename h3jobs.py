@@ -2046,6 +2046,38 @@ def prune(g: dict, keep: str) -> None:
         del g[k]
 
 
+def upstream_node(g: dict, start: str, ctype: str) -> str | None:
+    """The nearest node of class `ctype` that `start` depends on (breadth first
+    through its links), or None."""
+    seen, queue = {start}, [start]
+    while queue:
+        nid = queue.pop(0)
+        for v in g.get(nid, {}).get("inputs", {}).values():
+            if isinstance(v, list) and len(v) == 2 and isinstance(v[0], str) and v[0] not in seen:
+                if g.get(v[0], {}).get("class_type") == ctype:
+                    return v[0]
+                seen.add(v[0])
+                queue.append(v[0])
+    return None
+
+
+def latent_node(g: dict, saver: str, spec: dict) -> str:
+    """The node a binding's `saver.latent` names: the only one of its class, or
+    with `upstream_of: <saver input>`, the nearest one feeding that input (a
+    two-stage graph's final sampler, e.g. LTX-2's)."""
+    if spec.get("upstream_of"):
+        link = g[saver]["inputs"].get(spec["upstream_of"])
+        nid = None
+        if isinstance(link, list) and link and isinstance(link[0], str):
+            first = link[0]
+            nid = (first if g.get(first, {}).get("class_type") == spec["class_type"]
+                   else upstream_node(g, first, spec["class_type"]))
+        if nid is None:
+            raise ValueError(f"no {spec['class_type']} feeds the saver's {spec['upstream_of']}")
+        return nid
+    return node_of(g, spec["class_type"])
+
+
 def graph_for(base: dict, job: Job, take: T.Take, *, panel_mode: str | None = None,
               save_frames: bool | None = None, review_copy: bool = True,
               strip_meta: bool = False, inputs: dict | None = None) -> dict:
@@ -2100,7 +2132,7 @@ def graph_for(base: dict, job: Job, take: T.Take, *, panel_mode: str | None = No
     if job.save_latent and b.saver.get("latent"):
         # the saver keeps the take's latent: link the node the binding names
         spec = b.saver["latent"]
-        si["latent"] = [node_of(g, spec["class_type"]), int(spec.get("output", 0))]
+        si["latent"] = [latent_node(g, saver, spec), int(spec.get("output", 0))]
     if not review_copy:
         for k in [k for k, v in g.items() if v["class_type"] in b.review_nodes]:
             del g[k]

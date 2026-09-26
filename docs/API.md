@@ -332,7 +332,10 @@ its own schedule (the target's `start`, 0.875: step 7 of 8) under the take's fro
 shotlist, from its kept latent (Phase 13a) or, without one, its frames and `_h3.wav`
 through the VAE. The take's audio is held while it samples and its audio stream is copied
 onto the result unchanged. Only a target with an `upscale` block in its target.json
-(`minimax_h3_ref2va`) can upscale.
+can upscale: `minimax_h3_ref2va` (an external latent upscaler, then its own sampler from late
+in its schedule) and `ltx2` (its render graph's second stage run again on the take: its
+own upsampler, the tail of its fixed sigmas; mode `second_stage`, always 2x). The
+`.up.json` records `mode` and the schedule's `steps`.
 
 ### `POST /h3pipe/upscale`
 Body `{"ep", "shots"?: ["sh020"] | null, "takes"?: [{"shot", "take"}], "redo"?: false,

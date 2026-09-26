@@ -1714,7 +1714,15 @@ the one clip that wasn't upscaled scaled and named; `h3assemble` without it is u
 what this machine and the repo have today. Nothing below is built; each target gets an
 `upscale` block in its target.json and its own graph surgery in h3upscale.
 
-- **`ltx2` (LTX-2.5 distilled): no new nodes, no new downloads.** Its render graph is
+- **`ltx2`: built 2026-09-26** (mode `second_stage` in h3upscale; `saver.latent` names the
+  final sampler by `upstream_of: images`, since the graph has two). Live on the scratch
+  episode: sh760 rendered on ltx2 at 960×512 (49 s, a 2.5 MB latent) and upscaled to
+  1920×1024 in 18.1 s from the last of its three stage-2 sigmas (0.4219), audio bit-identical
+  to the take's. Visibly sharper than the take stretched (fabric, shoes, lace, siding) —
+  more than H3's one-step refine, as LTX's second stage is made to add detail on upsampling.
+  The VAE route encodes audio with `LTXVAudioVAEEncode` (target.json `encode_audio`).
+  Planned text, kept:
+  **`ltx2` (LTX-2.5 distilled): no new nodes, no new downloads.** Its render graph is
   already two-stage: `LatentUpscaleModelLoader` + `LTXVLatentUpsampler` with
   `ltx-2.5-latent-spatial-upscaler-x2-bf16-1.0.safetensors` (its required `upscaler`
   param, installed) and a second `SamplerCustomAdvanced` on `ManualSigmas`. An upscale is
