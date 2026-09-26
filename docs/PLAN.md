@@ -1660,6 +1660,22 @@ of their `.mctx` / `.cond` files: a take's frozen shotlist already says how it w
   `minimax_h3_latent_upscaler_3d_fp16.safetensors` in `models/latent_upscale_models/`, in the
   target's `downloads` (INSTALL.md regenerated). Readiness reports it; a render never needs it.
 
+- **As built** (2026-09-26, commit 58f85c2; `h3upscale.py`, `comfy_nodes/h3_upscale.py`).
+  Live check on the RTX 5090 (32 GB), scratch copy of Porchlights ep01, sh760 (73 frames):
+
+  | take | route | result | time (whole job) |
+  |---|---|---|---|
+  | 960×544 | latent | 1920×1088 | 30.1 s (upscaler model loaded) |
+  | 960×544 | VAE (`--vae --redo`) | 1920×1088 | 24.4 s |
+  | 1344×768 | latent | 2688×1536 | 51.3 s |
+
+  Every `.up.mp4`'s audio stream is bit-identical to its take's (MD5). The two routes look
+  alike: the VAE route loses nothing visible, so a take without a latent is no worse off. The
+  start step became a fraction of the take's own schedule (`start` 0.875) because a take's
+  steps vary (kitchen_sink's final pass is 6; the base preset 20). The upscaler's file is a
+  `downloads` entry but not yet in INSTALL.md (make_models_md lists model params only):
+  that, and readiness for the upscaler node, go with 13c.
+
 **13c — where you run it**
 - CLI: `h3.py upscale <ep> [--only sh760,sh770] [--redo] [--scale 2] [--start-step 7]
   [--check]`. Without `--only`: every take the final cut picks that has no fresh upscale.
