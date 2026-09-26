@@ -1727,6 +1727,13 @@ what this machine and the repo have today. Nothing below is built; each target g
   size, with the take's prompt, and the first frame (i2v) or references (VACE) at the new
   size. Silent, so no audio to hold: an upscale copies nothing. 832×480 → 1664×960; ti2v's
   1280×704 → 2560×1408 is too big, so 1.5x (1920×1056) there.
+  The pixel model is a choice, listed from ComfyUI (`UpscaleModelLoader.model_name`, so any
+  file in `models/upscale_models/` appears): the target's `upscale.pixel_model` default
+  (`RealESRGAN_x2.pth`: exactly 2x, gentle on grain), `h3.py upscale --pixel-model`, a
+  picker in the editor's Upscale, recorded in the `.up.json`. A 4x model's output is scaled
+  down to the 2x size. On this machine (2026-09-26): `RealESRGAN_x2.pth`,
+  `RealESRGAN_x4.pth`, `4x-UltraSharp.pth` (UltraSharp's licence may be non-commercial:
+  check before shipping with it). `downloads` entries only once each has a URL on record.
 - **Any target, custom ones too: a pixel-space video upscaler, to evaluate.** SeedVR2
   (ByteDance) is a one-step video restoration/upscale model with a community ComfyUI node
   pack (numz's `ComfyUI-SeedVR2_VideoUpscaler`, 3B and 7B models); verify the pack, its
