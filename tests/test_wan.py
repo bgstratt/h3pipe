@@ -132,7 +132,8 @@ class TargetTest(unittest.TestCase):
         self.cfg, self.story = kitchen_sink()
 
     def test_templates(self):
-        for tid, fps, m, top in ((I2V, 16.0, 16, 161), (TI2V, 24.0, 32, 241), (VACE, 16.0, 16, 161)):
+        # the 14B models are specified at 16 fps but paced for 24: timed at 24 (2026-09-27)
+        for tid, fps, m, top in ((I2V, 24.0, 16, 161), (TI2V, 24.0, 32, 241), (VACE, 24.0, 16, 161)):
             tp = TG.load_target(tid).template
             self.assertEqual((tp.fps, tp.size_multiple, tp.max), (fps, m, top), tid)
             self.assertEqual({(tp.snap(n) - 1) % 4 for n in range(1, top + 1)}, {0}, tid)
@@ -370,7 +371,7 @@ class RenderTest(unittest.TestCase):
         self.assertEqual(list(got), ["first"])
         g = self.graph(job, take)
         i2v = g[J.node_of(g, "WanImageToVideo")]["inputs"]
-        self.assertEqual((i2v["width"], i2v["height"], i2v["length"]), (640, 352, 41))
+        self.assertEqual((i2v["width"], i2v["height"], i2v["length"]), (640, 352, 61))
         self.assertEqual(g[i2v["start_image"][0]]["inputs"]["image"], got["first"])
         self.assertNotIn("end_image", i2v)
         # two stages: each model with its own LoRA and shift, samplers split 2/2
@@ -397,9 +398,10 @@ class RenderTest(unittest.TestCase):
             self.assertEqual(lora["_meta"]["title"], f"Wan {stage} noise LoRA")
         self.assertEqual(titled(g, "CLIPTextEncode", "Positive prompt")["text"], job.prompt)
         self.assertTrue(titled(g, "CLIPTextEncode", "Negative prompt")["text"].startswith("色调艳丽"))
-        self.saver(g, 16.0)
+        self.saver(g, 24.0)
         sc = T.read_sidecar(take.paths.sidecar)
-        self.assertEqual((sc["fps"], sc["length"], sc["target"]), (16.0, 41, I2V))
+        self.assertEqual((sc["fps"], sc["target"]), (24.0, I2V))
+        self.assertEqual((sc["length"] - 5) % 4, 0)                  # on the 4k+1 grid
         self.assertTrue(any("renders as silent" in n for n in sc["notes"]))
         first = next(r for r in sc["refs"] if r["slot"] == "first frame")
         self.assertEqual(first["sha1"], T.file_sha1(os.path.join(self.root, first["path"])))
@@ -536,7 +538,7 @@ class RenderTest(unittest.TestCase):
         vace = g[J.node_of(g, "WanVaceToVideo")]["inputs"]
         self.assertEqual(g[vace["reference_image"][0]]["inputs"]["image"], got["reference"])
         self.assertEqual((vace["width"], vace["height"], vace["length"], vace["strength"]),
-                         (640, 352, 61, 1.0))
+                         (640, 352, 89, 1.0))
         self.assertNotIn("control_video", vace)
         trim = g[J.node_of(g, "TrimVideoLatent")]["inputs"]
         self.assertEqual(trim["trim_amount"], [J.node_of(g, "WanVaceToVideo"), 3])
@@ -552,7 +554,7 @@ class RenderTest(unittest.TestCase):
              "wan2.2_t2v_lightx2v_4steps_lora_250928_high_noise.safetensors"),
             ("Wan low noise LoRA",
              "wan2.2_t2v_lightx2v_4steps_lora_250928_low_noise.safetensors")})
-        self.saver(g, 16.0)
+        self.saver(g, 24.0)
         # re-picking a view makes the take ref-stale
         png(os.path.join(self.root, "refs", "ada", "ada_sheet_4panel.png"), (256, 64), ((1, 2, 3),))
         doc, i = J.find_shot(self.root, "proxy", "sh020")
@@ -581,12 +583,12 @@ class RenderTest(unittest.TestCase):
         self.assertEqual(g[video[0]["inputs"]["image"][0]]["inputs"]["image"], got["first"])
         self.assertEqual(g[video[2]["inputs"]["image"][0]]["inputs"]["image"], got["last"])
         self.assertEqual((video[1]["inputs"]["batch_size"], video[1]["inputs"]["color"]),
-                         (59, 0x7F7F7F))
+                         (87, 0x7F7F7F))                   # the frames between: length - 2
         mask = g[vace["control_masks"][0]]
         self.assertEqual((mask["class_type"], mask["inputs"]["channel"]), ("ImageToMask", "red"))
         frames = flatten(mask["inputs"]["image"][0])
         self.assertEqual([(n["inputs"]["batch_size"], n["inputs"]["color"]) for n in frames],
-                         [(1, 0), (59, 0xFFFFFF), (1, 0)])
+                         [(1, 0), (87, 0xFFFFFF), (1, 0)])
         # first only: the keyframe, then grey to the end
         os.remove(os.path.join(self.root, "refs", "shots", "sh020", "last.png"))
         job = self.plan("sh020", VACE, redo=True)
@@ -595,7 +597,7 @@ class RenderTest(unittest.TestCase):
         vace = g[J.node_of(g, "WanVaceToVideo")]["inputs"]
         self.assertEqual([n["class_type"] for n in flatten(vace["control_video"][0])],
                          ["ImageScale", "EmptyImage"])
-        self.assertEqual(flatten(vace["control_video"][0])[1]["inputs"]["batch_size"], 60)
+        self.assertEqual(flatten(vace["control_video"][0])[1]["inputs"]["batch_size"], 88)
 
 
 # ---------------------------------------------------------------------------

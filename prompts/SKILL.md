@@ -138,9 +138,9 @@ shot 93. So:
 | `minimax_h3_fl2va` | the shot's first/last keyframes, plus words | generated or dubbed (no clone) | optional | `17k+5` at 24 fps, best 5–15 s | picking up exactly where the previous shot ended |
 | `ltx2` | words, plus keyframes when there are any | always generated | optional | `8k+1` at 24 fps, up to ~20 s | fast text-to-video with sound; `dur: model` |
 | `ltx2_ingredients` | a reference sheet made from your refs (required) | always generated | not read | `8k+1` at 24 fps, 2–20 s, best 5.04 s | identity on LTX |
-| `wan22_i2v` | a first frame (required) | none | first required, last optional | `4k+1` at 16 fps, best 5 s | animating a still |
+| `wan22_i2v` | a first frame (required) | none | first required, last optional | `4k+1` at 24 fps, best ≤ 3 s | animating a still |
 | `wan22_ti2v` | words, or a first frame | none | first optional | `4k+1` at 24 fps | cheap proxies; where an I2V shot without a first frame can go |
-| `wan22_vace` | a reference picture made from your sheets | none | optional | `4k+1` at 16 fps | identity without sound |
+| `wan22_vace` | a reference picture made from your sheets | none | optional | `4k+1` at 24 fps, best ≤ 3 s | identity without sound |
 
 - **Leave the target out** unless the choice is a decision about the film. Shots with no
   `target:` render on the episode's target (set in the editor) or the series config's
@@ -876,12 +876,14 @@ What every Wan shot has in common:
   **acted silently** (the prompt says who talks and how, mouth moving), so the recording or
   another take's sound goes on at the edit. Keep dialogue shots on a target with sound if
   you need lip-sync.
-- **Its own frame rate.** The 14B models (`wan22_i2v`, `wan22_vace`) render **16 fps**; the
-  5B renders 24. Lengths are on a `4k + 1` grid at that rate: 5 s is 81 frames at 16 fps,
-  121 at 24. The models were trained on 5 s shots; a longer one renders with a warning,
-  and past 10 s it must be split. A 16 fps take in a 24 fps episode is converted when the
-  cut is assembled (frames repeated, never sped up), and the editor's timeline and Play all
-  time it by its own duration.
+- **Its frame rate, and keeping shots short.** All three render at **24 fps**. The 14B
+  models (`wan22_i2v`, `wan22_vace`) are specified at 16 fps, but their motion is paced for
+  24: at 16 a take plays as slow motion, so h3pipe times and saves them at 24. Lengths are on
+  a `4k + 1` grid: 3 s is 73 frames. The 14B models were trained on 81 frames, **3.4 s** at
+  24, and their prompt adherence falls off after that: a longer shot renders with a
+  warning, and past 161 frames (6.7 s) it must be split. **Write Wan shots of 3 s or less**,
+  and cut a longer action into two shots. (A take rendered before this at 16 fps keeps its
+  own rate: assemble and Play all time it by what it recorded.)
 - **Prose prompts**, written for you: the look, the framing and `camera:`, who is in frame
   from their `design`, the action, on-screen text, then the lines as silent acting. No
   `sound:` or `music:`: they are ignored. Wan's standard (Chinese) negative prompt is
@@ -971,7 +973,7 @@ prediction between 3 and 8 seconds (without a range: 1 to 20).
 
 Every video model takes only certain frame counts, and a `dur:` between two of them rounds
 **up**, so you pay for frames you throw away. The grid is the target's: `17k + 5` frames on
-the H3 targets, `8k + 1` on LTX, `4k + 1` on Wan (at 16 fps on the 14B models). The build
+the H3 targets, `8k + 1` on LTX, `4k + 1` on Wan (at 24 fps; best kept to 3 s). The build
 snaps each shot to its own target's grid, and `--check` warns about wasted padding.
 
 Write for H3's grid, the default; the other grids are fine-grained enough that these

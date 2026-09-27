@@ -28,8 +28,8 @@
   "nodes": ["LoadImage", "WanFirstLastFrameToVideo"],
 
   "template": {
-    "_note": "Wan 2.2 14B renders 4k+1 frames at 16 fps (the template's CreateVideo, and its duration maths `floor(seconds * 16 + 1)`); trained on 81 frames (5 s), so a longer shot is a warning, and past 161 frames (10 s) it must be split. Width and height are multiples of 16 (WanImageToVideo's step); sizes that aren't legal are snapped down, then shrunk under 720p (1280 on the long side, 921600 pixels).",
-    "fps": 16,
+    "_note": "Wan 2.2 14B renders 4k+1 frames. Its spec (and ComfyUI's template) says 16 fps, but its motion is paced for 24: played at 16 it reads as slow motion (the user's finding, 2026-09-27; the lightx2v 4-step LoRAs are often blamed too). So it is timed and saved at 24 fps: a 3 s shot is 73 frames. Trained on 81 frames (3.4 s at 24), so a longer shot is a warning (adherence falls off in the second half), and past 161 frames (6.7 s) it must be split. Width and height are multiples of 16 (WanImageToVideo's step); sizes that aren't legal are snapped down, then shrunk under 720p (1280 on the long side, 921600 pixels).",
+    "fps": 24,
     "frames": {"step": 4, "base": 5, "max": 161},
     "size_multiple": 16,
     "size_fit": "snap",
