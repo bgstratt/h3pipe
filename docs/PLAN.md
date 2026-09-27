@@ -1752,6 +1752,14 @@ what this machine and the repo have today. Nothing below is built; each target g
   down to the 2x size. On this machine (2026-09-26): `RealESRGAN_x2.pth`,
   `RealESRGAN_x4.pth`, `4x-UltraSharp.pth` (UltraSharp's licence may be non-commercial:
   check before shipping with it). `downloads` entries only once each has a URL on record.
+- **Scale and "then pixel"** (2026-09-26): the dialog's Scale (1.5/2/3/4x, each checked per
+  take against its method: pixel on even sides, H3 on the 32 grid, LTX 2x only; the take
+  status now carries each take's width/height and the options route each target's mode,
+  align and fixed scale), and a pixel step after a re-sample in the same job
+  (`then_pixel_model` / `then_scale`, CLI `--then-pixel` / `--then-scale`): the decoded
+  frames go through `H3PixelUpscale` before the saver. Re-sample 2x then RealESRGAN_x2 = 4x
+  with generated detail in the first half. Scales are capped at 4 (the H3 upscaler's own
+  limit); a re-sample at 4x of 1344×768 is 5376×3072 conditioning, heavy on any GPU.
 - **Proxy takes upscale too** (2026-09-26, the user's call: "no reason we shouldn't"): every
   pass restriction went (plan, routes with `pass`, `h3.py upscale --proxy`, assemble
   `--upscaled` on either pass, the editor's menus and Export 2x on both). A proxy take keeps

@@ -63,6 +63,17 @@ class UpscaleJob:
     action: str = "upscale"             # upscale | skip | error
     method: str = "latent"              # latent | pixel
     pixel_model: str = ""
+    # "then pixel": after a re-sample, an upscale model takes width x height on
+    # to out_width x out_height in the same job ("" / 1.0: no second step)
+    then_model: str = ""
+    then_scale: float = 1.0
+    out_width: int = 0
+    out_height: int = 0
+
+    @property
+    def out_size(self) -> tuple[int, int]:
+        """What the .up.mp4 is: after the then-pixel step if there is one."""
+        return (self.out_width or self.width, self.out_height or self.height)
     why: str = ""
     notes: list = field(default_factory=list)
 
@@ -142,6 +153,7 @@ METHODS = ("latent", "pixel")
 PIXEL_NODES = ("H3LoadTakeVideo", "H3PixelUpscale", "UpscaleModelLoader", "H3SaveUpscale")
 DEFAULT_PIXEL_MODEL = "RealESRGAN_x2.pth"
 DETAILS = (0, 1, 2)                     # steps earlier than the default start
+MAX_SCALE = 4.0                         # the H3 latent upscaler's limit; the pixel method's too
 
 
 def pixel_models(object_info: dict | None) -> list[str] | None:
@@ -218,13 +230,17 @@ def upscale_readiness(target: "TG.Target", object_info: dict | None) -> dict | N
 def plan_upscale(root: str, take: T.Take, *, scale: float | None = None,
                  start_step: int | None = None, route: str | None = None,
                  redo: bool = False, method: str | None = None,
-                 pixel_model: str | None = None, detail: int | None = None) -> UpscaleJob:
+                 pixel_model: str | None = None, detail: int | None = None,
+                 then_model: str | None = None, then_scale: float | None = None) -> UpscaleJob:
     """What upscaling `take` would do. action "error" (with `why`) when it
     can't: not final, not usable, a latent upscale on a target without
     `upscale`, a size that doesn't scale evenly; "skip" when it already has a
     fresh upscale. `method`: latent (default where the target has one) or
     pixel (the default elsewhere). `detail` (0-2) starts that many steps
-    earlier than the default; `start_step` names the step outright."""
+    earlier than the default; `start_step` names the step outright.
+    `then_model` (a latent upscale only) adds a pixel step after the re-sample:
+    that upscale model takes the result on by `then_scale` (default 2) in the
+    same job, so re-sample 2x then RealESRGAN_x2 makes 4x."""
     sc = take.sidecar or {}
     target_id = sc.get("target") or T.DEFAULT_TARGET
     target = TG.load_target(target_id, "video", root=root)
@@ -239,6 +255,8 @@ def plan_upscale(root: str, take: T.Take, *, scale: float | None = None,
                 raise UpscaleError(f"{job.label} isn't a finished take ({take.status})")
             if not w or not h:
                 raise UpscaleError(f"{job.label}'s sidecar doesn't say its size")
+            if not 1 < job.scale <= MAX_SCALE:
+                raise UpscaleError(f"scale {job.scale:g}: it's more than 1, up to {MAX_SCALE:g}")
             job.width, job.height = scaled(w, h, job.scale, 2)
         except UpscaleError as e:
             job.action, job.why = "error", str(e)
@@ -273,7 +291,14 @@ def plan_upscale(root: str, take: T.Take, *, scale: float | None = None,
             raise UpscaleError(f"{job.label}'s sidecar doesn't say its size")
         if spec.get("mode", RESAMPLE) == SECOND_STAGE and s != float(spec.get("scale", 2)):
             raise UpscaleError(f"{target.short}'s upsampler is fixed at {spec.get('scale', 2):g}x")
+        if not 1 < s <= MAX_SCALE:
+            raise UpscaleError(f"scale {s:g}: it's more than 1, up to {MAX_SCALE:g}")
         job.width, job.height = scaled(w, h, s, align_of(spec))
+        if then_model:
+            job.then_model, job.then_scale = then_model, float(then_scale or 2)
+            if not 1 < job.then_scale <= MAX_SCALE:
+                raise UpscaleError(f"then-scale {job.then_scale:g}: it's more than 1, up to {MAX_SCALE:g}")
+            job.out_width, job.out_height = scaled(job.width, job.height, job.then_scale, 2)
         if not 0 <= step < steps:
             raise UpscaleError(f"start step {step} isn't inside the {steps}-step schedule")
     except UpscaleError as e:
@@ -390,6 +415,14 @@ def upscale_graph(base: dict, up: UpscaleJob) -> dict:
         "images": images, "project_root": up.root, "source_mp4": rel(up.root, take.paths.mp4),
         "out_mp4": rel(up.root, take.paths.up_mp4), "fps": float((take.sidecar or {}).get("fps") or 24),
         "sidecar": rel(up.root, take.paths.up_sidecar)}}
+    if up.then_model:
+        # the re-sample's frames through an upscale model before they're saved
+        g["up_then_model"] = {"class_type": "UpscaleModelLoader",
+                              "inputs": {"model_name": up.then_model}}
+        g["up_then"] = {"class_type": "H3PixelUpscale", "inputs": {
+            "images": images, "upscale_model": ["up_then_model", 0],
+            "width": up.out_size[0], "height": up.out_size[1], "chunk": 2}}
+        g["up_save"]["inputs"]["images"] = ["up_then", 0]
     J.prune(g, "up_save")
     return g
 
@@ -421,7 +454,9 @@ def not_ready(jobs: list[UpscaleJob], object_info: dict | None) -> list[str]:
         r = upscale_readiness(t, object_info)
         if r and r["status"] == "not_ready":
             out += [f"{t.short}: {m}" for m in r["missing"]]
-    for want in sorted({j.pixel_model for j in jobs if j.method == "pixel"}):
+    wants = {j.pixel_model for j in jobs if j.method == "pixel"}
+    wants |= {j.then_model for j in jobs if j.method == "latent" and j.then_model}
+    for want in sorted(wants):
         r = pixel_readiness(object_info, want)
         if r["status"] == "not_ready":
             out += [f"pixel: {m}" for m in r["missing"]]
@@ -441,7 +476,9 @@ def graph_of(up: UpscaleJob, bases: dict, comfy_url: str) -> dict:
 def describe(up: UpscaleJob) -> str:
     if up.method == "pixel":
         return f"pixel ({up.pixel_model}), {up.scale:g}x -> {up.width}x{up.height}"
-    return (f"{up.route}, {up.scale:g}x -> {up.width}x{up.height}, from step {up.start_step}")
+    then = (f", then {up.then_model} {up.then_scale:g}x -> {up.out_size[0]}x{up.out_size[1]}"
+            if up.then_model else "")
+    return (f"{up.route}, {up.scale:g}x -> {up.width}x{up.height}, from step {up.start_step}{then}")
 
 
 def queued_record(up: UpscaleJob) -> dict:
@@ -464,7 +501,9 @@ def queued_record(up: UpscaleJob) -> dict:
             "steps": schedule_steps(up.spec, int((up.take.sidecar or {}).get("steps") or 0)),
             "seed": (up.take.sidecar or {}).get("seed"),
             "upscaler": upscaler,
-            "width": up.width, "height": up.height, **T.source_stamp(up.take.paths.mp4)}
+            **({"then_pixel": {"model": up.then_model, "scale": up.then_scale,
+                               "from": [up.width, up.height]}} if up.then_model else {}),
+            "width": up.out_size[0], "height": up.out_size[1], **T.source_stamp(up.take.paths.mp4)}
 
 
 def start(up: UpscaleJob) -> None:
@@ -547,6 +586,10 @@ def main(argv=None) -> int:
                     help="latent (re-sample; the default where the target has one) or pixel "
                          "(an upscale model over the frames; any target)")
     ap.add_argument("--pixel-model", help=f"the pixel method's model (default {DEFAULT_PIXEL_MODEL})")
+    ap.add_argument("--then-pixel", metavar="MODEL",
+                    help="after a re-sample, an upscale model takes it on by --then-scale "
+                         "(e.g. re-sample 2x then RealESRGAN_x2.pth: 4x)")
+    ap.add_argument("--then-scale", type=float, help="the --then-pixel step's scale (default 2)")
     ap.add_argument("--detail", type=int, choices=DETAILS,
                     help="latent: start 0-2 steps earlier than the default (more detail, more change)")
     ap.add_argument("--vae", action="store_true",
@@ -578,7 +621,8 @@ def main(argv=None) -> int:
             continue
         up = plan_upscale(root, take, scale=args.scale, start_step=args.start_step,
                           route="vae" if args.vae else None, redo=args.redo,
-                          method=args.method, pixel_model=args.pixel_model, detail=args.detail)
+                          method=args.method, pixel_model=args.pixel_model, detail=args.detail,
+                          then_model=args.then_pixel, then_scale=args.then_scale)
         mark = {"upscale": "..", "skip": "= ", "error": "!!"}[up.action]
         what = describe(up) if up.action == "upscale" else up.why
         print(f"  {mark} {up.label}: {what}")

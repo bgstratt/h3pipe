@@ -988,6 +988,11 @@ export interface UpscaleForm {
   detail: 0 | 1 | 2;
   redo: boolean;
   vae: boolean;
+  /** 2 is the server's default */
+  scale: number;
+  /** a pixel step after a re-sample: its model (null: none) and scale */
+  thenModel: string | null;
+  thenScale: number;
 }
 
 /** The POST /h3pipe/upscale body (less `ep`) for the dialog's choices: only
@@ -998,6 +1003,11 @@ export function upscaleRequestOf(f: UpscaleForm, ask: { pass: Pass; takes: { sho
   if (f.method !== "latent" && f.pixelModel) req.pixel_model = f.pixelModel;
   if (f.method !== "pixel" && f.detail) req.detail = f.detail;
   if (f.method !== "pixel" && f.vae) req.vae = true;
+  if (f.scale !== 2) req.scale = f.scale;
+  if (f.method !== "pixel" && f.thenModel) {
+    req.then_pixel_model = f.thenModel;
+    if (f.thenScale !== 2) req.then_scale = f.thenScale;
+  }
   if (f.redo) req.redo = true;
   return req;
 }

@@ -8,7 +8,8 @@ import { errText } from "../api";
 import { api } from "../host";
 import { closeUpscale, upscale, upscaleRequestOf, type UpscaleForm } from "../actions";
 import { statusKey, useApp } from "../store";
-import type { UpscaleOptions } from "../types";
+import { SCALES, methodFor, thenSize, upscaleSize, type SizeCheck } from "../lib/upscale";
+import type { TakeSummary, UpscaleOptions } from "../types";
 import { Dialog } from "./Dialogs";
 
 const DETAIL_LABELS = [
@@ -29,7 +30,8 @@ function UpscaleBody() {
   const st = useApp((s) => (s.ep ? s.status[statusKey(s.ep, ask.pass)] : undefined));
   const [opts, setOpts] = useState<UpscaleOptions | null>(null);
   const [err, setErr] = useState<string | null>(null);
-  const [f, setF] = useState<UpscaleForm>({ method: "auto", pixelModel: null, detail: 0, redo: !!ask.redo, vae: false });
+  const [f, setF] = useState<UpscaleForm>({ method: "auto", pixelModel: null, detail: 0, redo: !!ask.redo, vae: false,
+                                              scale: 2, thenModel: null, thenScale: 2 });
   const set = (p: Partial<UpscaleForm>) => setF((x) => ({ ...x, ...p }));
 
   useEffect(() => {
@@ -53,16 +55,44 @@ function UpscaleBody() {
   const pixelReady = opts?.pixel.status === "ready";
   const count = ask.takes ? ask.takes.length : takes.filter(Boolean).length;
 
+  // what each take would come out as, at a scale (and the then-pixel step after a re-sample)
+  const maxScale = opts?.max_scale ?? 4;
+  const real = takes.filter(Boolean) as TakeSummary[];
+  const plan = (t: TakeSummary, scale: number, withThen: boolean): { method: "latent" | "pixel"; first: SizeCheck; out: SizeCheck } => {
+    const li = latentOf(t.target || "minimax_h3_ref2va");
+    const m = methodFor(f.method, li);
+    const first = f.method === "latent" && !li
+      ? { ok: false, why: "its target has no re-sample" }
+      : upscaleSize(t, m, scale, li, maxScale);
+    const out = withThen && m === "latent" && f.thenModel ? thenSize(first, f.thenScale, maxScale) : first;
+    return { method: m, first, out };
+  };
+  const now = real.map((t) => plan(t, f.scale, true));
+  const bad = now.filter((p) => !p.out.ok);
+  const scaleLabel = (sc: number) => {
+    const ps = real.map((t) => plan(t, sc, false));
+    const n = ps.filter((p) => !p.first.ok).length;
+    const one = real.length === 1 && ps[0].first.ok ? ` → ${ps[0].first.w}×${ps[0].first.h}` : "";
+    return { label: `${sc}x${one}${n ? (n === ps.length ? " — not possible" : ` — ${n} can't`) : ""}`, none: n === ps.length && n > 0 };
+  };
+  const one = real.length === 1 ? now[0] : null;
+  const summary = one
+    ? (one.out.ok
+      ? `${real[0].width}×${real[0].height} → ${one.first.w}×${one.first.h} ${one.method === "pixel" ? `(${f.pixelModel})` : "(re-sample)"}`
+        + (one.method === "latent" && f.thenModel ? ` → ${one.out.w}×${one.out.h} (${f.thenModel})` : "")
+      : `Can't: ${one.out.why}`)
+    : bad.length ? `${bad.length} of ${real.length} can't at these settings (${bad[0].out.why})` : "";
+
   const submit = () => {
     void upscale(upscaleRequestOf(f, ask), ask.takes ? ask.takes.map((t) => `${t.shot}|${t.take}`).join(",") : "cut");
     closeUpscale();
   };
-  const canQueue = !!ep && !!opts && count > 0
+  const canQueue = !!ep && !!opts && count > 0 && bad.length < real.length
     && (f.method === "latent" ? latentSome : f.method === "pixel" ? pixelReady && !!f.pixelModel : latentSome || pixelReady);
 
   return (
     <Dialog
-      title={<>{ask.title} <span className="h3-muted h3-small">{ask.pass} · 2x</span></>}
+      title={<>{ask.title} <span className="h3-muted h3-small">{ask.pass} · {f.scale}x{f.method !== "pixel" && f.thenModel ? ` then ${f.thenScale}x` : ""}</span></>}
       onClose={closeUpscale}
       footer={
         <>
@@ -112,6 +142,34 @@ function UpscaleBody() {
               </select>
             </label>
           )}
+          <label className="h3-col" style={{ gap: 2 }}>
+            <span className="h3-h">Scale</span>
+            <select value={f.scale} onChange={(e) => set({ scale: Number(e.target.value) })}>
+              {SCALES.map((sc) => {
+                const l = scaleLabel(sc);
+                return <option key={sc} value={sc} disabled={l.none}>{l.label}</option>;
+              })}
+            </select>
+          </label>
+          {f.method !== "pixel" && latentSome && pixelReady && (
+            <div className="h3-col" style={{ gap: 3 }}>
+              <label className="h3-check" title="After the re-sample, an upscale model takes the frames further in the same job: e.g. re-sample 2x then RealESRGAN_x2 = 4x, with generated detail in the first half">
+                <input type="checkbox" checked={!!f.thenModel} onChange={(e) => set({ thenModel: e.target.checked ? (f.pixelModel ?? opts.pixel.default) : null })} />
+                Then an upscale model (re-sampled takes)
+              </label>
+              {f.thenModel && (
+                <div className="h3-row" style={{ gap: 6 }}>
+                  <select value={f.thenModel} onChange={(e) => set({ thenModel: e.target.value })}>
+                    {opts.pixel.models.map((m) => <option key={m} value={m}>{m}</option>)}
+                  </select>
+                  <select value={f.thenScale} onChange={(e) => set({ thenScale: Number(e.target.value) })}>
+                    {SCALES.map((sc) => <option key={sc} value={sc}>{sc}x more</option>)}
+                  </select>
+                </div>
+              )}
+            </div>
+          )}
+          {summary && <div className={`h3-small ${bad.length ? "h3-error" : "h3-muted"}`}>{summary}</div>}
           <label className="h3-check" title="Upscale again even where the take already has a fresh upscale (it is replaced)">
             <input type="checkbox" checked={f.redo} onChange={(e) => set({ redo: e.target.checked })} />
             Again, where already upscaled

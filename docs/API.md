@@ -351,7 +351,12 @@ rest), null for each take's default. `pixel_model` names the pixel method's mode
 in ComfyUI's `models/upscale_models` (null: `RealESRGAN_x2.pth` if installed, else the first
 2x model); `detail` (0, 1 or 2) starts a re-sample that many steps earlier than the default
 (more detail, more change). The pixel method needs no latent, no frozen shotlist and none
-of the take's target's models, and a scale only has to land on even sides. Queues and
+of the take's target's models, and a scale only has to land on even sides. `scale` is more
+than 1 and at most 4: a pixel scale lands on even sides, an H3 re-sample's on the 32 grid,
+an LTX-2 re-sample is 2x only. `then_pixel_model` (with `then_scale`, default 2) adds a
+pixel step after a re-sample in the same job: that upscale model takes the re-sampled frames
+on (re-sample 2x then `RealESRGAN_x2.pth` 2x = 4x); `width`/`height` in the answer are the
+final size, and the `.up.json` records `then_pixel: {model, scale, from: [w, h]}`. Queues and
 returns at once:
 ```json
 {"queued": [{"shot": "sh020", "take": 3, "route": "latent", "method": "latent",
@@ -373,7 +378,10 @@ What the editor's Upscale dialog offers on this ComfyUI:
             "ltx2": {"status": "ready", "missing": []}, "wan22_i2v": null, "…": null},
  "details": [0, 1, 2]}
 ```
-`latent[target]` is null for a target with no latent upscale.
+`latent[target]` is null for a target with no latent upscale; otherwise it also has `mode`
+(`resample` | `second_stage`), `align` and `fixed_scale` (second_stage's only scale), and
+the answer has `max_scale`. Each take in `GET /h3pipe/episode` has its `width` and `height`,
+so the dialog can show what every scale makes before anything is queued.
 
 ### `DELETE /h3pipe/upscale?ep=…&shot=sh020&take=3[&pass=proxy]`
 Removes the take's upscale. 404 when it has none; 409 while ComfyUI still has it queued

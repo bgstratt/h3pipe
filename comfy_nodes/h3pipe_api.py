@@ -790,6 +790,12 @@ def post_upscale(ctx: Context, body):
     detail = body.get("detail")
     if detail is not None and detail not in U.DETAILS:
         raise ApiError(400, "detail must be 0, 1 or 2, or null")
+    then_model = body.get("then_pixel_model")
+    if then_model is not None and (not isinstance(then_model, str) or not then_model):
+        raise ApiError(400, "then_pixel_model must be an upscale model's file name, or null")
+    then_scale = body.get("then_scale")
+    if then_scale is not None and (isinstance(then_scale, bool) or not isinstance(then_scale, (int, float))):
+        raise ApiError(400, "then_scale must be a number or null")
     if takes is not None:
         found = []
         for x in takes:
@@ -805,7 +811,8 @@ def post_upscale(ctx: Context, body):
             continue
         up = U.plan_upscale(ep, t, scale=scale, start_step=start_step,
                             route="vae" if vae else None, redo=redo, method=method,
-                            pixel_model=pixel_model, detail=detail)
+                            pixel_model=pixel_model, detail=detail,
+                            then_model=then_model, then_scale=then_scale)
         if up.action == "skip":
             skipped.append({"shot": shot, "take": t.take, "reason": up.why})
         elif up.action == "error":
@@ -836,7 +843,8 @@ def post_upscale(ctx: Context, body):
             queued.append({"shot": up.shot, "take": up.take.take, "route": up.route,
                            "method": up.method, "pixel_model": up.pixel_model or None,
                            "scale": up.scale, "start_step": up.start_step,
-                           "width": up.width, "height": up.height, "prompt_id": pid})
+                           "then_pixel_model": up.then_model or None,
+                           "width": up.out_size[0], "height": up.out_size[1], "prompt_id": pid})
             upscale_event(ctx, ep, up.shot, up.take.take, "queued")
     return 200, {"queued": queued, "skipped": skipped, "errors": errors}
 
@@ -853,8 +861,17 @@ def get_upscale_options(ctx: Context, query: dict):
     px = U.pixel_readiness(info)
     latent = {}
     for t in TG.list_targets("video"):
-        latent[t.id] = U.upscale_readiness(t, info)
-    return 200, {"pixel": px, "latent": latent, "details": list(U.DETAILS)}
+        r = U.upscale_readiness(t, info)
+        if r is not None:
+            spec = U.upscale_spec(t) or {}
+            # what the dialog needs to judge a scale: LTX's is fixed, H3's sizes
+            # land on `align`
+            r = dict(r, mode=spec.get("mode", U.RESAMPLE), align=U.align_of(spec),
+                     fixed_scale=float(spec.get("scale", 2))
+                     if spec.get("mode") == U.SECOND_STAGE else None)
+        latent[t.id] = r
+    return 200, {"pixel": px, "latent": latent, "details": list(U.DETAILS),
+                 "max_scale": U.MAX_SCALE}
 
 
 @handler

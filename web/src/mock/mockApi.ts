@@ -1208,9 +1208,11 @@ export function createMockApi(emit: Emit, opts: MockOptions = {}): Api & { outsi
       await wait();
       return {
         pixel: { status: "ready", missing: [], models: ["4x-UltraSharp.pth", "RealESRGAN_x2.pth", "RealESRGAN_x4.pth"], default: "RealESRGAN_x2.pth" },
-        latent: { minimax_h3_ref2va: { status: "ready", missing: [] }, ltx2: { status: "ready", missing: [] },
+        latent: { minimax_h3_ref2va: { status: "ready", missing: [], mode: "resample", align: 32, fixed_scale: null },
+                  ltx2: { status: "ready", missing: [], mode: "second_stage", align: 32, fixed_scale: 2 },
                   ltx2_ingredients: null, minimax_h3_fl2va: null, wan22_i2v: null, wan22_ti2v: null, wan22_vace: null },
         details: [0, 1, 2],
+        max_scale: 4,
       };
     },
     async deleteUpscale(ep, shot, take, pass) {

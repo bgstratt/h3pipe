@@ -56,9 +56,11 @@ export interface TakeSummary {
   /** Phase 9b: the file whose sound the cut plays for this take (the mp4 when
    * it has an audio stream, else its `_h3.wav`, else null), relative to the episode. */
   audio?: string | null;
-  /** Phase 13: the take's upscale (final takes only; null: never upscaled;
-   * absent from older servers). */
+  /** Phase 13: the take's upscale (null: never upscaled; absent from older servers). */
   upscale?: TakeUpscale | null;
+  /** Phase 13: the take's size, from its sidecar (the Upscale dialog's arithmetic) */
+  width?: number | null;
+  height?: number | null;
 }
 
 export interface CutInfo {
@@ -677,6 +679,8 @@ export interface TakeUpscale {
   method?: "latent" | "pixel";
   /** the pixel method's model file */
   pixel_model?: string | null;
+  /** a pixel step after the re-sample: its model, scale and the re-sample's size */
+  then_pixel?: { model: string; scale: number; from: [number, number] } | null;
   comfy_prompt_id: string | null;
   /** the upscale's mp4, relative to the episode (null until it is written) */
   mp4: string | null;
@@ -701,19 +705,27 @@ export interface UpscaleRequest {
   pixel_model?: string | null;
   /** latent: start 0-2 steps earlier than the default (more detail, more change) */
   detail?: 0 | 1 | 2 | null;
+  /** latent: then an upscale model takes the re-sample on by `then_scale` (default 2) */
+  then_pixel_model?: string | null;
+  then_scale?: number | null;
 }
 
 /** GET /h3pipe/upscale/options: what the Upscale dialog can offer here. */
 export interface UpscaleOptions {
   pixel: { status: "ready" | "not_ready" | "unknown"; missing: string[]; models: string[]; default: string };
   /** each video target's latent upscale: null when it has none */
-  latent: Record<string, { status: "ready" | "not_ready" | "unknown"; missing: string[] } | null>;
+  latent: Record<string, {
+    status: "ready" | "not_ready" | "unknown"; missing: string[];
+    /** resample (H3: any scale on the `align` grid) or second_stage (LTX-2: `fixed_scale`) */
+    mode?: "resample" | "second_stage"; align?: number; fixed_scale?: number | null;
+  } | null>;
   details: number[];
+  max_scale?: number;
 }
 
 export interface UpscaleResult {
   queued: { shot: string; take: number; route: "latent" | "vae" | "pixel"; scale: number; start_step: number | null;
-            method?: "latent" | "pixel"; pixel_model?: string | null;
+            method?: "latent" | "pixel"; pixel_model?: string | null; then_pixel_model?: string | null;
             width: number; height: number; prompt_id: string }[];
   skipped: { shot: string; take?: number; reason: string }[];
   errors: { shot: string; take?: number; error: string }[];

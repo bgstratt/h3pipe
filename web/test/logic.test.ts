@@ -26,7 +26,8 @@ function shot(over: Partial<ShotStatus> = {}): ShotStatus {
 const kinds = (s: ShotStatus, r?: Set<number>) => shotBadges(s, r).map((b) => b.kind);
 
 describe("upscaleRequestOf (the Upscale dialog)", () => {
-  const f = { method: "auto" as const, pixelModel: "RealESRGAN_x2.pth", detail: 0 as const, redo: false, vae: false };
+  const f = { method: "auto" as const, pixelModel: "RealESRGAN_x2.pth", detail: 0 as const, redo: false, vae: false,
+              scale: 2, thenModel: null, thenScale: 2 };
   const one = { pass: "final" as const, takes: [{ shot: "sh020", take: 3 }] };
   it("defaults send only what's asked: the pass, the take, and the pixel model for takes without a re-sample", () => {
     expect(upscaleRequestOf(f, one)).toEqual({ pass: "final", takes: [{ shot: "sh020", take: 3 }], pixel_model: "RealESRGAN_x2.pth" });
@@ -35,6 +36,13 @@ describe("upscaleRequestOf (the Upscale dialog)", () => {
   it("latent: detail and vae, never a pixel model", () => {
     expect(upscaleRequestOf({ ...f, method: "latent", detail: 2, vae: true, redo: true }, one))
       .toEqual({ pass: "final", takes: [{ shot: "sh020", take: 3 }], method: "latent", detail: 2, vae: true, redo: true });
+  });
+  it("a scale other than 2, and a then-pixel step (not for the pixel method)", () => {
+    expect(upscaleRequestOf({ ...f, scale: 1.5, thenModel: "RealESRGAN_x2.pth", thenScale: 2 }, one))
+      .toMatchObject({ scale: 1.5, then_pixel_model: "RealESRGAN_x2.pth" });
+    expect("then_scale" in upscaleRequestOf({ ...f, thenModel: "RealESRGAN_x2.pth" }, one)).toBe(false);
+    expect(upscaleRequestOf({ ...f, thenModel: "RealESRGAN_x4.pth", thenScale: 4 }, one).then_scale).toBe(4);
+    expect("then_pixel_model" in upscaleRequestOf({ ...f, method: "pixel", thenModel: "x.pth" }, one)).toBe(false);
   });
   it("pixel: the model, never detail or vae", () => {
     expect(upscaleRequestOf({ ...f, method: "pixel", pixelModel: "4x-UltraSharp.pth", detail: 2, vae: true }, one))

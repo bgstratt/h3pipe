@@ -267,6 +267,11 @@ ComfyUI's `models/upscale_models`) over the frames, with the take's audio copied
 fast and needs nothing but the model, but it only sharpens what's there; it draws no new
 detail the way a re-sample does. `h3.py upscale <ep> --method pixel` uses it for any take.
 
+`--scale` goes up to 4 (a pixel upscale lands on even sides, an H3 re-sample on the 32 grid;
+LTX-2's is 2x only). For 4x with generated detail, re-sample then upscale in one go:
+`h3.py upscale <ep> --then-pixel RealESRGAN_x2.pth` (re-sample 2x, then the model 2x more).
+The editor's Upscale dialog offers the same, and shows the size each choice makes.
+
 ### Render profiles
 
 A profile is a named render setup for a kind of shot, so you set it once instead of

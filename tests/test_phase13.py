@@ -468,6 +468,50 @@ class PixelUpscaleTest(UpscaleRouteTest):
         self.ok(A.delete_upscale(self.ctx, {"ep": self.ep, "pass": "proxy", "shot": "sh010", "take": "1"}))
         self.assertFalse(os.path.exists(t.paths.up_mp4))
 
+    def test_then_pixel(self):
+        """Re-sample 2x, then an upscale model 2x more, in one job: 4x."""
+        t = self.final_take()
+        w, h = t.sidecar["width"], t.sidecar["height"]
+        up = U.plan_upscale(self.ep, t, then_model="RealESRGAN_x2.pth")
+        self.assertEqual(up.action, "upscale")
+        self.assertEqual(((up.width, up.height), up.out_size), ((w * 2, h * 2), (w * 4, h * 4)))
+        g = U.upscale_graph(self.base(), up)
+        decode = self.by_class(g, "VAEDecode")[0]
+        self.assertEqual(g["up_then"]["inputs"]["images"], [decode, 0])
+        self.assertEqual((g["up_then"]["inputs"]["width"], g["up_then"]["inputs"]["height"]), (w * 4, h * 4))
+        self.assertEqual(g["up_then_model"]["inputs"]["model_name"], "RealESRGAN_x2.pth")
+        self.assertEqual(g["up_save"]["inputs"]["images"], ["up_then", 0])
+        loader = g[self.by_class(g, "H3ShotListLoader")[0]]["inputs"]
+        self.assertEqual(loader["resolution_override"], f"{w * 2}x{h * 2}")   # the re-sample's size
+        self.assertIn("then RealESRGAN_x2.pth 2x", U.describe(up))
+        rec = U.queued_record(up)
+        self.assertEqual((rec["width"], rec["height"]), (w * 4, h * 4))
+        self.assertEqual(rec["then_pixel"], {"model": "RealESRGAN_x2.pth", "scale": 2.0, "from": [w * 2, h * 2]})
+        # through the route: the answer is the final size; a model it lacks is a 409
+        res = self.ok(A.post_upscale(self.ctx, {"ep": self.ep, "shots": ["sh010"], "then_pixel_model": "RealESRGAN_x4.pth",
+                                                "then_scale": 1.5}))
+        q = res["queued"][0]
+        self.assertEqual((q["width"], q["height"], q["then_pixel_model"]), (w * 3, h * 3, "RealESRGAN_x4.pth"))
+        self.assertEqual(self.status_take()["upscale"]["then_pixel"]["model"], "RealESRGAN_x4.pth")
+        msg = self.err(A.post_upscale(self.ctx, {"ep": self.ep, "shots": ["sh010"], "redo": True,
+                                                 "then_pixel_model": "gone.pth"}), 409)
+        self.assertIn("gone.pth", msg)
+
+    def test_scale_limits(self):
+        t = self.final_take()
+        self.assertEqual(U.plan_upscale(self.ep, t, method="pixel", scale=4).action, "upscale")
+        self.assertEqual(U.plan_upscale(self.ep, t, method="pixel", scale=5).action, "error")
+        self.assertEqual(U.plan_upscale(self.ep, t, scale=1).action, "error")
+        self.assertEqual(U.plan_upscale(self.ep, t, then_model="RealESRGAN_x2.pth", then_scale=6).action, "error")
+        opts = self.ok(A.get_upscale_options(self.ctx, {}))
+        self.assertEqual(opts["max_scale"], 4.0)
+        h3 = opts["latent"]["minimax_h3_ref2va"]
+        self.assertEqual((h3["mode"], h3["align"], h3["fixed_scale"]), ("resample", 32, None))
+        # ltx2 is second_stage, fixed 2x (its readiness depends on nodes this fake lacks)
+        self.assertEqual((opts["latent"]["ltx2"]["mode"], opts["latent"]["ltx2"]["fixed_scale"]), ("second_stage", 2.0))
+        take = self.status_take()
+        self.assertEqual((take["width"], take["height"]), (t.sidecar["width"], t.sidecar["height"]))
+
     def test_default_pixel_model(self):
         self.assertEqual(U.default_pixel_model(["4x-UltraSharp.pth", "RealESRGAN_x2.pth"]), "RealESRGAN_x2.pth")
         self.assertEqual(U.default_pixel_model(["4x-UltraSharp.pth", "2x-Other.pth"]), "2x-Other.pth")
