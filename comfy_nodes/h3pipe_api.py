@@ -793,6 +793,9 @@ def post_upscale(ctx: Context, body):
     then_model = body.get("then_pixel_model")
     if then_model is not None and (not isinstance(then_model, str) or not then_model):
         raise ApiError(400, "then_pixel_model must be an upscale model's file name, or null")
+    from_upscale = body.get("from_upscale", False)
+    if not isinstance(from_upscale, bool):
+        raise ApiError(400, "from_upscale must be true or false")
     then_scale = body.get("then_scale")
     if then_scale is not None and (isinstance(then_scale, bool) or not isinstance(then_scale, (int, float))):
         raise ApiError(400, "then_scale must be a number or null")
@@ -812,7 +815,8 @@ def post_upscale(ctx: Context, body):
         up = U.plan_upscale(ep, t, scale=scale, start_step=start_step,
                             route="vae" if vae else None, redo=redo, method=method,
                             pixel_model=pixel_model, detail=detail,
-                            then_model=then_model, then_scale=then_scale)
+                            then_model=then_model, then_scale=then_scale,
+                            from_upscale=from_upscale)
         if up.action == "skip":
             skipped.append({"shot": shot, "take": t.take, "reason": up.why})
         elif up.action == "error":

@@ -33,7 +33,10 @@ export function upscaleBadge(t: TakeSummary | undefined): Badge | null {
   if (u.status === "queued") return { kind: "queued", label: "upscaling", title: `Upscale of ${tn(t!.take)} queued` };
   if (u.status === "failed") return { kind: "failed", label: "upscale failed", title: u.save_notes || "The upscale failed" };
   if (!u.fresh) return { kind: "stale", label: "2x stale", title: `The upscale (${size}) was made from an earlier ${tn(t!.take)}: upscale it again` };
-  return { kind: "upscaled", label: "2x", title: `Upscaled to ${size} (${u.route ?? "?"} route, from step ${u.start_step ?? "?"}); Export 2x uses it` };
+  const how = u.method === "pixel"
+    ? `pixel, ${u.pixel_model ?? "?"}${u.on_upscale ? ", on an earlier upscale" : ""}`
+    : `${u.route ?? "?"} route, from step ${u.start_step ?? "?"}${u.then_pixel ? `, then ${u.then_pixel.model}` : ""}`;
+  return { kind: "upscaled", label: "2x", title: `Upscaled to ${size} (${how}); Export 2x uses it` };
 }
 
 /** The take the cut uses for this shot (not for a placeholder: that's another pass). */

@@ -356,7 +356,12 @@ than 1 and at most 4: a pixel scale lands on even sides, an H3 re-sample's on th
 an LTX-2 re-sample is 2x only. `then_pixel_model` (with `then_scale`, default 2) adds a
 pixel step after a re-sample in the same job: that upscale model takes the re-sampled frames
 on (re-sample 2x then `RealESRGAN_x2.pth` 2x = 4x); `width`/`height` in the answer are the
-final size, and the `.up.json` records `then_pixel: {model, scale, from: [w, h]}`. Queues and
+final size, and the `.up.json` records `then_pixel: {model, scale, from: [w, h]}`.
+`from_upscale: true` runs the pixel method on each take's existing fresh upscale instead of
+the take (its `.up.mp4` is the input and is replaced; `scale` applies to the upscale's size;
+the take's audio is still what's copied on). The new record keeps the old one as
+`on_upscale` (nested for a longer chain); freshness stays tied to the take. A take with no
+fresh upscale is an error; with `method: "latent"` it's refused. Queues and
 returns at once:
 ```json
 {"queued": [{"shot": "sh020", "take": 3, "route": "latent", "method": "latent",

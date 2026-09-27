@@ -270,7 +270,10 @@ detail the way a re-sample does. `h3.py upscale <ep> --method pixel` uses it for
 `--scale` goes up to 4 (a pixel upscale lands on even sides, an H3 re-sample on the 32 grid;
 LTX-2's is 2x only). For 4x with generated detail, re-sample then upscale in one go:
 `h3.py upscale <ep> --then-pixel RealESRGAN_x2.pth` (re-sample 2x, then the model 2x more).
-The editor's Upscale dialog offers the same, and shows the size each choice makes.
+The editor's Upscale dialog offers the same, and shows the size each choice makes. An
+upscale you already have can be taken further later with the pixel method alone:
+`h3.py upscale <ep> --only sh100 --method pixel --from-upscale` (the dialog's "On top of the
+existing upscale").
 
 ### Render profiles
 

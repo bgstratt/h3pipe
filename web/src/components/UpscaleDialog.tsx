@@ -31,7 +31,7 @@ function UpscaleBody() {
   const [opts, setOpts] = useState<UpscaleOptions | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [f, setF] = useState<UpscaleForm>({ method: "auto", pixelModel: null, detail: 0, redo: !!ask.redo, vae: false,
-                                              scale: 2, thenModel: null, thenScale: 2 });
+                                              scale: 2, thenModel: null, thenScale: 2, fromUpscale: false });
   const set = (p: Partial<UpscaleForm>) => setF((x) => ({ ...x, ...p }));
 
   useEffect(() => {
@@ -61,9 +61,14 @@ function UpscaleBody() {
   const plan = (t: TakeSummary, scale: number, withThen: boolean): { method: "latent" | "pixel"; first: SizeCheck; out: SizeCheck } => {
     const li = latentOf(t.target || "minimax_h3_ref2va");
     const m = methodFor(f.method, li);
+    // on top of its upscale: that upscale's size is what gets scaled
+    const onUp = f.method === "pixel" && f.fromUpscale;
+    const base = onUp ? { width: t.upscale?.width, height: t.upscale?.height } : t;
     const first = f.method === "latent" && !li
       ? { ok: false, why: "its target has no re-sample" }
-      : upscaleSize(t, m, scale, li, maxScale);
+      : onUp && !(t.upscale?.status === "ok" && t.upscale.fresh)
+        ? { ok: false, why: "it has no fresh upscale to build on" }
+        : upscaleSize(base, m, scale, li, maxScale);
     const out = withThen && m === "latent" && f.thenModel ? thenSize(first, f.thenScale, maxScale) : first;
     return { method: m, first, out };
   };
@@ -78,7 +83,7 @@ function UpscaleBody() {
   const one = real.length === 1 ? now[0] : null;
   const summary = one
     ? (one.out.ok
-      ? `${real[0].width}×${real[0].height} → ${one.first.w}×${one.first.h} ${one.method === "pixel" ? `(${f.pixelModel})` : "(re-sample)"}`
+      ? `${f.method === "pixel" && f.fromUpscale ? `its upscale ${real[0].upscale?.width}×${real[0].upscale?.height}` : `${real[0].width}×${real[0].height}`} → ${one.first.w}×${one.first.h} ${one.method === "pixel" ? `(${f.pixelModel})` : "(re-sample)"}`
         + (one.method === "latent" && f.thenModel ? ` → ${one.out.w}×${one.out.h} (${f.thenModel})` : "")
       : `Can't: ${one.out.why}`)
     : bad.length ? `${bad.length} of ${real.length} can't at these settings (${bad[0].out.why})` : "";
@@ -140,6 +145,12 @@ function UpscaleBody() {
               <select value={f.detail} onChange={(e) => set({ detail: Number(e.target.value) as 0 | 1 | 2 })}>
                 {opts.details.map((d) => <option key={d} value={d}>{DETAIL_LABELS[d] ?? `${d} steps earlier`}</option>)}
               </select>
+            </label>
+          )}
+          {f.method === "pixel" && real.some((t) => t.upscale?.status === "ok" && t.upscale.fresh) && (
+            <label className="h3-check" title="Run the upscale model on each take's existing upscale (say, a re-sample done earlier) instead of on the take; the upscale is replaced by the bigger one, and its history kept">
+              <input type="checkbox" checked={f.fromUpscale} onChange={(e) => set({ fromUpscale: e.target.checked })} />
+              On top of the existing upscale
             </label>
           )}
           <label className="h3-col" style={{ gap: 2 }}>

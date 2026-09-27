@@ -1760,6 +1760,9 @@ what this machine and the repo have today. Nothing below is built; each target g
   frames go through `H3PixelUpscale` before the saver. Re-sample 2x then RealESRGAN_x2 = 4x
   with generated detail in the first half. Scales are capped at 4 (the H3 upscaler's own
   limit); a re-sample at 4x of 1344×768 is 5376×3072 conditioning, heavy on any GPU.
+- **Pixel on top of an upscale** (2026-09-26): `from_upscale` / `--from-upscale` / the dialog's
+  "On top of the existing upscale": the pixel method reads the take's fresh `.up.mp4` and
+  replaces it, sized from the upscale; the record nests the old one as `on_upscale`.
 - **Proxy takes upscale too** (2026-09-26, the user's call: "no reason we shouldn't"): every
   pass restriction went (plan, routes with `pass`, `h3.py upscale --proxy`, assemble
   `--upscaled` on either pass, the editor's menus and Export 2x on both). A proxy take keeps

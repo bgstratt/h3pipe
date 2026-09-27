@@ -993,6 +993,8 @@ export interface UpscaleForm {
   /** a pixel step after a re-sample: its model (null: none) and scale */
   thenModel: string | null;
   thenScale: number;
+  /** pixel: on each take's existing upscale instead of the take */
+  fromUpscale: boolean;
 }
 
 /** The POST /h3pipe/upscale body (less `ep`) for the dialog's choices: only
@@ -1001,6 +1003,7 @@ export function upscaleRequestOf(f: UpscaleForm, ask: { pass: Pass; takes: { sho
   const req: Omit<UpscaleRequest, "ep"> = ask.takes ? { pass: ask.pass, takes: ask.takes } : { pass: ask.pass, shots: null };
   if (f.method !== "auto") req.method = f.method;
   if (f.method !== "latent" && f.pixelModel) req.pixel_model = f.pixelModel;
+  if (f.method === "pixel" && f.fromUpscale) req.from_upscale = true;
   if (f.method !== "pixel" && f.detail) req.detail = f.detail;
   if (f.method !== "pixel" && f.vae) req.vae = true;
   if (f.scale !== 2) req.scale = f.scale;

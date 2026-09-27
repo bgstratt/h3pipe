@@ -681,6 +681,8 @@ export interface TakeUpscale {
   pixel_model?: string | null;
   /** a pixel step after the re-sample: its model, scale and the re-sample's size */
   then_pixel?: { model: string; scale: number; from: [number, number] } | null;
+  /** a pixel upscale run on an earlier upscale: that one's record (nested for a longer chain) */
+  on_upscale?: Record<string, unknown> | null;
   comfy_prompt_id: string | null;
   /** the upscale's mp4, relative to the episode (null until it is written) */
   mp4: string | null;
@@ -708,6 +710,8 @@ export interface UpscaleRequest {
   /** latent: then an upscale model takes the re-sample on by `then_scale` (default 2) */
   then_pixel_model?: string | null;
   then_scale?: number | null;
+  /** pixel: run on each take's existing upscale (its .up.mp4, replaced) instead of the take */
+  from_upscale?: boolean;
 }
 
 /** GET /h3pipe/upscale/options: what the Upscale dialog can offer here. */

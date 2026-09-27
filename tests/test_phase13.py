@@ -512,6 +512,36 @@ class PixelUpscaleTest(UpscaleRouteTest):
         take = self.status_take()
         self.assertEqual((take["width"], take["height"]), (t.sidecar["width"], t.sidecar["height"]))
 
+    def test_pixel_on_top_of_an_upscale(self):
+        """A re-sample first, then later the pixel method on its result."""
+        t = self.final_take()
+        w, h = t.sidecar["width"], t.sidecar["height"]
+        no = U.plan_upscale(self.ep, t, from_upscale=True)
+        self.assertEqual(no.action, "error")
+        self.assertIn("no fresh upscale", no.why)
+        self.ok(A.post_upscale(self.ctx, {"ep": self.ep, "shots": ["sh010"]}))       # the re-sample
+        t = T.get_take(self.ep, "final", "sh010", 1)
+        up = U.plan_upscale(self.ep, t, from_upscale=True)
+        self.assertEqual((up.action, up.method), ("upscale", "pixel"))              # never "already upscaled"
+        self.assertEqual((up.width, up.height), (w * 4, h * 4))                     # 2x of the 2x
+        g = U.pixel_graph(up)
+        self.assertTrue(g["up_video"]["inputs"]["video_file"].endswith(".up.mp4"))
+        self.assertTrue(g["up_save"]["inputs"]["source_mp4"].endswith("sh010_t01.mp4"))  # the take's audio
+        self.assertEqual(U.queued_record(up)["on_upscale"]["method"], "latent")
+        self.assertIn("on its upscale", U.describe(up))
+        self.assertEqual(U.plan_upscale(self.ep, t, method="latent", from_upscale=True).action, "error")
+        # through the route; the chain reads back, and a second step nests
+        res = self.ok(A.post_upscale(self.ctx, {"ep": self.ep, "shots": ["sh010"], "from_upscale": True,
+                                                "scale": 1.5}))
+        self.assertEqual((res["queued"][0]["width"], res["queued"][0]["height"]), (w * 3, h * 3))
+        st = self.status_take()["upscale"]
+        self.assertEqual((st["method"], st["on_upscale"]["method"], st["fresh"]), ("pixel", "latent", True))
+        t = T.get_take(self.ep, "final", "sh010", 1)
+        again = U.queued_record(U.plan_upscale(self.ep, t, from_upscale=True))
+        self.assertEqual((again["on_upscale"]["method"], again["on_upscale"]["on_upscale"]["method"]),
+                         ("pixel", "latent"))
+        self.err(A.post_upscale(self.ctx, {"ep": self.ep, "shots": ["sh010"], "from_upscale": "yes"}), 400)
+
     def test_default_pixel_model(self):
         self.assertEqual(U.default_pixel_model(["4x-UltraSharp.pth", "RealESRGAN_x2.pth"]), "RealESRGAN_x2.pth")
         self.assertEqual(U.default_pixel_model(["4x-UltraSharp.pth", "2x-Other.pth"]), "2x-Other.pth")
