@@ -283,6 +283,15 @@ upscale you already have can be taken further later with the pixel method alone:
 `h3.py upscale <ep> --only sh100 --method pixel --from-upscale` (the dialog's "On top of the
 existing upscale").
 
+A pixel model has a fixed factor of its own (RealESRGAN_x2 makes 2x, RealESRGAN_x4 4x), but
+the upscale is resized to whatever scale you ask for: RealESRGAN_x2 at 1.5x is the model's
+2x shrunk to 1.5x, which is sharp and cheap. So pair a 2x model with 1.5x or 2x and a 4x
+model with 3x or 4x (a 4x model at 1.5x does four times the work to throw most of it away).
+For a 4K master from a 1344×768 take: re-sample 2x, then RealESRGAN_x2 at 1.5x (4032×2304),
+then `h3.py assemble <ep> --upscaled --size 3840x2160`. Past 4K the output is heavy to make
+and to play; upscales encode on the GPU (NVENC) by default, which is what keeps a 5K one
+from taking minutes to write.
+
 ### Render profiles
 
 A profile is a named render setup for a kind of shot, so you set it once instead of

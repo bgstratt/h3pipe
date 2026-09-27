@@ -542,6 +542,24 @@ class PixelUpscaleTest(UpscaleRouteTest):
                          ("pixel", "latent"))
         self.err(A.post_upscale(self.ctx, {"ep": self.ep, "shots": ["sh010"], "from_upscale": "yes"}), 400)
 
+    def test_encoder_and_precision(self):
+        t = self.final_take()
+        up = U.plan_upscale(self.ep, t, method="pixel", encoder="nvenc", precision="fp32")
+        g = U.pixel_graph(up)
+        self.assertEqual((g["up_save"]["inputs"]["encoder"], g["up_pixels"]["inputs"]["precision"]),
+                         ("nvenc", "fp32"))
+        rec = U.queued_record(up)
+        self.assertEqual((rec["encoder_asked"], rec["precision"]), ("nvenc", "fp32"))
+        lat = U.plan_upscale(self.ep, t, then_model="RealESRGAN_x2.pth")
+        g = U.upscale_graph(self.base(), lat)
+        self.assertEqual((g["up_save"]["inputs"]["encoder"], g["up_then"]["inputs"]["precision"]), ("auto", "fp16"))
+        self.assertEqual(U.plan_upscale(self.ep, t, encoder="gpu").action, "error")
+        self.assertEqual(U.plan_upscale(self.ep, t, precision="fp8").action, "error")
+        self.err(A.post_upscale(self.ctx, {"ep": self.ep, "shots": ["sh010"], "encoder": "gpu"}), 400)
+        self.err(A.post_upscale(self.ctx, {"ep": self.ep, "shots": ["sh010"], "precision": "fp8"}), 400)
+        opts = self.ok(A.get_upscale_options(self.ctx, {}))
+        self.assertEqual((opts["encoders"], opts["precisions"]), (["auto", "nvenc", "x264"], ["fp16", "fp32"]))
+
     def test_default_pixel_model(self):
         self.assertEqual(U.default_pixel_model(["4x-UltraSharp.pth", "RealESRGAN_x2.pth"]), "RealESRGAN_x2.pth")
         self.assertEqual(U.default_pixel_model(["4x-UltraSharp.pth", "2x-Other.pth"]), "2x-Other.pth")

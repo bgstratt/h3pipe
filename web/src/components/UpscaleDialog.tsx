@@ -31,7 +31,8 @@ function UpscaleBody() {
   const [opts, setOpts] = useState<UpscaleOptions | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [f, setF] = useState<UpscaleForm>({ method: "auto", pixelModel: null, detail: 0, redo: !!ask.redo, vae: false,
-                                              scale: 2, thenModel: null, thenScale: 2, fromUpscale: false });
+                                              scale: 2, thenModel: null, thenScale: 2, fromUpscale: false,
+                                              encoder: "auto", precision: "fp16" });
   const set = (p: Partial<UpscaleForm>) => setF((x) => ({ ...x, ...p }));
 
   useEffect(() => {
@@ -181,6 +182,25 @@ function UpscaleBody() {
             </div>
           )}
           {summary && <div className={`h3-small ${bad.length ? "h3-error" : "h3-muted"}`}>{summary}</div>}
+          <div className="h3-row" style={{ gap: 8, flexWrap: "wrap" }}>
+            <label className="h3-col" style={{ gap: 2 }} title="How the upscale's mp4 is written. Auto uses the GPU's NVENC when ffmpeg has it (H.264, HEVC past 4096 wide), else x264 on the CPU">
+              <span className="h3-h">Encoder</span>
+              <select value={f.encoder} onChange={(e) => set({ encoder: e.target.value as UpscaleForm["encoder"] })}>
+                <option value="auto">Auto (GPU when it can)</option>
+                <option value="nvenc">GPU (NVENC)</option>
+                <option value="x264">CPU (x264)</option>
+              </select>
+            </label>
+            {(f.method !== "latent" || !!f.thenModel) && (
+              <label className="h3-col" style={{ gap: 2 }} title="The upscale model's precision: 16-bit is about twice as fast and looks the same; 32-bit is how ComfyUI's own node runs it">
+                <span className="h3-h">Model precision</span>
+                <select value={f.precision} onChange={(e) => set({ precision: e.target.value as UpscaleForm["precision"] })}>
+                  <option value="fp16">16-bit (fast)</option>
+                  <option value="fp32">32-bit</option>
+                </select>
+              </label>
+            )}
+          </div>
           <label className="h3-check" title="Upscale again even where the take already has a fresh upscale (it is replaced)">
             <input type="checkbox" checked={f.redo} onChange={(e) => set({ redo: e.target.checked })} />
             Again, where already upscaled

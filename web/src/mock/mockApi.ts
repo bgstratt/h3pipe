@@ -1213,6 +1213,8 @@ export function createMockApi(emit: Emit, opts: MockOptions = {}): Api & { outsi
                   ltx2_ingredients: null, minimax_h3_fl2va: null, wan22_i2v: null, wan22_ti2v: null, wan22_vace: null },
         details: [0, 1, 2],
         max_scale: 4,
+        encoders: ["auto", "nvenc", "x264"],
+        precisions: ["fp16", "fp32"],
       };
     },
     async deleteUpscale(ep, shot, take, pass) {

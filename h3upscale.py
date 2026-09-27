@@ -70,6 +70,9 @@ class UpscaleJob:
     # the pixel method on top of the take's existing upscale: that record (its
     # .up.mp4 is the input, replaced by the result); None: from the take
     previous: dict | None = None
+    # how the .up.mp4 is written and the upscale model run (ENCODERS, PRECISIONS)
+    encoder: str = "auto"
+    precision: str = "fp16"
     out_width: int = 0
     out_height: int = 0
 
@@ -155,6 +158,11 @@ AUDIO_ENCODE = {"class_type": "VAEEncodeAudio", "audio": "audio", "vae": "vae"}
 METHODS = ("latent", "pixel")
 PIXEL_NODES = ("H3LoadTakeVideo", "H3PixelUpscale", "UpscaleModelLoader", "H3SaveUpscale")
 DEFAULT_PIXEL_MODEL = "RealESRGAN_x2.pth"
+# auto: the GPU's NVENC when ffmpeg has it (H.264 up to 4096 wide, HEVC above),
+# else x264; nvenc forces it (fails without); x264 forces the CPU encoder
+ENCODERS = ("auto", "nvenc", "x264")
+# the upscale model's precision: fp16 (autocast; about twice as fast) or fp32
+PRECISIONS = ("fp16", "fp32")
 DETAILS = (0, 1, 2)                     # steps earlier than the default start
 MAX_SCALE = 4.0                         # the H3 latent upscaler's limit; the pixel method's too
 
@@ -230,7 +238,20 @@ def upscale_readiness(target: "TG.Target", object_info: dict | None) -> dict | N
     return {"status": "not_ready" if missing else "ready", "missing": missing}
 
 
-def plan_upscale(root: str, take: T.Take, *, scale: float | None = None,
+def plan_upscale(root: str, take: T.Take, *, encoder: str = "auto", precision: str = "fp16",
+                 **kw) -> UpscaleJob:
+    """_plan (below), with how the result is encoded (`encoder`) and the upscale
+    model run (`precision`), both checked."""
+    job = _plan(root, take, **kw)
+    job.encoder, job.precision = encoder or "auto", precision or "fp16"
+    if job.action != "error" and job.encoder not in ENCODERS:
+        job.action, job.why = "error", f"encoder {encoder!r}: it's {', '.join(ENCODERS)}"
+    if job.action != "error" and job.precision not in PRECISIONS:
+        job.action, job.why = "error", f"precision {precision!r}: it's fp16 or fp32"
+    return job
+
+
+def _plan(root: str, take: T.Take, *, scale: float | None = None,
                  start_step: int | None = None, route: str | None = None,
                  redo: bool = False, method: str | None = None,
                  pixel_model: str | None = None, detail: int | None = None,
@@ -430,14 +451,15 @@ def upscale_graph(base: dict, up: UpscaleJob) -> dict:
     g["up_save"] = {"class_type": "H3SaveUpscale", "inputs": {
         "images": images, "project_root": up.root, "source_mp4": rel(up.root, take.paths.mp4),
         "out_mp4": rel(up.root, take.paths.up_mp4), "fps": float((take.sidecar or {}).get("fps") or 24),
-        "sidecar": rel(up.root, take.paths.up_sidecar)}}
+        "sidecar": rel(up.root, take.paths.up_sidecar), "encoder": up.encoder}}
     if up.then_model:
         # the re-sample's frames through an upscale model before they're saved
         g["up_then_model"] = {"class_type": "UpscaleModelLoader",
                               "inputs": {"model_name": up.then_model}}
         g["up_then"] = {"class_type": "H3PixelUpscale", "inputs": {
             "images": images, "upscale_model": ["up_then_model", 0],
-            "width": up.out_size[0], "height": up.out_size[1], "chunk": 2}}
+            "width": up.out_size[0], "height": up.out_size[1], "chunk": 2,
+            "precision": up.precision}}
         g["up_save"]["inputs"]["images"] = ["up_then", 0]
     J.prune(g, "up_save")
     return g
@@ -456,12 +478,12 @@ def pixel_graph(up: UpscaleJob) -> dict:
         "up_model": {"class_type": "UpscaleModelLoader", "inputs": {"model_name": up.pixel_model}},
         "up_pixels": {"class_type": "H3PixelUpscale", "inputs": {
             "images": ["up_video", 0], "upscale_model": ["up_model", 0],
-            "width": up.width, "height": up.height, "chunk": 4}},
+            "width": up.width, "height": up.height, "chunk": 4, "precision": up.precision}},
         "up_save": {"class_type": "H3SaveUpscale", "inputs": {
             "images": ["up_pixels", 0], "project_root": root,
             "source_mp4": rel(root, take.paths.mp4), "out_mp4": rel(root, take.paths.up_mp4),
             "fps": float((take.sidecar or {}).get("fps") or 24),
-            "sidecar": rel(root, take.paths.up_sidecar)}},
+            "sidecar": rel(root, take.paths.up_sidecar), "encoder": up.encoder}},
     }
 
 
@@ -514,7 +536,8 @@ def queued_record(up: UpscaleJob) -> dict:
                 "comfy_prompt_id": None, "target": up.target.id, "route": "pixel",
                 "method": "pixel", "mode": "pixel", "scale": up.scale, "start_step": None,
                 "steps": None, "seed": None, "upscaler": up.pixel_model,
-                "pixel_model": up.pixel_model,
+                "pixel_model": up.pixel_model, "precision": up.precision,
+                "encoder_asked": up.encoder,
                 # the chain: what the upscale it ran on was (so a later look can
                 # tell "re-sample 2x, then pixel 2x"); the stamp stays the take's
                 **({"on_upscale": previous_summary(up.previous)} if up.previous else {}),
@@ -530,7 +553,8 @@ def queued_record(up: UpscaleJob) -> dict:
             "scale": up.scale, "start_step": up.start_step,
             "steps": schedule_steps(up.spec, int((up.take.sidecar or {}).get("steps") or 0)),
             "seed": (up.take.sidecar or {}).get("seed"),
-            "upscaler": upscaler,
+            "upscaler": upscaler, "encoder_asked": up.encoder,
+            **({"precision": up.precision} if up.then_model else {}),
             **({"then_pixel": {"model": up.then_model, "scale": up.then_scale,
                                "from": [up.width, up.height]}} if up.then_model else {}),
             "width": up.out_size[0], "height": up.out_size[1], **T.source_stamp(up.take.paths.mp4)}
@@ -616,6 +640,11 @@ def main(argv=None) -> int:
                     help="latent (re-sample; the default where the target has one) or pixel "
                          "(an upscale model over the frames; any target)")
     ap.add_argument("--pixel-model", help=f"the pixel method's model (default {DEFAULT_PIXEL_MODEL})")
+    ap.add_argument("--encoder", choices=ENCODERS, default="auto",
+                    help="auto: the GPU's NVENC when there is one (H.264, HEVC above 4096 wide), "
+                         "else x264; nvenc / x264 force one")
+    ap.add_argument("--precision", choices=PRECISIONS, default="fp16",
+                    help="the upscale model's precision (fp16: about twice as fast)")
     ap.add_argument("--from-upscale", action="store_true",
                     help="the pixel method on the take's existing upscale (its .up.mp4 is the "
                          "input and is replaced): e.g. a re-sample first, pixel 2x later")
@@ -656,7 +685,8 @@ def main(argv=None) -> int:
                           route="vae" if args.vae else None, redo=args.redo,
                           method=args.method, pixel_model=args.pixel_model, detail=args.detail,
                           then_model=args.then_pixel, then_scale=args.then_scale,
-                          from_upscale=args.from_upscale)
+                          from_upscale=args.from_upscale, encoder=args.encoder,
+                          precision=args.precision)
         mark = {"upscale": "..", "skip": "= ", "error": "!!"}[up.action]
         what = describe(up) if up.action == "upscale" else up.why
         print(f"  {mark} {up.label}: {what}")

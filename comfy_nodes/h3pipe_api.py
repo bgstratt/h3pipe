@@ -793,6 +793,12 @@ def post_upscale(ctx: Context, body):
     then_model = body.get("then_pixel_model")
     if then_model is not None and (not isinstance(then_model, str) or not then_model):
         raise ApiError(400, "then_pixel_model must be an upscale model's file name, or null")
+    encoder = body.get("encoder") or "auto"
+    if encoder not in U.ENCODERS:
+        raise ApiError(400, f"encoder must be one of {', '.join(U.ENCODERS)}")
+    precision = body.get("precision") or "fp16"
+    if precision not in U.PRECISIONS:
+        raise ApiError(400, "precision must be fp16 or fp32")
     from_upscale = body.get("from_upscale", False)
     if not isinstance(from_upscale, bool):
         raise ApiError(400, "from_upscale must be true or false")
@@ -816,7 +822,7 @@ def post_upscale(ctx: Context, body):
                             route="vae" if vae else None, redo=redo, method=method,
                             pixel_model=pixel_model, detail=detail,
                             then_model=then_model, then_scale=then_scale,
-                            from_upscale=from_upscale)
+                            from_upscale=from_upscale, encoder=encoder, precision=precision)
         if up.action == "skip":
             skipped.append({"shot": shot, "take": t.take, "reason": up.why})
         elif up.action == "error":
@@ -875,7 +881,8 @@ def get_upscale_options(ctx: Context, query: dict):
                      if spec.get("mode") == U.SECOND_STAGE else None)
         latent[t.id] = r
     return 200, {"pixel": px, "latent": latent, "details": list(U.DETAILS),
-                 "max_scale": U.MAX_SCALE}
+                 "max_scale": U.MAX_SCALE, "encoders": list(U.ENCODERS),
+                 "precisions": list(U.PRECISIONS)}
 
 
 @handler

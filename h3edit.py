@@ -1482,6 +1482,7 @@ def upscale_summary(root: str, t: T.Take) -> dict | None:
             "method": up.get("method", "latent"), "pixel_model": up.get("pixel_model"),
             "then_pixel": up.get("then_pixel"),
             "on_upscale": up.get("on_upscale"),
+            "encoder": up.get("encoder"), "precision": up.get("precision"),
             "comfy_prompt_id": up.get("comfy_prompt_id"),
             "mp4": rel(root, t.paths.up_mp4) if os.path.isfile(t.paths.up_mp4) else None,
             "save_notes": up.get("save_notes", "")}

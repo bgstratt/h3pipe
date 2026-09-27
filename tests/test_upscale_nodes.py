@@ -169,6 +169,35 @@ def fake_upscaler_modules() -> dict:
     return {"comfy": comfy, "comfy.utils": utils, "comfy.model_management": mm}
 
 
+class EncoderTest(unittest.TestCase):
+    def test_encoder_choice(self):
+        both = {"h264_nvenc", "hevc_nvenc"}
+        with mock.patch.object(UN, "nvenc_encoders", return_value=both):
+            self.assertEqual(UN.encoder_args("auto", 3840, 2176)[0], "h264_nvenc")
+            name, args = UN.encoder_args("auto", 5376, 3072)             # past NVENC H.264's 4096
+            self.assertEqual(name, "hevc_nvenc")
+            self.assertIn("hvc1", args)
+            self.assertEqual(UN.encoder_args("nvenc", 1920, 1088)[0], "h264_nvenc")
+            self.assertEqual(UN.encoder_args("x264", 1920, 1088)[0], "libx264")
+        with mock.patch.object(UN, "nvenc_encoders", return_value=set()):
+            self.assertEqual(UN.encoder_args("auto", 1920, 1088)[0], "libx264")
+            with self.assertRaises(RuntimeError):
+                UN.encoder_args("nvenc", 1920, 1088)
+        # a frame past 4K gets x264's faster preset
+        self.assertIn("fast", UN.x264_args(5376, 3072))
+        self.assertIn("medium", UN.x264_args(3840, 2160))
+
+    @needs_ffmpeg
+    def test_forced_x264_writes_and_says_so(self):
+        with tempfile.TemporaryDirectory() as root:
+            out = os.path.join(root, "a.mp4")
+            self.assertEqual(UN.encode_stream(clip(12), out, 24.0, "x264"), "libx264")
+            n = subprocess.run(["ffprobe", "-v", "error", "-count_frames", "-select_streams", "v:0",
+                                "-show_entries", "stream=nb_read_frames", "-of", "csv=p=0", out],
+                               capture_output=True, text=True).stdout.strip()
+            self.assertEqual(n, "12")
+
+
 class PixelNodeTest(unittest.TestCase):
     def test_batches_resized_to_the_target(self):
         frames = clip(10)                                          # 10 x 48 x 96

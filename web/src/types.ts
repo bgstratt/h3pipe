@@ -683,6 +683,9 @@ export interface TakeUpscale {
   then_pixel?: { model: string; scale: number; from: [number, number] } | null;
   /** a pixel upscale run on an earlier upscale: that one's record (nested for a longer chain) */
   on_upscale?: Record<string, unknown> | null;
+  /** the encoder the .up.mp4 was written with (h264_nvenc, hevc_nvenc, libx264) */
+  encoder?: string | null;
+  precision?: string | null;
   comfy_prompt_id: string | null;
   /** the upscale's mp4, relative to the episode (null until it is written) */
   mp4: string | null;
@@ -712,6 +715,10 @@ export interface UpscaleRequest {
   then_scale?: number | null;
   /** pixel: run on each take's existing upscale (its .up.mp4, replaced) instead of the take */
   from_upscale?: boolean;
+  /** how the .up.mp4 is encoded: auto (NVENC when there, else x264), nvenc, x264 */
+  encoder?: "auto" | "nvenc" | "x264";
+  /** the upscale model's precision: fp16 (the default, faster) or fp32 */
+  precision?: "fp16" | "fp32";
 }
 
 /** GET /h3pipe/upscale/options: what the Upscale dialog can offer here. */
@@ -725,6 +732,8 @@ export interface UpscaleOptions {
   } | null>;
   details: number[];
   max_scale?: number;
+  encoders?: string[];
+  precisions?: string[];
 }
 
 export interface UpscaleResult {

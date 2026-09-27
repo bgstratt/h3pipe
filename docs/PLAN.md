@@ -1760,6 +1760,12 @@ what this machine and the repo have today. Nothing below is built; each target g
   frames go through `H3PixelUpscale` before the saver. Re-sample 2x then RealESRGAN_x2 = 4x
   with generated detail in the first half. Scales are capped at 4 (the H3 upscaler's own
   limit); a re-sample at 4x of 1344×768 is 5376×3072 conditioning, heavy on any GPU.
+- **Encoder and precision** (2026-09-26): upscales encode on NVENC by default (`encoder`
+  auto / nvenc / x264; H.264 to 4096, HEVC past it; x264 fallback, its faster preset past
+  4K), streaming frames to ffmpeg one at a time; the upscale model runs fp16 under autocast
+  by default (`precision`). Measured on the 5090: 5376×3072 HEVC NVENC ~9 fps against
+  x264's ~1 fps (sh020 t03's encode was 105 s of a 320 s job). Assemble re-encodes a cut
+  whose clips mix codecs.
 - **Pixel on top of an upscale** (2026-09-26): `from_upscale` / `--from-upscale` / the dialog's
   "On top of the existing upscale": the pixel method reads the take's fresh `.up.mp4` and
   replaces it, sized from the upscale; the record nests the old one as `on_upscale`.

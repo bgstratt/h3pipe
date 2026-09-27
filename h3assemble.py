@@ -122,6 +122,16 @@ def episode_fps(root: str, doc: dict) -> float:
     return float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) and v > 0 else 24.0
 
 
+def video_codec(path: str) -> str | None:
+    """The first video stream's codec (h264, hevc, ...), or None."""
+    try:
+        r = run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries",
+                 "stream=codec_name", "-of", "csv=p=0", path], timeout=60)
+        return r.stdout.decode("utf-8", "replace").strip() or None
+    except Exception:
+        return None
+
+
 def video_size(path: str) -> tuple[int, int] | None:
     r = run(["ffprobe", "-v", "error", "-select_streams", "v:0",
              "-show_entries", "stream=width,height", "-of", "csv=p=0:s=x", path],
@@ -674,7 +684,13 @@ def main() -> int:
     # once one clip is re-encoded every clip is, so the concat demuxer sees one
     # set of stream parameters.
     # So do clips at another frame rate or size (a mixed-target cut).
-    reencode = bool(windowed or trimmed or placeholders or converted or resized)
+    # an NVENC HEVC upscale beside H.264 clips: concat can't copy mixed codecs
+    codecs = {video_codec(p["path"]) for p in plan}
+    mixed = len(codecs) > 1
+    if mixed:
+        print(f"  clips in more than one codec ({', '.join(sorted(c or '?' for c in codecs))}): "
+              f"re-encoding them all")
+    reencode = bool(windowed or trimmed or placeholders or converted or resized or mixed)
     size = None
     if placeholders or resized:
         if width and height:

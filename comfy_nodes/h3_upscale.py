@@ -137,13 +137,16 @@ class H3PixelUpscale:
             "width": ("INT", {"default": 1920, "min": 16, "max": 16384, "step": 2}),
             "height": ("INT", {"default": 1088, "min": 16, "max": 16384, "step": 2}),
             "chunk": ("INT", {"default": 4, "min": 1, "max": 64}),
+            # fp16: the model under CUDA autocast (about twice as fast, what
+            # RealESRGAN is normally run at); fp32: as core's node runs it
+            "precision": (list(PRECISIONS), {"default": "fp16"}),
         }}
 
     RETURN_TYPES = ("IMAGE",)
     FUNCTION = "upscale"
     CATEGORY = "H3/upscale"
 
-    def upscale(self, images, upscale_model, width, height, chunk=4):
+    def upscale(self, images, upscale_model, width, height, chunk=4, precision="fp16"):
         # What core's ImageUpscaleWithModel does, but with the model loaded once
         # for the whole clip: calling that node per batch re-ran its load (and
         # logged "prepared for dynamic VRAM loading") for every batch.
@@ -158,6 +161,13 @@ class H3PixelUpscale:
                            memory_required=(512 * 512 * 3) * images.element_size() * scale * 384.0
                            + per_batch, force_full_load=True)
         device = upscale_model.patcher.load_device
+        half = precision == "fp16" and str(device).startswith("cuda")
+
+        def model(a):
+            if not half:
+                return upscale_model(a.float())
+            with torch.autocast("cuda", dtype=torch.float16):
+                return upscale_model(a.float()).float()
         pbar = comfy.utils.ProgressBar(n)
         out = torch.empty((n, height, width, 3), dtype=torch.float16)
         tile, overlap = 512, 32
@@ -165,7 +175,7 @@ class H3PixelUpscale:
             batch = images[i:i + chunk].movedim(-1, -3).to(device)
             while True:
                 try:
-                    big = comfy.utils.tiled_scale(batch, lambda a: upscale_model(a.float()),
+                    big = comfy.utils.tiled_scale(batch, model,
                                                   tile_x=tile, tile_y=tile, overlap=overlap,
                                                   upscale_amount=upscale_model.scale,
                                                   output_device=mm.intermediate_device())
@@ -252,6 +262,87 @@ def _notify(root: str, shot, take, status: str) -> None:
         pass
 
 
+ENCODERS = ("auto", "nvenc", "x264")
+PRECISIONS = ("fp16", "fp32")
+_NVENC: set | None = None
+
+
+def nvenc_encoders() -> set:
+    """The NVENC encoders this ffmpeg has (h264_nvenc, hevc_nvenc, ...), asked once."""
+    global _NVENC
+    if _NVENC is None:
+        try:
+            out = subprocess.run(["ffmpeg", "-hide_banner", "-encoders"], capture_output=True,
+                                 text=True, timeout=60).stdout
+            _NVENC = {w for line in out.splitlines() for w in line.split() if w.endswith("_nvenc")}
+        except Exception:
+            _NVENC = set()
+    return _NVENC
+
+
+def x264_args(w: int, h: int) -> list:
+    # a frame past 4K takes the faster preset: CRF 16 on "medium" is ~1 fps at 5376x3072
+    return ["-c:v", "libx264", "-crf", "16", "-preset", "medium" if w * h <= 4096 * 2304 else "fast",
+            "-pix_fmt", "yuv420p"]
+
+
+def encoder_args(encoder: str, w: int, h: int) -> tuple[str, list]:
+    """(the encoder used, its ffmpeg args). auto and nvenc use the GPU: H.264 up to
+    4096 on a side (NVENC's H.264 limit), HEVC above; auto falls back to x264
+    without NVENC, nvenc raises."""
+    if encoder in ("auto", "nvenc"):
+        have = nvenc_encoders()
+        name = ("h264_nvenc" if w <= 4096 and h <= 4096 and "h264_nvenc" in have
+                else "hevc_nvenc" if "hevc_nvenc" in have else None)
+        if name:
+            args = ["-c:v", name, "-preset", "p5", "-rc", "vbr", "-cq", "19", "-b:v", "0",
+                    "-pix_fmt", "yuv420p"]
+            return name, args + (["-tag:v", "hvc1"] if name == "hevc_nvenc" else [])
+        if encoder == "nvenc":
+            raise RuntimeError("this ffmpeg has no NVENC encoder (h264_nvenc / hevc_nvenc)")
+    return "libx264", x264_args(w, h)
+
+
+def encode_stream(images, path: str, fps: float, encoder: str = "auto") -> str:
+    """Write `images` (IMAGE [T, H, W, 3]) to a mute mp4, one frame at a time into
+    ffmpeg (no whole-clip byte copy: at 5376x3072 that was ~20 GB). Returns the
+    encoder used; on auto, a failed NVENC encode is retried on x264."""
+    n, h, w = int(images.shape[0]), int(images.shape[1]), int(images.shape[2])
+    name, args = encoder_args(encoder, w, h)
+
+    def run(args: list) -> None:
+        cmd = ["ffmpeg", "-y", "-v", "error", "-f", "rawvideo", "-pix_fmt", "rgb24",
+               "-s", f"{w}x{h}", "-framerate", str(fps), "-i", "-", "-frames:v", str(n),
+               *args, path]
+        proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stderr=subprocess.PIPE)
+        try:
+            for i in range(n):
+                frame = (images[i].float().clamp(0, 1) * 255.0 + 0.5).to(torch.uint8)
+                proc.stdin.write(frame.cpu().numpy().tobytes())
+            proc.stdin.close()
+            err = proc.stderr.read()
+            if proc.wait(timeout=1800):
+                raise RuntimeError(err.decode("utf-8", "replace")[-300:] or "ffmpeg failed")
+        except BaseException:
+            proc.kill()
+            for fh in (proc.stdin, proc.stderr):
+                try:
+                    fh.close()
+                except Exception:
+                    pass
+            proc.wait()
+            raise
+
+    try:
+        run(args)
+    except Exception:
+        if encoder != "auto" or name == "libx264":
+            raise
+        name = "libx264"
+        run(x264_args(w, h))
+    return name
+
+
 class H3SaveUpscale:
     """Write an upscale beside its take: <stem>.up.mp4, whose audio is the
     take's own stream copied on (what plays is the take's, not a VAE round
@@ -267,6 +358,8 @@ class H3SaveUpscale:
             "out_mp4": ("STRING", {"default": "renders/sh010/sh010_t01.up.mp4"}),
             "fps": ("FLOAT", {"default": 24.0, "min": 1.0, "max": 60.0, "step": 1.0}),
             "sidecar": ("STRING", {"default": ""}),
+            # auto: NVENC when ffmpeg has it (H.264 up to 4096, HEVC above), else x264
+            "encoder": (list(ENCODERS), {"default": "auto"}),
         }}
 
     RETURN_TYPES = ("STRING",)
@@ -275,21 +368,21 @@ class H3SaveUpscale:
     OUTPUT_NODE = True
     CATEGORY = "H3/upscale"
 
-    def save(self, images, project_root, source_mp4, out_mp4, fps, sidecar=""):
+    def save(self, images, project_root, source_mp4, out_mp4, fps, sidecar="", encoder="auto"):
         root = os.path.normpath(project_root)
         out = _abs(root, out_mp4)
         source = _abs(root, source_mp4)
         notes, ms, clock = [], {}, time.perf_counter
-        audio, ok = None, False
+        audio, ok, used = None, False, None
         fd, picture = tempfile.mkstemp(prefix=".tmp_", suffix=".mp4",
                                        dir=os.path.dirname(os.path.abspath(out)))
         os.close(fd)
         try:
             t0 = clock()
-            status = H3SaveShot._encode(images, picture, fps, None, None)
+            used = encode_stream(images, picture, float(fps), encoder)
             ms["mp4"] = round((clock() - t0) * 1000)
-            notes.append(status)
-            if status.startswith("mp4 written"):
+            notes.append(f"mp4 written ({used})")
+            if os.path.isfile(picture):
                 t0 = clock()
                 audio = copy_audio(picture, source, out)
                 ms["audio"] = round((clock() - t0) * 1000)
@@ -312,7 +405,8 @@ class H3SaveUpscale:
             data.update(status="ok" if ok else "failed", finished=_now(),
                         frames=int(images.shape[0]), width=int(images.shape[2]),
                         height=int(images.shape[1]), mp4=stem if ok else None,
-                        audio=audio, save_ms=ms, save_notes=f"{stem}: " + "; ".join(notes))
+                        audio=audio, encoder=used, save_ms=ms,
+                        save_notes=f"{stem}: " + "; ".join(notes))
             _write_json_atomic(path, data)
             _notify(root, data.get("shot"), data.get("take"), "ok" if ok else "failed")
         return (f"{stem}: " + "; ".join(notes),)
