@@ -783,7 +783,10 @@ def post_upscale(ctx: Context, body):
         raise ApiError(400, "start_step must be a whole number or null")
     method = body.get("method")
     if method is not None and method not in U.METHODS:
-        raise ApiError(400, "method must be latent, pixel or null (each take's default)")
+        raise ApiError(400, "method must be latent, pixel, seedvr2 or null (each take's default)")
+    seedvr2_model = body.get("seedvr2_model")
+    if seedvr2_model is not None and (not isinstance(seedvr2_model, str) or not seedvr2_model):
+        raise ApiError(400, "seedvr2_model must be 7b, 3b or a model file name, or null")
     pixel_model = body.get("pixel_model")
     if pixel_model is not None and (not isinstance(pixel_model, str) or not pixel_model):
         raise ApiError(400, "pixel_model must be an upscale model's file name, or null")
@@ -830,7 +833,8 @@ def post_upscale(ctx: Context, body):
                             pixel_model=pixel_model, detail=detail,
                             then_model=then_model, then_scale=then_scale,
                             from_upscale=from_upscale, encoder=encoder, precision=precision,
-                            frequency_split=frequency_split, keep_soft=keep_soft, grain=grain)
+                            frequency_split=frequency_split, keep_soft=keep_soft, grain=grain,
+                            seedvr2_model=seedvr2_model)
         if up.action == "skip":
             skipped.append({"shot": shot, "take": t.take, "reason": up.why})
         elif up.action == "error":
@@ -860,6 +864,7 @@ def post_upscale(ctx: Context, body):
                 continue
             queued.append({"shot": up.shot, "take": up.take.take, "route": up.route,
                            "method": up.method, "pixel_model": up.pixel_model or None,
+                           "seedvr2_model": up.seedvr2_model or None,
                            "scale": up.scale, "start_step": up.start_step,
                            "then_pixel_model": up.then_model or None,
                            "width": up.out_size[0], "height": up.out_size[1], "prompt_id": pid})
@@ -877,6 +882,7 @@ def get_upscale_options(ctx: Context, query: dict):
     except Exception:
         info = None
     px = U.pixel_readiness(info)
+    sv2 = U.seedvr2_readiness(info)
     latent = {}
     for t in TG.list_targets("video"):
         r = U.upscale_readiness(t, info)
@@ -888,7 +894,7 @@ def get_upscale_options(ctx: Context, query: dict):
                      fixed_scale=float(spec.get("scale", 2))
                      if spec.get("mode") == U.SECOND_STAGE else None)
         latent[t.id] = r
-    return 200, {"pixel": px, "latent": latent, "details": list(U.DETAILS),
+    return 200, {"pixel": px, "seedvr2": sv2, "latent": latent, "details": list(U.DETAILS),
                  "max_scale": U.MAX_SCALE, "encoders": list(U.ENCODERS),
                  "precisions": list(U.PRECISIONS)}
 

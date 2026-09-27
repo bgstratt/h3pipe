@@ -206,7 +206,7 @@ disk alone. ComfyUI must be running for `targets`, `refs`, `keyframe --generate`
 | `h3.py keyframe` | a shot's first/last keyframe: from the previous shot's take (continuity), `--generate`, `--missing`, `--clear` |
 | `h3.py render` | `h3render.py`: queues shots through their targets, one take each |
 | `h3.py assemble` | `h3assemble.py`: the review cut, in `cut.json` order; `--upscaled` from the takes' upscales |
-| `h3.py upscale` | `h3upscale.py`: a take at 2x, either pass (`--proxy`) — re-sampled (H3, LTX-2) or through a pixel upscale model (`--method pixel`, any target); the cut's takes, or `--only`/`--take`; `--check`, `--prune-latents` |
+| `h3.py upscale` | `h3upscale.py`: a take at 2x, either pass (`--proxy`) — re-sampled (H3, LTX-2, Wan), through a pixel upscale model (`--method pixel`) or SeedVR2 (`--method seedvr2`), the last two for any target; the cut's takes, or `--only`/`--take`; `--check`, `--prune-latents` |
 | `h3.py align` | `h3align.py`: times the script against a dialogue recording |
 | `h3.py takes` / `pick` / `override` | takes and why they're stale; the take the cut uses; per-shot tweaks and retargeting (`h3edit.py`) |
 | `h3.py cut` | edit the cut itself: `--show`, `--order`, `--move … --before`, `--trim SH IN OUT`, `--lock`/`--unlock`, `--reset`, `--copy-from final\|proxy`, `--audio` (a clip's sound from another take, a file, none or its own) |

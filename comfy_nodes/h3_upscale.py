@@ -299,6 +299,46 @@ class H3PixelUpscale:
         return (out,)
 
 
+class H3FinishUpscale:
+    """The pixel method's finish (frequency split, keep soft, grain; see finish)
+    for frames something else upscaled: SeedVR2's, say. `source` is the take's
+    own frames, the same count, at any size."""
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {
+            "images": ("IMAGE",),
+            "source": ("IMAGE",),
+            "frequency_split": ("BOOLEAN", {"default": True}),
+            "keep_soft": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.05}),
+            "grain": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 0.2, "step": 0.005}),
+            "grain_seed": ("INT", {"default": 0, "min": 0, "max": 0xFFFFFFFF}),
+            "chunk": ("INT", {"default": 8, "min": 1, "max": 64}),
+        }}
+
+    RETURN_TYPES = ("IMAGE",)
+    FUNCTION = "finish"
+    CATEGORY = "H3/upscale"
+
+    def finish(self, images, source, frequency_split=True, keep_soft=0.0, grain=0.0,
+               grain_seed=0, chunk=8):
+        n = min(int(images.shape[0]), int(source.shape[0]))
+        if not frequency_split and keep_soft <= 0 and grain <= 0:
+            return (images,)
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        level = detail_scale(source, device) if keep_soft > 0 else 1.0
+        h, w = int(images.shape[1]), int(images.shape[2])
+        out = torch.empty((n, h, w, 3), dtype=torch.float16)
+        for i in range(0, n, max(1, int(chunk))):
+            up = images[i:i + chunk, :, :, :3].movedim(-1, 1).to(device).float()
+            src = source[i:i + chunk, :, :, :3].movedim(-1, 1).to(device).float()
+            x = finish(src, up, frequency_split=frequency_split, keep_soft=float(keep_soft),
+                       level=level)
+            x = add_grain(x, float(grain), int(grain_seed), i)
+            out[i:i + x.shape[0]] = x.movedim(1, -1).to("cpu", torch.float16)
+        return (out,)
+
+
 # ---------------------------------------------------------------------------
 # H3HoldAudio
 # ---------------------------------------------------------------------------
@@ -524,6 +564,7 @@ NODE_CLASS_MAPPINGS = {
     "H3HoldAudio": H3HoldAudio,
     "H3SaveUpscale": H3SaveUpscale,
     "H3PixelUpscale": H3PixelUpscale,
+    "H3FinishUpscale": H3FinishUpscale,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -532,4 +573,5 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "H3HoldAudio": "H3 Hold Audio",
     "H3SaveUpscale": "H3 Save Upscale",
     "H3PixelUpscale": "H3 Pixel Upscale",
+    "H3FinishUpscale": "H3 Finish Upscale",
 }

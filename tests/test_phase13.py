@@ -636,6 +636,57 @@ class PixelUpscaleTest(UpscaleRouteTest):
         g = U.upscale_graph(self.wan_base("wan22_ti2v"), U.plan_upscale(self.ep, wan, **kw))
         self.assertEqual((g["up_pixels"]["inputs"]["keep_soft"], g["up_pixels"]["inputs"]["grain"]), (0.5, 0.0))
 
+    def sv2_info(self, models=("seedvr2_7b_int8_convrot.safetensors", "seedvr2_3b_int8_convrot.safetensors")):
+        info = {c: {"input": {}} for c in U.SEEDVR2_NODES}
+        info["UNETLoader"] = {"input": {"required": {"unet_name": [list(models), {}]}}}
+        info["VAELoader"] = {"input": {"required": {"vae_name": [[U.SEEDVR2_VAE], {}]}}}
+        return info
+
+    def test_seedvr2_any_target(self):
+        t = self.as_target(self.final_take(latent=False), "wan22_vace")      # no re-sample of its own
+        up = U.plan_upscale(self.ep, t, method="seedvr2", grain=0.02)
+        self.assertEqual((up.action, up.method, up.route, up.seedvr2_model),
+                         ("upscale", "seedvr2", "seedvr2", "seedvr2_7b_int8_convrot.safetensors"))
+        self.assertEqual(U.plan_upscale(self.ep, t, method="seedvr2", seedvr2_model="3b").seedvr2_model,
+                         "seedvr2_3b_int8_convrot.safetensors")
+        g = U.seedvr2_graph(up)
+        self.assertEqual((g["up_resize"]["inputs"]["width"], g["up_resize"]["inputs"]["height"]), (up.width, up.height))
+        self.assertEqual((g["up_ks"]["inputs"]["steps"], g["up_ks"]["inputs"]["latent_image"]), (1, ["up_chunk", 0]))
+        self.assertEqual(g["up_chunk"]["inputs"]["chunking_mode"], "auto")
+        self.assertEqual(g["up_merge"]["inputs"]["temporal_overlap"], ["up_chunk", 1])
+        self.assertEqual(g["up_post"]["inputs"]["color_correction_method"], "lab")
+        fin = g["up_finish"]["inputs"]
+        self.assertEqual((fin["images"], fin["source"], fin["frequency_split"], fin["grain"]),
+                         (["up_post", 0], ["up_video", 0], True, 0.02))
+        self.assertEqual(g["up_save"]["inputs"]["images"], ["up_finish", 0])
+        rec = U.queued_record(up)
+        self.assertEqual((rec["method"], rec["seedvr2_model"], rec["color_correction"]),
+                         ("seedvr2", "seedvr2_7b_int8_convrot.safetensors", "lab"))
+        self.assertIn("SeedVR2", U.describe(up))
+        # on top of an upscale, like the pixel method
+        self.assertEqual(U.plan_upscale(self.ep, t, method="seedvr2", from_upscale=True).action, "error")
+
+    def test_seedvr2_readiness_route_and_options(self):
+        self.final_take()                                    # rendered before the lists change
+        self.comfy.nodes |= set(U.SEEDVR2_NODES)
+        self.comfy.info.update({k: v for k, v in self.sv2_info().items() if k in ("UNETLoader", "VAELoader")})
+        self.assertEqual(U.seedvr2_readiness(self.sv2_info())["status"], "ready")
+        r = U.seedvr2_readiness(self.sv2_info(models=("seedvr2_3b_int8_convrot.safetensors",)))
+        self.assertEqual(r["status"], "not_ready")                          # the default 7b missing
+        self.assertEqual(r["default"], "seedvr2_3b_int8_convrot.safetensors")
+        self.assertEqual(U.seedvr2_readiness(self.sv2_info(), "3b")["status"], "ready")
+        res = self.ok(A.post_upscale(self.ctx, {"ep": self.ep, "shots": ["sh010"], "method": "seedvr2",
+                                                "seedvr2_model": "3b"}))
+        q = res["queued"][0]
+        self.assertEqual((q["method"], q["seedvr2_model"]), ("seedvr2", "seedvr2_3b_int8_convrot.safetensors"))
+        self.assertEqual(self.status_take()["upscale"]["seedvr2_model"], "seedvr2_3b_int8_convrot.safetensors")
+        opts = self.ok(A.get_upscale_options(self.ctx, {}))
+        self.assertEqual(opts["seedvr2"]["status"], "ready")
+        self.assertIn("seedvr2_7b_int8_convrot.safetensors", opts["seedvr2"]["models"])
+        msg = self.err(A.post_upscale(self.ctx, {"ep": self.ep, "shots": ["sh010"], "method": "seedvr2",
+                                                 "seedvr2_model": "gone.safetensors", "redo": True}), 409)
+        self.assertIn("gone.safetensors", msg)
+
     def test_default_pixel_model(self):
         self.assertEqual(U.default_pixel_model(["4x-UltraSharp.pth", "RealESRGAN_x2.pth"]), "RealESRGAN_x2.pth")
         self.assertEqual(U.default_pixel_model(["4x-UltraSharp.pth", "2x-Other.pth"]), "2x-Other.pth")

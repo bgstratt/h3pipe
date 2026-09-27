@@ -587,6 +587,13 @@ Every file any target names. `python h3.py targets` tells you which of these you
 Only to upscale takes (`python h3.py upscale`), never to render. The node comes from the Comfyui_Minimax_h3_latent_Upscaler pack (LBH-123-AI) — not its "Plus" fork, which has the same node without temporal chunking. `python h3.py targets` says whether this ComfyUI can upscale.
 
 - `minimax_h3_latent_upscaler_3d_fp16.safetensors` → `models/latent_upscale_models/` (MinimaxH3LatentUpscaler3D, for `minimax_h3_ref2va`) — no URL: no ComfyUI template, saved workflow or ComfyUI-Manager model list on this machine records this file. Search Hugging Face for its exact name: the Comfyui_Minimax_h3_latent_Upscaler pack's README points to the LBH-123-AI/Minimax_h3_latent_Upscaler repo. Only needed to upscale (Phase 13), never to render.
+
+**SeedVR2** (any take; ComfyUI's own nodes, the models Apache 2.0): the VAE and at least one model.
+
+- `seedvr2_ema_vae_fp16.safetensors` → `models/vae/` — [download](https://huggingface.co/Comfy-Org/SeedVR2/resolve/main/vae/seedvr2_ema_vae_fp16.safetensors) (ComfyUI templates utility_seedvr2_3b_int8_upscale_video.json / utility_seedvr2_7b_int8_upscale_image.json (properties.models))
+- `seedvr2_7b_int8_convrot.safetensors` → `models/diffusion_models/` — [download](https://huggingface.co/Comfy-Org/SeedVR2/resolve/main/diffusion_models/seedvr2_7b_int8_convrot.safetensors) (ComfyUI templates utility_seedvr2_3b_int8_upscale_video.json / utility_seedvr2_7b_int8_upscale_image.json (properties.models))
+- `seedvr2_3b_int8_convrot.safetensors` → `models/diffusion_models/` — [download](https://huggingface.co/Comfy-Org/SeedVR2/resolve/main/diffusion_models/seedvr2_3b_int8_convrot.safetensors) (ComfyUI templates utility_seedvr2_3b_int8_upscale_video.json / utility_seedvr2_7b_int8_upscale_image.json (properties.models))
+
 - `ltx2`: nothing extra. Its render already has a latent upsampler, and an upscale runs that second stage again on the take
 - `wan22_i2v`: an upscale model from `models/upscale_models/` (RealESRGAN_x2.pth by default), then its own sampler
 - `wan22_ti2v`: an upscale model from `models/upscale_models/` (RealESRGAN_x2.pth by default), then its own sampler

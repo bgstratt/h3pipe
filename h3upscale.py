@@ -61,8 +61,9 @@ class UpscaleJob:
     width: int
     height: int
     action: str = "upscale"             # upscale | skip | error
-    method: str = "latent"              # latent | pixel
+    method: str = "latent"              # latent | pixel | seedvr2
     pixel_model: str = ""
+    seedvr2_model: str = ""             # the SeedVR2 method's model file
     # "then pixel": after a re-sample, an upscale model takes width x height on
     # to out_width x out_height in the same job ("" / 1.0: no second step)
     then_model: str = ""
@@ -174,8 +175,52 @@ UPSCALE_NODES = ("H3LoadTakeLatent", "H3LoadTakeVideo", "H3HoldAudio", "H3SaveUp
                  "VAEEncodeAudio")
 AUDIO_ENCODE = {"class_type": "VAEEncodeAudio", "audio": "audio", "vae": "vae"}
 
-METHODS = ("latent", "pixel")
+METHODS = ("latent", "pixel", "seedvr2")
 PIXEL_NODES = ("H3LoadTakeVideo", "H3PixelUpscale", "UpscaleModelLoader", "H3SaveUpscale")
+
+# SeedVR2 (ByteDance, Apache 2.0), native in ComfyUI core: a one-step video
+# restoration model, any take, no prompt. Its files, as ComfyUI's own templates
+# record them (utility_seedvr2_*_int8_upscale_*.json, properties.models).
+SEEDVR2_MODELS = {"7b": "seedvr2_7b_int8_convrot.safetensors",
+                  "3b": "seedvr2_3b_int8_convrot.safetensors"}
+SEEDVR2_DEFAULT = "7b"
+SEEDVR2_VAE = "seedvr2_ema_vae_fp16.safetensors"
+SEEDVR2_DOWNLOADS = {
+    "seedvr2_ema_vae_fp16.safetensors": ("vae", "https://huggingface.co/Comfy-Org/SeedVR2/resolve/main/vae/seedvr2_ema_vae_fp16.safetensors"),
+    "seedvr2_7b_int8_convrot.safetensors": ("diffusion_models", "https://huggingface.co/Comfy-Org/SeedVR2/resolve/main/diffusion_models/seedvr2_7b_int8_convrot.safetensors"),
+    "seedvr2_3b_int8_convrot.safetensors": ("diffusion_models", "https://huggingface.co/Comfy-Org/SeedVR2/resolve/main/diffusion_models/seedvr2_3b_int8_convrot.safetensors"),
+}
+SEEDVR2_SOURCE = "ComfyUI templates utility_seedvr2_3b_int8_upscale_video.json / utility_seedvr2_7b_int8_upscale_image.json (properties.models)"
+SEEDVR2_NODES = ("H3LoadTakeVideo", "ImageScale", "SeedVR2Preprocess", "VAEEncodeTiled",
+                 "SeedVR2TemporalChunk", "SeedVR2Conditioning", "KSampler", "SeedVR2TemporalMerge",
+                 "VAEDecodeTiled", "SeedVR2PostProcessing", "H3FinishUpscale", "H3SaveUpscale",
+                 "UNETLoader", "VAELoader")
+
+
+def seedvr2_file(name: str | None) -> str:
+    """A SeedVR2 model: "7b" / "3b", or a file name as it is."""
+    name = name or SEEDVR2_DEFAULT
+    return SEEDVR2_MODELS.get(name, name)
+
+
+def seedvr2_readiness(object_info: dict | None, want: str | None = None) -> dict:
+    """Whether this ComfyUI can run SeedVR2 (core nodes since 0.3x, its model and
+    VAE, our finish node). {"status", "missing", "models", "default"}."""
+    if object_info is None:
+        return {"status": "unknown", "missing": [], "models": [], "default": seedvr2_file(None)}
+    missing = [f"node {c} (update ComfyUI / h3pipe's node pack and restart it)"
+               for c in SEEDVR2_NODES if c not in object_info]
+    unets = J.choices_in(object_info, "UNETLoader", "unet_name") or []
+    models = [m for m in unets if "seedvr2" in m.lower()]
+    vaes = J.choices_in(object_info, "VAELoader", "vae_name") or []
+    if SEEDVR2_VAE not in vaes:
+        missing.append(f"{SEEDVR2_VAE} in models/vae/")
+    want = seedvr2_file(want)
+    if want not in models:
+        missing.append(f"{want} in models/diffusion_models/")
+    default = seedvr2_file(None) if seedvr2_file(None) in models else (models or [seedvr2_file(None)])[0]
+    return {"status": "not_ready" if missing else "ready", "missing": missing,
+            "models": models, "default": default}
 DEFAULT_PIXEL_MODEL = "RealESRGAN_x2.pth"
 # auto: the GPU's NVENC when ffmpeg has it (H.264 up to 4096 wide, HEVC above),
 # else x264; nvenc forces it (fails without); x264 forces the CPU encoder
@@ -286,7 +331,7 @@ def _plan(root: str, take: T.Take, *, scale: float | None = None,
                  redo: bool = False, method: str | None = None,
                  pixel_model: str | None = None, detail: int | None = None,
                  then_model: str | None = None, then_scale: float | None = None,
-                 from_upscale: bool = False) -> UpscaleJob:
+                 from_upscale: bool = False, seedvr2_model: str | None = None) -> UpscaleJob:
     """What upscaling `take` would do. action "error" (with `why`) when it
     can't: not final, not usable, a latent upscale on a target without
     `upscale`, a size that doesn't scale evenly; "skip" when it already has a
@@ -300,11 +345,15 @@ def _plan(root: str, take: T.Take, *, scale: float | None = None,
     target_id = sc.get("target") or T.DEFAULT_TARGET
     target = TG.load_target(target_id, "video", root=root)
     spec = upscale_spec(target) or {}
+    kw_seedvr2 = seedvr2_model
     m = method or ("pixel" if from_upscale or not spec else "latent")
     w, h = int(sc.get("width") or 0), int(sc.get("height") or 0)
-    if m == "pixel":
-        job = UpscaleJob(root, take, target, spec, "pixel", float(scale or 2), None, w, h,
-                         method="pixel", pixel_model=pixel_model or DEFAULT_PIXEL_MODEL)
+    if m in ("pixel", "seedvr2"):
+        job = UpscaleJob(root, take, target, spec, m, float(scale or 2), None, w, h,
+                         method=m, pixel_model=pixel_model or DEFAULT_PIXEL_MODEL)
+        if m == "seedvr2":
+            job.pixel_model = ""
+            job.seedvr2_model = seedvr2_file(kw_seedvr2)
         try:
             if not take.usable:
                 raise UpscaleError(f"{job.label} isn't a finished take ({take.status})")
@@ -330,7 +379,7 @@ def _plan(root: str, take: T.Take, *, scale: float | None = None,
         return job
     if from_upscale:
         job = UpscaleJob(root, take, target, spec, "latent", 2.0, None, w, h, action="error",
-                         why="only the pixel method runs on top of an upscale")
+                         why="only the pixel and SeedVR2 methods run on top of an upscale")
         return job
     s = float(scale or spec.get("scale", 2))
     steps = schedule_steps(spec, int(sc.get("steps") or 8)) if spec else 8
@@ -544,6 +593,51 @@ def finish_graph(g: dict, up: UpscaleJob, images: list) -> dict:
     return g
 
 
+def seedvr2_graph(up: UpscaleJob) -> dict:
+    """SeedVR2, as ComfyUI's own video template runs it (lanczos to the target
+    size, pre-process, tiled encode, one step, tiled decode, LAB colour
+    correction), with the clip split in time as VRAM needs (auto) and our finish
+    after it: the frequency split halved its frame-to-frame shimmer and its colour
+    drift in the evaluation (docs/PLAN.md 13d). The take's audio copied on."""
+    take, root = up.take, up.root
+    seed = int((take.sidecar or {}).get("seed") or 0) % (1 << 50)
+    tile = {"tile_size": 512, "overlap": 128, "temporal_size": 64, "temporal_overlap": 8}
+    return {
+        "up_video": {"class_type": "H3LoadTakeVideo", "inputs": {
+            "project_root": root, "audio_file": "",
+            "video_file": rel(root, take.paths.up_mp4 if up.previous else take.paths.mp4)}},
+        "up_resize": {"class_type": "ImageScale", "inputs": {
+            "image": ["up_video", 0], "upscale_method": "lanczos", "width": up.width,
+            "height": up.height, "crop": "disabled"}},
+        "up_pre": {"class_type": "SeedVR2Preprocess", "inputs": {"resized_images": ["up_resize", 0]}},
+        "up_vae": {"class_type": "VAELoader", "inputs": {"vae_name": SEEDVR2_VAE}},
+        "up_enc": {"class_type": "VAEEncodeTiled", "inputs": {"pixels": ["up_pre", 0], "vae": ["up_vae", 0], **tile}},
+        "up_chunk": {"class_type": "SeedVR2TemporalChunk", "inputs": {
+            "latent": ["up_enc", 0], "temporal_overlap": 2, "chunking_mode": "auto"}},
+        "up_unet": {"class_type": "UNETLoader", "inputs": {"unet_name": up.seedvr2_model,
+                                                          "weight_dtype": "default"}},
+        "up_cond": {"class_type": "SeedVR2Conditioning", "inputs": {
+            "model": ["up_unet", 0], "vae_conditioning": ["up_chunk", 0]}},
+        "up_ks": {"class_type": "KSampler", "inputs": {
+            "model": ["up_unet", 0], "positive": ["up_cond", 0], "negative": ["up_cond", 1],
+            "latent_image": ["up_chunk", 0], "seed": seed, "steps": 1, "cfg": 1.0,
+            "sampler_name": "euler", "scheduler": "simple", "denoise": 1.0}},
+        "up_merge": {"class_type": "SeedVR2TemporalMerge", "inputs": {
+            "latents": ["up_ks", 0], "temporal_overlap": ["up_chunk", 1]}},
+        "up_dec": {"class_type": "VAEDecodeTiled", "inputs": {"samples": ["up_merge", 0], "vae": ["up_vae", 0], **tile}},
+        "up_post": {"class_type": "SeedVR2PostProcessing", "inputs": {
+            "images": ["up_dec", 0], "original_resized_images": ["up_resize", 0],
+            "color_correction_method": "lab"}},
+        "up_finish": {"class_type": "H3FinishUpscale", "inputs": {
+            "images": ["up_post", 0], "source": ["up_video", 0], "chunk": 8, **up.finish_inputs()}},
+        "up_save": {"class_type": "H3SaveUpscale", "inputs": {
+            "images": ["up_finish", 0], "project_root": root,
+            "source_mp4": rel(root, take.paths.mp4), "out_mp4": rel(root, take.paths.up_mp4),
+            "fps": float((take.sidecar or {}).get("fps") or 24),
+            "sidecar": rel(root, take.paths.up_sidecar), "encoder": up.encoder}},
+    }
+
+
 def pixel_graph(up: UpscaleJob) -> dict:
     """The pixel method: the take's frames through an upscale model, resized to
     the target size, saved with the take's audio copied on. No model of the
@@ -578,6 +672,10 @@ def not_ready(jobs: list[UpscaleJob], object_info: dict | None) -> list[str]:
     wants |= {j.then_model for j in jobs if j.method == "latent" and j.then_model}
     wants |= {j.pixel_model for j in jobs
               if j.method == "latent" and j.spec.get("mode") == PIXEL_REFINE}
+    for want in sorted({j.seedvr2_model for j in jobs if j.method == "seedvr2"}):
+        r = seedvr2_readiness(object_info, want)
+        if r["status"] == "not_ready":
+            out += [f"SeedVR2: {m}" for m in r["missing"]]
     for want in sorted(wants):
         r = pixel_readiness(object_info, want)
         if r["status"] == "not_ready":
@@ -590,12 +688,17 @@ def graph_of(up: UpscaleJob, bases: dict, comfy_url: str) -> dict:
     once per `bases`)."""
     if up.method == "pixel":
         return pixel_graph(up)
+    if up.method == "seedvr2":
+        return seedvr2_graph(up)
     if up.target.id not in bases:
         bases[up.target.id] = J.target_workflow(up.target, None, comfy_url)[0]
     return upscale_graph(bases[up.target.id], up)
 
 
 def describe(up: UpscaleJob) -> str:
+    if up.method == "seedvr2":
+        on = " on its upscale" if up.previous else ""
+        return f"SeedVR2 ({up.seedvr2_model}){on}, {up.scale:g}x -> {up.width}x{up.height}"
     if up.method == "pixel":
         on = " on its upscale" if up.previous else ""
         return f"pixel ({up.pixel_model}){on}, {up.scale:g}x -> {up.width}x{up.height}"
@@ -613,6 +716,16 @@ def previous_summary(prev: dict) -> dict:
 
 
 def queued_record(up: UpscaleJob) -> dict:
+    if up.method == "seedvr2":
+        return {"shot": up.shot, "take": up.take.take, "status": "queued", "queued": T.now(),
+                "comfy_prompt_id": None, "target": up.target.id, "route": "seedvr2",
+                "method": "seedvr2", "mode": "seedvr2", "scale": up.scale, "start_step": None,
+                "steps": 1, "seed": (up.take.sidecar or {}).get("seed"),
+                "upscaler": up.seedvr2_model, "seedvr2_model": up.seedvr2_model,
+                "color_correction": "lab", "encoder_asked": up.encoder,
+                "finish": up.finish_record(),
+                **({"on_upscale": previous_summary(up.previous)} if up.previous else {}),
+                "width": up.width, "height": up.height, **T.source_stamp(up.take.paths.mp4)}
     if up.method == "pixel":
         return {"shot": up.shot, "take": up.take.take, "status": "queued", "queued": T.now(),
                 "comfy_prompt_id": None, "target": up.target.id, "route": "pixel",
@@ -725,6 +838,7 @@ def main(argv=None) -> int:
                     help="latent (re-sample; the default where the target has one) or pixel "
                          "(an upscale model over the frames; any target)")
     ap.add_argument("--pixel-model", help=f"the pixel method's model (default {DEFAULT_PIXEL_MODEL})")
+    ap.add_argument("--seedvr2-model", help="the SeedVR2 method's model: 7b (default) or 3b, or a file name")
     ap.add_argument("--encoder", choices=ENCODERS, default="auto",
                     help="auto: the GPU's NVENC when there is one (H.264, HEVC above 4096 wide), "
                          "else x264; nvenc / x264 force one")
@@ -778,7 +892,8 @@ def main(argv=None) -> int:
                           then_model=args.then_pixel, then_scale=args.then_scale,
                           from_upscale=args.from_upscale, encoder=args.encoder,
                           precision=args.precision, frequency_split=args.frequency_split,
-                          keep_soft=args.keep_soft, grain=args.grain)
+                          keep_soft=args.keep_soft, grain=args.grain,
+                          seedvr2_model=args.seedvr2_model)
         mark = {"upscale": "..", "skip": "= ", "error": "!!"}[up.action]
         what = describe(up) if up.action == "upscale" else up.why
         print(f"  {mark} {up.label}: {what}")

@@ -673,12 +673,14 @@ export interface TakeUpscale {
   fresh: boolean;
   width: number | null;
   height: number | null;
-  route: "latent" | "vae" | "pixel" | null;
+  route: "latent" | "vae" | "pixel" | "seedvr2" | null;
   start_step: number | null;
-  /** latent (a re-sample) or pixel (an upscale model over the frames) */
-  method?: "latent" | "pixel";
+  /** latent (a re-sample), pixel (an upscale model over the frames) or seedvr2 */
+  method?: "latent" | "pixel" | "seedvr2";
   /** the pixel method's model file */
   pixel_model?: string | null;
+  /** the SeedVR2 method's model file */
+  seedvr2_model?: string | null;
   /** a pixel step after the re-sample: its model, scale and the re-sample's size */
   then_pixel?: { model: string; scale: number; from: [number, number] } | null;
   /** a pixel upscale run on an earlier upscale: that one's record (nested for a longer chain) */
@@ -706,7 +708,9 @@ export interface UpscaleRequest {
   start_step?: number | null;
   vae?: boolean;
   /** null: each take's default (latent where its target has one, else pixel) */
-  method?: "latent" | "pixel" | null;
+  method?: "latent" | "pixel" | "seedvr2" | null;
+  /** seedvr2: "7b" (the default), "3b" or a model file name */
+  seedvr2_model?: string | null;
   /** the pixel method's model (models/upscale_models); null: the default */
   pixel_model?: string | null;
   /** latent: start 0-2 steps earlier than the default (more detail, more change) */
@@ -730,6 +734,8 @@ export interface UpscaleRequest {
 /** GET /h3pipe/upscale/options: what the Upscale dialog can offer here. */
 export interface UpscaleOptions {
   pixel: { status: "ready" | "not_ready" | "unknown"; missing: string[]; models: string[]; default: string };
+  /** SeedVR2 (core nodes, its own model files): absent from older servers */
+  seedvr2?: { status: "ready" | "not_ready" | "unknown"; missing: string[]; models: string[]; default: string };
   /** each video target's latent upscale: null when it has none */
   latent: Record<string, {
     status: "ready" | "not_ready" | "unknown"; missing: string[];
@@ -744,8 +750,9 @@ export interface UpscaleOptions {
 }
 
 export interface UpscaleResult {
-  queued: { shot: string; take: number; route: "latent" | "vae" | "pixel"; scale: number; start_step: number | null;
-            method?: "latent" | "pixel"; pixel_model?: string | null; then_pixel_model?: string | null;
+  queued: { shot: string; take: number; route: "latent" | "vae" | "pixel" | "seedvr2"; scale: number; start_step: number | null;
+            method?: "latent" | "pixel" | "seedvr2"; pixel_model?: string | null; then_pixel_model?: string | null;
+            seedvr2_model?: string | null;
             width: number; height: number; prompt_id: string }[];
   skipped: { shot: string; take?: number; reason: string }[];
   errors: { shot: string; take?: number; error: string }[];

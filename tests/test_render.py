@@ -483,7 +483,8 @@ class FakeComfy:
         loader's resolution_override asks for."""
         si = next(v["inputs"] for v in graph.values() if v["class_type"] == "H3SaveUpscale")
         root = si["project_root"]
-        px = next((v["inputs"] for v in graph.values() if v["class_type"] == "H3PixelUpscale"), None)
+        px = next((v["inputs"] for v in graph.values()
+                   if v["class_type"] in ("H3PixelUpscale", "ImageScale")), None)
         if px is not None:                       # the pixel method: its node says the size
             w, h = px["width"], px["height"]
         else:

@@ -60,6 +60,12 @@ describe("upscaleRequestOf (the Upscale dialog)", () => {
     const d = upscaleRequestOf(f, one);
     expect("encoder" in d || "precision" in d).toBe(false);
   });
+  it("seedvr2: its model, never the pixel model, detail or a then step", () => {
+    const r = upscaleRequestOf({ ...f, method: "seedvr2", seedvr2Model: "seedvr2_3b_int8_convrot.safetensors",
+                                 detail: 2, vae: true, thenModel: "x.pth", fromUpscale: true }, one);
+    expect(r).toMatchObject({ method: "seedvr2", seedvr2_model: "seedvr2_3b_int8_convrot.safetensors", from_upscale: true });
+    expect("pixel_model" in r || "detail" in r || "vae" in r || "then_pixel_model" in r).toBe(false);
+  });
   it("on top of an upscale: pixel only", () => {
     expect(upscaleRequestOf({ ...f, method: "pixel", fromUpscale: true }, one).from_upscale).toBe(true);
     expect("from_upscale" in upscaleRequestOf({ ...f, method: "latent", fromUpscale: true }, one)).toBe(false);

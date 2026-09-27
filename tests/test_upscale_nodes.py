@@ -260,6 +260,21 @@ class FinishTest(unittest.TestCase):
         self.assertGreaterEqual(UN.detail_scale(self.src().movedim(1, -1), "cpu"), 0.02)
 
 
+class FinishNodeTest(unittest.TestCase):
+    def test_finish_node_on_someone_elses_upscale(self):
+        import torch.nn.functional as F
+        src = torch.rand((5, 24, 32, 3), generator=torch.Generator().manual_seed(1))
+        big = F.interpolate(src.movedim(-1, 1), size=(48, 64), mode="bicubic", align_corners=False)
+        tinted = (big + 0.12).clamp(0, 1).movedim(1, -1)              # a colour shift to take out
+        (out,) = UN.H3FinishUpscale().finish(tinted, src, chunk=2)
+        self.assertEqual(tuple(out.shape), (5, 48, 64, 3))
+        low = lambda x: F.avg_pool2d(x.float().movedim(-1, 1), 8)
+        self.assertLess(float((low(out) - low(big.movedim(1, -1))).abs().mean()),
+                        float((low(tinted) - low(big.movedim(1, -1))).abs().mean()) * 0.5)
+        (same,) = UN.H3FinishUpscale().finish(tinted, src, frequency_split=False)
+        self.assertIs(same, tinted)                                  # nothing asked: untouched
+
+
 class PixelNodeTest(unittest.TestCase):
     def test_batches_resized_to_the_target(self):
         frames = clip(10)                                          # 10 x 48 x 96

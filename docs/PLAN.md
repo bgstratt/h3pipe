@@ -1806,6 +1806,26 @@ what this machine and the repo have today. Nothing below is built; each target g
   that many steps earlier. The editor's Upscale is now a dialog (method, pixel model,
   detail, again, from the video) fed by `GET /h3pipe/upscale/options`. Wan's re-sample on
   top of the pixel pass was built next (`pixel_refine`, above).
+- **SeedVR2: evaluated and built 2026-09-27** (method `seedvr2`). Native in ComfyUI 0.37
+  core (SeedVR2Preprocess / Conditioning / TemporalChunk / TemporalMerge / PostProcessing);
+  files from Comfy-Org/SeedVR2 (the templates' properties.models): the VAE, 3B and 7B int8.
+  Evaluation on three scratch takes against ours (≈1080p; drift and flicker /255, low band):
+
+  | take | method | time | drift | detail | flicker |
+  |---|---|---|---|---|---|
+  | H3 sh760 | ours re-sample / pixel | ~30 / 36 s | 2.31 / 1.22 | .0092 / .0106 | .028 / .067 |
+  | | SeedVR2 3B / 7B | 93 / 61 s | 2.12 / 1.80 | .0136 / .0118 | .197 / .188 |
+  | H3 sh330 (talk) | ours re-sample (step 7) | ~22 s | 2.39 | .0089 | .017 |
+  | | SeedVR2 7B / + our split | 77 s | 1.82 / **1.28** | .0098 / .0096 | .211 / .099 |
+  | Wan sh760 | ours Wan re-sample | 237 s | 3.72 | .0144 | .026 |
+  | | SeedVR2 3B / 7B | 74 / 54 s | 2.34 / 1.81 | .0171 / .0131 | .401 / .358 |
+
+  The sharpest stills, 7–15× the frame-to-frame shimmer of a re-sample (throughout, not at
+  seams); our frequency split after it halves the shimmer and gives the least drift of all.
+  The user saw no flicker watching it, and wanted it as an option. Built as ComfyUI's video
+  template runs it (lanczos to size, tiled VAE, one step, LAB colour correction) with
+  `SeedVR2TemporalChunk` auto (overlap 2) for long shots and our finish after
+  (`H3FinishUpscale`, a new node: the finish for anyone's frames); 7B int8 the default.
 - **Any target, custom ones too: a pixel-space video upscaler, to evaluate.** SeedVR2
   (ByteDance) is a one-step video restoration/upscale model with a community ComfyUI node
   pack (numz's `ComfyUI-SeedVR2_VideoUpscaler`, 3B and 7B models); verify the pack, its

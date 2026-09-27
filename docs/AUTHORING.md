@@ -268,6 +268,13 @@ ComfyUI's `models/upscale_models`) over the frames, with the take's audio copied
 fast and needs nothing but the model, but it only sharpens what's there; it draws no new
 detail the way a re-sample does. `h3.py upscale <ep> --method pixel` uses it for any take.
 
+**SeedVR2** is the third method, for any take too: a one-step video restoration model
+(ComfyUI's own nodes; files in INSTALL.md). It gives the sharpest single frames of the three,
+in about a minute a shot, with no prompt (so nothing ties it to the take's performance but
+the picture); its frames change a little more from one to the next than a re-sample's, and
+the colour finish after it halves that. `h3.py upscale <ep> --method seedvr2` (the 7B;
+`--seedvr2-model 3b` for the smaller one).
+
 `--scale` goes up to 4 (a pixel upscale lands on even sides, an H3 re-sample on the 32 grid;
 LTX-2's is 2x only). For 4x with generated detail, re-sample then upscale in one go:
 `h3.py upscale <ep> --then-pixel RealESRGAN_x2.pth` (re-sample 2x, then the model 2x more).

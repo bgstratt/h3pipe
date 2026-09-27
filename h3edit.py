@@ -1480,6 +1480,7 @@ def upscale_summary(root: str, t: T.Take) -> dict | None:
             "width": up.get("width"), "height": up.get("height"),
             "route": up.get("route"), "start_step": up.get("start_step"),
             "method": up.get("method", "latent"), "pixel_model": up.get("pixel_model"),
+            "seedvr2_model": up.get("seedvr2_model"),
             "then_pixel": up.get("then_pixel"),
             "on_upscale": up.get("on_upscale"),
             "encoder": up.get("encoder"), "precision": up.get("precision"),

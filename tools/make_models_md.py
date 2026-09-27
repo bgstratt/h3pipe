@@ -213,7 +213,8 @@ def block() -> str:
             ups.append((t.id, u["class_type"], name, dl))
         elif spec.get("mode") in ("second_stage", "pixel_refine"):
             own.append((t.id, spec.get("mode")))
-    if ups:
+    import h3upscale as U
+    if ups or own:
         lines += ["### For upscaling (optional)", "",
                   "Only to upscale takes (`python h3.py upscale`), never to render. The "
                   "node comes from the Comfyui_Minimax_h3_latent_Upscaler pack (LBH-123-AI) — "
@@ -223,6 +224,12 @@ def block() -> str:
             where = dl.get("url") or dl.get("source") or "no download record"
             lines += [f"- `{name}` → `models/{dl.get('folder') or 'latent_upscale_models'}/` "
                       f"({cls}, for `{tid}`) — {where}"]
+        lines += ["", "**SeedVR2** (any take; ComfyUI's own nodes, the models Apache 2.0): the VAE "
+                  "and at least one model.", ""]
+        for name, (folder, url) in U.SEEDVR2_DOWNLOADS.items():
+            lines += [f"- `{name}` → `models/{folder}/` — [download]({url}) "
+                      f"({U.SEEDVR2_SOURCE})"]
+        lines += [""]
         for tid, mode in own:
             lines += [f"- `{tid}`: nothing extra. Its render already has a latent upsampler, "
                       f"and an upscale runs that second stage again on the take"

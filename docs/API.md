@@ -399,7 +399,10 @@ What the editor's Upscale dialog offers on this ComfyUI:
             "ltx2": {"status": "ready", "missing": []}, "wan22_i2v": null, "…": null},
  "details": [0, 1, 2]}
 ```
-`latent[target]` is null for a target with no latent upscale; otherwise it also has `mode`
+`method: "seedvr2"` runs SeedVR2 (ComfyUI's own nodes; any take, no prompt): `seedvr2_model`
+is `"7b"` (the default), `"3b"` or a file name; it takes `scale`, `from_upscale` and the
+finish like the pixel method, and options lists it as `seedvr2: {status, missing, models,
+default}`. `latent[target]` is null for a target with no latent upscale; otherwise it also has `mode`
 (`resample` | `second_stage`), `align` and `fixed_scale` (second_stage's only scale), and
 the answer has `max_scale`. Each take in `GET /h3pipe/episode` has its `width` and `height`,
 so the dialog can show what every scale makes before anything is queued.

@@ -983,7 +983,9 @@ export function closeUpscale() {
 
 /** The Upscale dialog's choices. `method` "auto" leaves each take's default. */
 export interface UpscaleForm {
-  method: "auto" | "latent" | "pixel";
+  method: "auto" | "latent" | "pixel" | "seedvr2";
+  /** the SeedVR2 method's model (null: the server's default, 7b) */
+  seedvr2Model?: string | null;
   pixelModel: string | null;
   detail: 0 | 1 | 2;
   redo: boolean;
@@ -1008,17 +1010,18 @@ export function upscaleRequestOf(f: UpscaleForm, ask: { pass: Pass; takes: { sho
                                  /** a take's re-sample starts with a pixel model (Wan) */ refineNeedsModel = false): Omit<UpscaleRequest, "ep"> {
   const req: Omit<UpscaleRequest, "ep"> = ask.takes ? { pass: ask.pass, takes: ask.takes } : { pass: ask.pass, shots: null };
   if (f.method !== "auto") req.method = f.method;
-  if ((f.method !== "latent" || refineNeedsModel) && f.pixelModel) req.pixel_model = f.pixelModel;
-  if (f.method === "pixel" && f.fromUpscale) req.from_upscale = true;
+  if (f.method !== "seedvr2" && (f.method !== "latent" || refineNeedsModel) && f.pixelModel) req.pixel_model = f.pixelModel;
+  if (f.method === "seedvr2" && f.seedvr2Model) req.seedvr2_model = f.seedvr2Model;
+  if ((f.method === "pixel" || f.method === "seedvr2") && f.fromUpscale) req.from_upscale = true;
   if (f.encoder !== "auto") req.encoder = f.encoder;
   if (f.precision !== "fp16") req.precision = f.precision;
   if (!f.frequencySplit) req.frequency_split = false;
   if (f.keepSoft) req.keep_soft = f.keepSoft;
   if (f.grain) req.grain = f.grain;
-  if (f.method !== "pixel" && f.detail) req.detail = f.detail;
-  if (f.method !== "pixel" && f.vae) req.vae = true;
+  if (f.method !== "pixel" && f.method !== "seedvr2" && f.detail) req.detail = f.detail;
+  if (f.method !== "pixel" && f.method !== "seedvr2" && f.vae) req.vae = true;
   if (f.scale !== 2) req.scale = f.scale;
-  if (f.method !== "pixel" && f.thenModel) {
+  if (f.method !== "pixel" && f.method !== "seedvr2" && f.thenModel) {
     req.then_pixel_model = f.thenModel;
     if (f.thenScale !== 2) req.then_scale = f.thenScale;
   }
