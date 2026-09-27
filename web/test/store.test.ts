@@ -47,6 +47,14 @@ describe("prefs (last episode and pass)", () => {
     expect(JSON.parse(s.map.get(PREFS_KEY)!)).toEqual({ ep: "C:\\Shows\\ep05", pass: "final", zoom: 60 });
   });
 
+  it("remembers the 2x (upscaled playback) choice", () => {
+    const s = memStorage();
+    savePrefs({ ep: "E", pass: "final", zoom: 60, upscaled: true }, s);
+    expect(loadPrefs(s).upscaled).toBe(true);
+    expect(initialState(loadPrefs(s)).upscaled).toBe(true);
+    expect(initialState({}).upscaled).toBe(false);
+  });
+
   it("ignores junk and missing storage", () => {
     expect(loadPrefs(memStorage({ [PREFS_KEY]: "{not json" }))).toEqual({});
     expect(loadPrefs(memStorage({ [PREFS_KEY]: `{"ep":5,"pass":"weird","zoom":"x"}` }))).toEqual({ ep: null, pass: undefined, zoom: undefined });

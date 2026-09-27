@@ -123,7 +123,13 @@ export function spanOf(s: ShotStatus, fps: number, take: TakeSummary | undefined
  * becomes a missing card lasting the shot's duration. `other` is the other
  * pass's status, for placeholders.
  */
-export function buildPlaylist(st: EpisodeStatus | undefined, other?: EpisodeStatus): PlayItem[] {
+/** The file a take plays: its fresh upscale when `upscaled` and it has one, else its mp4. */
+export function playFile(take: TakeSummary, upscaled = false): string | null {
+  const u = take.upscale;
+  return upscaled && u && u.status === "ok" && u.fresh && u.mp4 ? u.mp4 : take.mp4;
+}
+
+export function buildPlaylist(st: EpisodeStatus | undefined, other?: EpisodeStatus, upscaled = false): PlayItem[] {
   if (!st) return [];
   const fps = st.fps || 24;
   const base = baseIn(st);
@@ -141,7 +147,8 @@ export function buildPlaylist(st: EpisodeStatus | undefined, other?: EpisodeStat
     const extra = { trimIn, trimOut, total, audioIn: w?.audioIn ?? null, audioOut: w?.audioOut ?? null };
     let item: Omit<PlayItem, "start" | "index">;
     if (usable && win) {
-      item = { shot: s.shot, pass: s.cut.placeholder ? s.cut.pass : st.pass, take: take!.take, mp4: take!.mp4, why: "", ...win, ...extra };
+      // an upscale has the take's frames and rate, so the timing is the take's
+      item = { shot: s.shot, pass: s.cut.placeholder ? s.cut.pass : st.pass, take: take!.take, mp4: playFile(take!, upscaled), why: "", ...win, ...extra };
     } else {
       const dur = win?.dur ?? frames / rate;
       const why = !take

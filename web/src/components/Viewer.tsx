@@ -6,7 +6,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as RPointerEvent, type ReactNode } from "react";
 import {
   closeViewer, currentPlaylist, openInspector, openMenu, openRedo, openSidecar, openViewer, pickRef, pickTake,
-  reportCutPos, seekCut, setCutPlaying, updateViewer,
+  reportCutPos, seekCut, setCutPlaying, toggleUpscaled, updateViewer,
 } from "../actions";
 import { cutKey, isTyping, lockedPickRefusal, setCutAudio } from "../cutActions";
 import { api } from "../host";
@@ -247,8 +247,8 @@ function TakesView({ ep, v }: { ep: string; v: ViewerState }) {
     else updateViewer({ a: t.take });
   };
 
-  // Phase 13: show a take's fresh upscale instead of the take
-  const [hi, setHi] = useState(false);
+  // Phase 13: show a take's fresh upscale instead of the take (remembered, shared with Play all)
+  const hi = useApp((s) => s.upscaled);
   const upOf = (t: TakeSummary | undefined) => (hi && t?.upscale?.fresh && t.upscale.mp4 ? t.upscale.mp4 : null);
   const src = (t: TakeSummary | undefined) => upOf(t) ?? t?.mp4 ?? null;
   const anyUp = [takeA, takeB].some((t) => t?.upscale?.fresh && t.upscale.mp4);
@@ -303,7 +303,7 @@ function TakesView({ ep, v }: { ep: string; v: ViewerState }) {
       <span className="h3-muted h3-small" title="The shot's current target">{v.pass}{shot?.seconds ? ` · ${shot.seconds}s` : ""}{targets ? ` · ${targetLabel(targets, shotCurrent)}` : ""}</span>
       <ModeButtons v={v} />
       {anyUp && (
-        <button className={`h3-btn${hi ? " h3-primary" : ""}`} title="Play the take's upscale (2x) instead of the take" onClick={() => setHi((x) => !x)}>
+        <button className={`h3-btn${hi ? " h3-primary" : ""}`} title="Play the take's upscale (2x) instead of the take (remembered; Play all shares it)" onClick={() => toggleUpscaled()}>
           2x
         </button>
       )}
@@ -435,6 +435,13 @@ function CutPlayer({ ep, v }: { ep: string; v: ViewerState }) {
   const st = useStatus();
   const cp = useApp((s) => s.cutPlay);
   const audioMode = useApp((s) => s.cutAudio);
+  const upscaled = useApp((s) => s.upscaled);
+  // the clips whose take has a fresh upscale (Play all's 2x plays them)
+  const upscaledCount = (st?.shots ?? []).filter((s) => {
+    const t = s.cut.placeholder ? undefined : s.takes.find((x) => x.take === s.cut.take);
+    return !!(t?.upscale && t.upscale.status === "ok" && t.upscale.fresh && t.upscale.mp4);
+  }).length;
+  const anyUpscale = upscaledCount > 0;
   const fps = st?.fps || 24;
   // the recording, when there is one that can be played
   const ts = trackState(st?.track);
@@ -746,6 +753,13 @@ function CutPlayer({ ep, v }: { ep: string; v: ViewerState }) {
         <button className="h3-btn h3-icon" title="Next shot (→)" onClick={() => jump(1)}><i className="pi pi-step-forward" /></button>
         <input type="range" min={0} max={total || 1} step={0.01} value={Math.min(cp.pos, total)} onChange={(e) => seekCut(Number(e.target.value))} />
         <span className="h3-mono h3-muted">{fmtClock(cp.pos)} / {fmtClock(total)}</span>
+        {anyUpscale && (
+          <button className={`h3-btn${upscaled ? " h3-primary" : ""}`}
+                  title={`Play each clip's upscale (2x) where it has a fresh one, the take otherwise (${upscaledCount} of ${items.length} clips have one; remembered)`}
+                  onClick={() => toggleUpscaled()}>
+            2x
+          </button>
+        )}
         {ts && (
           <span
             className="h3-seg"

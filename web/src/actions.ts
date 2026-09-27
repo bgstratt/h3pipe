@@ -1382,17 +1382,24 @@ export function closeInspector() {
 // Play all
 // ---------------------------------------------------------------------------
 
-let plCache: { a?: EpisodeStatus; b?: EpisodeStatus; items: PlayItem[] } = { items: [] };
+let plCache: { a?: EpisodeStatus; b?: EpisodeStatus; up?: boolean; items: PlayItem[] } = { items: [] };
 
 /** The current pass's cut as a playlist (memoised on the status objects). */
 const NO_ITEMS: PlayItem[] = [];
+
+/** Phase 13: the viewer's and Play all's 2x (remembered). */
+export function toggleUpscaled(on?: boolean) {
+  set((s) => ({ upscaled: on ?? !s.upscaled }));
+}
 
 export function currentPlaylist(s: AppState = get()): PlayItem[] {
   // a stable empty list: components select it (useSyncExternalStore wants the same value back)
   if (!s.ep) return NO_ITEMS;
   const st = s.status[statusKey(s.ep, s.pass)];
   const other = s.status[statusKey(s.ep, s.pass === "proxy" ? "final" : "proxy")];
-  if (plCache.a !== st || plCache.b !== other) plCache = { a: st, b: other, items: buildPlaylist(st, other) };
+  if (plCache.a !== st || plCache.b !== other || plCache.up !== s.upscaled) {
+    plCache = { a: st, b: other, up: s.upscaled, items: buildPlaylist(st, other, s.upscaled) };
+  }
   return plCache.items;
 }
 
