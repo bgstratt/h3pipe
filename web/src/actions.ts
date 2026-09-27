@@ -965,14 +965,16 @@ export async function upscale(req: Omit<UpscaleRequest, "ep">, busyKey: string) 
   });
 }
 
-/** Phase 13: the Upscale dialog for one final take (`redo`: it already has a fresh one). */
+/** Phase 13: the Upscale dialog for one take, either pass (`redo`: it already has a fresh one). */
 export function upscaleTake(ref: TakeRef, redo = false) {
-  set({ menu: null, upscaleAsk: { title: `Upscale ${ref.shot} ${tn(ref.take)}`, takes: [{ shot: ref.shot, take: ref.take }], redo } });
+  set({ menu: null, upscaleAsk: { title: `Upscale ${ref.shot} ${tn(ref.take)}`, pass: ref.pass,
+                                  takes: [{ shot: ref.shot, take: ref.take }], redo } });
 }
 
-/** Phase 13: the Upscale dialog for every take of the final cut. */
+/** Phase 13: the Upscale dialog for every take of the current pass's cut. */
 export function upscaleCut() {
-  set({ menu: null, upscaleAsk: { title: "Upscale the final cut", takes: null } });
+  const pass = get().pass;
+  set({ menu: null, upscaleAsk: { title: `Upscale the ${pass} cut`, pass, takes: null } });
 }
 
 export function closeUpscale() {
@@ -990,8 +992,8 @@ export interface UpscaleForm {
 
 /** The POST /h3pipe/upscale body (less `ep`) for the dialog's choices: only
  * what differs from the server's defaults is sent. */
-export function upscaleRequestOf(f: UpscaleForm, ask: { takes: { shot: string; take: number }[] | null }): Omit<UpscaleRequest, "ep"> {
-  const req: Omit<UpscaleRequest, "ep"> = ask.takes ? { takes: ask.takes } : { shots: null };
+export function upscaleRequestOf(f: UpscaleForm, ask: { pass: Pass; takes: { shot: string; take: number }[] | null }): Omit<UpscaleRequest, "ep"> {
+  const req: Omit<UpscaleRequest, "ep"> = ask.takes ? { pass: ask.pass, takes: ask.takes } : { pass: ask.pass, shots: null };
   if (f.method !== "auto") req.method = f.method;
   if (f.method !== "latent" && f.pixelModel) req.pixel_model = f.pixelModel;
   if (f.method !== "pixel" && f.detail) req.detail = f.detail;
@@ -1006,7 +1008,7 @@ export async function removeUpscale(ref: TakeRef) {
   if (!confirm(`Remove ${ref.shot} ${tn(ref.take)}'s upscale? The take itself stays.`)) return;
   return withBusy(`unupscale|${ref.shot}|${ref.take}`, async () => {
     try {
-      await api().deleteUpscale(ref.ep, ref.shot, ref.take);
+      await api().deleteUpscale(ref.ep, ref.shot, ref.take, ref.pass);
       scheduleRefresh(0);
     } catch (e) {
       report(`Couldn't remove ${ref.shot} ${tn(ref.take)}'s upscale`, e);

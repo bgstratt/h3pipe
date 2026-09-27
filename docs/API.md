@@ -318,7 +318,7 @@ when it's done (can take minutes).
 ```json
 {"ok": true, "output": "renders_proxy/ep05_proxy.mp4", "report": "…stdout…"}
 ```
-Phase 13 adds `"upscaled": true` (final pass only, else 400): each clip plays its take's
+Phase 13 adds `"upscaled": true` (either pass): each clip plays its take's
 fresh upscale, the cut is the upscales' size and is written as `<ep>_up.mp4`, and clips
 without one are scaled up (the report names them). `"size": "1920x1080"` sets the cut's
 size, letterboxing a clip whose aspect differs. `h3.py assemble <ep> --upscaled [--size WxH]`
@@ -326,7 +326,7 @@ is the same.
 
 ## Upscale (Phase 13)
 
-An upscale is a version of a final take, not a take: `<stem>.up.mp4` and `<stem>.up.json`
+An upscale is a version of a take (either pass), not a take: `<stem>.up.mp4` and `<stem>.up.json`
 beside it (h3upscale.py; docs/PLAN.md Phase 13). It re-samples the take at 2x from late in
 its own schedule (the target's `start`, 0.875: step 7 of 8) under the take's frozen
 shotlist, from its kept latent (Phase 13a) or, without one, its frames and `_h3.wav`
@@ -341,7 +341,9 @@ own upsampler, the tail of its fixed sigmas; mode `second_stage`, always 2x). Th
 Body `{"ep", "shots"?: ["sh020"] | null, "takes"?: [{"shot", "take"}], "redo"?: false,
 "scale"?: 2, "start_step"?: null, "vae"?: false}`. `shots` upscales the final cut's take
 of each (the pick, else the latest usable; null: the whole final cut); `takes` names
-final takes directly and wins. A take with a fresh upscale is skipped unless `redo`.
+that pass's takes directly and wins; `pass` (default `"final"`) says whose. A proxy take
+kept no latent by default, so its re-sample goes through the VAE. A take with a fresh
+upscale is skipped unless `redo`.
 `vae` forces the VAE route; `start_step` is an exact step of the take's schedule.
 `method`: `"latent"` (a re-sample: the default where the take's target has an `upscale`
 block) or `"pixel"` (an upscale model over the frames: any target, the default for the
@@ -373,7 +375,7 @@ What the editor's Upscale dialog offers on this ComfyUI:
 ```
 `latent[target]` is null for a target with no latent upscale.
 
-### `DELETE /h3pipe/upscale?ep=…&shot=sh020&take=3`
+### `DELETE /h3pipe/upscale?ep=…&shot=sh020&take=3[&pass=proxy]`
 Removes the take's upscale. 404 when it has none; 409 while ComfyUI still has it queued
 or running.
 

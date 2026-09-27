@@ -683,10 +683,12 @@ export interface TakeUpscale {
   save_notes: string;
 }
 
-/** Phase 13: POST /h3pipe/upscale. `shots`: their final-cut takes (null: the
- * whole final cut); `takes`: final takes named directly (wins). */
+/** Phase 13: POST /h3pipe/upscale. `shots`: their takes in the pass's cut
+ * (null: the whole cut); `takes`: that pass's takes named directly (wins). */
 export interface UpscaleRequest {
   ep: string;
+  /** whose takes: final (the server's default) or proxy */
+  pass?: Pass;
   shots?: string[] | null;
   takes?: { shot: string; take: number }[];
   redo?: boolean;

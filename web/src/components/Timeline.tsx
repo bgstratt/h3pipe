@@ -508,11 +508,9 @@ export function Timeline() {
         <button className="h3-btn" disabled={!ep || asm.busy} title={`Export: assemble the ${pass} review cut into one mp4 with ffmpeg (missing shots are skipped). Not needed to watch the cut: use Play all.`} onClick={() => void assemble(true)}>
           <i className={asm.busy ? "pi pi-spin pi-spinner" : "pi pi-download"} /> {asm.busy ? "Assembling…" : "Export"}
         </button>
-        {pass === "final" && (
-          <button className="h3-btn" disabled={!ep || asm.busy} title="Export the final cut from its upscales (2x): clips without a fresh upscale are scaled up. Writes <episode>_up.mp4 beside the plain cut" onClick={() => void assemble(true, { upscaled: true })}>
-            <i className="pi pi-arrow-up-right" /> Export 2x
-          </button>
-        )}
+        <button className="h3-btn" disabled={!ep || asm.busy} title={`Export the ${pass} cut from its upscales (2x): clips without a fresh upscale are scaled up. Writes <cut>_up.mp4 beside the plain cut`} onClick={() => void assemble(true, { upscaled: true })}>
+          <i className="pi pi-arrow-up-right" /> Export 2x
+        </button>
         <button className="h3-btn h3-icon" title="Inspect the selected shot" onClick={() => openInspector()}><i className="pi pi-sliders-h" /></button>
         <button className="h3-btn h3-icon" title="Open the Shots tab" onClick={() => host().show("shots")}><i className="pi pi-list" /></button>
         <button className="h3-btn h3-icon" title="Refresh" disabled={!ep} onClick={() => void refreshEpisode()}><i className="pi pi-refresh" /></button>

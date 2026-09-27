@@ -202,7 +202,8 @@ which ones your ComfyUI can render.
   `audio.default_policy` forces one policy for every dialogue shot, and `audio.retention`
   sets the dub `retention:` default. A target that can't do a mode says so and generates.
 - `upscale.save_latents` decides which renders keep their latent for an upscale later:
-  `"final"` (the default: only final takes are ever upscaled), `"always"` or `"never"` (to
+  `"final"` (the default: the final pass is what gets upscaled; a proxy take can still be,
+  through the VAE), `"always"` or `"never"` (to
   save the disk space, a few MB a take; an upscale then goes through the VAE).
 - Resolution must be a multiple of 32 on both axes for H3. **1280×720 is illegal**, because
   720 is not. 1344×768 is H3's native canvas. The other targets snap it to their own sizes.

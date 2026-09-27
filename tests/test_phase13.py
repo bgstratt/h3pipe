@@ -194,9 +194,12 @@ class UpscaleTest(ApiTest):
         self.assertEqual(bad.action, "error")
         self.assertIn("start step", bad.why)
         self.render("sh010")
-        proxy = U.plan_upscale(self.ep, T.get_take(self.ep, "proxy", "sh010", 1))
-        self.assertEqual(proxy.action, "error")
-        self.assertIn("only final takes", proxy.why)
+        # a proxy take upscales too: it kept no latent, so through the VAE
+        pt = T.get_take(self.ep, "proxy", "sh010", 1)
+        proxy = U.plan_upscale(self.ep, pt)
+        self.assertEqual((proxy.action, proxy.route), ("upscale", "vae"))
+        self.assertEqual((proxy.width, proxy.height), (pt.sidecar["width"] * 2, pt.sidecar["height"] * 2))
+        self.assertEqual(U.plan_upscale(self.ep, pt, method="pixel").action, "upscale")
         with self.assertRaises(U.UpscaleError):
             U.scaled(960, 544, 1.5)                      # 816 isn't a multiple of 32
         self.assertEqual(U.scaled(1344, 768, 1.5), (2016, 1152))
@@ -447,6 +450,23 @@ class PixelUpscaleTest(UpscaleRouteTest):
         self.assertEqual(opts["latent"]["minimax_h3_ref2va"]["status"], "ready")
         self.assertIsNone(opts["latent"]["wan22_ti2v"])
         self.assertEqual(opts["details"], [0, 1, 2])
+
+    def test_the_proxy_pass(self):
+        self.render("sh010")                                       # a proxy take
+        res = self.ok(A.post_upscale(self.ctx, {"ep": self.ep, "pass": "proxy", "shots": ["sh010"],
+                                                "method": "pixel"}))
+        self.assertEqual([(q["shot"], q["take"], q["method"]) for q in res["queued"]], [("sh010", 1, "pixel")])
+        t = T.get_take(self.ep, "proxy", "sh010", 1)
+        self.assertTrue(os.path.isfile(t.paths.up_mp4))
+        self.assertTrue("renders_proxy" in t.paths.up_mp4)
+        data = self.ok(A.get_episode(self.ctx, {"ep": self.ep, "pass": "proxy"}))
+        tk = next(x for s in data["shots"] if s["shot"] == "sh010" for x in s["takes"] if x["take"] == 1)
+        self.assertEqual((tk["upscale"]["method"], tk["upscale"]["fresh"]), ("pixel", True))
+        # the final pass's sh010 is untouched, and the proxy one is deleted by pass
+        self.assertIsNone(T.get_take(self.ep, "final", "sh010", 1))
+        self.err(A.delete_upscale(self.ctx, {"ep": self.ep, "shot": "sh010", "take": "1"}), 404)
+        self.ok(A.delete_upscale(self.ctx, {"ep": self.ep, "pass": "proxy", "shot": "sh010", "take": "1"}))
+        self.assertFalse(os.path.exists(t.paths.up_mp4))
 
     def test_default_pixel_model(self):
         self.assertEqual(U.default_pixel_model(["4x-UltraSharp.pth", "RealESRGAN_x2.pth"]), "RealESRGAN_x2.pth")

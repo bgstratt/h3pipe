@@ -187,7 +187,7 @@ python h3.py render   Shows\ep05 --proxy     # low-res animatic
 python h3.py assemble Shows\ep05 --proxy     # join it into one mp4
 python h3.py render   Shows\ep05             # full-res
 python h3.py assemble Shows\ep05
-python h3.py upscale  Shows\ep05             # optional: the cut's final takes at 2x
+python h3.py upscale  Shows\ep05             # optional: the cut's takes at 2x (--proxy too)
 python h3.py assemble Shows\ep05 --upscaled --size 1920x1080
 ```
 
@@ -206,7 +206,7 @@ disk alone. ComfyUI must be running for `targets`, `refs`, `keyframe --generate`
 | `h3.py keyframe` | a shot's first/last keyframe: from the previous shot's take (continuity), `--generate`, `--missing`, `--clear` |
 | `h3.py render` | `h3render.py`: queues shots through their targets, one take each |
 | `h3.py assemble` | `h3assemble.py`: the review cut, in `cut.json` order; `--upscaled` from the takes' upscales |
-| `h3.py upscale` | `h3upscale.py`: a final take at 2x — re-sampled (H3, LTX-2) or through a pixel upscale model (`--method pixel`, any target); the cut's takes, or `--only`/`--take`; `--check`, `--prune-latents` |
+| `h3.py upscale` | `h3upscale.py`: a take at 2x, either pass (`--proxy`) — re-sampled (H3, LTX-2) or through a pixel upscale model (`--method pixel`, any target); the cut's takes, or `--only`/`--take`; `--check`, `--prune-latents` |
 | `h3.py align` | `h3align.py`: times the script against a dialogue recording |
 | `h3.py takes` / `pick` / `override` | takes and why they're stale; the take the cut uses; per-shot tweaks and retargeting (`h3edit.py`) |
 | `h3.py cut` | edit the cut itself: `--show`, `--order`, `--move … --before`, `--trim SH IN OUT`, `--lock`/`--unlock`, `--reset`, `--copy-from final\|proxy`, `--audio` (a clip's sound from another take, a file, none or its own) |
@@ -226,7 +226,7 @@ disk alone. ComfyUI must be running for `targets`, `refs`, `keyframe --generate`
 | `h3edit.py` | `takes`, `pick`, `override`, `keyframe`, `discard`, `cut`, `targets` (through `h3.py`) | the episode | `cut.json`, `overrides.json`, `refs/shots/` |
 | `h3promote.py` | Moves an override into the script or the series config where it belongs, and rebuilds | `overrides.json`, `epNN.md`, `series.json` | updated script and series config, `_history/` |
 | `h3align.py` | Times the script against a dialogue recording and writes the `audio:` windows | recording, `epNN.md`, `series.json` | updated script and series config, `align_report.md` |
-| `h3upscale.py` | Upscales final takes 2x: the take's latent (or its frames, through the VAE) upscaled and re-sampled from late in its schedule under its frozen shotlist, its audio held and copied on | a take, its frozen shotlist and latent | `<stem>.up.mp4`, `<stem>.up.json` beside the take |
+| `h3upscale.py` | Upscales takes 2x (either pass): the take's latent (or its frames, through the VAE) upscaled and re-sampled from late in its schedule under its frozen shotlist, its audio held and copied on | a take, its frozen shotlist and latent | `<stem>.up.mp4`, `<stem>.up.json` beside the take |
 | `h3assemble.py` | Joins the rendered shots in cut order (`cut.json`, else script order), trimming timed shots to their windows and using each clip's chosen audio | `shotlist*.json`, `cut.json`, renders | `renders/epNN.mp4`, `epNN_shots.txt` |
 
 `h3core/` (parser, story IR, series config, speech pacing), `h3jobs.py`, `h3takes.py`,
@@ -474,7 +474,7 @@ python h3.py assemble Shows\ep05 --partial         # join what exists so far
 - Shots with an `audio:` window are trimmed to it (re-encoded, x264 CRF 16) so the cut lines up
   with the recording. `--no-trim` keeps the padding.
 - `epNN_shots.txt` lists every shot's start time in the cut.
-- `--upscaled` (final pass) plays each clip's fresh upscale (`h3.py upscale`) and writes
+- `--upscaled` (either pass) plays each clip's fresh upscale (`h3.py upscale`) and writes
   `epNN_up.mp4` at the upscales' size beside the plain cut; a clip without one is scaled up
   and named in the report. `--size WxH` sets the cut's size (`1920x1080` for a 1920×1088
   upscale), letterboxing a clip whose aspect differs.

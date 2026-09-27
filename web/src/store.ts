@@ -125,10 +125,11 @@ export interface RenderAsk {
   seedMode?: SeedMode;
 }
 
-/** Phase 13: the Upscale dialog's subject: named final takes, or the whole final cut. */
+/** Phase 13: the Upscale dialog's subject: named takes of a pass, or that pass's whole cut. */
 export interface UpscaleAsk {
   title: string;
-  /** null: the final cut's takes */
+  pass: Pass;
+  /** null: the pass's cut's takes */
   takes: { shot: string; take: number }[] | null;
   /** start with "again, where already upscaled" ticked */
   redo?: boolean;

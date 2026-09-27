@@ -245,23 +245,19 @@ export function ContextMenu() {
               <i className="pi pi-ban" /> Cancel this render
             </button>
           )}
-          {menu.pass === "final" && (
-            <>
-              <button
-                disabled={!usable || take.upscale?.status === "queued"}
-                title={take.upscale?.status === "queued"
-                  ? "Its upscale is queued"
-                  : "Re-sample this take at 2x from late in its schedule: more detail, the same performance, its own audio"}
-                onClick={run(() => void upscaleTake({ ep, pass: menu.pass, shot: menu.shot, take: take.take }, !!take.upscale?.fresh))}
-              >
-                <i className="pi pi-arrow-up-right" /> {take.upscale?.fresh ? "Upscale again (2x)…" : "Upscale (2x)…"}
-              </button>
-              {take.upscale && take.upscale.status !== "queued" && (
-                <button onClick={run(() => void removeUpscale({ ep, pass: menu.pass, shot: menu.shot, take: take.take }))}>
-                  <i className="pi pi-times" /> Remove upscale
-                </button>
-              )}
-            </>
+          <button
+            disabled={!usable || take.upscale?.status === "queued"}
+            title={take.upscale?.status === "queued"
+              ? "Its upscale is queued"
+              : "Upscale this take 2x: a re-sample (more detail, the same performance) or an upscale model, its own audio kept"}
+            onClick={run(() => void upscaleTake({ ep, pass: menu.pass, shot: menu.shot, take: take.take }, !!take.upscale?.fresh))}
+          >
+            <i className="pi pi-arrow-up-right" /> {take.upscale?.fresh ? "Upscale again (2x)…" : "Upscale (2x)…"}
+          </button>
+          {take.upscale && take.upscale.status !== "queued" && (
+            <button onClick={run(() => void removeUpscale({ ep, pass: menu.pass, shot: menu.shot, take: take.take }))}>
+              <i className="pi pi-times" /> Remove upscale
+            </button>
           )}
           <button
             className="h3-menu-danger"

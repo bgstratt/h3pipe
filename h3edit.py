@@ -417,7 +417,7 @@ def episode_status(root: str, pass_: str, folder: str | None = None) -> dict:
                 "comfy_prompt_id": (t.sidecar or {}).get("comfy_prompt_id"),
                 "finished": (t.sidecar or {}).get("finished"),
                 "save_notes": (t.sidecar or {}).get("save_notes", ""),
-                # Phase 13: its upscale (final takes only; null: never upscaled)
+                # Phase 13: its upscale (null: never upscaled)
                 "upscale": upscale_summary(root, t),
             } for t in takes],
         })
@@ -1470,7 +1470,7 @@ def _graph_key(graph: dict | None) -> str:
 def upscale_summary(root: str, t: T.Take) -> dict | None:
     """A take's upscale for the editor (None: it has none): status, whether
     it is fresh (made from the take as it is now), its size and file."""
-    if t.pass_ != "final" or not os.path.isfile(t.paths.up_sidecar):
+    if not os.path.isfile(t.paths.up_sidecar):
         return None
     up = T.upscale_of(t) or {}
     return {"status": up.get("status", "queued"), "fresh": bool(up.get("fresh")),
@@ -1980,7 +1980,7 @@ def assemble_episode(root: str, pass_: str, partial: bool = True,
                      size: str | None = None) -> dict:
     """h3assemble for one pass, as `h3.py assemble` runs it. `output` is the
     cut's path relative to the episode (forward slashes), or None. `upscaled`
-    (final pass): each clip from its fresh upscale, as <ep>_up.mp4; `size`
+    (either pass): each clip from its fresh upscale, as <cut>_up.mp4; `size`
     ("1920x1080"): the cut's size."""
     args = ["-o", root]
     if pass_ == "proxy":

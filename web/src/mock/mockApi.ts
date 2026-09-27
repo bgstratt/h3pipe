@@ -1184,7 +1184,7 @@ export function createMockApi(emit: Emit, opts: MockOptions = {}): Api & { outsi
     async upscale(req) {
       await wait();
       need(req.ep);
-      const fin = st("final");
+      const fin = st(req.pass ?? "final");
       const want = req.takes ?? fin.shots
         .filter((s) => !req.shots || req.shots.includes(s.shot))
         .flatMap((s) => (s.cut.take != null && !s.cut.placeholder ? [{ shot: s.shot, take: s.cut.take }] : []));
@@ -1213,10 +1213,10 @@ export function createMockApi(emit: Emit, opts: MockOptions = {}): Api & { outsi
         details: [0, 1, 2],
       };
     },
-    async deleteUpscale(ep, shot, take) {
+    async deleteUpscale(ep, shot, take, pass) {
       await wait();
       need(ep);
-      const t = st("final").shots.find((s) => s.shot === shot)?.takes.find((x) => x.take === take);
+      const t = st(pass ?? "final").shots.find((s) => s.shot === shot)?.takes.find((x) => x.take === take);
       if (!t?.upscale) throw new MockError(`${shot} take ${take} has no upscale`, 404);
       t.upscale = null;
       emit("h3pipe.upscale", { ep: EP, shot, take, status: "deleted" });

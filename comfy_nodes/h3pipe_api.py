@@ -759,11 +759,13 @@ def upscale_event(ctx: Context, ep: str, shot: str, take: int, status: str) -> N
 
 @handler
 def post_upscale(ctx: Context, body):
-    """Queue upscales of final takes (h3upscale): `shots` (their cut takes; null
+    """Queue upscales of a pass's takes (h3upscale; `pass`, default final):
+    `shots` (their cut takes; null
     for the whole final cut) or `takes` ([{shot, take}]), with optional `redo`,
     `scale`, `start_step` and `vae`. 409 when this ComfyUI can't upscale."""
     body = body_dict(body)
     ep = check_ep(ctx, body.get("ep"))
+    pass_ = check_pass(body.get("pass"), "final")
     shots, takes = body.get("shots"), body.get("takes")
     if shots is not None and (not isinstance(shots, list)
                               or not all(isinstance(s, str) and s for s in shots)):
@@ -792,10 +794,10 @@ def post_upscale(ctx: Context, body):
         found = []
         for x in takes:
             n = check_take(x.get("take"))
-            found.append((x["shot"], T.get_take(ep, "final", x["shot"], n),
-                          f"final take {n} of {x['shot']} doesn't exist"))
+            found.append((x["shot"], T.get_take(ep, pass_, x["shot"], n),
+                          f"{pass_} take {n} of {x['shot']} doesn't exist"))
     else:
-        found = U.cut_takes(ep, set(shots) if shots is not None else None)
+        found = U.cut_takes(ep, set(shots) if shots is not None else None, pass_=pass_)
     jobs, skipped, errors = [], [], []
     for shot, t, why in found:
         if t is None:
@@ -865,9 +867,10 @@ def delete_upscale(ctx: Context, query: dict):
         n = int(query.get("take"))
     except (TypeError, ValueError):
         raise ApiError(400, "take must be a take number")
-    t = T.get_take(ep, "final", shot, check_take(n))
+    pass_ = check_pass(query.get("pass"), "final")
+    t = T.get_take(ep, pass_, shot, check_take(n))
     if t is None:
-        raise ApiError(404, f"final take {n} of {shot} doesn't exist")
+        raise ApiError(404, f"{pass_} take {n} of {shot} doesn't exist")
     up = T.upscale_of(t)
     if up is None:
         raise ApiError(404, f"{shot} take {n} has no upscale")
@@ -1518,12 +1521,10 @@ def post_assemble(ctx: Context, body):
     partial = body.get("partial", True)
     if not isinstance(partial, bool):
         raise ApiError(400, "partial must be true or false")
-    # Phase 13: the final cut from its upscales, and/or at a set size
+    # Phase 13: the cut from its upscales, and/or at a set size
     upscaled = body.get("upscaled", False)
     if not isinstance(upscaled, bool):
         raise ApiError(400, "upscaled must be true or false")
-    if upscaled and pass_ != "final":
-        raise ApiError(400, "upscaled is for the final pass: proxy takes are never upscaled")
     size = body.get("size")
     if size is not None and (not isinstance(size, str) or not re.fullmatch(r"\d+x\d+", size)):
         raise ApiError(400, "size must look like 1920x1080, or be null")

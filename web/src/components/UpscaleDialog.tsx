@@ -1,5 +1,5 @@
-// Phase 13: the Upscale dialog, opened from a final take's menu (one take) or
-// the cut menu (the whole final cut). What it offers comes from
+// Phase 13: the Upscale dialog, opened from a take's menu (one take, either
+// pass) or the cut menu (that pass's whole cut). What it offers comes from
 // GET /h3pipe/upscale/options: the pixel method's models on this ComfyUI, and
 // which targets have a latent upscale (and whether it's ready here).
 
@@ -26,7 +26,7 @@ export function UpscaleDialog() {
 function UpscaleBody() {
   const ask = useApp((s) => s.upscaleAsk)!;
   const ep = useApp((s) => s.ep);
-  const st = useApp((s) => (s.ep ? s.status[statusKey(s.ep, "final")] : undefined));
+  const st = useApp((s) => (s.ep ? s.status[statusKey(s.ep, ask.pass)] : undefined));
   const [opts, setOpts] = useState<UpscaleOptions | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [f, setF] = useState<UpscaleForm>({ method: "auto", pixelModel: null, detail: 0, redo: !!ask.redo, vae: false });
@@ -62,7 +62,7 @@ function UpscaleBody() {
 
   return (
     <Dialog
-      title={<>{ask.title} <span className="h3-muted h3-small">final · 2x</span></>}
+      title={<>{ask.title} <span className="h3-muted h3-small">{ask.pass} · 2x</span></>}
       onClose={closeUpscale}
       footer={
         <>

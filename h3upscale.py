@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-h3upscale.py — Phase 13 (docs/PLAN.md): a final take, refined at 2x.
+h3upscale.py — Phase 13 (docs/PLAN.md): a take, refined at 2x (either pass).
 
 An upscale is a version of its take, not a new take: <stem>.up.mp4 beside it,
 with <stem>.up.json. It re-samples the take at twice the size from late in the
@@ -11,10 +11,10 @@ stream, copied on. The start is a fraction of the take's own schedule (the
 target's `start`, 0.875: step 7 of 8), so a take on the no-turbo base preset
 starts at the same noise level.
 
-    python h3upscale.py <episode> [--only sh760,sh770] [--take N] [--redo]
+    python h3upscale.py <episode> [--proxy] [--only sh760,sh770] [--take N] [--redo]
                         [--scale 2] [--start-step 7] [--vae] [--check]
 
-Without --only: every shot of the final cut whose take (the pick, else the
+Without --only: every shot of the pass's cut (final, or --proxy) whose take (the pick, else the
 latest usable) has no fresh upscale. The graph is the take's target's render
 graph (`upscale` in its target.json says how), with the sampler's latent
 replaced by the take's latent (<stem>.latent.safetensors, Phase 13a) or, for
@@ -41,7 +41,7 @@ import h3jobs as J
 import h3takes as T
 import targets as TG
 
-PASS = "final"
+PASS = "final"                          # the default pass; a proxy take upscales too
 ROUTES = ("latent", "vae")
 
 
@@ -235,8 +235,6 @@ def plan_upscale(root: str, take: T.Take, *, scale: float | None = None,
         job = UpscaleJob(root, take, target, spec, "pixel", float(scale or 2), None, w, h,
                          method="pixel", pixel_model=pixel_model or DEFAULT_PIXEL_MODEL)
         try:
-            if take.pass_ != PASS:
-                raise UpscaleError(f"{job.label} is a {take.pass_} take: only final takes are upscaled")
             if not take.usable:
                 raise UpscaleError(f"{job.label} isn't a finished take ({take.status})")
             if not w or not h:
@@ -263,8 +261,6 @@ def plan_upscale(root: str, take: T.Take, *, scale: float | None = None,
     try:
         if m not in METHODS:
             raise UpscaleError(f"method {m!r}: it's latent or pixel")
-        if take.pass_ != PASS:
-            raise UpscaleError(f"{job.label} is a {take.pass_} take: only final takes are upscaled")
         if not take.usable:
             raise UpscaleError(f"{job.label} isn't a finished take ({take.status})")
         if not spec:
@@ -298,7 +294,7 @@ def take_job(up: UpscaleJob) -> J.Job:
     doc = T.read_json(take.paths.shotlist)
     shot = doc["shots"][0]
     inputs = {k: v for k, v in (sc.get("inputs") or {}).items() if k != "sheet"}
-    return J.Job(root=up.root, pass_=PASS, index=0, shot=shot, doc=doc, folder=None,
+    return J.Job(root=up.root, pass_=take.pass_, index=0, shot=shot, doc=doc, folder=None,
                  action="render", take=take.take, seed=int(shot.get("seed", sc.get("seed", 0))),
                  seed_source=sc.get("seed_source", "stable"),
                  model=shot.get("model") or sc.get("model") or "",
@@ -484,16 +480,18 @@ def mark_failed(up: UpscaleJob, why: str) -> None:
                      save_notes=why)
 
 
-def cut_takes(root: str, only: set[str] | None = None, take_n: int | None = None) -> list:
-    """(shot, Take | None, why) for each final-cut shot (or `only`): the pick,
-    else the latest usable take; `take_n` forces a number."""
+def cut_takes(root: str, only: set[str] | None = None, take_n: int | None = None,
+              pass_: str = PASS) -> list:
+    """(shot, Take | None, why) for each shot of the pass's cut (or `only`): the
+    pick, else the latest usable take; `take_n` forces a number. A placeholder
+    (a take from the other pass) is left out."""
     from h3assemble import choose_take
-    entries = T.resolve_cut(T.load_cut(root), PASS, J.script_order(root))
+    entries = T.resolve_cut(T.load_cut(root), pass_, J.script_order(root))
     out = []
     for e in entries:
         if only is not None and e.shot not in only:
             continue
-        if e.pass_ != PASS:
+        if e.pass_ != pass_:
             out.append((e.shot, None, f"the cut uses its {e.pass_} take"))
             continue
         t, why = choose_take(root, e, None, take_n)
@@ -502,17 +500,18 @@ def cut_takes(root: str, only: set[str] | None = None, take_n: int | None = None
 
 
 def prune_latents(root: str, only: set[str] | None = None,
-                  dry_run: bool = False) -> list[tuple[str, int, str]]:
-    """Delete the latents nothing needs: of final takes the cut doesn't use, and
+                  dry_run: bool = False, pass_: str = PASS) -> list[tuple[str, int, str]]:
+    """Delete the latents nothing needs: of the pass's takes its cut doesn't use, and
     of takes with a fresh upscale (either can still be upscaled, through the
     VAE). Returns (path, bytes, why) for each; `dry_run` deletes nothing. The
     sidecar's `latent` goes with the file (and `latent_pruned` says when)."""
-    picked = {shot: take.take for shot, take, _ in cut_takes(root, only) if take is not None}
+    picked = {shot: take.take for shot, take, _ in cut_takes(root, only, pass_=pass_)
+              if take is not None}
     out = []
     for shot in J.script_order(root):
         if only is not None and shot not in only:
             continue
-        for t in T.list_takes(root, PASS, shot):
+        for t in T.list_takes(root, pass_, shot):
             if not os.path.isfile(t.paths.latent):
                 continue
             up = T.upscale_of(t)
@@ -535,6 +534,7 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("episode", help="episode folder")
+    ap.add_argument("--proxy", action="store_true", help="the proxy pass's takes and cut")
     ap.add_argument("--only", help="comma-separated shot ids")
     ap.add_argument("--take", type=int, help="this take number instead of the cut's")
     ap.add_argument("--redo", action="store_true", help="upscale again even if fresh")
@@ -553,7 +553,7 @@ def main(argv=None) -> int:
                     help="encode the take's frames even if it kept a latent")
     ap.add_argument("--check", action="store_true", help="list the jobs, queue nothing")
     ap.add_argument("--prune-latents", action="store_true",
-                    help="delete the latents of final takes the cut doesn't use, and of takes "
+                    help="delete the latents of the pass's takes its cut doesn't use, and of takes "
                          "whose upscale is fresh (with --check: only list them)")
     ap.add_argument("--comfy", default="http://127.0.0.1:8188")
     ap.add_argument("--timeout", type=int, default=3600)
@@ -562,8 +562,9 @@ def main(argv=None) -> int:
     root = os.path.abspath(args.episode)
     TG.add_thread_root(root)
     only = {s.strip() for s in args.only.split(",")} if args.only else None
+    pass_ = "proxy" if args.proxy else PASS
     if args.prune_latents:
-        gone = prune_latents(root, only, dry_run=args.check)
+        gone = prune_latents(root, only, dry_run=args.check, pass_=pass_)
         for path, _, why in gone:
             print(f"  {'-' if args.check else 'x'}  {rel(root, path)}  ({why})")
         mb = sum(n for _, n, _ in gone) / 1e6
@@ -571,7 +572,7 @@ def main(argv=None) -> int:
               + (" would be deleted" if args.check else " deleted"))
         return 0
     jobs = []
-    for shot, take, why in cut_takes(root, only, args.take):
+    for shot, take, why in cut_takes(root, only, args.take, pass_=pass_):
         if take is None:
             print(f"  -  {shot}: {why}")
             continue

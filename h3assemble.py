@@ -365,7 +365,7 @@ def main() -> int:
                     help="assemble the shots that exist instead of refusing")
     ap.add_argument("--check", action="store_true", help="report only")
     ap.add_argument("--upscaled", action="store_true",
-                    help="final pass: each clip from its fresh upscale (h3upscale), the "
+                    help="each clip from its fresh upscale (h3upscale), the "
                          "cut at the upscale size; clips without one are scaled up")
     ap.add_argument("--size", default=None, metavar="WxH",
                     help="the cut's size (every clip scaled, letterboxed if its aspect "
@@ -375,8 +375,6 @@ def main() -> int:
     pass_ = args.pass_ or ("proxy" if "_proxy" in os.path.basename(args.shotlist)
                            else "final")
     other = "final" if pass_ == "proxy" else "proxy"
-    if args.upscaled and pass_ != "final":
-        ap.error("--upscaled is for the final pass: proxy takes are never upscaled")
     want_size = None
     if args.size:
         try:
@@ -468,7 +466,7 @@ def main() -> int:
         # same shot's length.
         # --upscaled: the take's fresh upscale plays in its place (same frames,
         # same audio stream, twice the size)
-        up = (h3takes.upscale_of(t) if args.upscaled and e.pass_ == "final" else None)
+        up = h3takes.upscale_of(t) if args.upscaled else None
         clip = t.paths.up_mp4 if up and up["fresh"] else t.paths.mp4
         n = frame_count(clip)
         # a take rendered on another target (retargeted) has that target's

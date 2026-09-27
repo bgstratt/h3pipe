@@ -71,7 +71,7 @@ export interface Api {
   /** Phase 13: GET /h3pipe/upscale/options: pixel models and each target's latent upscale. */
   upscaleOptions(): Promise<UpscaleOptions>;
   /** Phase 13: DELETE /h3pipe/upscale: remove a take's upscale (409 while it is queued). */
-  deleteUpscale(ep: string, shot: string, take: number): Promise<{ shot: string; take: number; deleted: boolean }>;
+  deleteUpscale(ep: string, shot: string, take: number, pass?: Pass): Promise<{ shot: string; take: number; deleted: boolean }>;
   /** Folders on the ComfyUI machine; no path = the starting points. `files`
    * lists image or audio files too (for importing a ref). */
   browse(path?: string | null, files?: BrowseFiles | null): Promise<BrowseResult>;
@@ -407,7 +407,7 @@ export function createHttpApi(t: Transport): Api {
     }),
     upscale: (req) => call("POST", "/h3pipe/upscale", req),
     upscaleOptions: () => get("/h3pipe/upscale/options"),
-    deleteUpscale: (ep, shot, take) => call("DELETE", `/h3pipe/upscale?${qs({ ep, shot, take: String(take) })}`),
+    deleteUpscale: (ep, shot, take, pass) => call("DELETE", `/h3pipe/upscale?${qs({ ep, shot, take: String(take), pass })}`),
     browse: (path, files) => get(`/h3pipe/browse?${qs({ path: path || undefined, files: files || undefined })}`),
     refs: (ep) => get(`/h3pipe/refs?${qs({ ep })}`),
     refFileUrl: (ep, path, version) => t.url(`/h3pipe/file?${qs({ ep, path, v: version || undefined })}`),

@@ -1752,6 +1752,10 @@ what this machine and the repo have today. Nothing below is built; each target g
   down to the 2x size. On this machine (2026-09-26): `RealESRGAN_x2.pth`,
   `RealESRGAN_x4.pth`, `4x-UltraSharp.pth` (UltraSharp's licence may be non-commercial:
   check before shipping with it). `downloads` entries only once each has a URL on record.
+- **Proxy takes upscale too** (2026-09-26, the user's call: "no reason we shouldn't"): every
+  pass restriction went (plan, routes with `pass`, `h3.py upscale --proxy`, assemble
+  `--upscaled` on either pass, the editor's menus and Export 2x on both). A proxy take keeps
+  no latent by default, so its re-sample goes through the VAE; the pixel method doesn't care.
 - **The pixel method: built 2026-09-26.** `method: pixel` (h3upscale, the route, the CLI's
   `--method pixel --pixel-model`) upscales any take with an upscale model from
   `models/upscale_models`: `H3LoadTakeVideo` → `UpscaleModelLoader` → `H3PixelUpscale` (the

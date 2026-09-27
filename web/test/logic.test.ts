@@ -27,18 +27,18 @@ const kinds = (s: ShotStatus, r?: Set<number>) => shotBadges(s, r).map((b) => b.
 
 describe("upscaleRequestOf (the Upscale dialog)", () => {
   const f = { method: "auto" as const, pixelModel: "RealESRGAN_x2.pth", detail: 0 as const, redo: false, vae: false };
-  const one = { takes: [{ shot: "sh020", take: 3 }] };
-  it("defaults send only what's asked: the take, and the pixel model for takes without a re-sample", () => {
-    expect(upscaleRequestOf(f, one)).toEqual({ takes: [{ shot: "sh020", take: 3 }], pixel_model: "RealESRGAN_x2.pth" });
-    expect(upscaleRequestOf(f, { takes: null })).toEqual({ shots: null, pixel_model: "RealESRGAN_x2.pth" });
+  const one = { pass: "final" as const, takes: [{ shot: "sh020", take: 3 }] };
+  it("defaults send only what's asked: the pass, the take, and the pixel model for takes without a re-sample", () => {
+    expect(upscaleRequestOf(f, one)).toEqual({ pass: "final", takes: [{ shot: "sh020", take: 3 }], pixel_model: "RealESRGAN_x2.pth" });
+    expect(upscaleRequestOf(f, { pass: "proxy", takes: null })).toEqual({ pass: "proxy", shots: null, pixel_model: "RealESRGAN_x2.pth" });
   });
   it("latent: detail and vae, never a pixel model", () => {
     expect(upscaleRequestOf({ ...f, method: "latent", detail: 2, vae: true, redo: true }, one))
-      .toEqual({ takes: [{ shot: "sh020", take: 3 }], method: "latent", detail: 2, vae: true, redo: true });
+      .toEqual({ pass: "final", takes: [{ shot: "sh020", take: 3 }], method: "latent", detail: 2, vae: true, redo: true });
   });
   it("pixel: the model, never detail or vae", () => {
     expect(upscaleRequestOf({ ...f, method: "pixel", pixelModel: "4x-UltraSharp.pth", detail: 2, vae: true }, one))
-      .toEqual({ takes: [{ shot: "sh020", take: 3 }], method: "pixel", pixel_model: "4x-UltraSharp.pth" });
+      .toEqual({ pass: "final", takes: [{ shot: "sh020", take: 3 }], method: "pixel", pixel_model: "4x-UltraSharp.pth" });
   });
 });
 

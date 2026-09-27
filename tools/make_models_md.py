@@ -215,7 +215,7 @@ def block() -> str:
             own.append(t.id)
     if ups:
         lines += ["### For upscaling (optional)", "",
-                  "Only to upscale final takes (`python h3.py upscale`), never to render. The "
+                  "Only to upscale takes (`python h3.py upscale`), never to render. The "
                   "node comes from the Comfyui_Minimax_h3_latent_Upscaler pack (LBH-123-AI) — "
                   "not its \"Plus\" fork, which has the same node without temporal chunking. "
                   "`python h3.py targets` says whether this ComfyUI can upscale.", ""]
