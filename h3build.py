@@ -156,6 +156,10 @@ def story_warnings(story: ir.Episode, series_cfg: dict | None = None) -> list[st
                 f"({plate}), so they are drawn against one background from one view and "
                 f"the cut reads as a single camera rather than a reverse angle. Give the "
                 f"location an angle per speaker and name it with `plate:`.")
+    mode = ((series_cfg or {}).get("upscale") or {}).get("save_latents")
+    if mode is not None and mode not in ("final", "always", "never"):
+        out.append(f"series.json upscale.save_latents is {mode!r}: it takes \"final\" (the "
+                   f"default), \"always\" or \"never\", so renders use \"final\".")
     return out
 
 

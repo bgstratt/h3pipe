@@ -77,6 +77,7 @@ import sys
 import h3jobs as J
 import h3peaks
 import h3takes as T
+import h3upscale as U
 
 
 # ---------------------------------------------------------------------------
@@ -401,6 +402,9 @@ def episode_status(root: str, pass_: str, folder: str | None = None) -> dict:
                 "seed": (t.sidecar or {}).get("seed"),
                 "frames": take_frames(t),
                 "fps": take_fps(t),
+                # its size (the Upscale dialog works out what each scale makes)
+                "width": (t.sidecar or {}).get("width"),
+                "height": (t.sidecar or {}).get("height"),
                 "seed_source": (t.sidecar or {}).get("seed_source"),
                 "target": (t.sidecar or {}).get("target"),
                 "note": (t.sidecar or {}).get("note", ""),
@@ -416,6 +420,8 @@ def episode_status(root: str, pass_: str, folder: str | None = None) -> dict:
                 "comfy_prompt_id": (t.sidecar or {}).get("comfy_prompt_id"),
                 "finished": (t.sidecar or {}).get("finished"),
                 "save_notes": (t.sidecar or {}).get("save_notes", ""),
+                # Phase 13: its upscale (null: never upscaled)
+                "upscale": upscale_summary(root, t),
             } for t in takes],
         })
     d = doc0.get("defaults", {})
@@ -1464,6 +1470,26 @@ def _graph_key(graph: dict | None) -> str:
     return hashlib.sha1(blob.encode("utf-8")).hexdigest()[:16]
 
 
+def upscale_summary(root: str, t: T.Take) -> dict | None:
+    """A take's upscale for the editor (None: it has none): status, whether
+    it is fresh (made from the take as it is now), its size and file."""
+    if not os.path.isfile(t.paths.up_sidecar):
+        return None
+    up = T.upscale_of(t) or {}
+    return {"status": up.get("status", "queued"), "fresh": bool(up.get("fresh")),
+            "width": up.get("width"), "height": up.get("height"),
+            "route": up.get("route"), "start_step": up.get("start_step"),
+            "method": up.get("method", "latent"), "pixel_model": up.get("pixel_model"),
+            "seedvr2_model": up.get("seedvr2_model"),
+            "then_pixel": up.get("then_pixel"),
+            "on_upscale": up.get("on_upscale"),
+            "encoder": up.get("encoder"), "precision": up.get("precision"),
+            "finish": up.get("finish"),
+            "comfy_prompt_id": up.get("comfy_prompt_id"),
+            "mp4": rel(root, t.paths.up_mp4) if os.path.isfile(t.paths.up_mp4) else None,
+            "save_notes": up.get("save_notes", "")}
+
+
 def target_nodes(t, graph: dict | None = None, where: str = "") -> dict[str, dict]:
     """{node class: {"tier", "feature"}} a target's renders need: its
     workflow's classes as a job's graph keeps them (the saver in place, then
@@ -1590,6 +1616,10 @@ def readiness(targets, object_info: dict | None, resolve=None, cache=None,
                      "resolved": by_pass.get("final") or next(iter(by_pass.values()), {}),
                      "by_pass": by_pass, "features_off": features_off,
                      "nodes_missing": nodes_missing}
+        # Phase 13: whether its takes can be upscaled here (never affects `status`)
+        up = U.upscale_readiness(t, object_info)
+        if up is not None:
+            out[t.id]["upscale"] = up
     return out
 
 
@@ -1766,6 +1796,11 @@ def cmd_targets(root: str | None, argv: list[str]) -> int:
         for param, v in sorted(r["resolved"].items()):
             if v["how"] == "family":
                 print(f"      using       {param}: {v['using']} for {v['want']}")
+        up = r.get("upscale")
+        if up and up["status"] != "unknown":
+            print(f"      upscale     {'ready' if up['status'] == 'ready' else 'not ready'}")
+            for m in up["missing"]:
+                print(f"                  missing {m}")
     print()
     return 0 if object_info is not None else 1
 
@@ -1949,14 +1984,21 @@ def build_episode(root: str, timeout: int = 600) -> dict:
 
 
 def assemble_episode(root: str, pass_: str, partial: bool = True,
-                     timeout: int = 3600) -> dict:
+                     timeout: int = 3600, upscaled: bool = False,
+                     size: str | None = None) -> dict:
     """h3assemble for one pass, as `h3.py assemble` runs it. `output` is the
-    cut's path relative to the episode (forward slashes), or None."""
+    cut's path relative to the episode (forward slashes), or None. `upscaled`
+    (either pass): each clip from its fresh upscale, as <cut>_up.mp4; `size`
+    ("1920x1080"): the cut's size."""
     args = ["-o", root]
     if pass_ == "proxy":
         args += ["--shotlist", "shotlist/shotlist_proxy.json", "--subfolder", "renders_proxy"]
     if partial:
         args.append("--partial")
+    if upscaled:
+        args.append("--upscaled")
+    if size:
+        args += ["--size", size]
     rc, out, err = run_tool("h3assemble.py", args, root, timeout)
     output = None
     for line in out.splitlines():

@@ -56,6 +56,11 @@ export interface TakeSummary {
   /** Phase 9b: the file whose sound the cut plays for this take (the mp4 when
    * it has an audio stream, else its `_h3.wav`, else null), relative to the episode. */
   audio?: string | null;
+  /** Phase 13: the take's upscale (null: never upscaled; absent from older servers). */
+  upscale?: TakeUpscale | null;
+  /** Phase 13: the take's size, from its sidecar (the Upscale dialog's arithmetic) */
+  width?: number | null;
+  height?: number | null;
 }
 
 export interface CutInfo {
@@ -535,6 +540,9 @@ export interface RenderRequest {
   target?: string | null;
   /** Queue shots whose model file is another family than the target needs. Only sent when set. */
   allow_model_mismatch?: boolean;
+  /** Phase 13: keep the take's latent beside it for an upscale later. Absent: the
+   * server's default (the series config's upscale.save_latents; final pass only). */
+  save_latent?: boolean;
 }
 
 export interface RenderSkip {
@@ -649,6 +657,112 @@ export interface AssembleResult {
   ok: boolean;
   output: string;
   report: string;
+}
+
+/** Phase 13: POST /h3pipe/assemble's extras. `upscaled` (final pass): each clip
+ * from its fresh upscale, as <ep>_up.mp4; `size`: the cut's size ("1920x1080"). */
+export interface AssembleOptions {
+  upscaled?: boolean;
+  size?: string | null;
+}
+
+/** Phase 13: a final take's upscale (<stem>.up.mp4), as GET /h3pipe/episode says it. */
+export interface TakeUpscale {
+  status: "queued" | "ok" | "failed";
+  /** made from the take's mp4 as it is now (false once the take is re-rendered) */
+  fresh: boolean;
+  width: number | null;
+  height: number | null;
+  route: "latent" | "vae" | "pixel" | "seedvr2" | null;
+  start_step: number | null;
+  /** latent (a re-sample), pixel (an upscale model over the frames) or seedvr2 */
+  method?: "latent" | "pixel" | "seedvr2";
+  /** the pixel method's model file */
+  pixel_model?: string | null;
+  /** the SeedVR2 method's model file */
+  seedvr2_model?: string | null;
+  /** a pixel step after the re-sample: its model, scale and the re-sample's size */
+  then_pixel?: { model: string; scale: number; from: [number, number] } | null;
+  /** a pixel upscale run on an earlier upscale: that one's record (nested for a longer chain) */
+  on_upscale?: Record<string, unknown> | null;
+  /** the encoder the .up.mp4 was written with (h264_nvenc, hevc_nvenc, libx264) */
+  encoder?: string | null;
+  precision?: string | null;
+  finish?: { frequency_split: boolean; keep_soft: number; grain: number } | null;
+  comfy_prompt_id: string | null;
+  /** the upscale's mp4, relative to the episode (null until it is written) */
+  mp4: string | null;
+  save_notes: string;
+}
+
+/** Phase 13: POST /h3pipe/upscale. `shots`: their takes in the pass's cut
+ * (null: the whole cut); `takes`: that pass's takes named directly (wins). */
+export interface UpscaleRequest {
+  ep: string;
+  /** whose takes: final (the server's default) or proxy */
+  pass?: Pass;
+  shots?: string[] | null;
+  takes?: { shot: string; take: number }[];
+  redo?: boolean;
+  scale?: number | null;
+  start_step?: number | null;
+  vae?: boolean;
+  /** null: each take's default (latent where its target has one, else pixel) */
+  method?: "latent" | "pixel" | "seedvr2" | null;
+  /** seedvr2: "7b" (the default), "3b" or a model file name */
+  seedvr2_model?: string | null;
+  /** the pixel method's model (models/upscale_models); null: the default */
+  pixel_model?: string | null;
+  /** latent: start 0-2 steps earlier than the default (more detail, more change) */
+  detail?: 0 | 1 | 2 | null;
+  /** latent: then an upscale model takes the re-sample on by `then_scale` (default 2) */
+  then_pixel_model?: string | null;
+  then_scale?: number | null;
+  /** pixel: run on each take's existing upscale (its .up.mp4, replaced) instead of the take */
+  from_upscale?: boolean;
+  /** how the .up.mp4 is encoded: auto (NVENC when there, else x264), nvenc, x264 */
+  encoder?: "auto" | "nvenc" | "x264";
+  /** the upscale model's precision: fp16 (the default, faster) or fp32 */
+  precision?: "fp16" | "fp32";
+  /** a pixel model's finish: colour and tone from the source (default true), invented
+   * detail faded where the source was soft (0-1), film grain (0-0.2) */
+  frequency_split?: boolean;
+  keep_soft?: number;
+  grain?: number;
+}
+
+/** GET /h3pipe/upscale/options: what the Upscale dialog can offer here. */
+export interface UpscaleOptions {
+  pixel: { status: "ready" | "not_ready" | "unknown"; missing: string[]; models: string[]; default: string };
+  /** SeedVR2 (core nodes, its own model files): absent from older servers */
+  seedvr2?: { status: "ready" | "not_ready" | "unknown"; missing: string[]; models: string[]; default: string };
+  /** each video target's latent upscale: null when it has none */
+  latent: Record<string, {
+    status: "ready" | "not_ready" | "unknown"; missing: string[];
+    /** resample (H3: any scale on the `align` grid) or second_stage (LTX-2: `fixed_scale`) */
+    /** resample (H3), second_stage (LTX-2), pixel_refine (Wan: a pixel model, then its sampler) */
+    mode?: "resample" | "second_stage" | "pixel_refine"; align?: number; fixed_scale?: number | null;
+  } | null>;
+  details: number[];
+  max_scale?: number;
+  encoders?: string[];
+  precisions?: string[];
+}
+
+export interface UpscaleResult {
+  queued: { shot: string; take: number; route: "latent" | "vae" | "pixel" | "seedvr2"; scale: number; start_step: number | null;
+            method?: "latent" | "pixel" | "seedvr2"; pixel_model?: string | null; then_pixel_model?: string | null;
+            seedvr2_model?: string | null;
+            width: number; height: number; prompt_id: string }[];
+  skipped: { shot: string; take?: number; reason: string }[];
+  errors: { shot: string; take?: number; error: string }[];
+}
+
+export interface UpscaleEvent {
+  ep: string;
+  shot: string;
+  take: number;
+  status: "queued" | "ok" | "failed" | "deleted";
 }
 
 // websocket events (docs/API.md "Live updates")

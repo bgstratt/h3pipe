@@ -122,6 +122,16 @@ def episode_fps(root: str, doc: dict) -> float:
     return float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) and v > 0 else 24.0
 
 
+def video_codec(path: str) -> str | None:
+    """The first video stream's codec (h264, hevc, ...), or None."""
+    try:
+        r = run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries",
+                 "stream=codec_name", "-of", "csv=p=0", path], timeout=60)
+        return r.stdout.decode("utf-8", "replace").strip() or None
+    except Exception:
+        return None
+
+
 def video_size(path: str) -> tuple[int, int] | None:
     r = run(["ffprobe", "-v", "error", "-select_streams", "v:0",
              "-show_entries", "stream=width,height", "-of", "csv=p=0:s=x", path],
@@ -364,11 +374,26 @@ def main() -> int:
     ap.add_argument("--partial", action="store_true",
                     help="assemble the shots that exist instead of refusing")
     ap.add_argument("--check", action="store_true", help="report only")
+    ap.add_argument("--upscaled", action="store_true",
+                    help="each clip from its fresh upscale (h3upscale), the "
+                         "cut at the upscale size; clips without one are scaled up")
+    ap.add_argument("--size", default=None, metavar="WxH",
+                    help="the cut's size (every clip scaled, letterboxed if its aspect "
+                         "differs), e.g. 1920x1080")
     args = ap.parse_args()
 
     pass_ = args.pass_ or ("proxy" if "_proxy" in os.path.basename(args.shotlist)
                            else "final")
     other = "final" if pass_ == "proxy" else "proxy"
+    want_size = None
+    if args.size:
+        try:
+            w_, h_ = (int(x) for x in args.size.lower().split("x"))
+            if w_ <= 0 or h_ <= 0 or w_ % 2 or h_ % 2:
+                raise ValueError
+        except ValueError:
+            ap.error(f"--size wants WxH with even sides, e.g. 1920x1080, not {args.size!r}")
+        want_size = (w_, h_)
     sub = args.subfolder or h3takes.pass_subfolder(pass_)
 
     def folder_for(src_pass: str) -> str | None:
@@ -449,7 +474,11 @@ def main() -> int:
 
         # Both passes share lengths, so a placeholder is checked against the
         # same shot's length.
-        n = frame_count(t.paths.mp4)
+        # --upscaled: the take's fresh upscale plays in its place (same frames,
+        # same audio stream, twice the size)
+        up = h3takes.upscale_of(t) if args.upscaled else None
+        clip = t.paths.up_mp4 if up and up["fresh"] else t.paths.mp4
+        n = frame_count(clip)
         # a take rendered on another target (retargeted) has that target's
         # length, which its sidecar records
         sc = t.sidecar or {}
@@ -461,7 +490,7 @@ def main() -> int:
             bad.append(f"{e.shot}: {n} frames on disk, shotlist says {want}")
         # the take's own frame rate: its sidecar's, else the file's
         src_fps = sc.get("fps") if isinstance(sc.get("fps"), (int, float)) else None
-        src_fps = float(src_fps or frame_rate(t.paths.mp4) or fps)
+        src_fps = float(src_fps or frame_rate(clip) or fps)
         convert = abs(src_fps - fps) > 1e-3
         if convert:
             # judged by duration: its frames are src_fps frames
@@ -488,7 +517,8 @@ def main() -> int:
         audio_src = h3takes.audio_source_file(root, e.audio, pass_)
         if audio_src and not h3peaks.has_audio(audio_src):
             audio_src = None
-        p = {"id": e.shot, "take": t.take, "src": e.pass_, "path": t.paths.mp4,
+        p = {"id": e.shot, "take": t.take, "src": e.pass_, "path": clip,
+             "upscaled": clip != t.paths.mp4,
              "placeholder": e.pass_ != pass_, "listed": e.in_cut_file,
              "keep": keep, "trim_in": trim_in, "trim_out": trim_out,
              "frames": n, "used": used, "audio_in": s.get("audio_in"),
@@ -498,7 +528,7 @@ def main() -> int:
              "wav": t.paths.h3_wav if os.path.isfile(t.paths.h3_wav) else None,
              "expected": s["length"], "policy": s.get("audio_policy", "?"),
              "src_fps": src_fps, "convert": convert,
-             "size": video_size(t.paths.mp4)}
+             "size": video_size(clip)}
         if convert and not keep:
             acc_s += clip_s - (trim_in + trim_out) / fps
         else:
@@ -507,10 +537,23 @@ def main() -> int:
         plan.append(p)
         rows.append(("ok", e, p))
 
+    ups = [p for p in plan if p["upscaled"]]
+    if want_size:
+        width, height = want_size
+    elif ups:
+        sizes = [p["size"] for p in ups if p["size"]]
+        if sizes:
+            width, height = max(set(sizes), key=sizes.count)
     print(f"\n  {width}x{height}   {pass_} pass   "
           f"{len(plan)}/{len(shots)} shots rendered"
           f"{'   (cut.json)' if has_cut else ''}")
 
+    if args.upscaled:
+        plain = [p["id"] for p in plan if not p["upscaled"]]
+        print(f"  {len(ups)} clip(s) from their upscales"
+              + (f"; {len(plain)} without a fresh one, scaled up: "
+                 + ", ".join(plain[:10]) + (" ..." if len(plain) > 10 else "")
+                 if plain else ""))
     if orphans:
         print(f"  orphaned in cut.json, not in the script, skipped ({len(orphans)}): "
               f"{', '.join(orphans)}")
@@ -632,6 +675,8 @@ def main() -> int:
                          .replace("shotlist", doc.get("episode", "cut")) + ".mp4")
     if not base.endswith(".mp4"):
         base += ".mp4"
+    if args.upscaled and not args.name:
+        base = base[:-4] + "_up.mp4"
     out_path = os.path.join(root, sub, base)
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
 
@@ -639,7 +684,13 @@ def main() -> int:
     # once one clip is re-encoded every clip is, so the concat demuxer sees one
     # set of stream parameters.
     # So do clips at another frame rate or size (a mixed-target cut).
-    reencode = bool(windowed or trimmed or placeholders or converted or resized)
+    # an NVENC HEVC upscale beside H.264 clips: concat can't copy mixed codecs
+    codecs = {video_codec(p["path"]) for p in plan}
+    mixed = len(codecs) > 1
+    if mixed:
+        print(f"  clips in more than one codec ({', '.join(sorted(c or '?' for c in codecs))}): "
+              f"re-encoding them all")
+    reencode = bool(windowed or trimmed or placeholders or converted or resized or mixed)
     size = None
     if placeholders or resized:
         if width and height:

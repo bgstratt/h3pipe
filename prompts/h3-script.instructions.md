@@ -136,9 +136,9 @@ shot 93. So:
 | `minimax_h3_fl2va` | the shot's first/last keyframes, plus words | generated or dubbed (no clone) | optional | `17k+5` at 24 fps, best 5–15 s | picking up exactly where the previous shot ended |
 | `ltx2` | words, plus keyframes when there are any | always generated | optional | `8k+1` at 24 fps, up to ~20 s | fast text-to-video with sound; `dur: model` |
 | `ltx2_ingredients` | a reference sheet made from your refs (required) | always generated | not read | `8k+1` at 24 fps, 2–20 s, best 5.04 s | identity on LTX |
-| `wan22_i2v` | a first frame (required) | none | first required, last optional | `4k+1` at 16 fps, best 5 s | animating a still |
+| `wan22_i2v` | a first frame (required) | none | first required, last optional | `4k+1` at 24 fps, best ≤ 3 s | animating a still |
 | `wan22_ti2v` | words, or a first frame | none | first optional | `4k+1` at 24 fps | cheap proxies; where an I2V shot without a first frame can go |
-| `wan22_vace` | a reference picture made from your sheets | none | optional | `4k+1` at 16 fps | identity without sound |
+| `wan22_vace` | a reference picture made from your sheets | none | optional | `4k+1` at 24 fps, best ≤ 3 s | identity without sound |
 
 - **Leave the target out** unless the choice is a decision about the film. Shots with no
   `target:` render on the episode's target (set in the editor) or the series config's
@@ -207,8 +207,14 @@ which ones your ComfyUI can render.
   `proxy.audio_mode` can use another mode for the animatic (`generate` is the usual one),
   `audio.default_policy` forces one policy for every dialogue shot, and `audio.retention`
   sets the dub `retention:` default. A target that can't do a mode says so and generates.
+- `upscale.save_latents` decides which renders keep their latent for an upscale later:
+  `"final"` (the default: the final pass is what gets upscaled; a proxy take can still be,
+  through the VAE), `"always"` or `"never"` (to
+  save the disk space, a few MB a take; an upscale then goes through the VAE).
 - Resolution must be a multiple of 32 on both axes for H3. **1280×720 is illegal**, because
   720 is not. 1344×768 is H3's native canvas. The other targets snap it to their own sizes.
+  Whether the final pass renders at the size you deliver, or smaller and is upscaled, is
+  **Final resolution** below.
 - `steps`, `lora` and `model` are optional per pass; see the README's **Steps, model and LoRA**.
 - `series.target` names the video model the episode renders on: `minimax_h3_ref2va`
   (MiniMax H3, the default: leave it out), `ltx2` (LTX-2.5 distilled), `ltx2_ingredients`
@@ -218,6 +224,86 @@ which ones your ComfyUI can render.
   character sheets). Single shots or sequences can render on another one; see
   **Rendering a shot on LTX-2**, **Rendering a shot on H3 from keyframes** and **Rendering a
   shot on Wan 2.2** below.
+
+### Final resolution: render at size, or render small and upscale
+
+`series.width` / `series.height` is the size every final take renders at. There are two
+ways to use it:
+
+| | final renders at | a 3 s take | the picked takes | you deliver |
+|---|---|---|---|---|
+| **Render at size** (the default) | 1344×768 | ~53 s | as rendered | 1344×768 |
+| **Render small, upscale** | 960×544 | ~20 s | `h3.py upscale`: 2x, ~25–35 s each, picks only | 1920×1088 (`h3.py assemble --upscaled --size 1920x1080`) |
+
+(Measured on an RTX 5090 with the 8-step turbo LoRA. The proxy pass stays 448×256 either way.)
+
+- **Render small and upscale** when the episode renders on `minimax_h3_ref2va` with the
+  latent upscaler installed (INSTALL.md, **The upscaler**), or on `ltx2`, which upscales
+  with its own second stage and needs nothing extra (`python h3.py targets` says
+  `upscale ready` for each). Every take you try costs under half as much, and only the ones the cut
+  keeps are upscaled, once, after the cut is locked. The upscale re-samples the take from
+  late in its schedule under its own prompt, references and seed, with its audio held, so
+  the performance and the lip sync are the take's; it adds detail a 960×544 frame is short
+  of (faces in wide shots, hands, small props).
+- **Render at size** when shots render on `ltx2_ingredients`, `minimax_h3_fl2va` or
+  `wan22_vace` (they have no re-sample: the pixel method is theirs), when the upscaler
+  isn't installed, or when 1344×768 is the delivery. `wan22_i2v` and `wan22_ti2v` do
+  re-sample (a pixel model, then their own sampler), but slowly: minutes a shot. Upscaling a 1344×768 take to 2688×1536 works
+  but adds little: that frame already holds most of what the model can draw.
+- The two don't mix within a pass: pick one per series. Switching later only changes the
+  takes rendered after the switch.
+
+**Writing a new series config for someone**, ask once which of the two they want, unless
+they already said (a delivery size, "upscale", "fast iterations"). With no answer, write
+1344×768: it renders on every target with nothing extra installed. For an existing series
+config, never change the size unasked.
+
+```json
+"series": { "id": "porchlight", "title": "Porchlight", "fps": 24,
+            "width": 960, "height": 544, "steps": 8 }
+```
+
+An upscale starts 7/8 of the way through the take's schedule (step 7 of 8), which keeps a
+speaking mouth exactly as the take had it. A shot with no dialogue can take more detail with
+`h3.py upscale <ep> --only sh100 --redo --detail 2` (two steps earlier: more change, check
+it).
+
+Takes on any other target (Wan, `ltx2_ingredients`, H3 from keyframes, a show's own) can
+still be upscaled by the **pixel method**: an upscale model (RealESRGAN, UltraSharp, from
+ComfyUI's `models/upscale_models`) over the frames, with the take's audio copied on. It is
+fast and needs nothing but the model, but it only sharpens what's there; it draws no new
+detail the way a re-sample does. `h3.py upscale <ep> --method pixel` uses it for any take.
+
+**SeedVR2** is the third method, for any take too: a one-step video restoration model
+(ComfyUI's own nodes; files in INSTALL.md). It gives the sharpest single frames of the three,
+in about a minute a shot, with no prompt (so nothing ties it to the take's performance but
+the picture); its frames change a little more from one to the next than a re-sample's, and
+the colour finish after it halves that. `h3.py upscale <ep> --method seedvr2` (the 7B;
+`--seedvr2-model 3b` for the smaller one).
+
+`--scale` goes up to 4 (a pixel upscale lands on even sides, an H3 re-sample on the 32 grid;
+LTX-2's is 2x only). For 4x with generated detail, re-sample then upscale in one go:
+`h3.py upscale <ep> --then-pixel RealESRGAN_x2.pth` (re-sample 2x, then the model 2x more).
+The editor's Upscale dialog offers the same, and shows the size each choice makes. An
+upscale you already have can be taken further later with the pixel method alone:
+`h3.py upscale <ep> --only sh100 --method pixel --from-upscale` (the dialog's "On top of the
+existing upscale").
+
+A pixel model has a fixed factor of its own (RealESRGAN_x2 makes 2x, RealESRGAN_x4 4x), but
+the upscale is resized to whatever scale you ask for: RealESRGAN_x2 at 1.5x is the model's
+2x shrunk to 1.5x, which is sharp and cheap. So pair a 2x model with 1.5x or 2x and a 4x
+model with 3x or 4x (a 4x model at 1.5x does four times the work to throw most of it away).
+For a 4K master from a 1344×768 take: re-sample 2x, then RealESRGAN_x2 at 1.5x (4032×2304),
+then `h3.py assemble <ep> --upscaled --size 3840x2160`. Past 4K the output is heavy to make
+and to play; upscales encode on the GPU (NVENC) by default, which is what keeps a 5K one
+from taking minutes to write.
+
+A pixel model's output is finished before it's saved. By default its colour and tone come
+from the original frames and only its fine detail from the model (upscale models shift
+colour a little; this keeps an upscaled clip matching the cut around it). Two more, off by
+default: **keep soft areas soft** fades the detail the model invents where the original was
+out of focus, so shallow depth of field stays shallow (`--keep-soft 1`), and **grain** puts
+back the film grain the model scrubbed away (`--grain 0.02` is light).
 
 ### Render profiles
 
@@ -788,12 +874,14 @@ What every Wan shot has in common:
   **acted silently** (the prompt says who talks and how, mouth moving), so the recording or
   another take's sound goes on at the edit. Keep dialogue shots on a target with sound if
   you need lip-sync.
-- **Its own frame rate.** The 14B models (`wan22_i2v`, `wan22_vace`) render **16 fps**; the
-  5B renders 24. Lengths are on a `4k + 1` grid at that rate: 5 s is 81 frames at 16 fps,
-  121 at 24. The models were trained on 5 s shots; a longer one renders with a warning,
-  and past 10 s it must be split. A 16 fps take in a 24 fps episode is converted when the
-  cut is assembled (frames repeated, never sped up), and the editor's timeline and Play all
-  time it by its own duration.
+- **Its frame rate, and keeping shots short.** All three render at **24 fps**. The 14B
+  models (`wan22_i2v`, `wan22_vace`) are specified at 16 fps, but their motion is paced for
+  24: at 16 a take plays as slow motion, so h3pipe times and saves them at 24. Lengths are on
+  a `4k + 1` grid: 3 s is 73 frames. The 14B models were trained on 81 frames, **3.4 s** at
+  24, and their prompt adherence falls off after that: a longer shot renders with a
+  warning, and past 161 frames (6.7 s) it must be split. **Write Wan shots of 3 s or less**,
+  and cut a longer action into two shots. (A take rendered before this at 16 fps keeps its
+  own rate: assemble and Play all time it by what it recorded.)
 - **Prose prompts**, written for you: the look, the framing and `camera:`, who is in frame
   from their `design`, the action, on-screen text, then the lines as silent acting. No
   `sound:` or `music:`: they are ignored. Wan's standard (Chinese) negative prompt is
@@ -883,7 +971,7 @@ prediction between 3 and 8 seconds (without a range: 1 to 20).
 
 Every video model takes only certain frame counts, and a `dur:` between two of them rounds
 **up**, so you pay for frames you throw away. The grid is the target's: `17k + 5` frames on
-the H3 targets, `8k + 1` on LTX, `4k + 1` on Wan (at 16 fps on the 14B models). The build
+the H3 targets, `8k + 1` on LTX, `4k + 1` on Wan (at 24 fps; best kept to 3 s). The build
 snaps each shot to its own target's grid, and `--check` warns about wasted padding.
 
 Write for H3's grid, the default; the other grids are fine-grained enough that these

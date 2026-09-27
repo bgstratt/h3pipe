@@ -1603,13 +1603,23 @@ of their `.mctx` / `.cond` files: a take's frozen shotlist already says how it w
 - Whether a render saves it: `save_latent`, default **on for final, off for proxy** (proxy is
   never upscaled). The series config's `upscale.save_latents: "final" | "always" | "never"`
   sets the default; `RenderRequest.save_latent`, `h3render --latent / --no-latent` and the
-  Render dialog override it for one run. About 4.3 MB per 3 s at 960×544, about twice that
+  redo dialog's "Keep the latent" override it for one run. (The Render dialog only opens when
+  a batch has something blocked, so a batch follows the series config.) About 4.3 MB per 3 s at 960×544, about twice that
   at 1344×768.
 - The target's binding names where the latent comes from
   (`binding.latent: {"class_type": "SamplerCustomAdvanced", "output": 0}`); `graph_for`
   links it into the saver when `save_latent` is on. A target without the key never saves one.
 - Discarding a take deletes its latent. `h3.py upscale --prune-latents <ep>` deletes the
   latents of takes the cut doesn't pick, and of takes whose upscale is done and fresh.
+
+- **As built** (2026-09-26, commit 64b9295). Live check against the real ComfyUI on a scratch
+  copy of Porchlights ep01: sh760 at the final pass kept `sh760_t01.latent.safetensors`
+  (8.5 MB at 1344×768: video `(1, 24, 22, 48, 84)`, audio `(1, 32, 2, 122)`, written in
+  5 ms), and its sidecar says `save_latent: true` and `latent`; the proxy render kept none.
+  The mp4 is **byte-identical** to ep01's own sh760 t02 at the same seed, so linking the
+  latent changes nothing about a render. The Render dialog opens only when a batch has
+  something blocked, so the per-run switch is the redo dialog's; a batch follows the series
+  config.
 
 **13b — the upscale of a take**
 - It is a **version of the take, not a new take**: `<shot>_tNN.up.mp4` beside the take, with
@@ -1624,7 +1634,7 @@ of their `.mctx` / `.cond` files: a take's frozen shotlist already says how it w
   references are encoded exactly as for the take, at the new size; the take's seed; the
   latent comes from a new `H3LoadTakeLatent` node (core `LoadLatent` only reads ComfyUI's
   input folder), then `MinimaxH3LatentUpscaler3D` (temporal chunking on), rejoined with the
-  audio latent; the preset's sigmas through `SplitSigmas` at the start step (default 7 of 8: one step).
+  audio latent; the preset's sigmas through `SplitSigmas` at the start step: `start` in target.json, a fraction of the take's own schedule (0.875: step 7 of 8, step 5 of 6, step 18 of the no-turbo base preset's 20), so every take starts at about the same noise level; `--start-step` is an exact step.
 - **The VAE route**, for a take with no latent: the take's frames through the video VAE and
   its audio through the audio VAE, then the same graph. Slower and slightly lossier, and so
   the log and the `.up.json` say which route was used. **Untested in the spike: the first
@@ -1650,6 +1660,22 @@ of their `.mctx` / `.cond` files: a take's frozen shotlist already says how it w
   `minimax_h3_latent_upscaler_3d_fp16.safetensors` in `models/latent_upscale_models/`, in the
   target's `downloads` (INSTALL.md regenerated). Readiness reports it; a render never needs it.
 
+- **As built** (2026-09-26, commit 58f85c2; `h3upscale.py`, `comfy_nodes/h3_upscale.py`).
+  Live check on the RTX 5090 (32 GB), scratch copy of Porchlights ep01, sh760 (73 frames):
+
+  | take | route | result | time (whole job) |
+  |---|---|---|---|
+  | 960×544 | latent | 1920×1088 | 30.1 s (upscaler model loaded) |
+  | 960×544 | VAE (`--vae --redo`) | 1920×1088 | 24.4 s |
+  | 1344×768 | latent | 2688×1536 | 51.3 s |
+
+  Every `.up.mp4`'s audio stream is bit-identical to its take's (MD5). The two routes look
+  alike: the VAE route loses nothing visible, so a take without a latent is no worse off. The
+  start step became a fraction of the take's own schedule (`start` 0.875) because a take's
+  steps vary (kitchen_sink's final pass is 6; the base preset 20). The upscaler's file is a
+  `downloads` entry but not yet in INSTALL.md (make_models_md lists model params only):
+  that, and readiness for the upscaler node, go with 13c.
+
 **13c — where you run it**
 - CLI: `h3.py upscale <ep> [--only sh760,sh770] [--redo] [--scale 2] [--start-step 7]
   [--check]`. Without `--only`: every take the final cut picks that has no fresh upscale.
@@ -1673,6 +1699,140 @@ produces a comparable clip and says so; a proxy render writes no latent; the Sho
 timeline menu items upscale one clip each; `h3assemble --upscaled` writes the cut at 2x with
 the one clip that wasn't upscaled scaled and named; `h3assemble` without it is unchanged.
 `python -m pytest` green; this phase changes no build output, so the goldens must not move.
+
+- **As built** (2026-09-26; commits 6e9ae25 backend, fe53f9c editor). Live against the real
+  ComfyUI on the scratch episode: `DELETE /h3pipe/upscale` removed sh760 t02's upscale (404
+  the second time); `POST /h3pipe/upscale {"shots": ["sh760"]}` queued it on the latent route
+  and the episode status showed it `ok` and fresh at 1920×1088 32 s later; `POST
+  /h3pipe/assemble` with `upscaled` and `size: 1920x1080` wrote `ep01_up.mp4` at 1920×1080;
+  `upscaled` on the proxy pass is a 400. `h3.py targets` reports `upscale ready`; `h3.py
+  upscale --check` and `--prune-latents --check` list what they would do. The editor's menus,
+  badges, viewer toggle and Export 2x were checked by type and unit tests and the mock API;
+  the look of them is the user's to confirm.
+
+**13d — upscale on LTX and Wan (planned 2026-09-26, not started).** What each needs, from
+what this machine and the repo have today. Nothing below is built; each target gets an
+`upscale` block in its target.json and its own graph surgery in h3upscale.
+
+- **`ltx2`: built 2026-09-26** (mode `second_stage` in h3upscale; `saver.latent` names the
+  final sampler by `upstream_of: images`, since the graph has two). Live on the scratch
+  episode: sh760 rendered on ltx2 at 960×512 (49 s, a 2.5 MB latent) and upscaled to
+  1920×1024 in 18.1 s from the last of its three stage-2 sigmas (0.4219), audio bit-identical
+  to the take's. Visibly sharper than the take stretched (fabric, shoes, lace, siding) —
+  more than H3's one-step refine, as LTX's second stage is made to add detail on upsampling.
+  The VAE route encodes audio with `LTXVAudioVAEEncode` (target.json `encode_audio`).
+  Planned text, kept:
+  **`ltx2` (LTX-2.5 distilled): no new nodes, no new downloads.** Its render graph is
+  already two-stage: `LatentUpscaleModelLoader` + `LTXVLatentUpsampler` with
+  `ltx-2.5-latent-spatial-upscaler-x2-bf16-1.0.safetensors` (its required `upscaler`
+  param, installed) and a second `SamplerCustomAdvanced` on `ManualSigmas`. An upscale is
+  that second stage run again on the take: the take's latent (`saver.latent` names the
+  final sampler) through `LTXVLatentUpsampler`, then a short tail of the distilled sigmas at
+  2x, conditioned as the take was (the graph is loader-less: width/height patched as
+  widgets), audio held. LTX's AV latent is the same NestedTensor pair, so `H3HoldAudio`
+  works on it (worth a target-neutral name). 768×512 → 1536×1024. To find out: whether a
+  2x of the *final* output fits and is worth it, and how much of the tail keeps the mouth.
+- **`ltx2_ingredients` (LTX-2.3 + IC-LoRA): no new downloads**
+  (`ltx-2.3-spatial-upscaler-x2-1.1.safetensors` is in `latent_upscale_models`, and
+  `LTXVLatentUpsampler` is core). Harder: the reference sheet goes in as IC-LoRA guides
+  (`LTXVAddGuide` / `LTXVCropGuides`) that must be rebuilt at the new size.
+- **Wan 2.2 (`wan22_i2v`, `wan22_ti2v`, `wan22_vace`): the VAE route only.** No latent
+  upscaler for Wan's VAE is on record here, so: the take's frames scaled 2x in pixels (core
+  `ImageScaleBy`, lanczos; or an ESRGAN-class model through core `UpscaleModelLoader` +
+  `ImageUpscaleWithModel`, which needs a file in `models/upscale_models/`, empty on this
+  machine), `VAEEncode` with the Wan VAE, then the take's own model (the 14B low-noise
+  expert; the 5B for ti2v) through `KSamplerAdvanced` from late in the schedule at the new
+  size, with the take's prompt, and the first frame (i2v) or references (VACE) at the new
+  size. Silent, so no audio to hold: an upscale copies nothing. 832×480 → 1664×960; ti2v's
+  1280×704 → 2560×1408 is too big, so 1.5x (1920×1056) there.
+  The pixel model is a choice, listed from ComfyUI (`UpscaleModelLoader.model_name`, so any
+  file in `models/upscale_models/` appears): the target's `upscale.pixel_model` default
+  (`RealESRGAN_x2.pth`: exactly 2x, gentle on grain), `h3.py upscale --pixel-model`, a
+  picker in the editor's Upscale, recorded in the `.up.json`. A 4x model's output is scaled
+  down to the 2x size. On this machine (2026-09-26): `RealESRGAN_x2.pth`,
+  `RealESRGAN_x4.pth`, `4x-UltraSharp.pth` (UltraSharp's licence may be non-commercial:
+  check before shipping with it). `downloads` entries only once each has a URL on record.
+- **Scale and "then pixel"** (2026-09-26): the dialog's Scale (1.5/2/3/4x, each checked per
+  take against its method: pixel on even sides, H3 on the 32 grid, LTX 2x only; the take
+  status now carries each take's width/height and the options route each target's mode,
+  align and fixed scale), and a pixel step after a re-sample in the same job
+  (`then_pixel_model` / `then_scale`, CLI `--then-pixel` / `--then-scale`): the decoded
+  frames go through `H3PixelUpscale` before the saver. Re-sample 2x then RealESRGAN_x2 = 4x
+  with generated detail in the first half. Scales are capped at 4 (the H3 upscaler's own
+  limit); a re-sample at 4x of 1344×768 is 5376×3072 conditioning, heavy on any GPU.
+- **The finish of a pixel model's output** (2026-09-27; ideas from sajb0t's
+  comfyui_ensemble_upscale, which has no licence, so our own code): in `H3PixelUpscale`,
+  per batch after the model — a box average when shrinking by a whole factor (a 4x model to
+  2x) else lanczos; the frequency split, on by default (low band from a bicubic enlarge of
+  the source, high band from the model, one Gaussian cutoff of 1.5 source pixels); keep
+  soft (0–1, the model's high band faded by the source's own detail, normalised once per
+  clip so it can't flicker); grain (per-frame seeded monochrome Gaussian). Its ensembles
+  of 2–3 models, face pass and photo filters were left out: per-frame weights and face
+  boxes flicker in video, and grading belongs to the conform. Live (2026-09-27, sh760 t02,
+  960×544 → 1920×1088 with RealESRGAN_x2, frame 40 against the take stretched): colour drift
+  2.19/255 without the split, **1.07/255 with it** (mean RGB shift −1.7/−2.6/−1.6 → −0.1/−1.4/
+  −1.0), the model's detail the same either way; 36–45 s a take, h264_nvenc.
+- **Wan 2.2: built 2026-09-27** for `wan22_i2v` and `wan22_ti2v` (mode `pixel_refine`):
+  the take's frames through an upscale model (`pixel_model`, RealESRGAN_x2 by default),
+  `VAEEncode` with the target's VAE, then its final sampler alone from late in its schedule
+  at the new size (i2v: the low-noise `KSamplerAdvanced` from step 3 of 4, add_noise on,
+  `WanImageToVideo` and its staged first frame rebuilt at the new size; ti2v: its `KSampler`
+  at denoise 0.25). No latent kept or needed; silent, so nothing to hold. ti2v defaults to
+  1.5x (its 1280×704 at 2x is 2560×1408). `wan22_vace` stays on the pixel method: its latent
+  carries the reference frame in front, which a plain encoded video doesn't match. Live:
+  sh760 on wan22_ti2v (1280×704, 69 frames, 87 s) upscaled to 1920×1056 in 237 s (5 of 20
+  steps at 1080p on the 5B, h264_nvenc in 1.8 s): sharper eyes, hair, lettering and edges,
+  the face kept. Slow: a later `start` or the pixel method when time matters.
+- **Encoder and precision** (2026-09-26): upscales encode on NVENC by default (`encoder`
+  auto / nvenc / x264; H.264 to 4096, HEVC past it; x264 fallback, its faster preset past
+  4K), streaming frames to ffmpeg one at a time; the upscale model runs fp16 under autocast
+  by default (`precision`). Measured on the 5090: 5376×3072 HEVC NVENC ~9 fps against
+  x264's ~1 fps (sh020 t03's encode was 105 s of a 320 s job). Assemble re-encodes a cut
+  whose clips mix codecs.
+- **Pixel on top of an upscale** (2026-09-26): `from_upscale` / `--from-upscale` / the dialog's
+  "On top of the existing upscale": the pixel method reads the take's fresh `.up.mp4` and
+  replaces it, sized from the upscale; the record nests the old one as `on_upscale`.
+- **Proxy takes upscale too** (2026-09-26, the user's call: "no reason we shouldn't"): every
+  pass restriction went (plan, routes with `pass`, `h3.py upscale --proxy`, assemble
+  `--upscaled` on either pass, the editor's menus and Export 2x on both). A proxy take keeps
+  no latent by default, so its re-sample goes through the VAE; the pixel method doesn't care.
+- **The pixel method: built 2026-09-26.** `method: pixel` (h3upscale, the route, the CLI's
+  `--method pixel --pixel-model`) upscales any take with an upscale model from
+  `models/upscale_models`: `H3LoadTakeVideo` → `UpscaleModelLoader` → `H3PixelUpscale` (the
+  model over 4 frames at a time, each batch resized to the target size, lanczos, so a 4x
+  model never holds a whole clip at 4x) → `H3SaveUpscale` (the take's audio copied on). It
+  needs no latent, no frozen shotlist and none of the target's models; it is the default
+  for takes whose target has no latent upscale. `detail` (0–2) starts a latent re-sample
+  that many steps earlier. The editor's Upscale is now a dialog (method, pixel model,
+  detail, again, from the video) fed by `GET /h3pipe/upscale/options`. Wan's re-sample on
+  top of the pixel pass was built next (`pixel_refine`, above).
+- **SeedVR2: evaluated and built 2026-09-27** (method `seedvr2`). Native in ComfyUI 0.37
+  core (SeedVR2Preprocess / Conditioning / TemporalChunk / TemporalMerge / PostProcessing);
+  files from Comfy-Org/SeedVR2 (the templates' properties.models): the VAE, 3B and 7B int8.
+  Evaluation on three scratch takes against ours (≈1080p; drift and flicker /255, low band):
+
+  | take | method | time | drift | detail | flicker |
+  |---|---|---|---|---|---|
+  | H3 sh760 | ours re-sample / pixel | ~30 / 36 s | 2.31 / 1.22 | .0092 / .0106 | .028 / .067 |
+  | | SeedVR2 3B / 7B | 93 / 61 s | 2.12 / 1.80 | .0136 / .0118 | .197 / .188 |
+  | H3 sh330 (talk) | ours re-sample (step 7) | ~22 s | 2.39 | .0089 | .017 |
+  | | SeedVR2 7B / + our split | 77 s | 1.82 / **1.28** | .0098 / .0096 | .211 / .099 |
+  | Wan sh760 | ours Wan re-sample | 237 s | 3.72 | .0144 | .026 |
+  | | SeedVR2 3B / 7B | 74 / 54 s | 2.34 / 1.81 | .0171 / .0131 | .401 / .358 |
+
+  The sharpest stills, 7–15× the frame-to-frame shimmer of a re-sample (throughout, not at
+  seams); our frequency split after it halves the shimmer and gives the least drift of all.
+  The user saw no flicker watching it, and wanted it as an option. Built as ComfyUI's video
+  template runs it (lanczos to size, tiled VAE, one step, LAB colour correction) with
+  `SeedVR2TemporalChunk` auto (overlap 2) for long shots and our finish after
+  (`H3FinishUpscale`, a new node: the finish for anyone's frames); 7B int8 the default.
+- **Any target, custom ones too: a pixel-space video upscaler, to evaluate.** SeedVR2
+  (ByteDance) is a one-step video restoration/upscale model with a community ComfyUI node
+  pack (numz's `ComfyUI-SeedVR2_VideoUpscaler`, 3B and 7B models); verify the pack, its
+  model files and its licence before depending on it. It needs no prompt or references (so
+  it can't pull a face toward a sheet, or away from one), works on any take and would give
+  Wan and custom targets an upscale without per-target graphs. To measure: VRAM and time
+  at 1080p, and whether it flickers across a 3–8 s clip.
 
 **Phase 13 risks**
 - **Lip sync.** Held audio fixes timing, and at step 7 the mouth matched the take on the one

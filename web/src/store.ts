@@ -125,6 +125,16 @@ export interface RenderAsk {
   seedMode?: SeedMode;
 }
 
+/** Phase 13: the Upscale dialog's subject: named takes of a pass, or that pass's whole cut. */
+export interface UpscaleAsk {
+  title: string;
+  pass: Pass;
+  /** null: the pass's cut's takes */
+  takes: { shot: string; take: number }[] | null;
+  /** start with "again, where already upscaled" ticked */
+  redo?: boolean;
+}
+
 export interface RefTakeRef {
   ep: string;
   ref: string;
@@ -276,6 +286,7 @@ export interface AppState {
   browse: BrowseState | null;
   /** the render confirmation (shots that will be skipped for missing refs) */
   renderAsk: RenderAsk | null;
+  upscaleAsk: UpscaleAsk | null;
   /** refs by episode (GET /h3pipe/refs) */
   refs: Record<string, Ref[]>;
   refsError: Record<string, string>;
@@ -335,6 +346,8 @@ export interface AppState {
   cutAudio: CutAudio;
   /** Phase 9b: the waveform lane under the timeline's clips is shown */
   waves: boolean;
+  /** Phase 13: the viewer and Play all show each take's fresh upscale (2x) where it has one */
+  upscaled: boolean;
   /** Phase 9b: what Ctrl+Z / Ctrl+Shift+Z would undo / redo, by statusKey */
   cutUndo: Record<string, { undo: string | null; redo: string | null }>;
   /** Phase 9b: the timeline's Cut menu, open at (x, y) */
@@ -395,6 +408,7 @@ export function initialState(prefs: Prefs = {}): AppState {
     cutPlay: { playing: false, pos: 0, seek: null },
     browse: null,
     renderAsk: null,
+    upscaleAsk: null,
     refs: {},
     refsError: {},
     refsLoading: {},
@@ -432,6 +446,7 @@ export function initialState(prefs: Prefs = {}): AppState {
     promote: null,
     cutAudio: "clips",
     waves: prefs.waves ?? false,
+    upscaled: prefs.upscaled ?? false,
     cutUndo: {},
     cutMenu: null,
     trackPanel: null,
@@ -475,6 +490,8 @@ export interface Prefs {
   zoom?: number;
   /** Phase 9b: the waveform lane */
   waves?: boolean;
+  /** Phase 13: play upscales (the viewer's and Play all's 2x) */
+  upscaled?: boolean;
 }
 
 type KV = Pick<Storage, "getItem" | "setItem">;
@@ -497,15 +514,17 @@ export function loadPrefs(storage: KV | null = defaultStorage()): Prefs {
       pass: p.pass === "final" || p.pass === "proxy" ? p.pass : undefined,
       zoom: typeof p.zoom === "number" ? p.zoom : undefined,
       waves: typeof p.waves === "boolean" ? p.waves : undefined,
+      upscaled: typeof p.upscaled === "boolean" ? p.upscaled : undefined,
     };
   } catch {
     return {};
   }
 }
 
-export function savePrefs(s: Pick<AppState, "ep" | "pass" | "zoom"> & { waves?: boolean }, storage: KV | null = defaultStorage()) {
+export function savePrefs(s: Pick<AppState, "ep" | "pass" | "zoom"> & { waves?: boolean; upscaled?: boolean }, storage: KV | null = defaultStorage()) {
   try {
-    storage?.setItem(PREFS_KEY, JSON.stringify({ ep: s.ep, pass: s.pass, zoom: s.zoom, ...(s.waves != null ? { waves: s.waves } : {}) }));
+    storage?.setItem(PREFS_KEY, JSON.stringify({ ep: s.ep, pass: s.pass, zoom: s.zoom, ...(s.waves != null ? { waves: s.waves } : {}),
+                                               ...(s.upscaled != null ? { upscaled: s.upscaled } : {}) }));
   } catch {
     /* private window or blocked storage: not remembering is fine */
   }
@@ -513,11 +532,12 @@ export function savePrefs(s: Pick<AppState, "ep" | "pass" | "zoom"> & { waves?: 
 
 /** Save prefs whenever they change. Returns the unsubscribe. */
 export function persistPrefs(st: Store<AppState>, storage: KV | null = defaultStorage()): () => void {
-  let last = { ep: st.get().ep, pass: st.get().pass, zoom: st.get().zoom, waves: st.get().waves };
+  let last = { ep: st.get().ep, pass: st.get().pass, zoom: st.get().zoom, waves: st.get().waves, upscaled: st.get().upscaled };
   return st.subscribe(() => {
     const s = st.get();
-    if (s.ep !== last.ep || s.pass !== last.pass || s.zoom !== last.zoom || s.waves !== last.waves) {
-      last = { ep: s.ep, pass: s.pass, zoom: s.zoom, waves: s.waves };
+    if (s.ep !== last.ep || s.pass !== last.pass || s.zoom !== last.zoom || s.waves !== last.waves
+        || s.upscaled !== last.upscaled) {
+      last = { ep: s.ep, pass: s.pass, zoom: s.zoom, waves: s.waves, upscaled: s.upscaled };
       savePrefs(last, storage);
     }
   });

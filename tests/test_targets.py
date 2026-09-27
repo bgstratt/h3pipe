@@ -408,7 +408,7 @@ class TargetsRouteTest(ApiTest):
             self.assertEqual((by[tid]["label"], by[tid]["short"]), (label, short))
             self.assertEqual(by[tid]["capabilities"]["audio"], "none")
             self.assertEqual(by[tid]["capabilities"]["policies"], ["silent"])
-        self.assertEqual(by["wan22_i2v"]["template"]["fps"], 16.0)
+        self.assertEqual(by["wan22_i2v"]["template"]["fps"], 24.0)
         self.assertEqual(by["wan22_ti2v"]["template"]["fps"], 24.0)
         self.assertTrue(by["wan22_vace"]["capabilities"]["subject_refs"])
         self.assertEqual(by[H3]["capabilities"]["audio"], "generate")

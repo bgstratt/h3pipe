@@ -202,6 +202,42 @@ def block() -> str:
         lines += table(records_, with_size)
         lines += [""]
 
+    # Phase 13: what an upscale needs besides the target's own files (never a render)
+    ups, own = [], []
+    for t in TG.list_targets():
+        spec = t.spec.get("upscale") or {}
+        u = spec.get("upscaler") or {}
+        name = (u.get("inputs") or {}).get("model_name")
+        if name:
+            dl = t.downloads.get(name) or {}
+            ups.append((t.id, u["class_type"], name, dl))
+        elif spec.get("mode") in ("second_stage", "pixel_refine"):
+            own.append((t.id, spec.get("mode")))
+    import h3upscale as U
+    if ups or own:
+        lines += ["### For upscaling (optional)", "",
+                  "Only to upscale takes (`python h3.py upscale`), never to render. The "
+                  "node comes from the Comfyui_Minimax_h3_latent_Upscaler pack (LBH-123-AI) — "
+                  "not its \"Plus\" fork, which has the same node without temporal chunking. "
+                  "`python h3.py targets` says whether this ComfyUI can upscale.", ""]
+        for tid, cls, name, dl in ups:
+            where = dl.get("url") or dl.get("source") or "no download record"
+            lines += [f"- `{name}` → `models/{dl.get('folder') or 'latent_upscale_models'}/` "
+                      f"({cls}, for `{tid}`) — {where}"]
+        lines += ["", "**SeedVR2** (any take; ComfyUI's own nodes, the models Apache 2.0): the VAE "
+                  "and at least one model.", ""]
+        for name, (folder, url) in U.SEEDVR2_DOWNLOADS.items():
+            lines += [f"- `{name}` → `models/{folder}/` — [download]({url}) "
+                      f"({U.SEEDVR2_SOURCE})"]
+        lines += [""]
+        for tid, mode in own:
+            lines += [f"- `{tid}`: nothing extra. Its render already has a latent upsampler, "
+                      f"and an upscale runs that second stage again on the take"
+                      if mode == "second_stage" else
+                      f"- `{tid}`: an upscale model from `models/upscale_models/` "
+                      f"(RealESRGAN_x2.pth by default), then its own sampler"]
+        lines += [""]
+
     nourl = [r for r in records if not r["url"]]
     if nourl:
         lines += ["#### Files with no recorded download URL", "",

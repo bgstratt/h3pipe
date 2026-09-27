@@ -318,6 +318,109 @@ when it's done (can take minutes).
 ```json
 {"ok": true, "output": "renders_proxy/ep05_proxy.mp4", "report": "…stdout…"}
 ```
+Phase 13 adds `"upscaled": true` (either pass): each clip plays its take's
+fresh upscale, the cut is the upscales' size and is written as `<ep>_up.mp4`, and clips
+without one are scaled up (the report names them). `"size": "1920x1080"` sets the cut's
+size, letterboxing a clip whose aspect differs. `h3.py assemble <ep> --upscaled [--size WxH]`
+is the same.
+
+## Upscale (Phase 13)
+
+An upscale is a version of a take (either pass), not a take: `<stem>.up.mp4` and `<stem>.up.json`
+beside it (h3upscale.py; docs/PLAN.md Phase 13). It re-samples the take at 2x from late in
+its own schedule (the target's `start`, 0.875: step 7 of 8) under the take's frozen
+shotlist, from its kept latent (Phase 13a) or, without one, its frames and `_h3.wav`
+through the VAE. The take's audio is held while it samples and its audio stream is copied
+onto the result unchanged. Only a target with an `upscale` block in its target.json
+can upscale: `minimax_h3_ref2va` (an external latent upscaler, then its own sampler from late
+in its schedule) and `ltx2` (its render graph's second stage run again on the take: its
+own upsampler, the tail of its fixed sigmas; mode `second_stage`, always 2x). The
+`.up.json` records `mode` and the schedule's `steps`. `wan22_i2v` / `wan22_ti2v` use mode
+`pixel_refine`: the take's frames through the pixel model (`pixel_model` applies), encoded
+with the Wan VAE, then the target's last sampler from late in its schedule; always the VAE
+route (`route: "latent"` is refused).
+
+### `POST /h3pipe/upscale`
+Body `{"ep", "shots"?: ["sh020"] | null, "takes"?: [{"shot", "take"}], "redo"?: false,
+"scale"?: 2, "start_step"?: null, "vae"?: false}`. `shots` upscales the final cut's take
+of each (the pick, else the latest usable; null: the whole final cut); `takes` names
+that pass's takes directly and wins; `pass` (default `"final"`) says whose. A proxy take
+kept no latent by default, so its re-sample goes through the VAE. A take with a fresh
+upscale is skipped unless `redo`.
+`vae` forces the VAE route; `start_step` is an exact step of the take's schedule.
+`method`: `"latent"` (a re-sample: the default where the take's target has an `upscale`
+block) or `"pixel"` (an upscale model over the frames: any target, the default for the
+rest), null for each take's default. `pixel_model` names the pixel method's model, a file
+in ComfyUI's `models/upscale_models` (null: `RealESRGAN_x2.pth` if installed, else the first
+2x model); `detail` (0, 1 or 2) starts a re-sample that many steps earlier than the default
+(more detail, more change). The pixel method needs no latent, no frozen shotlist and none
+of the take's target's models, and a scale only has to land on even sides. `scale` is more
+than 1 and at most 4: a pixel scale lands on even sides, an H3 re-sample's on the 32 grid,
+an LTX-2 re-sample is 2x only. `then_pixel_model` (with `then_scale`, default 2) adds a
+pixel step after a re-sample in the same job: that upscale model takes the re-sampled frames
+on (re-sample 2x then `RealESRGAN_x2.pth` 2x = 4x); `width`/`height` in the answer are the
+final size, and the `.up.json` records `then_pixel: {model, scale, from: [w, h]}`.
+`from_upscale: true` runs the pixel method on each take's existing fresh upscale instead of
+the take (its `.up.mp4` is the input and is replaced; `scale` applies to the upscale's size;
+the take's audio is still what's copied on). The new record keeps the old one as
+`on_upscale` (nested for a longer chain); freshness stays tied to the take. A take with no
+fresh upscale is an error; with `method: "latent"` it's refused.
+`encoder`: `"auto"` (the default: NVENC when this ffmpeg has it — H.264 up to 4096 on a side,
+HEVC past that, which NVENC's H.264 can't do — else x264), `"nvenc"` (forced; fails
+without) or `"x264"` (the CPU; its faster preset past 4K). The `.up.json`'s `encoder` is
+the one used. `precision`: the upscale model's, `"fp16"` (the default: autocast, about
+twice as fast) or `"fp32"`. Options lists both as `encoders` / `precisions`. An upscaled
+cut that mixes an HEVC upscale with H.264 clips is re-encoded by assemble, since concat
+can't copy mixed codecs.
+The finish of anything a pixel model makes (the pixel method, a then-pixel step, the start
+of a Wan re-sample): `frequency_split` (default true: colour and tone from a bicubic enlarge
+of the source, only the high band from the model), `keep_soft` (0–1, default 0: the
+model's detail faded where the source had none, measured once per clip), `grain` (0–0.2,
+default 0: monochrome, per frame, seeded by the take's seed; never before a Wan re-sample).
+Recorded as the `.up.json`'s `finish`. Queues and
+returns at once:
+```json
+{"queued": [{"shot": "sh020", "take": 3, "route": "latent", "method": "latent",
+             "pixel_model": null, "scale": 2.0, "start_step": 7,
+             "width": 1920, "height": 1088, "prompt_id": "…"}],
+ "skipped": [{"shot": "sh030", "take": 1, "reason": "already upscaled"}],
+ "errors": [{"shot": "sh040", "take": 2, "error": "…"}]}
+```
+409 when the running ComfyUI can't upscale (the reason names what's missing: an
+h3pipe node, the latent upscaler pack or its model file, the pack's "Plus" fork, which
+has no temporal chunking, or the pixel method's model); 502 when ComfyUI doesn't answer.
+
+### `GET /h3pipe/upscale/options`
+What the editor's Upscale dialog offers on this ComfyUI:
+```json
+{"pixel": {"status": "ready", "missing": [], "default": "RealESRGAN_x2.pth",
+           "models": ["4x-UltraSharp.pth", "RealESRGAN_x2.pth", "RealESRGAN_x4.pth"]},
+ "latent": {"minimax_h3_ref2va": {"status": "ready", "missing": []},
+            "ltx2": {"status": "ready", "missing": []}, "wan22_i2v": null, "…": null},
+ "details": [0, 1, 2]}
+```
+`method: "seedvr2"` runs SeedVR2 (ComfyUI's own nodes; any take, no prompt): `seedvr2_model`
+is `"7b"` (the default), `"3b"` or a file name; it takes `scale`, `from_upscale` and the
+finish like the pixel method, and options lists it as `seedvr2: {status, missing, models,
+default}`. `latent[target]` is null for a target with no latent upscale; otherwise it also has `mode`
+(`resample` | `second_stage`), `align` and `fixed_scale` (second_stage's only scale), and
+the answer has `max_scale`. Each take in `GET /h3pipe/episode` has its `width` and `height`,
+so the dialog can show what every scale makes before anything is queued.
+
+### `DELETE /h3pipe/upscale?ep=…&shot=sh020&take=3[&pass=proxy]`
+Removes the take's upscale. 404 when it has none; 409 while ComfyUI still has it queued
+or running.
+
+### A take's `upscale`
+Every take in `GET /h3pipe/episode` has `upscale`: null (a proxy take, or never
+upscaled), else `{"status": "queued" | "ok" | "failed", "fresh", "width", "height",
+"route", "start_step", "comfy_prompt_id", "mp4", "save_notes"}`. `fresh` is false once
+the take's mp4 isn't the one it was made from (re-rendered into the same number).
+
+### Readiness
+`GET /h3pipe/targets?ready=1`: a target that can upscale has `upscale: {"status":
+"ready" | "not_ready" | "unknown", "missing": [sentences]}` beside its render
+readiness, which it never changes.
 
 ## Live updates
 
@@ -333,6 +436,9 @@ knows from `/h3pipe/render`. Two custom events come from the node pack:
   (`renders_proxy` means proxy, anything else final).
 - **`h3pipe.episode`**, `{"ep": "<abs path>"}`, sent after a build, pick, cut or override
   change, so every open editor view can refetch.
+- **`h3pipe.upscale`** (Phase 13), `{"ep", "shot", "take", "status"}`: "queued" from
+  `POST /h3pipe/upscale`, "ok" or "failed" from `H3SaveUpscale` when it closes the
+  `.up.json`, "deleted" from `DELETE /h3pipe/upscale`.
 
 ## Models
 
@@ -365,6 +471,17 @@ model family; see **Model families** at the end.)
     same switch. A render is reproducible — two renders at one seed gave byte-identical
     frames and mp4 (2026-09-22) — so the frames of a take you already have can be fetched by
     re-rendering it at its own seed.
+  - `save_latent` (Phase 13a, 2026-09-26, optional `true` / `false` / `null`): keep the
+    take's sampled latent beside it as `<stem>.latent.safetensors`, for an upscale later
+    (video and audio streams; about 4 MB per 3 s at 960×544, twice that at 1344×768).
+    Absent or null: the series config's `upscale.save_latents` (`"final"`, the default:
+    final pass only; `"always"`; `"never"`). Only a target whose binding names its latent
+    source (`saver.latent`: `{"class_type", "output"}`, today `minimax_h3_ref2va`) can
+    keep one; asked for on another, the take's `notes` say so and nothing is linked. The
+    queuer records `save_latent: true` on the sidecar, and H3SaveShot records the file as
+    `latent` (absent if writing it failed, which is never fatal: an upscale can still go
+    through the VAE). The editor's redo dialog has "Keep the latent", sent only when
+    changed; `h3render --latent / --no-latent` is the same switch.
   - `skipped` and `errors` entries carry `take` when one was reserved.
   - The `h3pipe.take` event sent at queue time says `queued`.
 - **`PUT /h3pipe/override`:**

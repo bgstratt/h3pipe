@@ -197,6 +197,12 @@ def main() -> int:
                     help="also write each shot as a PNG sequence (16-50 GB per episode)")
     fr.add_argument("--no-frames", dest="save_frames", action="store_false",
                     help="mp4 and wav only, no PNG sequence")
+    lt = ap.add_mutually_exclusive_group()
+    lt.add_argument("--latent", dest="save_latent", action="store_true", default=None,
+                    help="keep each take's latent for an upscale later (default: final pass "
+                         "only, or the series config's upscale.save_latents)")
+    lt.add_argument("--no-latent", dest="save_latent", action="store_false",
+                    help="don't keep the latent (about 4-9 MB per 3 s take)")
     rc = ap.add_mutually_exclusive_group()
     rc.add_argument("--review-copy", dest="review_copy", action="store_true", default=False,
                     help="also leave the workflow's own SaveVideo copy in ComfyUI/output "
@@ -237,7 +243,7 @@ def main() -> int:
         seed_mode="new" if args.new_seed else "same" if args.same_seed else "auto",
         model=args.model or None, loras=loras, steps=args.steps, note=args.note,
         allow_missing_refs=args.allow_missing_refs, target=args.target,
-        allow_model_mismatch=args.allow_model_mismatch)
+        allow_model_mismatch=args.allow_model_mismatch, save_latent=args.save_latent)
     only = {s.strip() for s in args.only.split(",")} if args.only else None
 
     # Each job renders with its own target's workflow. --workflow replaces the

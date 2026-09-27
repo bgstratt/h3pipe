@@ -1114,6 +1114,7 @@ class RenderRequest:
     target: str | None = None          # render on this video target, this run only
     allow_model_mismatch: bool = False  # render even if a model file is another family
     negative: str | None = None        # the negative prompt, this run only (negative_for)
+    save_latent: bool | None = None    # keep the take's latent; None: latent_default
 
 
 @dataclass
@@ -1178,6 +1179,10 @@ class Job:
     # where the negative prompt comes from (negative_for): request | override |
     # negative.txt | series | preset, or "none" for a target without one
     negative_source: str = "none"
+    # keep the take's latent beside it (<stem>.latent.safetensors) for an upscale
+    # later: the request's choice, else latent_default; always False on a target
+    # whose binding names no latent source (`saver.latent`)
+    save_latent: bool = False
 
     @property
     def id(self) -> str:
@@ -1292,6 +1297,19 @@ def series_config(root: str) -> dict | None:
             cfg = T.read_json(p)
             return cfg if isinstance(cfg, dict) else None
     return None
+
+
+LATENT_MODES = ("final", "always", "never")
+
+
+def latent_default(root: str, pass_: str) -> bool:
+    """Whether a render keeps its take's latent when the request doesn't say:
+    the series config's `upscale.save_latents` ("final", the default: only the
+    final pass is ever upscaled; "always"; "never")."""
+    mode = ((series_config(root) or {}).get("upscale") or {}).get("save_latents", "final")
+    if mode not in LATENT_MODES:
+        mode = "final"
+    return mode == "always" or (mode == "final" and pass_ == "final")
 
 
 def series_target(root: str) -> str | None:
@@ -1473,6 +1491,13 @@ def plan_job(root: str, pass_: str, doc: dict, index: int, req: RenderRequest,
     else:
         seed, source = built_seed, "stable"
 
+    save_latent = (req.save_latent if req.save_latent is not None
+                   else latent_default(root, pass_))
+    if save_latent and not target.binding.saver.get("latent"):
+        if req.save_latent:
+            notes.append(f"no latent is kept: {target.short} doesn't say where its latent comes from")
+        save_latent = False
+
     base_hash = ov.get("base_hash")
     if missing and not anyway and action not in ("skip", "busy"):
         action = "blocked"
@@ -1490,7 +1515,7 @@ def plan_job(root: str, pass_: str, doc: dict, index: int, req: RenderRequest,
                built_target=built_target.id, notes=notes, error=error,
                length_source=length_source, allow_model_mismatch=req.allow_model_mismatch,
                steps_set="steps" in explicit, target_source=target_source,
-               values=values, negative_source=negative_source)
+               values=values, negative_source=negative_source, save_latent=save_latent)
 
 
 # ---------------------------------------------------------------------------
@@ -1739,6 +1764,8 @@ def sidecar_for(job: Job) -> dict:
         # which installed file each model param used (resolve_models)
         **({"resolved": copy.deepcopy(job.resolved)} if job.resolved else {}),
         **({"base": True} if job.based else {}),
+        # asked for; the saver records the file itself as `latent`
+        **({"save_latent": True} if job.save_latent else {}),
     }
 
 
@@ -2019,6 +2046,38 @@ def prune(g: dict, keep: str) -> None:
         del g[k]
 
 
+def upstream_node(g: dict, start: str, ctype: str) -> str | None:
+    """The nearest node of class `ctype` that `start` depends on (breadth first
+    through its links), or None."""
+    seen, queue = {start}, [start]
+    while queue:
+        nid = queue.pop(0)
+        for v in g.get(nid, {}).get("inputs", {}).values():
+            if isinstance(v, list) and len(v) == 2 and isinstance(v[0], str) and v[0] not in seen:
+                if g.get(v[0], {}).get("class_type") == ctype:
+                    return v[0]
+                seen.add(v[0])
+                queue.append(v[0])
+    return None
+
+
+def latent_node(g: dict, saver: str, spec: dict) -> str:
+    """The node a binding's `saver.latent` names: the only one of its class, or
+    with `upstream_of: <saver input>`, the nearest one feeding that input (a
+    two-stage graph's final sampler, e.g. LTX-2's)."""
+    if spec.get("upstream_of"):
+        link = g[saver]["inputs"].get(spec["upstream_of"])
+        nid = None
+        if isinstance(link, list) and link and isinstance(link[0], str):
+            first = link[0]
+            nid = (first if g.get(first, {}).get("class_type") == spec["class_type"]
+                   else upstream_node(g, first, spec["class_type"]))
+        if nid is None:
+            raise ValueError(f"no {spec['class_type']} feeds the saver's {spec['upstream_of']}")
+        return nid
+    return node_of(g, spec["class_type"])
+
+
 def graph_for(base: dict, job: Job, take: T.Take, *, panel_mode: str | None = None,
               save_frames: bool | None = None, review_copy: bool = True,
               strip_meta: bool = False, inputs: dict | None = None) -> dict:
@@ -2070,6 +2129,10 @@ def graph_for(base: dict, job: Job, take: T.Take, *, panel_mode: str | None = No
     si[sin["sidecar"]] = os.path.relpath(take.paths.sidecar, job.root)
     if save_frames is not None:
         si["save_frames"] = save_frames
+    if job.save_latent and b.saver.get("latent"):
+        # the saver keeps the take's latent: link the node the binding names
+        spec = b.saver["latent"]
+        si["latent"] = [latent_node(g, saver, spec), int(spec.get("output", 0))]
     if not review_copy:
         for k in [k for k, v in g.items() if v["class_type"] in b.review_nodes]:
             del g[k]

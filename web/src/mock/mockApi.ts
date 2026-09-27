@@ -1174,11 +1174,61 @@ export function createMockApi(emit: Emit, opts: MockOptions = {}): Api & { outsi
       emit("h3pipe.episode", { ep: EP });
       return overrideResult(shot);
     },
-    async assemble(ep, pass) {
+    async assemble(ep, pass, _partial, opts) {
       await wait(1500);
       need(ep);
       const n = st(pass).shots.filter((s) => s.cut.usable).length;
-      return { ok: true, output: `${st(pass).folder}/ep05_${pass}.mp4`, report: `  ${n} shots, partial cut\n  wrote ${st(pass).folder}/ep05_${pass}.mp4\n` };
+      const name = `ep05_${pass}${opts?.upscaled ? "_up" : ""}.mp4`;
+      return { ok: true, output: `${st(pass).folder}/${name}`, report: `  ${n} shots, partial cut\n  wrote ${st(pass).folder}/${name}\n` };
+    },
+    async upscale(req) {
+      await wait();
+      need(req.ep);
+      const fin = st(req.pass ?? "final");
+      const want = req.takes ?? fin.shots
+        .filter((s) => !req.shots || req.shots.includes(s.shot))
+        .flatMap((s) => (s.cut.take != null && !s.cut.placeholder ? [{ shot: s.shot, take: s.cut.take }] : []));
+      const out: import("../types").UpscaleResult = { queued: [], skipped: [], errors: [] };
+      for (const w of want) {
+        const t = fin.shots.find((s) => s.shot === w.shot)?.takes.find((x) => x.take === w.take);
+        if (!t || t.status !== "ok") { out.skipped.push({ shot: w.shot, reason: "not a finished final take" }); continue; }
+        if (t.upscale?.fresh && !req.redo) { out.skipped.push({ shot: w.shot, take: w.take, reason: "already upscaled" }); continue; }
+        const stem = `${fin.folder}/${w.shot}/${w.shot}_t${String(w.take).padStart(2, "0")}`;
+        const pixel = req.method === "pixel";
+        t.upscale = { status: "ok", fresh: true, width: 1920, height: 1088, route: pixel ? "pixel" : req.vae ? "vae" : "latent",
+                      method: pixel ? "pixel" : "latent", pixel_model: pixel ? (req.pixel_model ?? "RealESRGAN_x2.pth") : null,
+                      start_step: pixel ? null : (req.start_step ?? 7 - (req.detail ?? 0)), comfy_prompt_id: null, mp4: t.mp4 ?? `${stem}.mp4`, save_notes: "mock" };
+        out.queued.push({ shot: w.shot, take: w.take, route: t.upscale.route!, scale: 2, start_step: t.upscale.start_step!,
+                          width: 1920, height: 1088, prompt_id: `mock-up-${w.shot}` });
+        emit("h3pipe.upscale", { ep: EP, shot: w.shot, take: w.take, status: "ok" });
+      }
+      return out;
+    },
+    async upscaleOptions() {
+      await wait();
+      return {
+        pixel: { status: "ready", missing: [], models: ["4x-UltraSharp.pth", "RealESRGAN_x2.pth", "RealESRGAN_x4.pth"], default: "RealESRGAN_x2.pth" },
+        seedvr2: { status: "ready", missing: [], models: ["seedvr2_3b_int8_convrot.safetensors", "seedvr2_7b_int8_convrot.safetensors"],
+                   default: "seedvr2_7b_int8_convrot.safetensors" },
+        latent: { minimax_h3_ref2va: { status: "ready", missing: [], mode: "resample", align: 32, fixed_scale: null },
+                  ltx2: { status: "ready", missing: [], mode: "second_stage", align: 32, fixed_scale: 2 },
+                  ltx2_ingredients: null, minimax_h3_fl2va: null, wan22_vace: null,
+                  wan22_i2v: { status: "ready", missing: [], mode: "pixel_refine", align: 32, fixed_scale: null },
+                  wan22_ti2v: { status: "ready", missing: [], mode: "pixel_refine", align: 32, fixed_scale: null } },
+        details: [0, 1, 2],
+        max_scale: 4,
+        encoders: ["auto", "nvenc", "x264"],
+        precisions: ["fp16", "fp32"],
+      };
+    },
+    async deleteUpscale(ep, shot, take, pass) {
+      await wait();
+      need(ep);
+      const t = st(pass ?? "final").shots.find((s) => s.shot === shot)?.takes.find((x) => x.take === take);
+      if (!t?.upscale) throw new MockError(`${shot} take ${take} has no upscale`, 404);
+      t.upscale = null;
+      emit("h3pipe.upscale", { ep: EP, shot, take, status: "deleted" });
+      return { shot, take, deleted: true };
     },
     async browse(path, files) {
       await wait();

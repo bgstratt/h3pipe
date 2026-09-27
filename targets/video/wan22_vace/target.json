@@ -74,8 +74,8 @@
     "ImageToMask"
   ],
   "template": {
-    "_note": "Wan 2.2 14B (Fun VACE is built on the A14B pair): 4k+1 frames at 16 fps, trained on 81 frames (5 s), so a longer shot is a warning, and past 161 frames (10 s) it must be split. Width and height are multiples of 16 (WanVaceToVideo's step; its masks need /8); sizes that aren't legal are snapped down, then shrunk under 720p.",
-    "fps": 16,
+    "_note": "Wan 2.2 14B (Fun VACE is built on the A14B pair): 4k+1 frames, timed and saved at 24 fps though its spec says 16 (its motion is paced for 24; at 16 it plays as slow motion, as wan22_i2v), trained on 81 frames (3.4 s at 24), so a longer shot is a warning, and past 161 frames (6.7 s) it must be split. Width and height are multiples of 16 (WanVaceToVideo's step; its masks need /8); sizes that aren't legal are snapped down, then shrunk under 720p.",
+    "fps": 24,
     "frames": {
       "step": 4,
       "base": 5,

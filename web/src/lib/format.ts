@@ -16,12 +16,29 @@ export type BadgeKind =
   | "failed"
   | "unusable"
   | "missing-refs"
-  | "target";
+  | "target"
+  | "upscaled";
 
 export interface Badge {
   kind: BadgeKind;
   label: string;
   title: string;
+}
+
+/** Phase 13: a take's upscale as a badge (null: it has none). */
+export function upscaleBadge(t: TakeSummary | undefined): Badge | null {
+  const u = t?.upscale;
+  if (!u) return null;
+  const size = u.width && u.height ? `${u.width}×${u.height}` : "";
+  if (u.status === "queued") return { kind: "queued", label: "upscaling", title: `Upscale of ${tn(t!.take)} queued` };
+  if (u.status === "failed") return { kind: "failed", label: "upscale failed", title: u.save_notes || "The upscale failed" };
+  if (!u.fresh) return { kind: "stale", label: "2x stale", title: `The upscale (${size}) was made from an earlier ${tn(t!.take)}: upscale it again` };
+  const how = u.method === "seedvr2"
+    ? `SeedVR2, ${u.seedvr2_model ?? "?"}${u.on_upscale ? ", on an earlier upscale" : ""}`
+    : u.method === "pixel"
+    ? `pixel, ${u.pixel_model ?? "?"}${u.on_upscale ? ", on an earlier upscale" : ""}`
+    : `${u.route ?? "?"} route, from step ${u.start_step ?? "?"}${u.then_pixel ? `, then ${u.then_pixel.model}` : ""}`;
+  return { kind: "upscaled", label: "2x", title: `Upscaled to ${size} (${how}); Export 2x uses it` };
 }
 
 /** The take the cut uses for this shot (not for a placeholder: that's another pass). */
@@ -95,6 +112,8 @@ ${missingRefsTitle(missing)}`,
   }
   const stale = realStale(cutTake(s));
   if (stale.length) out.push({ kind: "stale", label: `stale: ${stale.join(",")}`, title: staleTitle(stale) });
+  const ub = upscaleBadge(cutTake(s));
+  if (ub) out.push(ub);
   if (s.override.fields.length) {
     out.push({ kind: "override", label: "override", title: `Override: ${s.override.fields.join(", ")}` });
     if (s.override.stale) {

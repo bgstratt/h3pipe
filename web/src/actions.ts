@@ -24,10 +24,10 @@ import {
   type CompareMode, type RefTakeRef, type VoiceClipState,
 } from "./store";
 import type {
-  AlignEvent, AlignMissing, AlignRequest, BuildResult, CutAudioSource, EpisodeStatus, Lora, NewEpisodeResult, SourceFile, OverrideFields, Pass,
+  AlignEvent, AlignMissing, AlignRequest, AssembleOptions, BuildResult, CutAudioSource, EpisodeStatus, Lora, NewEpisodeResult, SourceFile, OverrideFields, Pass,
   ProgressEvent, PromptEvent, Ref, RefEvent, RefGenerateRequest, RefTake, RenderRequest, RenderResult, RenderSkip, Seed,
   Issue, SeedMode, ShotDetail, TakeEvent, TakeRef, TargetProposal, TrackResult,
-  VoiceFromTakeRequest, WorkflowFile,
+  UpscaleEvent, UpscaleRequest, VoiceFromTakeRequest, WorkflowFile,
 } from "./types";
 
 const set = store.set;
@@ -434,7 +434,7 @@ export async function loadEpisodes() {
 
 export function selectEpisode(ep: string | null) {
   set((s) => ({
-    ep, shot: null, take: null, viewer: null, menu: null, redo: null, renderAsk: null, refSel: null,
+    ep, shot: null, take: null, viewer: null, menu: null, redo: null, renderAsk: null, upscaleAsk: null, refSel: null,
     cutPlay: { ...s.cutPlay, playing: false, pos: 0 },
     build: { busy: false, result: null, error: null },
     // Phase 9c: the Recording and voice-clip windows belong to one episode
@@ -940,6 +940,110 @@ export async function cancelTake(ref: TakeRef) {
 }
 
 /**
+ * Phase 13: queue upscales (POST /h3pipe/upscale): named final takes, or the
+ * final cut's take of each of `shots` (null: the whole final cut). Says what
+ * was queued and why anything wasn't; the h3pipe.upscale events refresh the
+ * status as each one finishes.
+ */
+export async function upscale(req: Omit<UpscaleRequest, "ep">, busyKey: string) {
+  const s = get();
+  if (!s.ep) return;
+  const ep = s.ep;
+  set({ menu: null });
+  return withBusy(`upscale|${busyKey}`, async () => {
+    try {
+      const r = await api().upscale({ ep, ...req });
+      const n = r.queued.length;
+      const why = [...r.errors.map((x) => `${x.shot}: ${x.error}`), ...r.skipped.map((x) => `${x.shot}: ${x.reason}`)];
+      host().toast(r.errors.length ? "warn" : n ? "info" : "warn",
+                   n ? `Queued ${n} upscale${n === 1 ? "" : "s"}` : "Nothing to upscale",
+                   why.slice(0, 6).join("\n") + (why.length > 6 ? `\n… and ${why.length - 6} more` : ""));
+      scheduleRefresh(0);
+    } catch (e) {
+      report("Couldn't upscale", e);
+    }
+  });
+}
+
+/** Phase 13: the Upscale dialog for one take, either pass (`redo`: it already has a fresh one). */
+export function upscaleTake(ref: TakeRef, redo = false) {
+  set({ menu: null, upscaleAsk: { title: `Upscale ${ref.shot} ${tn(ref.take)}`, pass: ref.pass,
+                                  takes: [{ shot: ref.shot, take: ref.take }], redo } });
+}
+
+/** Phase 13: the Upscale dialog for every take of the current pass's cut. */
+export function upscaleCut() {
+  const pass = get().pass;
+  set({ menu: null, upscaleAsk: { title: `Upscale the ${pass} cut`, pass, takes: null } });
+}
+
+export function closeUpscale() {
+  set({ upscaleAsk: null });
+}
+
+/** The Upscale dialog's choices. `method` "auto" leaves each take's default. */
+export interface UpscaleForm {
+  method: "auto" | "latent" | "pixel" | "seedvr2";
+  /** the SeedVR2 method's model (null: the server's default, 7b) */
+  seedvr2Model?: string | null;
+  pixelModel: string | null;
+  detail: 0 | 1 | 2;
+  redo: boolean;
+  vae: boolean;
+  /** 2 is the server's default */
+  scale: number;
+  /** a pixel step after a re-sample: its model (null: none) and scale */
+  thenModel: string | null;
+  thenScale: number;
+  /** pixel: on each take's existing upscale instead of the take */
+  fromUpscale: boolean;
+  encoder: "auto" | "nvenc" | "x264";
+  precision: "fp16" | "fp32";
+  frequencySplit: boolean;
+  keepSoft: number;
+  grain: number;
+}
+
+/** The POST /h3pipe/upscale body (less `ep`) for the dialog's choices: only
+ * what differs from the server's defaults is sent. */
+export function upscaleRequestOf(f: UpscaleForm, ask: { pass: Pass; takes: { shot: string; take: number }[] | null },
+                                 /** a take's re-sample starts with a pixel model (Wan) */ refineNeedsModel = false): Omit<UpscaleRequest, "ep"> {
+  const req: Omit<UpscaleRequest, "ep"> = ask.takes ? { pass: ask.pass, takes: ask.takes } : { pass: ask.pass, shots: null };
+  if (f.method !== "auto") req.method = f.method;
+  if (f.method !== "seedvr2" && (f.method !== "latent" || refineNeedsModel) && f.pixelModel) req.pixel_model = f.pixelModel;
+  if (f.method === "seedvr2" && f.seedvr2Model) req.seedvr2_model = f.seedvr2Model;
+  if ((f.method === "pixel" || f.method === "seedvr2") && f.fromUpscale) req.from_upscale = true;
+  if (f.encoder !== "auto") req.encoder = f.encoder;
+  if (f.precision !== "fp16") req.precision = f.precision;
+  if (!f.frequencySplit) req.frequency_split = false;
+  if (f.keepSoft) req.keep_soft = f.keepSoft;
+  if (f.grain) req.grain = f.grain;
+  if (f.method !== "pixel" && f.method !== "seedvr2" && f.detail) req.detail = f.detail;
+  if (f.method !== "pixel" && f.method !== "seedvr2" && f.vae) req.vae = true;
+  if (f.scale !== 2) req.scale = f.scale;
+  if (f.method !== "pixel" && f.method !== "seedvr2" && f.thenModel) {
+    req.then_pixel_model = f.thenModel;
+    if (f.thenScale !== 2) req.then_scale = f.thenScale;
+  }
+  if (f.redo) req.redo = true;
+  return req;
+}
+
+/** Phase 13: remove a take's upscale (DELETE /h3pipe/upscale). Asks first. */
+export async function removeUpscale(ref: TakeRef) {
+  set({ menu: null });
+  if (!confirm(`Remove ${ref.shot} ${tn(ref.take)}'s upscale? The take itself stays.`)) return;
+  return withBusy(`unupscale|${ref.shot}|${ref.take}`, async () => {
+    try {
+      await api().deleteUpscale(ref.ep, ref.shot, ref.take, ref.pass);
+      scheduleRefresh(0);
+    } catch (e) {
+      report(`Couldn't remove ${ref.shot} ${tn(ref.take)}'s upscale`, e);
+    }
+  });
+}
+
+/**
  * Discard a take (POST /h3pipe/discard): its files move to `_trash/` beside
  * them (nothing is deleted), and a cut that picked it goes back to the latest
  * usable take. Refused for a queued take (cancel it first). Asks first.
@@ -986,12 +1090,12 @@ export async function discardTake(ref: TakeRef, ask = true): Promise<boolean> {
   });
 }
 
-export async function assemble(partial = true) {
+export async function assemble(partial = true, opts?: AssembleOptions) {
   const s = get();
   if (!s.ep) return;
   set({ assemble: { busy: true, output: null, report: null, error: null } });
   try {
-    const r = await api().assemble(s.ep, s.pass, partial);
+    const r = await api().assemble(s.ep, s.pass, partial, opts);
     set({ assemble: { busy: false, output: r.output, report: r.report, error: r.ok ? null : r.report } });
     if (r.ok) host().toast("success", "Assembled", absPath(s.ep, r.output));
     else host().toast("error", "Assemble failed", r.report.slice(-400));
@@ -1062,6 +1166,9 @@ export interface RedoPlan {
    * shot that is right but for a frame or two. Absent leaves the workflow's own
    * setting, which is off. */
   keepFrames?: boolean;
+  /** keep the take's latent for an upscale (sent as `save_latent`); null/absent
+   * leaves the server's default: the final pass only, or the series config's rule */
+  keepLatent?: boolean | null;
   /** The prompt isn't the user's to set: the shot is retargeted, or this run is on
    * another target (its prompt is compiled at queue time). Sent as null, never saved. */
   lockPrompt?: boolean;
@@ -1076,6 +1183,8 @@ export function planRedo(p: RedoPlan, ep: string, d: ShotDetail): { override: Ov
   const base = { ...baseRender(ep, p.pass, [p.shot], !!p.allowMissingRefs, target, !!p.allowModelMismatch), redo: true, parent_take: p.parent, note: p.note, seed_mode: seedMode, seed };
   // only sent when asked for: the server leaves the workflow's value alone otherwise
   if (p.keepFrames) base.save_frames = true;
+  // only when the user chose: the series config's rule applies otherwise
+  if (p.keepLatent != null) base.save_latent = p.keepLatent;
   const prompt = p.lockPrompt ? null : p.prompt;
   // a one-off run on another target isn't saved: the override is the shot's own target's
   if (!p.saveAsOverride || target) {
@@ -1224,6 +1333,13 @@ export function wireEvents() {
     if (t.status === "ok" && isTracked(t)) host().toast("success", `${t.shot} ${tn(t.take)} rendered`);
     scheduleRefresh();
   });
+  h.on("h3pipe.upscale", (d) => {
+    const u = (d ?? {}) as UpscaleEvent;
+    if (!sameEp(u.ep, get().ep)) return;
+    if (u.status === "ok") host().toast("success", `${u.shot} ${tn(u.take)} upscaled`);
+    if (u.status === "failed") host().toast("error", `${u.shot} ${tn(u.take)}'s upscale failed`, "Its .up.json says why (Show details).");
+    scheduleRefresh();
+  });
   h.on("h3pipe.episode", (d) => {
     const ep = (d as { ep?: string } | null)?.ep;
     if (!sameEp(ep, get().ep)) return;
@@ -1269,17 +1385,24 @@ export function closeInspector() {
 // Play all
 // ---------------------------------------------------------------------------
 
-let plCache: { a?: EpisodeStatus; b?: EpisodeStatus; items: PlayItem[] } = { items: [] };
+let plCache: { a?: EpisodeStatus; b?: EpisodeStatus; up?: boolean; items: PlayItem[] } = { items: [] };
 
 /** The current pass's cut as a playlist (memoised on the status objects). */
 const NO_ITEMS: PlayItem[] = [];
+
+/** Phase 13: the viewer's and Play all's 2x (remembered). */
+export function toggleUpscaled(on?: boolean) {
+  set((s) => ({ upscaled: on ?? !s.upscaled }));
+}
 
 export function currentPlaylist(s: AppState = get()): PlayItem[] {
   // a stable empty list: components select it (useSyncExternalStore wants the same value back)
   if (!s.ep) return NO_ITEMS;
   const st = s.status[statusKey(s.ep, s.pass)];
   const other = s.status[statusKey(s.ep, s.pass === "proxy" ? "final" : "proxy")];
-  if (plCache.a !== st || plCache.b !== other) plCache = { a: st, b: other, items: buildPlaylist(st, other) };
+  if (plCache.a !== st || plCache.b !== other || plCache.up !== s.upscaled) {
+    plCache = { a: st, b: other, up: s.upscaled, items: buildPlaylist(st, other, s.upscaled) };
+  }
   return plCache.items;
 }
 

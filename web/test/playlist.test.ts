@@ -1,7 +1,7 @@
 // Play all: trim maths, the playlist, and stepping through it on one clock.
 import { describe, expect, it } from "vitest";
 import {
-  atOutPoint, buildPlaylist, clipOffset, cutTime, fileTime, framesOf, locate, nextVideo, startOf, totalDuration, trimWindow,
+  atOutPoint, buildPlaylist, clipOffset, cutTime, fileTime, framesOf, locate, nextVideo, playFile, startOf, totalDuration, trimWindow,
   type PlayItem,
 } from "../src/lib/playlist";
 import type { CutInfo, EpisodeStatus, ShotStatus, TakeSummary } from "../src/types";
@@ -25,6 +25,25 @@ function shot(id: string, length: number, over: Partial<ShotStatus> = {}, cut: P
 function ep(shots: ShotStatus[], pass: "proxy" | "final" = "proxy"): EpisodeStatus {
   return { episode: "ep", title: "", pass, fps: 24, width: 448, height: 256, folder: "renders_proxy", shots };
 }
+
+describe("Play all's 2x (Phase 13)", () => {
+  const up = (over = {}) => ({ status: "ok" as const, fresh: true, width: 896, height: 512, route: "pixel" as const, start_step: null,
+                               comfy_prompt_id: null, mp4: "r/a/t1.up.mp4", save_notes: "", ...over });
+  it("plays a take's fresh upscale only when asked", () => {
+    const t = take(1, { mp4: "r/a/t1.mp4", upscale: up() });
+    expect(playFile(t)).toBe("r/a/t1.mp4");
+    expect(playFile(t, true)).toBe("r/a/t1.up.mp4");
+    expect(playFile(take(1, { mp4: "r/a/t1.mp4", upscale: up({ fresh: false }) }), true)).toBe("r/a/t1.mp4");
+    expect(playFile(take(1, { mp4: "r/a/t1.mp4", upscale: up({ status: "queued" }) }), true)).toBe("r/a/t1.mp4");
+    expect(playFile(take(1, { mp4: "r/a/t1.mp4" }), true)).toBe("r/a/t1.mp4");
+  });
+  it("the playlist swaps the file, never the timing", () => {
+    const st = ep([shot("a", 48, { takes: [take(1, { mp4: "r/a/t1.mp4", upscale: up() })] }), shot("b", 24)]);
+    const plain = buildPlaylist(st), big = buildPlaylist(st, undefined, true);
+    expect(big.map((i) => i.mp4)).toEqual(["r/a/t1.up.mp4", "r/b/t1.mp4"]);
+    expect(big.map((i) => [i.start, i.dur])).toEqual(plain.map((i) => [i.start, i.dur]));
+  });
+});
 
 describe("trimWindow", () => {
   it("drops trim_in frames from the head and trim_out from the tail", () => {

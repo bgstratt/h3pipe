@@ -89,7 +89,8 @@
                          "sidecar": "sidecar"},
               "replace": {"class_type": "CreateVideo", "inputs": {"images": "images", "audio": "audio"}},
               "drop": ["SaveVideo", "PreviewAny"],
-              "set": {"save_frames": false}},
+              "set": {"save_frames": false},
+              "latent": {"class_type": "SamplerCustomAdvanced", "output": 0, "upstream_of": "images"}},
     "prune": true,
     "params": {
       "model": {"class_type": "UNETLoader", "field": "unet_name"},
@@ -186,6 +187,18 @@
       "duration_head": "ltx-2.5-duration-head-bf16.safetensors",
       "default_seconds": 5.0, "min_seconds": 1.0, "max_seconds": 20.0
     }
+  },
+
+  "upscale": {
+    "_note": "Phase 13d (docs/PLAN.md, h3upscale.py): the render graph is already two-stage, so an upscale is its second stage run again on the take: the take's latent through the graph's own LTXVLatentUpsampler (2x, the `upscaler` model param), its audio held, and the stage's ManualSigmas cut to the tail from `start` (0.875 of its 3 steps: the last, from 0.42). No new nodes or files.",
+    "mode": "second_stage",
+    "scale": 2,
+    "steps": 3,
+    "start": 0.875,
+    "align": 32,
+    "upsampler": {"class_type": "LTXVLatentUpsampler", "input": "samples"},
+    "sigmas": {"class_type": "ManualSigmas", "field": "sigmas"},
+    "encode_audio": {"class_type": "LTXVAudioVAEEncode", "audio": "audio", "vae": "audio_vae"}
   },
 
   "downloads": {

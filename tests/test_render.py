@@ -449,6 +449,8 @@ class FakeComfy:
             return pid
         if any(v["class_type"] in ("H3SaveRefAudio", "SaveAudio") for v in graph.values()):
             return self.run_audio(graph, pid)
+        if any(v["class_type"] == "H3SaveUpscale" for v in graph.values()):
+            return self.run_upscale(graph, pid)
         if not any(v["class_type"] == J.SAVER for v in graph.values()):
             return self.run_image(graph, pid)
         si = next(v["inputs"] for v in graph.values() if v["class_type"] == J.SAVER)
@@ -472,6 +474,29 @@ class FakeComfy:
             T.update_sidecar(os.path.join(root, si["sidecar"]), status="ok",
                              finished=T.now(), frames=shot["length"], mp4=stem + ".mp4",
                              thumb=None, strip=None, save_notes="fake")
+        self.history[pid] = {"status": {"status_str": "success", "completed": True},
+                             "outputs": {}}
+        return pid
+
+    def run_upscale(self, graph: dict, pid: str) -> str:
+        """An upscale (Phase 13): what H3SaveUpscale does, at the size the
+        loader's resolution_override asks for."""
+        si = next(v["inputs"] for v in graph.values() if v["class_type"] == "H3SaveUpscale")
+        root = si["project_root"]
+        px = next((v["inputs"] for v in graph.values()
+                   if v["class_type"] in ("H3PixelUpscale", "ImageScale")), None)
+        if px is not None:                       # the pixel method: its node says the size
+            w, h = px["width"], px["height"]
+        else:
+            loader = next(v["inputs"] for v in graph.values() if v["class_type"] == J.LOADER)
+            w, h = (int(x) for x in loader["resolution_override"].split("x"))
+        with open(os.path.join(root, si["out_mp4"]), "wb") as fh:
+            fh.write(b"upscaled")
+        if self.mode == "node":
+            T.update_sidecar(os.path.join(root, si["sidecar"]), status="ok",
+                             finished=T.now(), width=w, height=h,
+                             mp4=os.path.basename(si["out_mp4"]), audio="copied",
+                             save_notes="fake")
         self.history[pid] = {"status": {"status_str": "success", "completed": True},
                              "outputs": {}}
         return pid

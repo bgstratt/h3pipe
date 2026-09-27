@@ -271,6 +271,10 @@
        "40",
        0
       ],
+      "latent": [
+       "34",
+       0
+      ],
       "project_root": "<ROOT>",
       "save_frames": false,
       "shot_id": [
@@ -448,6 +452,7 @@
       "slot": "Picture 4"
      }
     ],
+    "save_latent": true,
     "seed": 8828384270954910346,
     "seed_source": "stable",
     "shot": "sh010",
@@ -731,6 +736,10 @@
        "40",
        0
       ],
+      "latent": [
+       "34",
+       0
+      ],
       "project_root": "<ROOT>",
       "save_frames": false,
       "shot_id": [
@@ -950,6 +959,7 @@
       "subject": "bo"
      }
     ],
+    "save_latent": true,
     "seed": 2769191069994745345,
     "seed_source": "stable",
     "shot": "sh020",
@@ -1233,6 +1243,10 @@
        "40",
        0
       ],
+      "latent": [
+       "34",
+       0
+      ],
       "project_root": "<ROOT>",
       "save_frames": false,
       "shot_id": [
@@ -1424,6 +1438,7 @@
       "subject": "ada"
      }
     ],
+    "save_latent": true,
     "seed": 9049780455082391214,
     "seed_source": "stable",
     "shot": "sh030",
@@ -1707,6 +1722,10 @@
        "40",
        0
       ],
+      "latent": [
+       "34",
+       0
+      ],
       "project_root": "<ROOT>",
       "save_frames": false,
       "shot_id": [
@@ -1893,6 +1912,7 @@
       "slot": "Picture 4"
      }
     ],
+    "save_latent": true,
     "seed": 2765843861826537092,
     "seed_source": "stable",
     "shot": "sh040",
@@ -2176,6 +2196,10 @@
        "40",
        0
       ],
+      "latent": [
+       "34",
+       0
+      ],
       "project_root": "<ROOT>",
       "save_frames": false,
       "shot_id": [
@@ -2387,6 +2411,7 @@
       "subject": "rex"
      }
     ],
+    "save_latent": true,
     "seed": 4412217473130868673,
     "seed_source": "stable",
     "shot": "sh050",
@@ -2670,6 +2695,10 @@
        "40",
        0
       ],
+      "latent": [
+       "34",
+       0
+      ],
       "project_root": "<ROOT>",
       "save_frames": false,
       "shot_id": [
@@ -2873,6 +2902,7 @@
       "subject": "cy"
      }
     ],
+    "save_latent": true,
     "seed": 7624922143456421625,
     "seed_source": "stable",
     "shot": "sh060",
@@ -3156,6 +3186,10 @@
        "40",
        0
       ],
+      "latent": [
+       "34",
+       0
+      ],
       "project_root": "<ROOT>",
       "save_frames": false,
       "shot_id": [
@@ -3360,6 +3394,7 @@
       "slot": "Audio 1"
      }
     ],
+    "save_latent": true,
     "seed": 3054841815674432230,
     "seed_source": "stable",
     "shot": "sh110",
@@ -3643,6 +3678,10 @@
        "40",
        0
       ],
+      "latent": [
+       "34",
+       0
+      ],
       "project_root": "<ROOT>",
       "save_frames": false,
       "shot_id": [
@@ -3829,6 +3868,7 @@
       "slot": "Audio 1"
      }
     ],
+    "save_latent": true,
     "seed": 985161046565145751,
     "seed_source": "stable",
     "shot": "sh120",
@@ -4112,6 +4152,10 @@
        "40",
        0
       ],
+      "latent": [
+       "34",
+       0
+      ],
       "project_root": "<ROOT>",
       "save_frames": false,
       "shot_id": [
@@ -4298,6 +4342,7 @@
       "slot": "Audio 1"
      }
     ],
+    "save_latent": true,
     "seed": 1964752148325355590,
     "seed_source": "stable",
     "shot": "sh130",
@@ -4581,6 +4626,10 @@
        "40",
        0
       ],
+      "latent": [
+       "34",
+       0
+      ],
       "project_root": "<ROOT>",
       "save_frames": false,
       "shot_id": [
@@ -4758,6 +4807,7 @@
       "slot": "Audio 1"
      }
     ],
+    "save_latent": true,
     "seed": 5738520875936942780,
     "seed_source": "stable",
     "shot": "sh140",
@@ -5041,6 +5091,10 @@
        "40",
        0
       ],
+      "latent": [
+       "34",
+       0
+      ],
       "project_root": "<ROOT>",
       "save_frames": false,
       "shot_id": [
@@ -5218,6 +5272,7 @@
       "slot": "Picture 4"
      }
     ],
+    "save_latent": true,
     "seed": 5193023516762493768,
     "seed_source": "stable",
     "shot": "sh150",
@@ -5501,6 +5556,10 @@
        "40",
        0
       ],
+      "latent": [
+       "34",
+       0
+      ],
       "project_root": "<ROOT>",
       "save_frames": false,
       "shot_id": [
@@ -5724,6 +5783,7 @@
       "subject": "narrator"
      }
     ],
+    "save_latent": true,
     "seed": 1998322879969458948,
     "seed_source": "stable",
     "shot": "sh210",
@@ -6007,6 +6067,10 @@
        "40",
        0
       ],
+      "latent": [
+       "34",
+       0
+      ],
       "project_root": "<ROOT>",
       "save_frames": false,
       "shot_id": [
@@ -6185,6 +6249,7 @@
       "slot": "Picture 4"
      }
     ],
+    "save_latent": true,
     "seed": 6151578644003521749,
     "seed_source": "stable",
     "shot": "sh310",
@@ -6468,6 +6533,10 @@
        "40",
        0
       ],
+      "latent": [
+       "34",
+       0
+      ],
       "project_root": "<ROOT>",
       "save_frames": false,
       "shot_id": [
@@ -6682,6 +6751,7 @@
       "subject": "ada"
      }
     ],
+    "save_latent": true,
     "seed": 5660381186064488857,
     "seed_source": "stable",
     "shot": "sh320",
@@ -6965,6 +7035,10 @@
        "40",
        0
       ],
+      "latent": [
+       "34",
+       0
+      ],
       "project_root": "<ROOT>",
       "save_frames": false,
       "shot_id": [
@@ -7157,6 +7231,7 @@
       "subject": "bo"
      }
     ],
+    "save_latent": true,
     "seed": 5114629555451768005,
     "seed_source": "stable",
     "shot": "sh330",
@@ -7440,6 +7515,10 @@
        "40",
        0
       ],
+      "latent": [
+       "34",
+       0
+      ],
       "project_root": "<ROOT>",
       "save_frames": false,
       "shot_id": [
@@ -7644,6 +7723,7 @@
       "subject": "narrator"
      }
     ],
+    "save_latent": true,
     "seed": 2470138522001882497,
     "seed_source": "stable",
     "shot": "sh340",

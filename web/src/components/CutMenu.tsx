@@ -3,6 +3,7 @@
 // from the other pass.
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { upscaleCut } from "../actions";
 import { copyCut, redoCut, resetCut, toggleWaves, undoCut } from "../cutActions";
 import { clipsWithAudio } from "../lib/audioSource";
 import { statusKey, store, useApp } from "../store";
@@ -93,6 +94,10 @@ export function CutMenu() {
       </button>
       <button onClick={run(() => copyCut("all"))} title={`Order, trims and audio sources from the ${other} cut (picks are never copied)`}>
         <i className="pi pi-copy" /> Copy order, trims and audio from {other}
+      </button>
+      <div className="h3-menu-sep" />
+      <button onClick={run(() => upscaleCut())} title={`Upscale every take of the ${pass} cut that isn't yet (2x, its own audio kept); Export 2x then assembles from them`}>
+        <i className="pi pi-arrow-up-right" /> Upscale the cut (2x)…
       </button>
       <div className="h3-menu-sep" />
       <button onClick={run(() => toggleWaves())}>

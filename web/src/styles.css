@@ -117,6 +117,7 @@
 .h3-b-orphan { color: var(--h3-failed); border-style: dashed; }
 .h3-b-failed, .h3-b-unusable { color: var(--h3-failed); }
 .h3-b-cut { color: var(--h3-accent); }
+.h3-b-upscaled { color: var(--h3-ok); font-weight: 600; }
 .h3-b-ok { color: var(--h3-ok); }
 .h3-b-target { color: var(--h3-target); font-weight: 600; letter-spacing: 0.02em; }
 .h3-pane-label .h3-b-target { color: #6fe0da; }

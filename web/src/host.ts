@@ -17,7 +17,9 @@ export type HostEvent =
   /** Phase 9c-A: an h3align run's stages (transcribe / match / write) */
   | "h3pipe.align"
   /** P10: a pass's notepad changed (a note added, resolved or cleared) */
-  | "h3pipe.issues";
+  | "h3pipe.issues"
+  /** Phase 13: a take's upscale was queued, finished, failed or deleted */
+  | "h3pipe.upscale";
 
 export type Severity = "success" | "info" | "warn" | "error";
 /** Docked surfaces (sidebar tabs and the bottom panel). The inspector and the

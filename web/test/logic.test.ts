@@ -1,7 +1,7 @@
 // Badges, grouping, paths, the override form and redo planning.
 import { describe, expect, it } from "vitest";
-import { planRedo } from "../src/actions";
-import { absPath, groupBySequence, sameEp, shotBadges, shotSeconds } from "../src/lib/format";
+import { planRedo, upscaleRequestOf } from "../src/actions";
+import { absPath, groupBySequence, sameEp, shotBadges, shotSeconds, upscaleBadge } from "../src/lib/format";
 import { formFromDetail, overrideFields } from "../src/lib/overrideForm";
 import type { ShotDetail, ShotStatus, TakeSummary } from "../src/types";
 
@@ -24,6 +24,77 @@ function shot(over: Partial<ShotStatus> = {}): ShotStatus {
 }
 
 const kinds = (s: ShotStatus, r?: Set<number>) => shotBadges(s, r).map((b) => b.kind);
+
+describe("upscaleRequestOf (the Upscale dialog)", () => {
+  const f = { method: "auto" as const, pixelModel: "RealESRGAN_x2.pth", detail: 0 as const, redo: false, vae: false,
+              scale: 2, thenModel: null, thenScale: 2, fromUpscale: false,
+              encoder: "auto" as const, precision: "fp16" as const,
+              frequencySplit: true, keepSoft: 0, grain: 0 };
+  const one = { pass: "final" as const, takes: [{ shot: "sh020", take: 3 }] };
+  it("defaults send only what's asked: the pass, the take, and the pixel model for takes without a re-sample", () => {
+    expect(upscaleRequestOf(f, one)).toEqual({ pass: "final", takes: [{ shot: "sh020", take: 3 }], pixel_model: "RealESRGAN_x2.pth" });
+    expect(upscaleRequestOf(f, { pass: "proxy", takes: null })).toEqual({ pass: "proxy", shots: null, pixel_model: "RealESRGAN_x2.pth" });
+  });
+  it("a Wan re-sample sends its pixel model", () => {
+    expect(upscaleRequestOf({ ...f, method: "latent" }, one, true).pixel_model).toBe("RealESRGAN_x2.pth");
+  });
+  it("latent: detail and vae, never a pixel model", () => {
+    expect(upscaleRequestOf({ ...f, method: "latent", detail: 2, vae: true, redo: true }, one))
+      .toEqual({ pass: "final", takes: [{ shot: "sh020", take: 3 }], method: "latent", detail: 2, vae: true, redo: true });
+  });
+  it("a scale other than 2, and a then-pixel step (not for the pixel method)", () => {
+    expect(upscaleRequestOf({ ...f, scale: 1.5, thenModel: "RealESRGAN_x2.pth", thenScale: 2 }, one))
+      .toMatchObject({ scale: 1.5, then_pixel_model: "RealESRGAN_x2.pth" });
+    expect("then_scale" in upscaleRequestOf({ ...f, thenModel: "RealESRGAN_x2.pth" }, one)).toBe(false);
+    expect(upscaleRequestOf({ ...f, thenModel: "RealESRGAN_x4.pth", thenScale: 4 }, one).then_scale).toBe(4);
+    expect("then_pixel_model" in upscaleRequestOf({ ...f, method: "pixel", thenModel: "x.pth" }, one)).toBe(false);
+  });
+  it("the finish only when not the defaults", () => {
+    const d = upscaleRequestOf(f, one);
+    expect("frequency_split" in d || "keep_soft" in d || "grain" in d).toBe(false);
+    expect(upscaleRequestOf({ ...f, frequencySplit: false, keepSoft: 0.5, grain: 0.02 }, one))
+      .toMatchObject({ frequency_split: false, keep_soft: 0.5, grain: 0.02 });
+  });
+  it("encoder and precision only when not the defaults", () => {
+    expect(upscaleRequestOf({ ...f, encoder: "nvenc", precision: "fp32" }, one)).toMatchObject({ encoder: "nvenc", precision: "fp32" });
+    const d = upscaleRequestOf(f, one);
+    expect("encoder" in d || "precision" in d).toBe(false);
+  });
+  it("seedvr2: its model, never the pixel model, detail or a then step", () => {
+    const r = upscaleRequestOf({ ...f, method: "seedvr2", seedvr2Model: "seedvr2_3b_int8_convrot.safetensors",
+                                 detail: 2, vae: true, thenModel: "x.pth", fromUpscale: true }, one);
+    expect(r).toMatchObject({ method: "seedvr2", seedvr2_model: "seedvr2_3b_int8_convrot.safetensors", from_upscale: true });
+    expect("pixel_model" in r || "detail" in r || "vae" in r || "then_pixel_model" in r).toBe(false);
+  });
+  it("on top of an upscale: pixel only", () => {
+    expect(upscaleRequestOf({ ...f, method: "pixel", fromUpscale: true }, one).from_upscale).toBe(true);
+    expect("from_upscale" in upscaleRequestOf({ ...f, method: "latent", fromUpscale: true }, one)).toBe(false);
+  });
+  it("pixel: the model, never detail or vae", () => {
+    expect(upscaleRequestOf({ ...f, method: "pixel", pixelModel: "4x-UltraSharp.pth", detail: 2, vae: true }, one))
+      .toEqual({ pass: "final", takes: [{ shot: "sh020", take: 3 }], method: "pixel", pixel_model: "4x-UltraSharp.pth" });
+  });
+});
+
+describe("upscaleBadge (Phase 13)", () => {
+  const up = (over: object) => ({ status: "ok", fresh: true, width: 1920, height: 1088, route: "latent", start_step: 7,
+                                  comfy_prompt_id: null, mp4: "renders/sh020/sh020_t01.up.mp4", save_notes: "", ...over });
+  it("no upscale, no badge", () => {
+    expect(upscaleBadge(take(1))).toBeNull();
+    expect(upscaleBadge(take(1, { upscale: null }))).toBeNull();
+    expect(upscaleBadge(undefined)).toBeNull();
+  });
+  it("fresh, queued, stale and failed", () => {
+    expect(upscaleBadge(take(1, { upscale: up({}) as never }))).toMatchObject({ kind: "upscaled", label: "2x" });
+    expect(upscaleBadge(take(1, { upscale: up({ status: "queued", fresh: false }) as never }))!.label).toBe("upscaling");
+    expect(upscaleBadge(take(1, { upscale: up({ fresh: false }) as never }))).toMatchObject({ kind: "stale", label: "2x stale" });
+    expect(upscaleBadge(take(1, { upscale: up({ status: "failed", fresh: false }) as never }))!.kind).toBe("failed");
+  });
+  it("the cut take's upscale shows on the shot", () => {
+    expect(kinds(shot({ takes: [take(1, { upscale: up({}) as never })] }))).toContain("upscaled");
+    expect(kinds(shot({ takes: [take(1)] }))).not.toContain("upscaled");
+  });
+});
 
 describe("shotBadges", () => {
   it("no badges for a clean shot", () => {
@@ -148,6 +219,14 @@ describe("planRedo", () => {
     const p = planRedo({ ...base, seed: { mode: "typed", seed: "77" }, steps: 10, prompt: "tweaked", saveAsOverride: true }, "E", detail());
     expect(p.override).toEqual({ prompt: "tweaked", steps: 10, seed: "77" });
     expect(p.render).toMatchObject({ prompt: null, model: null, loras: null, steps: null, seed: "77", parent_take: 2, redo: true });
+  });
+  it("keep the latent is only sent when chosen (Phase 13a)", () => {
+    const dflt = planRedo({ ...base, seed: { mode: "new" }, saveAsOverride: false }, "E", detail());
+    expect("save_latent" in dflt.render).toBe(false);
+    const on = planRedo({ ...base, seed: { mode: "new" }, saveAsOverride: false, keepLatent: true }, "E", detail());
+    expect(on.render.save_latent).toBe(true);
+    const off = planRedo({ ...base, seed: { mode: "new" }, saveAsOverride: true, keepLatent: false }, "E", detail());
+    expect(off.render.save_latent).toBe(false);
   });
   it("save as override with nothing changed and a new seed writes no override", () => {
     const p = planRedo({ ...base, seed: { mode: "new" }, saveAsOverride: true }, "E", detail());
