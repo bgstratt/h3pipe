@@ -144,18 +144,42 @@ class H3PixelUpscale:
     CATEGORY = "H3/upscale"
 
     def upscale(self, images, upscale_model, width, height, chunk=4):
+        # What core's ImageUpscaleWithModel does, but with the model loaded once
+        # for the whole clip: calling that node per batch re-ran its load (and
+        # logged "prepared for dynamic VRAM loading") for every batch.
+        import comfy.model_management as mm
         import comfy.utils
-        from comfy_extras.nodes_upscale_model import ImageUpscaleWithModel
 
-        n = int(images.shape[0])
-        out = torch.empty((n, int(height), int(width), 3), dtype=torch.float16)
-        for i in range(0, n, int(chunk)):
-            got = ImageUpscaleWithModel.execute(upscale_model, images[i:i + int(chunk)])
-            big = got.args[0] if hasattr(got, "args") else got[0]
-            if big.shape[1] != height or big.shape[2] != width:
-                big = comfy.utils.common_upscale(big.movedim(-1, 1), int(width), int(height),
-                                                 "lanczos", "disabled").movedim(1, -1)
-            out[i:i + big.shape[0]] = big.clamp(0, 1).to("cpu", torch.float16)
+        n, chunk = int(images.shape[0]), max(1, int(chunk))
+        width, height = int(width), int(height)
+        scale = max(float(getattr(upscale_model, "scale", 1.0)), 1.0)
+        per_batch = images[:chunk].nelement() * images.element_size()
+        mm.load_models_gpu([upscale_model.patcher],
+                           memory_required=(512 * 512 * 3) * images.element_size() * scale * 384.0
+                           + per_batch, force_full_load=True)
+        device = upscale_model.patcher.load_device
+        pbar = comfy.utils.ProgressBar(n)
+        out = torch.empty((n, height, width, 3), dtype=torch.float16)
+        tile, overlap = 512, 32
+        for i in range(0, n, chunk):
+            batch = images[i:i + chunk].movedim(-1, -3).to(device)
+            while True:
+                try:
+                    big = comfy.utils.tiled_scale(batch, lambda a: upscale_model(a.float()),
+                                                  tile_x=tile, tile_y=tile, overlap=overlap,
+                                                  upscale_amount=upscale_model.scale,
+                                                  output_device=mm.intermediate_device())
+                    break
+                except Exception as e:
+                    mm.raise_non_oom(e)            # only out-of-memory gets a smaller tile
+                    tile //= 2
+                    if tile < 128:
+                        raise
+            big = big.clamp(0, 1)
+            if big.shape[-2] != height or big.shape[-1] != width:
+                big = comfy.utils.common_upscale(big, width, height, "lanczos", "disabled")
+            out[i:i + big.shape[0]] = big.movedim(1, -1).to("cpu", torch.float16)
+            pbar.update(big.shape[0])
         return (out,)
 
 

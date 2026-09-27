@@ -120,46 +120,65 @@ class UpscaleNodesTest(unittest.TestCase):
         self.assertEqual((rec["status"], rec["audio"]), ("ok", "none"))
 
 
-def fake_upscaler_modules(factor: int = 4) -> dict:
-    """sys.modules entries for comfy.utils (common_upscale) and core's
-    ImageUpscaleWithModel, so H3PixelUpscale runs outside ComfyUI: the "model"
-    repeats pixels `factor` times and counts its calls."""
+class FakeUpscaleModel:
+    """An upscale model's shape (scale, patcher.load_device, callable on BCHW):
+    repeats pixels `scale` times and counts the batches it sees."""
+
+    def __init__(self, scale: int = 4):
+        import types
+        self.scale = scale
+        self.patcher = types.SimpleNamespace(load_device="cpu")
+        self.calls: list[int] = []
+
+    def __call__(self, x):
+        self.calls.append(int(x.shape[0]))
+        return x.repeat_interleave(self.scale, 2).repeat_interleave(self.scale, 3)
+
+
+def fake_upscaler_modules() -> dict:
+    """sys.modules entries for comfy.utils and comfy.model_management, so
+    H3PixelUpscale runs outside ComfyUI. `loads` counts load_models_gpu calls."""
     import types
     comfy = types.ModuleType("comfy")
     utils = types.ModuleType("comfy.utils")
+    mm = types.ModuleType("comfy.model_management")
 
     def common_upscale(s, w, h, method, crop):
         return torch.nn.functional.interpolate(s, size=(h, w), mode="bilinear", align_corners=False)
-    utils.common_upscale = common_upscale
-    comfy.utils = utils
-    extras = types.ModuleType("comfy_extras")
-    mod = types.ModuleType("comfy_extras.nodes_upscale_model")
-    calls = []
 
-    class Out:
-        def __init__(self, x):
-            self.args = (x,)
+    def tiled_scale(samples, function, tile_x=64, tile_y=64, overlap=8, upscale_amount=4,
+                    out_channels=3, output_device="cpu", pbar=None):
+        return function(samples)
 
-    class ImageUpscaleWithModel:
-        @classmethod
-        def execute(cls, model, image):
-            calls.append(int(image.shape[0]))
-            return Out(image.repeat_interleave(factor, 1).repeat_interleave(factor, 2))
-    mod.ImageUpscaleWithModel = ImageUpscaleWithModel
-    mod.calls = calls
-    extras.nodes_upscale_model = mod
-    return {"comfy": comfy, "comfy.utils": utils, "comfy_extras": extras,
-            "comfy_extras.nodes_upscale_model": mod}
+    class ProgressBar:
+        def __init__(self, total):
+            self.total, self.done = total, 0
+
+        def update(self, n):
+            self.done += n
+
+    utils.common_upscale, utils.tiled_scale, utils.ProgressBar = common_upscale, tiled_scale, ProgressBar
+    mm.loads = []
+    mm.load_models_gpu = lambda models, **kw: mm.loads.append(len(models))
+    mm.intermediate_device = lambda: "cpu"
+
+    def raise_non_oom(e):
+        raise e
+    mm.raise_non_oom = raise_non_oom
+    comfy.utils, comfy.model_management = utils, mm
+    return {"comfy": comfy, "comfy.utils": utils, "comfy.model_management": mm}
 
 
 class PixelNodeTest(unittest.TestCase):
     def test_batches_resized_to_the_target(self):
         frames = clip(10)                                          # 10 x 48 x 96
-        mods = fake_upscaler_modules(4)
+        mods, model = fake_upscaler_modules(), FakeUpscaleModel(4)
         with mock.patch.dict(sys.modules, mods):
-            (out,) = UN.H3PixelUpscale().upscale(frames, object(), 192, 96, chunk=4)
+            (out,) = UN.H3PixelUpscale().upscale(frames, model, 192, 96, chunk=4)
         self.assertEqual(tuple(out.shape), (10, 96, 192, 3))       # 4x model, 2x out
-        self.assertEqual(mods["comfy_extras.nodes_upscale_model"].calls, [4, 4, 2])
+        self.assertEqual(model.calls, [4, 4, 2])
+        # the model is loaded once for the clip, not once per batch
+        self.assertEqual(mods["comfy.model_management"].loads, [1])
         # frame order and content kept: frame i's red is i/9
         for i in (0, 5, 9):
             self.assertAlmostEqual(float(out[i, :, :, 0].mean()), i / 9, delta=0.01)
