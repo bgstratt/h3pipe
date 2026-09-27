@@ -891,8 +891,7 @@ def get_upscale_options(ctx: Context, query: dict):
             # what the dialog needs to judge a scale: LTX's is fixed, H3's sizes
             # land on `align`
             r = dict(r, mode=spec.get("mode", U.RESAMPLE), align=U.align_of(spec),
-                     fixed_scale=float(spec.get("scale", 2))
-                     if spec.get("mode") == U.SECOND_STAGE else None)
+                     fixed_scale=U.fixed_scale(spec))
         latent[t.id] = r
     return 200, {"pixel": px, "seedvr2": sv2, "latent": latent, "details": list(U.DETAILS),
                  "max_scale": U.MAX_SCALE, "encoders": list(U.ENCODERS),

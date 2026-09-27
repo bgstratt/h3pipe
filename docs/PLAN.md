@@ -1710,9 +1710,10 @@ the one clip that wasn't upscaled scaled and named; `h3assemble` without it is u
   badges, viewer toggle and Export 2x were checked by type and unit tests and the mock API;
   the look of them is the user's to confirm.
 
-**13d — upscale on LTX and Wan (planned 2026-09-26, not started).** What each needs, from
-what this machine and the repo have today. Nothing below is built; each target gets an
-`upscale` block in its target.json and its own graph surgery in h3upscale.
+**13d — upscale on LTX and Wan (planned 2026-09-26; every built-in video target built by
+2026-09-27).** What each needed, from what this machine and the repo had; each target got
+an `upscale` block in its target.json and its own graph surgery in h3upscale. The plan's
+text is kept under each "built" note.
 
 - **`ltx2`: built 2026-09-26** (mode `second_stage` in h3upscale; `saver.latent` names the
   final sampler by `upstream_of: images`, since the graph has two). Live on the scratch
@@ -1732,7 +1733,8 @@ what this machine and the repo have today. Nothing below is built; each target g
   widgets), audio held. LTX's AV latent is the same NestedTensor pair, so `H3HoldAudio`
   works on it (worth a target-neutral name). 768×512 → 1536×1024. To find out: whether a
   2x of the *final* output fits and is worth it, and how much of the tail keeps the mouth.
-- **`ltx2_ingredients` (LTX-2.3 + IC-LoRA): no new downloads**
+- **`ltx2_ingredients` (LTX-2.3 + IC-LoRA): built 2026-09-27**, see "The rest" below.
+  Planned: no new downloads
   (`ltx-2.3-spatial-upscaler-x2-1.1.safetensors` is in `latent_upscale_models`, and
   `LTXVLatentUpsampler` is core). Harder: the reference sheet goes in as IC-LoRA guides
   (`LTXVAddGuide` / `LTXVCropGuides`) that must be rebuilt at the new size.
@@ -1778,11 +1780,45 @@ what this machine and the repo have today. Nothing below is built; each target g
   at the new size (i2v: the low-noise `KSamplerAdvanced` from step 3 of 4, add_noise on,
   `WanImageToVideo` and its staged first frame rebuilt at the new size; ti2v: its `KSampler`
   at denoise 0.25). No latent kept or needed; silent, so nothing to hold. ti2v defaults to
-  1.5x (its 1280×704 at 2x is 2560×1408). `wan22_vace` stays on the pixel method: its latent
-  carries the reference frame in front, which a plain encoded video doesn't match. Live:
+  1.5x (its 1280×704 at 2x is 2560×1408). (`wan22_vace` waited: its latent carries the
+  reference frame in front, which a plain encoded video doesn't match; see "The rest".) Live:
   sh760 on wan22_ti2v (1280×704, 69 frames, 87 s) upscaled to 1920×1056 in 237 s (5 of 20
   steps at 1080p on the 5B, h264_nvenc in 1.8 s): sharper eyes, hair, lettering and edges,
   the face kept. Slow: a later `start` or the pixel method when time matters.
+- **The rest: `minimax_h3_fl2va`, `wan22_vace`, `ltx2_ingredients`, built 2026-09-27**
+  (on the `upscale` branch after PR #1; unit-tested, the live check pending a ComfyUI
+  restart for the `H3HoldAudio` change):
+  - **FL2VA** (mode `resample`, as Ref2VA's, the same H3 latent upscaler): no loader, so
+    `size: "params"` puts the new size on `MiniMaxH3ImageToVideo`'s width/height, which
+    stretches the keyframes to it; its keyframes and the dialogue anchor
+    (`MiniMaxH3AddGuide`, which reads its size from that node's latent) are conditioning,
+    not latent, so replacing the latent keeps them. `saver.latent` is its one
+    `SamplerCustomAdvanced`.
+  - **VACE** (mode `pixel_refine`, as I2V's, plus `reference`): `WanVaceToVideo`'s latent
+    has `trim_latent` frames in front for the reference picture (cut off after sampling by
+    `TrimVideoLatent`), so the refine's latent is the reference sized as the node sizes it
+    (`ImageScale` bilinear, centre crop), `VAEEncode`d, then core `LatentConcat` on `t` in
+    front of the encoded frames. Its staged `reference` input comes back from the sidecar.
+  - **LTX-2.3 ingredients** (mode `resample`, generalised): the upscaler may load a model
+    (`upscaler.model`: `LatentUpscaleModelLoader` with
+    `ltx-2.3-spatial-upscaler-x2-1.1.safetensors`, now in its `downloads` from ComfyUI-Manager's
+    model list) and take the video VAE (`upscaler.vae`); with no scale input it is
+    fixed at 2x (`fixed_scale`, for any mode now, so the dialog greys other scales).
+    The upscaled video goes `into` the graph's own `LTXVAddGuide`, which appends the sheet
+    again at the new size (`ResizeAndPadImage` through the width/height params); the join
+    after it takes the take's audio; a kept latent (the KSampler's, guides and all:
+    `saver.latent` is the KSampler) is cut to its first `(length - 1) / 8 + 1` frames by
+    core `LatentCut` (`trim`). The KSampler becomes the `KSamplerAdvanced` it is with
+    `start_at_step` (`sampler_tail`), since a denoise would stretch its schedule rather
+    than cut it: step 7 of its 8 linear_quadratic steps starts at sigma 0.4219, where
+    `ltx2`'s default starts too (its tail is 0.9094, 0.725, 0.4219, 0). The VAEs are the
+    checkpoint's third output and `LTXVAudioVAELoader` (`video_vae` / `audio_vae` in the
+    block). `take_job` now keeps a staged `sheet` except for a second stage.
+  - **`H3HoldAudio` keeps a video mask the latent already has** (LTX's guide frames held
+    at 0, so the IC-LoRA sees its sheet clean; a first frame a second stage re-imposes),
+    where it used to set ones over the whole video.
+  - Every built-in video target now re-samples; the tests of "a target without one" drop
+    `wan22_vace`'s block for their duration.
 - **Encoder and precision** (2026-09-26): upscales encode on NVENC by default (`encoder`
   auto / nvenc / x264; H.264 to 4096, HEVC past it; x264 fallback, its faster preset past
   4K), streaming frames to ffmpeg one at a time; the upscale model runs fp16 under autocast

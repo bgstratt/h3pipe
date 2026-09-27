@@ -72,6 +72,15 @@ class UpscaleNodesTest(unittest.TestCase):
         self.assertEqual(out["x"], 1)
         with mock.patch.dict(sys.modules, fake_comfy_nested()), self.assertRaises(ValueError):
             UN.H3HoldAudio().hold({"samples": video})
+        # a video mask the latent has is kept (LTX's guide frames held at 0)
+        guide = torch.ones(1, 1, 3, 6, 12)
+        guide[:, :, -1] = 0
+        with mock.patch.dict(sys.modules, fake_comfy_nested()):
+            (out,) = UN.H3HoldAudio().hold({"samples": FakeNested((video, audio)),
+                                            "noise_mask": FakeNested((guide, torch.ones_like(audio)))})
+        vm, am = out["noise_mask"].tensors
+        self.assertTrue(torch.equal(vm, guide))
+        self.assertTrue(torch.equal(am, torch.zeros_like(audio)))
 
     def test_load_take_latent(self):
         video, audio = torch.randn(1, 4, 3, 6, 12), torch.randn(1, 8, 20)

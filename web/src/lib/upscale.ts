@@ -3,7 +3,7 @@
 // dialog can grey out a scale before anything is queued:
 //   - pixel: any scale above 1 up to the limit whose sides land on even numbers
 //   - a re-sample (resample mode, H3): the sides land on the target's `align` (32)
-//   - a re-sample (second_stage mode, LTX-2): only the target's fixed scale
+//   - a re-sample with a fixed upsampler (LTX: 2x): only the target's fixed scale
 //   - then pixel: the re-sample's size times its scale, on even sides
 
 import type { UpscaleOptions } from "../types";
@@ -42,7 +42,7 @@ export function upscaleSize(
   // SeedVR2 pads what it needs: any even size, as the pixel method
   if (method === "pixel" || method === "seedvr2") return onGrid(w, h, scale, 2);
   if (!latent) return { ok: false, why: "its target has no re-sample" };
-  if (latent.mode === "second_stage" && latent.fixed_scale != null && scale !== latent.fixed_scale) {
+  if (latent.fixed_scale != null && scale !== latent.fixed_scale) {
     return { ok: false, why: `its re-sample is fixed at ${latent.fixed_scale}x` };
   }
   return onGrid(w, h, scale, latent.align ?? 32);

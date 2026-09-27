@@ -332,13 +332,23 @@ its own schedule (the target's `start`, 0.875: step 7 of 8) under the take's fro
 shotlist, from its kept latent (Phase 13a) or, without one, its frames and `_h3.wav`
 through the VAE. The take's audio is held while it samples and its audio stream is copied
 onto the result unchanged. Only a target with an `upscale` block in its target.json
-can upscale: `minimax_h3_ref2va` (an external latent upscaler, then its own sampler from late
-in its schedule) and `ltx2` (its render graph's second stage run again on the take: its
-own upsampler, the tail of its fixed sigmas; mode `second_stage`, always 2x). The
-`.up.json` records `mode` and the schedule's `steps`. `wan22_i2v` / `wan22_ti2v` use mode
-`pixel_refine`: the take's frames through the pixel model (`pixel_model` applies), encoded
-with the Wan VAE, then the target's last sampler from late in its schedule; always the VAE
-route (`route: "latent"` is refused).
+can re-sample (every built-in video target has one):
+- mode `resample`: `minimax_h3_ref2va` and `minimax_h3_fl2va` (an external latent upscaler,
+  then their own sampler from late in its schedule; FL2VA's size goes to its I2V node,
+  which stretches the keyframes to it), and `ltx2_ingredients` (LTX-2.3's own 2x latent
+  upsampler, `ltx-2.3-spatial-upscaler-x2-1.1.safetensors`, into the graph's `LTXVAddGuide`,
+  which appends the ingredient sheet again at the new size; a kept latent has its guide
+  frames cut off first; the KSampler run as the KSamplerAdvanced it is, from the step;
+  always 2x);
+- mode `second_stage`: `ltx2` (its render graph's second stage run again on the take: its
+  own upsampler, the tail of its fixed sigmas; always 2x);
+- mode `pixel_refine`: `wan22_i2v`, `wan22_ti2v` and `wan22_vace` (the take's frames through
+  the pixel model, `pixel_model` applies, encoded with the Wan VAE, then the target's last
+  sampler from late in its schedule; VACE's reference picture encoded in front, as its
+  latent has it; always the VAE route: `route: "latent"` is refused).
+
+The `.up.json` records `mode` and the schedule's `steps`. Options' `latent[target]`
+`fixed_scale` is the one scale a fixed upsampler makes (the LTX targets: 2), else null.
 
 ### `POST /h3pipe/upscale`
 Body `{"ep", "shots"?: ["sh020"] | null, "takes"?: [{"shot", "take"}], "redo"?: false,

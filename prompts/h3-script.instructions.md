@@ -237,18 +237,18 @@ ways to use it:
 
 (Measured on an RTX 5090 with the 8-step turbo LoRA. The proxy pass stays 448×256 either way.)
 
-- **Render small and upscale** when the episode renders on `minimax_h3_ref2va` with the
-  latent upscaler installed (INSTALL.md, **The upscaler**), or on `ltx2`, which upscales
-  with its own second stage and needs nothing extra (`python h3.py targets` says
-  `upscale ready` for each). Every take you try costs under half as much, and only the ones the cut
+- **Render small and upscale** when the episode renders on `minimax_h3_ref2va` or
+  `minimax_h3_fl2va` with the latent upscaler installed (INSTALL.md, **The upscaler**), on
+  `ltx2`, which upscales with its own second stage and needs nothing extra, or on
+  `ltx2_ingredients` with LTX-2.3's latent upsampler installed (INSTALL.md, **For
+  upscaling**; `python h3.py targets` says `upscale ready` for each). Every take you try costs under half as much, and only the ones the cut
   keeps are upscaled, once, after the cut is locked. The upscale re-samples the take from
   late in its schedule under its own prompt, references and seed, with its audio held, so
   the performance and the lip sync are the take's; it adds detail a 960×544 frame is short
   of (faces in wide shots, hands, small props).
-- **Render at size** when shots render on `ltx2_ingredients`, `minimax_h3_fl2va` or
-  `wan22_vace` (they have no re-sample: the pixel method is theirs), when the upscaler
-  isn't installed, or when 1344×768 is the delivery. `wan22_i2v` and `wan22_ti2v` do
-  re-sample (a pixel model, then their own sampler), but slowly: minutes a shot. Upscaling a 1344×768 take to 2688×1536 works
+- **Render at size** when shots render on Wan (`wan22_i2v`, `wan22_ti2v`, `wan22_vace`:
+  they re-sample, a pixel model then their own sampler, but slowly: minutes a shot), when
+  the upscaler isn't installed, or when 1344×768 is the delivery. Upscaling a 1344×768 take to 2688×1536 works
   but adds little: that frame already holds most of what the model can draw.
 - The two don't mix within a pass: pick one per series. Switching later only changes the
   takes rendered after the switch.

@@ -346,7 +346,8 @@ class H3FinishUpscale:
 class H3HoldAudio:
     """Re-sample the picture, keep the audio: a per-stream noise mask of ones on
     the video and zeros on the audio, on a joint AV latent. The sampler then
-    sees the audio clean at every step and the lips follow it."""
+    sees the audio clean at every step and the lips follow it. A video mask the
+    latent already has is kept (LTX's guide frames, a first frame held)."""
 
     @classmethod
     def INPUT_TYPES(cls):
@@ -364,9 +365,10 @@ class H3HoldAudio:
             raise ValueError("H3HoldAudio needs a joint audio/video latent (H3's), "
                              "not a video-only one")
         video, audio = samples.unbind()[:2]
+        mask = latent.get("noise_mask")
+        vmask = mask.unbind()[0] if getattr(mask, "is_nested", False) else torch.ones_like(video)
         out = dict(latent)
-        out["noise_mask"] = comfy.nested_tensor.NestedTensor(
-            (torch.ones_like(video), torch.zeros_like(audio)))
+        out["noise_mask"] = comfy.nested_tensor.NestedTensor((vmask, torch.zeros_like(audio)))
         return (out,)
 
 

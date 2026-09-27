@@ -20,11 +20,13 @@ graph (`upscale` in its target.json says how), with the sampler's latent
 replaced by the take's latent (<stem>.latent.safetensors, Phase 13a) or, for
 a take without one, its frames and audio through the VAE (`--vae` forces it).
 
-Two methods. `latent` (the targets with an `upscale` block: H3 Ref2VA, LTX-2)
-re-samples as above. `pixel` (any target, the default for the rest) runs an
+Three methods. `latent` (the targets with an `upscale` block: every built-in
+video target) re-samples as above; Wan's, with no latent upscaler, from its
+frames through a pixel model. `pixel` (any target, the default for the rest) runs an
 upscale model from ComfyUI's models/upscale_models (RealESRGAN, UltraSharp...)
 over the take's frames and copies its audio on: fast, adds no generated detail.
 `--method pixel --pixel-model RealESRGAN_x4.pth` picks it for any take.
+`seedvr2` (any target) restores the frames with SeedVR2.
 
 Stdlib only.
 """
@@ -120,13 +122,15 @@ RESAMPLE, SECOND_STAGE, PIXEL_REFINE = "resample", "second_stage", "pixel_refine
 def upscale_spec(target: "TG.Target") -> dict | None:
     """The target's `upscale` block (target.json), or None: it can't upscale.
 
-    Two modes. `resample` (H3, the default): the take's latent through an
-    external latent upscaler (`upscaler`), then the target's sampler from late
-    in its schedule, conditioned at the new size by the loader. `second_stage`
-    (LTX-2): the target's render graph is already two-stage (a latent upsampler
-    and a short fixed schedule), so an upscale is that second stage run again on
-    the take: its own `upsampler` node fed the take's latent, the stage's
-    `sigmas` cut to their tail."""
+    Three modes. `resample` (H3, LTX-2.3 ingredients; the default): the take's
+    latent through a latent upscaler (`upscaler`), then the target's sampler
+    from late in its schedule, conditioned at the new size (`size`: the loader's
+    resolution_override, or "params": the binding's width and height).
+    `second_stage` (LTX-2): the target's render graph is already two-stage (a
+    latent upsampler and a short fixed schedule), so an upscale is that second
+    stage run again on the take: its own `upsampler` node fed the take's latent,
+    the stage's `sigmas` cut to their tail. `pixel_refine` (Wan): no latent
+    upscaler, so the take's frames through a pixel model, then the sampler."""
     s = target.spec.get("upscale")
     if not isinstance(s, dict):
         return None
@@ -167,6 +171,25 @@ def schedule_steps(spec: dict, take_steps: int) -> int:
 
 def align_of(spec: dict) -> int:
     return int(spec.get("align") or (spec.get("upscaler") or {}).get("align") or 32)
+
+
+def fixed_scale(spec: dict) -> float | None:
+    """The one scale a re-sample makes, or None: any. A second stage's
+    upsampler, or a resample upscaler with no scale input (LTX's latent
+    upsampler, a 2x model), makes only its own."""
+    mode = spec.get("mode", RESAMPLE)
+    if mode == SECOND_STAGE or (mode == RESAMPLE and spec.get("upscaler")
+                                and not spec["upscaler"].get("scale")):
+        return float(spec.get("scale", 2))
+    return None
+
+
+def upscaler_model(spec: dict) -> str | None:
+    """The model file a resample's upscaler loads (in its own inputs, or its
+    loader's)."""
+    u = spec.get("upscaler") or {}
+    return ((u.get("inputs") or {}).get("model_name")
+            or ((u.get("model") or {}).get("inputs") or {}).get("model_name"))
 
 
 # the nodes an upscale graph adds to the target's (besides its upscaler)
@@ -286,9 +309,25 @@ def upscale_readiness(target: "TG.Target", object_info: dict | None) -> dict | N
         # Wan: no latent, no audio; the pixel model's pieces instead
         need = ["H3LoadTakeVideo", "H3PixelUpscale", "UpscaleModelLoader", "VAEEncode",
                 "H3SaveUpscale"]
+        if spec.get("reference"):
+            need += ["ImageScale", "LatentConcat"]
+    if spec.get("mode", RESAMPLE) == RESAMPLE and spec["upscaler"].get("model"):
+        # a model-loading upscaler (LTX's latent upsampler): core nodes, and its file
+        u = spec["upscaler"]
+        need += [u["class_type"], u["model"]["class_type"]]
+        if spec.get("trim"):
+            need.append("LatentCut")
+        if spec.get("sampler_tail") == "advanced":
+            need.append("KSamplerAdvanced")
     missing = [f"node {c} (update h3pipe's node pack, or ComfyUI, and restart it)"
                for c in need if c not in object_info]
-    if spec.get("mode", RESAMPLE) == RESAMPLE:
+    if spec.get("mode", RESAMPLE) == RESAMPLE and spec["upscaler"].get("model"):
+        m = spec["upscaler"]["model"]
+        want = (m.get("inputs") or {}).get("model_name")
+        choices = J.choices_in(object_info, m["class_type"], "model_name")
+        if want and choices is not None and want not in choices:
+            missing.append(f"{want} in models/latent_upscale_models/")
+    elif spec.get("mode", RESAMPLE) == RESAMPLE:
         u = spec["upscaler"]
         info = object_info.get(u["class_type"])
         if info is None:
@@ -411,8 +450,8 @@ def _plan(root: str, take: T.Take, *, scale: float | None = None,
             raise UpscaleError(f"{job.label} kept no latent: upscale it through the VAE")
         if not w or not h:
             raise UpscaleError(f"{job.label}'s sidecar doesn't say its size")
-        if spec.get("mode", RESAMPLE) == SECOND_STAGE and s != float(spec.get("scale", 2)):
-            raise UpscaleError(f"{target.short}'s upsampler is fixed at {spec.get('scale', 2):g}x")
+        if fixed_scale(spec) is not None and s != fixed_scale(spec):
+            raise UpscaleError(f"{target.short}'s upsampler is fixed at {fixed_scale(spec):g}x")
         if not 1 < s <= MAX_SCALE:
             raise UpscaleError(f"scale {s:g}: it's more than 1, up to {MAX_SCALE:g}")
         job.width, job.height = scaled(w, h, s, align_of(spec))
@@ -435,12 +474,14 @@ def _plan(root: str, take: T.Take, *, scale: float | None = None,
 def take_job(up: UpscaleJob) -> J.Job:
     """The render job the take was, rebuilt from its frozen shotlist and
     sidecar: graph_for then patches the target's graph exactly as for the take.
-    Its staged inputs come back too (a first frame the second stage re-imposes),
-    except a reference sheet, which only a first stage reads."""
+    Its staged inputs come back too (a first frame the second stage re-imposes,
+    keyframes, VACE's reference, the ingredients sheet its guide re-encodes),
+    except, for a second stage, a reference sheet, which only its first stage reads."""
     take, sc = up.take, up.take.sidecar or {}
     doc = T.read_json(take.paths.shotlist)
     shot = doc["shots"][0]
-    inputs = {k: v for k, v in (sc.get("inputs") or {}).items() if k != "sheet"}
+    first_only = ("sheet",) if up.spec.get("mode") == SECOND_STAGE else ()
+    inputs = {k: v for k, v in (sc.get("inputs") or {}).items() if k not in first_only}
     return J.Job(root=up.root, pass_=take.pass_, index=0, shot=shot, doc=doc, folder=None,
                  action="render", take=take.take, seed=int(shot.get("seed", sc.get("seed", 0))),
                  seed_source=sc.get("seed_source", "stable"),
@@ -459,20 +500,47 @@ def take_source(g: dict, up: UpscaleJob) -> list:
         g["up_source"] = {"class_type": "H3LoadTakeLatent", "inputs": {
             "project_root": root, "latent_file": rel(root, take.paths.latent)}}
         return ["up_source", 0]
-    vvae = J.select_nodes(g, b.specs("video_vae")[0])[0]
-    avae = J.select_nodes(g, b.specs("audio_vae")[0])[0]
+    vvae, avae = vae_link(g, up, "video_vae"), vae_link(g, up, "audio_vae")
     wav = take.paths.h3_wav if os.path.isfile(take.paths.h3_wav) else ""
     enc = up.spec.get("encode_audio") or AUDIO_ENCODE
     g["up_video"] = {"class_type": "H3LoadTakeVideo", "inputs": {
         "project_root": root, "video_file": rel(root, take.paths.mp4),
         "audio_file": rel(root, wav) if wav else ""}}
     g["up_venc"] = {"class_type": "VAEEncode", "inputs": {"pixels": ["up_video", 0],
-                                                          "vae": [vvae, 0]}}
+                                                          "vae": vvae}}
     g["up_aenc"] = {"class_type": enc["class_type"], "inputs": {enc["audio"]: ["up_video", 1],
-                                                                enc["vae"]: [avae, 0]}}
+                                                                enc["vae"]: avae}}
     g["up_source"] = {"class_type": "LTXVConcatAVLatent", "inputs": {
         "video_latent": ["up_venc", 0], "audio_latent": ["up_aenc", 0]}}
     return ["up_source", 0]
+
+
+def vae_link(g: dict, up: UpscaleJob, name: str) -> list:
+    """A link to the graph's `name` VAE (video_vae / audio_vae): the spec's own
+    {class_type, output} (a checkpoint's third output), else the binding's
+    param of that name (a VAELoader)."""
+    s = up.spec.get(name)
+    if s:
+        return [J.node_of(g, s["class_type"]), int(s.get("output", 0))]
+    return [J.select_nodes(g, up.target.binding.specs(name)[0])[0], 0]
+
+
+def sampler_tail(g: dict, sampler: str, start: int) -> None:
+    """Start `sampler` at step `start` of its own schedule. A KSampler becomes
+    the KSamplerAdvanced it is plus a start (same schedule, same seed), since
+    its denoise would stretch the schedule, not cut it."""
+    n = g[sampler]
+    if n["class_type"] == "KSampler":
+        i = n["inputs"]
+        n["class_type"] = "KSamplerAdvanced"
+        n["inputs"] = {**{k: v for k, v in i.items() if k not in ("seed", "denoise")},
+                       "noise_seed": i["seed"], "add_noise": "enable", "start_at_step": start,
+                       "end_at_step": 10000, "return_with_leftover_noise": "disable"}
+    elif n["class_type"] == "KSamplerAdvanced":
+        n["inputs"].update(add_noise="enable", start_at_step=start, end_at_step=10000,
+                           return_with_leftover_noise="disable")
+    else:
+        raise UpscaleError(f"can't start a {n['class_type']} late")
 
 
 def upscale_graph(base: dict, up: UpscaleJob) -> dict:
@@ -481,10 +549,14 @@ def upscale_graph(base: dict, up: UpscaleJob) -> dict:
     schedule started late, and H3SaveUpscale writing <stem>.up.mp4 with the
     take's audio copied on.
 
-    - resample (H3): the loader reads the take's frozen shotlist at the new
-      size, so the prompt and references are encoded as for the take; the
-      video goes through the external upscaler; SplitSigmas starts the
-      sampler's own schedule at `start_step`.
+    - resample (H3, LTX-2.3 ingredients): the conditioning is rebuilt at the
+      new size (the loader reads the take's frozen shotlist at it; or the
+      width/height params: an I2V node's keyframes, LTX's guide image), so the
+      prompt and references are encoded as for the take; the video goes
+      through the upscaler (the external H3 pack, or a model-loading one: LTX's
+      latent upsampler), into the graph's own guide node when it has one
+      (`into`: LTX's IC-LoRA guide is appended to it again); SplitSigmas (or a
+      KSampler's start step) starts the sampler's own schedule at `start_step`.
     - second_stage (LTX-2): the final stage's own upsampler takes the take's
       video, its join takes the take's audio, and its fixed sigmas are cut to
       their tail from `start_step`; the first stage falls away in the prune."""
@@ -523,24 +595,70 @@ def upscale_graph(base: dict, up: UpscaleJob) -> dict:
             raise UpscaleError(f"start step {up.start_step} leaves nothing of {', '.join(vals)}")
         g[sig]["inputs"][sspec["field"]] = ", ".join(vals[up.start_step:])
     else:
-        size = spec.get("size") or {"class_type": b.loader_class, "field": "resolution_override"}
-        for nid in J.select_nodes(g, size):
-            g[nid]["inputs"][size["field"]] = f"{up.width}x{up.height}"
-        u = spec["upscaler"]
-        g["up_scale"] = {"class_type": u["class_type"], "inputs": {
-            **copy.deepcopy(u.get("inputs") or {}),
-            u.get("latent", "latent"): ["up_split_av", 0], u.get("scale", "scale"): up.scale}}
-        g["up_join"] = {"class_type": "LTXVConcatAVLatent", "inputs": {
-            "video_latent": ["up_scale", 0], "audio_latent": ["up_split_av", 1]}}
-        g["up_hold"] = {"class_type": "H3HoldAudio", "inputs": {"latent": ["up_join", 0]}}
-        si["latent_image"] = ["up_hold", 0]
-        g["up_sigmas"] = {"class_type": "SplitSigmas", "inputs": {"sigmas": si["sigmas"],
-                                                                  "step": up.start_step}}
-        si["sigmas"] = ["up_sigmas", 1]
+        resample(g, up, sampler)
 
     images = g[saver]["inputs"]["images"]
     del g[saver]
     return finish_graph(g, up, images)
+
+
+def resample(g: dict, up: UpscaleJob, sampler: str) -> None:
+    """upscale_graph's resample mode, from the take's latent split in two
+    (`up_split_av`)."""
+    spec, b, take = up.spec, up.target.binding, up.take
+    si = g[sampler]["inputs"]
+    size = spec.get("size") or {"class_type": b.loader_class, "field": "resolution_override"}
+    if size == "params":
+        for name, value in (("width", up.width), ("height", up.height)):
+            J.patch_param(g, b, name, value)
+    else:
+        for nid in J.select_nodes(g, size):
+            g[nid]["inputs"][size["field"]] = f"{up.width}x{up.height}"
+    video = ["up_split_av", 0]
+    if spec.get("trim") and up.route == "latent":
+        # a kept latent is the sampler's, guide frames and all: the take's own
+        # frames are the first (length - 1) / temporal + 1
+        n = int((take.sidecar or {}).get("length") or 0)
+        g["up_trim"] = {"class_type": "LatentCut", "inputs": {
+            "samples": video, "dim": "t", "index": 0,
+            "amount": (n - 1) // int(spec["trim"]["temporal"]) + 1 if n else 4096}}
+        video = ["up_trim", 0]
+    u = spec["upscaler"]
+    g["up_scale"] = {"class_type": u["class_type"], "inputs": {
+        **copy.deepcopy(u.get("inputs") or {}), u.get("latent", "latent"): video}}
+    if u.get("scale"):
+        g["up_scale"]["inputs"][u["scale"]] = up.scale
+    if u.get("model"):
+        m = u["model"]
+        g["up_scale_model"] = {"class_type": m["class_type"],
+                               "inputs": copy.deepcopy(m.get("inputs") or {})}
+        g["up_scale"]["inputs"][m["input"]] = ["up_scale_model", 0]
+    if u.get("vae"):
+        g["up_scale"]["inputs"][u["vae"]] = vae_link(g, up, "video_vae")
+    if spec.get("into"):
+        # the graph's own guide node takes the upscaled video (its guide
+        # re-encoded at the new size and appended), and the join after it the
+        # take's audio
+        into = spec["into"]
+        guide = J.upstream_node(g, sampler, into["class_type"])
+        join = si["latent_image"][0]
+        if guide is None or g[join]["class_type"] != "LTXVConcatAVLatent":
+            raise UpscaleError(f"{up.target.short}'s sampler isn't fed a {into['class_type']} "
+                               f"through an LTXVConcatAVLatent")
+        g[guide]["inputs"][into["input"]] = ["up_scale", 0]
+        g[join]["inputs"]["audio_latent"] = ["up_split_av", 1]
+        g["up_hold"] = {"class_type": "H3HoldAudio", "inputs": {"latent": [join, 0]}}
+    else:
+        g["up_join"] = {"class_type": "LTXVConcatAVLatent", "inputs": {
+            "video_latent": ["up_scale", 0], "audio_latent": ["up_split_av", 1]}}
+        g["up_hold"] = {"class_type": "H3HoldAudio", "inputs": {"latent": ["up_join", 0]}}
+    si["latent_image"] = ["up_hold", 0]
+    if "sigmas" in si:
+        g["up_sigmas"] = {"class_type": "SplitSigmas", "inputs": {"sigmas": si["sigmas"],
+                                                                  "step": up.start_step}}
+        si["sigmas"] = ["up_sigmas", 1]
+    else:
+        sampler_tail(g, sampler, up.start_step)
 
 
 def pixel_refine(g: dict, up: UpscaleJob, sampler: str) -> None:
@@ -563,6 +681,22 @@ def pixel_refine(g: dict, up: UpscaleJob, sampler: str) -> None:
     g["up_venc"] = {"class_type": "VAEEncode", "inputs": {"pixels": ["up_pixels", 0], "vae": [vae, 0]}}
     si = g[sampler]["inputs"]
     si["latent_image"] = ["up_venc", 0]
+    ref = up.spec.get("reference")
+    if ref:
+        # VACE: its latent starts with the reference picture's frame (cut off
+        # after sampling by trim_latent); the refine's starts with it too,
+        # sized as the node sizes it (bilinear, centre crop)
+        node = J.node_of(g, ref["class_type"])
+        image = g[node]["inputs"].get(ref["image"])
+        if J.is_link(image):
+            g["up_ref"] = {"class_type": "ImageScale", "inputs": {
+                "image": image, "upscale_method": "bilinear", "width": up.width,
+                "height": up.height, "crop": "center"}}
+            g["up_ref_enc"] = {"class_type": "VAEEncode", "inputs": {"pixels": ["up_ref", 0],
+                                                                     "vae": [vae, 0]}}
+            g["up_with_ref"] = {"class_type": "LatentConcat", "inputs": {
+                "samples1": ["up_ref_enc", 0], "samples2": ["up_venc", 0], "dim": "t"}}
+            si["latent_image"] = ["up_with_ref", 0]
     steps = schedule_steps(up.spec, int((take.sidecar or {}).get("steps") or 0))
     if g[sampler]["class_type"] == "KSamplerAdvanced":
         # the last expert alone, from the start step: noise added at that level
@@ -742,8 +876,7 @@ def queued_record(up: UpscaleJob) -> dict:
     elif up.spec.get("mode", RESAMPLE) == SECOND_STAGE:
         upscaler = f"{up.spec['upsampler']['class_type']} (the target's own second stage)"
     else:
-        u = up.spec["upscaler"]
-        upscaler = (u.get("inputs") or {}).get("model_name") or u["class_type"]
+        upscaler = upscaler_model(up.spec) or up.spec["upscaler"]["class_type"]
     return {"shot": up.shot, "take": up.take.take, "status": "queued", "queued": T.now(),
             "comfy_prompt_id": None, "target": up.target.id, "route": up.route,
             "method": "latent", "mode": up.spec.get("mode", RESAMPLE),

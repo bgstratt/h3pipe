@@ -52,7 +52,8 @@
                          "sidecar": "sidecar"},
               "replace": {"class_type": "CreateVideo", "inputs": {"images": "images", "audio": "audio"}},
               "drop": ["SaveVideo", "PreviewAny", "PreviewImage"],
-              "set": {"save_frames": false}},
+              "set": {"save_frames": false},
+              "latent": {"class_type": "KSampler", "output": 0}},
     "prune": true,
     "params": {
       "model": [{"class_type": "CheckpointLoaderSimple", "field": "ckpt_name"},
@@ -115,11 +116,29 @@
     }
   },
 
+  "upscale": {
+    "_note": "Phase 13 (docs/PLAN.md, h3upscale.py): a take re-sampled at 2x from `start` (0.875: step 7 of 8, from sigma 0.42 on linear_quadratic, where LTX-2's second stage ends too). The take's video latent (a kept one is the sampler's, so `trim` cuts the IC-LoRA guide frames off its end: (length - 1) / 8 + 1 frames are the take's) through LTX-2.3's own latent upsampler (fixed 2x, core LTXVLatentUpsampler, needing the checkpoint's VAE: its third output), then into the graph's LTXVAddGuide (`into`), which appends the ingredient sheet again, re-encoded at the new size (ResizeAndPadImage, through the width/height params); its audio held. The KSampler starts at the step as the KSamplerAdvanced it is (`sampler_tail`), on its own schedule.",
+    "scale": 2,
+    "start": 0.875,
+    "align": 32,
+    "size": "params",
+    "trim": {"temporal": 8},
+    "into": {"class_type": "LTXVAddGuide", "input": "latent"},
+    "sampler_tail": "advanced",
+    "video_vae": {"class_type": "CheckpointLoaderSimple", "output": 2},
+    "audio_vae": {"class_type": "LTXVAudioVAELoader", "output": 0},
+    "encode_audio": {"class_type": "LTXVAudioVAEEncode", "audio": "audio", "vae": "audio_vae"},
+    "upscaler": {"class_type": "LTXVLatentUpsampler", "latent": "samples", "vae": "vae",
+                 "model": {"class_type": "LatentUpscaleModelLoader", "input": "upscale_model",
+                           "inputs": {"model_name": "ltx-2.3-spatial-upscaler-x2-1.1.safetensors"}}}
+  },
+
   "downloads": {
     "_note": "Where to get each file this target names (docs/API.md 'Downloads'). A url is only given when a trustworthy record has it: a ComfyUI template's or saved workflow's properties.models entry, or ComfyUI-Manager's model list; `source` says which. Otherwise url is null and source says what to search for. Never a guessed URL.",
     "ltx-2.3-22b-ic-lora-ingredients-0.9.safetensors": {"folder": "loras", "url": "https://huggingface.co/Comfy-Org/ltx-2.3/resolve/main/split_files/loras/ltx-2.3-22b-ic-lora-ingredients-0.9.safetensors", "source": "ComfyUI template template_ltx2_3_ic_lora_ingredients.json (properties.models)"},
     "ltx-2.3-22b-dev-fp8.safetensors": {"folder": "checkpoints", "url": "https://huggingface.co/Lightricks/LTX-2.3-fp8/resolve/main/ltx-2.3-22b-dev-fp8.safetensors", "source": "ComfyUI template video_ltx2_3_i2v.json (properties.models)"},
     "ltx-2.3-22b-distilled-fp8.safetensors": {"folder": "checkpoints", "url": "https://huggingface.co/Lightricks/LTX-2.3-fp8/resolve/main/ltx-2.3-22b-distilled-fp8.safetensors", "source": "ComfyUI template template_ltx2_3_ic_lora_ingredients.json (properties.models)"},
-    "gemma_3_12B_it_fp4_mixed.safetensors": {"folder": "text_encoders", "url": "https://huggingface.co/Comfy-Org/ltx-2/resolve/main/split_files/text_encoders/gemma_3_12B_it_fp4_mixed.safetensors", "source": "ComfyUI template template_ltx2_3_ic_lora_ingredients.json (properties.models)"}
+    "gemma_3_12B_it_fp4_mixed.safetensors": {"folder": "text_encoders", "url": "https://huggingface.co/Comfy-Org/ltx-2/resolve/main/split_files/text_encoders/gemma_3_12B_it_fp4_mixed.safetensors", "source": "ComfyUI template template_ltx2_3_ic_lora_ingredients.json (properties.models)"},
+    "ltx-2.3-spatial-upscaler-x2-1.1.safetensors": {"folder": "latent_upscale_models", "url": "https://huggingface.co/Lightricks/LTX-2.3/resolve/main/ltx-2.3-spatial-upscaler-x2-1.1.safetensors", "source": "ComfyUI-Manager model list (model-list.json; ComfyUI's blueprint Image to Video (LTX-2.3).json has the same URL). Only needed to upscale (Phase 13), never to render."}
   }
 }

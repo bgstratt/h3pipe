@@ -37,6 +37,16 @@ from test_api import ApiTest  # noqa: E402
 
 KITCHEN = os.path.join(HERE, "fixtures", "kitchen_sink")
 
+# every built-in video target re-samples now; the tests of one that doesn't use
+# wan22_vace with its `upscale` block taken away (targets are cached by folder)
+PLAIN = "wan22_vace"
+
+
+def without_resample(case: unittest.TestCase, target_id: str = PLAIN) -> None:
+    spec = TG.load_target(target_id, "video").spec
+    block = spec.pop("upscale")
+    case.addCleanup(spec.__setitem__, "upscale", block)
+
 
 class LatentDefaultTest(unittest.TestCase):
     def setUp(self):
@@ -305,7 +315,8 @@ class UpscaleRouteTest(UpscaleTest):
         self.assertEqual(r["status"], "not_ready")
         self.assertIn("H3HoldAudio", r["missing"][0])
         self.assertEqual(U.upscale_readiness(t, None)["status"], "unknown")
-        wan = TG.load_target("wan22_vace", "video")          # no re-sample of its own
+        without_resample(self)
+        wan = TG.load_target(PLAIN, "video")                  # no re-sample of its own
         self.assertIsNone(U.upscale_readiness(wan, info))
         self.assertNotIn("upscale", E.readiness([wan], info)[wan.id])
         self.assertIn("upscale", E.readiness([t], info)[t.id])
@@ -397,7 +408,8 @@ class PixelUpscaleTest(UpscaleRouteTest):
     def test_default_method_follows_the_target(self):
         t = self.final_take()
         self.assertEqual(U.plan_upscale(self.ep, t).method, "latent")         # H3 has one
-        wan = self.as_target(t, "wan22_vace")              # no re-sample of its own
+        without_resample(self)
+        wan = self.as_target(t, PLAIN)                     # no re-sample of its own
         up = U.plan_upscale(self.ep, wan)
         self.assertEqual((up.method, up.route, up.pixel_model, up.start_step),
                          ("pixel", "pixel", "RealESRGAN_x2.pth", None))
@@ -429,6 +441,7 @@ class PixelUpscaleTest(UpscaleRouteTest):
                          [base, base - 1, base - 2])
 
     def test_route_and_options(self):
+        without_resample(self)
         t = self.final_take()
         res = self.ok(A.post_upscale(self.ctx, {"ep": self.ep, "takes": [{"shot": "sh010", "take": 1}],
                                                 "method": "pixel", "pixel_model": "4x-UltraSharp.pth"}))
@@ -448,7 +461,7 @@ class PixelUpscaleTest(UpscaleRouteTest):
         self.assertEqual(opts["pixel"]["default"], "RealESRGAN_x2.pth")
         self.assertIn("RealESRGAN_x4.pth", opts["pixel"]["models"])
         self.assertEqual(opts["latent"]["minimax_h3_ref2va"]["status"], "ready")
-        self.assertIsNone(opts["latent"]["wan22_vace"])
+        self.assertIsNone(opts["latent"][PLAIN])
         self.assertEqual(opts["details"], [0, 1, 2])
 
     def test_the_proxy_pass(self):
@@ -609,6 +622,119 @@ class PixelUpscaleTest(UpscaleRouteTest):
         ks = g[self.by_class(g, "KSampler")[0]]["inputs"]
         self.assertEqual((ks["denoise"], ks["latent_image"]), (0.25, ["up_venc", 0]))
         self.assertEqual(U.plan_upscale(self.ep, t, scale=2).height, 1408)
+
+    def test_fl2va_resample(self):
+        """H3 FL2V re-samples as Ref2VA does; its size goes to the I2V node, which
+        stretches the keyframes to it (they and the anchor are conditioning)."""
+        t = self.as_target(self.final_take(), "minimax_h3_fl2va")
+        T.update_sidecar(t.paths.sidecar, width=1344, height=768, steps=8,
+                         inputs={"first": "h3pipe/sh010_first.png", "audio": "h3pipe/sh010_line.wav"})
+        t = T.get_take(self.ep, "final", "sh010", 1)
+        up = U.plan_upscale(self.ep, t)
+        self.assertEqual((up.action, up.method, up.route, up.start_step), ("upscale", "latent", "latent", 7))
+        self.assertEqual((up.width, up.height), (2688, 1536))
+        g = U.upscale_graph(self.wan_base("minimax_h3_fl2va"), up)
+        samplers = self.by_class(g, "SamplerCustomAdvanced")
+        self.assertEqual(len(samplers), 1)
+        si = g[samplers[0]]["inputs"]
+        self.assertEqual(si["latent_image"], ["up_hold", 0])
+        self.assertEqual(g[si["sigmas"][0]]["class_type"], "SplitSigmas")
+        self.assertEqual(g[si["sigmas"][0]]["inputs"]["step"], 7)
+        i2v = g[self.by_class(g, "MiniMaxH3ImageToVideo")[0]]["inputs"]
+        self.assertEqual((i2v["width"], i2v["height"]), (2688, 1536))
+        self.assertEqual(g[i2v["first_frame"][0]]["inputs"]["image"], "h3pipe/sh010_first.png")
+        self.assertTrue(self.by_class(g, "MiniMaxH3AddGuide"))              # the anchor, kept
+        self.assertEqual(g["up_scale"]["class_type"], "MinimaxH3LatentUpscaler3D")
+        self.assertEqual(g["up_scale"]["inputs"]["mode.scale"], 2.0)
+        self.assertEqual(g["up_source"]["class_type"], "H3LoadTakeLatent")
+        info = {c: {"input": {}} for c in U.UPSCALE_NODES}
+        info["MinimaxH3LatentUpscaler3D"] = UPSCALER
+        self.assertEqual(U.upscale_readiness(up.target, info)["status"], "ready")
+
+    def test_vace_refine_keeps_its_reference_in_front(self):
+        """VACE refines as Wan I2V does, its latent led by the reference picture's
+        frame (trim_latent cuts it off after sampling), sized as the node sizes it."""
+        t = self.as_target(self.final_take(latent=False), "wan22_vace")
+        T.update_sidecar(t.paths.sidecar, width=832, height=480, steps=4,
+                         inputs={"reference": "h3pipe/sh010_ref.png"})
+        t = T.get_take(self.ep, "final", "sh010", 1)
+        up = U.plan_upscale(self.ep, t)
+        self.assertEqual((up.action, up.route, up.start_step, up.width, up.height),
+                         ("upscale", "vae", 3, 1664, 960))
+        g = U.upscale_graph(self.wan_base("wan22_vace"), up)
+        samplers = self.by_class(g, "KSamplerAdvanced")
+        self.assertEqual(len(samplers), 1)                                   # the high expert is gone
+        si = g[samplers[0]]["inputs"]
+        self.assertEqual((si["start_at_step"], si["latent_image"]), (3, ["up_with_ref", 0]))
+        cat = g["up_with_ref"]["inputs"]
+        self.assertEqual((cat["samples1"], cat["samples2"], cat["dim"]), (["up_ref_enc", 0], ["up_venc", 0], "t"))
+        ref = g["up_ref"]["inputs"]
+        self.assertEqual((ref["width"], ref["height"], ref["upscale_method"], ref["crop"]), (1664, 960, "bilinear", "center"))
+        vace = self.by_class(g, "WanVaceToVideo")[0]
+        self.assertEqual(ref["image"], g[vace]["inputs"]["reference_image"])
+        self.assertEqual(g[ref["image"][0]]["inputs"]["image"], "h3pipe/sh010_ref.png")
+        self.assertEqual((g[vace]["inputs"]["width"], g[vace]["inputs"]["height"]), (1664, 960))
+        self.assertTrue(self.by_class(g, "TrimVideoLatent"))
+        info = {c: {"input": {}} for c in ("H3LoadTakeVideo", "H3PixelUpscale", "UpscaleModelLoader",
+                                           "VAEEncode", "H3SaveUpscale", "ImageScale")}
+        r = U.upscale_readiness(up.target, info)
+        self.assertEqual(r["status"], "not_ready")
+        self.assertIn("LatentConcat", r["missing"][0])
+
+    def test_ltx_ingredients_resample(self):
+        """LTX-2.3 ingredients: the take's video (its guide frames cut off) through
+        LTX's 2x latent upsampler into the graph's own guide node, which appends
+        the sheet again at the new size; the KSampler started late."""
+        t = self.as_target(self.final_take(), "ltx2_ingredients")
+        T.update_sidecar(t.paths.sidecar, width=768, height=448, steps=8, length=121, seed=41,
+                         inputs={"sheet": "h3pipe/sh010_sheet.png"})
+        t = T.get_take(self.ep, "final", "sh010", 1)
+        up = U.plan_upscale(self.ep, t)
+        self.assertEqual((up.action, up.route, up.start_step, up.width, up.height),
+                         ("upscale", "latent", 7, 1536, 896))
+        self.assertEqual(U.plan_upscale(self.ep, t, scale=1.5).action, "error")   # fixed 2x
+        g = U.upscale_graph(self.wan_base("ltx2_ingredients"), up)
+        self.assertFalse(self.by_class(g, "KSampler"))
+        self.assertFalse(self.by_class(g, "EmptyLTXVLatentVideo"))
+        ks = self.by_class(g, "KSamplerAdvanced")
+        self.assertEqual(len(ks), 1)
+        si = g[ks[0]]["inputs"]
+        self.assertEqual((si["start_at_step"], si["add_noise"], si["latent_image"]), (7, "enable", ["up_hold", 0]))
+        self.assertNotIn("denoise", si)
+        self.assertIn("noise_seed", si)
+        join = g["up_hold"]["inputs"]["latent"][0]
+        self.assertEqual(g[join]["class_type"], "LTXVConcatAVLatent")
+        self.assertEqual(g[join]["inputs"]["audio_latent"], ["up_split_av", 1])     # the take's audio
+        guide = g[join]["inputs"]["video_latent"][0]
+        self.assertEqual(g[guide]["class_type"], "LTXVAddGuide")
+        self.assertEqual(g[guide]["inputs"]["latent"], ["up_scale", 0])
+        self.assertEqual(g[g[guide]["inputs"]["image"][0]]["inputs"]["target_width"], 1536)
+        ckpt = self.by_class(g, "CheckpointLoaderSimple")[0]
+        ups = g["up_scale"]["inputs"]
+        self.assertEqual(g["up_scale"]["class_type"], "LTXVLatentUpsampler")
+        self.assertEqual((ups["samples"], ups["upscale_model"], ups["vae"]),
+                         (["up_trim", 0], ["up_scale_model", 0], [ckpt, 2]))
+        self.assertEqual(g["up_scale_model"]["inputs"]["model_name"], "ltx-2.3-spatial-upscaler-x2-1.1.safetensors")
+        self.assertEqual((g["up_trim"]["inputs"]["dim"], g["up_trim"]["inputs"]["amount"]), ("t", 16))
+        self.assertTrue(self.by_class(g, "LTXVCropGuides"))
+        loads = [g[n]["inputs"]["image"] for n in self.by_class(g, "LoadImage")]
+        self.assertEqual(loads, ["h3pipe/sh010_sheet.png"])
+        # through the VAE: the checkpoint's VAE and LTX's audio encoder, nothing to trim
+        os.remove(t.paths.latent)
+        g = U.upscale_graph(self.wan_base("ltx2_ingredients"), U.plan_upscale(self.ep, t))
+        self.assertNotIn("up_trim", g)
+        self.assertEqual(g["up_venc"]["inputs"]["vae"], [ckpt, 2])
+        self.assertEqual(g["up_aenc"]["class_type"], "LTXVAudioVAEEncode")
+        self.assertEqual(g[g["up_aenc"]["inputs"]["audio_vae"][0]]["class_type"], "LTXVAudioVAELoader")
+        # the options say it's fixed at 2x; readiness asks for the upsampler's file
+        opts = self.ok(A.get_upscale_options(self.ctx, {}))
+        self.assertEqual(opts["latent"]["ltx2_ingredients"]["fixed_scale"], 2.0)
+        info = {c: {"input": {}} for c in U.UPSCALE_NODES + ("LTXVAudioVAEEncode", "LTXVLatentUpsampler",
+                                                             "LatentCut", "KSamplerAdvanced")}
+        info["LatentUpscaleModelLoader"] = {"input": {"required": {"model_name": [["other.safetensors"], {}]}}}
+        r = U.upscale_readiness(up.target, info)
+        self.assertEqual(r["status"], "not_ready")
+        self.assertIn("ltx-2.3-spatial-upscaler-x2-1.1.safetensors", r["missing"][0])
 
     def test_finish_reaches_every_pixel_node(self):
         t = self.final_take()
