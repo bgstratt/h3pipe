@@ -1768,7 +1768,10 @@ what this machine and the repo have today. Nothing below is built; each target g
   soft (0–1, the model's high band faded by the source's own detail, normalised once per
   clip so it can't flicker); grain (per-frame seeded monochrome Gaussian). Its ensembles
   of 2–3 models, face pass and photo filters were left out: per-frame weights and face
-  boxes flicker in video, and grading belongs to the conform.
+  boxes flicker in video, and grading belongs to the conform. Live (2026-09-27, sh760 t02,
+  960×544 → 1920×1088 with RealESRGAN_x2, frame 40 against the take stretched): colour drift
+  2.19/255 without the split, **1.07/255 with it** (mean RGB shift −1.7/−2.6/−1.6 → −0.1/−1.4/
+  −1.0), the model's detail the same either way; 36–45 s a take, h264_nvenc.
 - **Wan 2.2: built 2026-09-27** for `wan22_i2v` and `wan22_ti2v` (mode `pixel_refine`):
   the take's frames through an upscale model (`pixel_model`, RealESRGAN_x2 by default),
   `VAEEncode` with the target's VAE, then its final sampler alone from late in its schedule
@@ -1802,7 +1805,7 @@ what this machine and the repo have today. Nothing below is built; each target g
   for takes whose target has no latent upscale. `detail` (0–2) starts a latent re-sample
   that many steps earlier. The editor's Upscale is now a dialog (method, pixel model,
   detail, again, from the video) fed by `GET /h3pipe/upscale/options`. Wan's re-sample on
-  top of the pixel pass (below) is still to build.
+  top of the pixel pass was built next (`pixel_refine`, above).
 - **Any target, custom ones too: a pixel-space video upscaler, to evaluate.** SeedVR2
   (ByteDance) is a one-step video restoration/upscale model with a community ComfyUI node
   pack (numz's `ComfyUI-SeedVR2_VideoUpscaler`, 3B and 7B models); verify the pack, its
