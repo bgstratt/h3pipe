@@ -1752,6 +1752,16 @@ what this machine and the repo have today. Nothing below is built; each target g
   down to the 2x size. On this machine (2026-09-26): `RealESRGAN_x2.pth`,
   `RealESRGAN_x4.pth`, `4x-UltraSharp.pth` (UltraSharp's licence may be non-commercial:
   check before shipping with it). `downloads` entries only once each has a URL on record.
+- **The pixel method: built 2026-09-26.** `method: pixel` (h3upscale, the route, the CLI's
+  `--method pixel --pixel-model`) upscales any take with an upscale model from
+  `models/upscale_models`: `H3LoadTakeVideo` → `UpscaleModelLoader` → `H3PixelUpscale` (the
+  model over 4 frames at a time, each batch resized to the target size, lanczos, so a 4x
+  model never holds a whole clip at 4x) → `H3SaveUpscale` (the take's audio copied on). It
+  needs no latent, no frozen shotlist and none of the target's models; it is the default
+  for takes whose target has no latent upscale. `detail` (0–2) starts a latent re-sample
+  that many steps earlier. The editor's Upscale is now a dialog (method, pixel model,
+  detail, again, from the video) fed by `GET /h3pipe/upscale/options`. Wan's re-sample on
+  top of the pixel pass (below) is still to build.
 - **Any target, custom ones too: a pixel-space video upscaler, to evaluate.** SeedVR2
   (ByteDance) is a one-step video restoration/upscale model with a community ComfyUI node
   pack (numz's `ComfyUI-SeedVR2_VideoUpscaler`, 3B and 7B models); verify the pack, its

@@ -187,7 +187,7 @@ python h3.py render   Shows\ep05 --proxy     # low-res animatic
 python h3.py assemble Shows\ep05 --proxy     # join it into one mp4
 python h3.py render   Shows\ep05             # full-res
 python h3.py assemble Shows\ep05
-python h3.py upscale  Shows\ep05             # optional: the cut's final takes at 2x (H3)
+python h3.py upscale  Shows\ep05             # optional: the cut's final takes at 2x
 python h3.py assemble Shows\ep05 --upscaled --size 1920x1080
 ```
 
@@ -206,7 +206,7 @@ disk alone. ComfyUI must be running for `targets`, `refs`, `keyframe --generate`
 | `h3.py keyframe` | a shot's first/last keyframe: from the previous shot's take (continuity), `--generate`, `--missing`, `--clear` |
 | `h3.py render` | `h3render.py`: queues shots through their targets, one take each |
 | `h3.py assemble` | `h3assemble.py`: the review cut, in `cut.json` order; `--upscaled` from the takes' upscales |
-| `h3.py upscale` | `h3upscale.py`: a final take re-sampled at 2x (the cut's takes, or `--only`/`--take`); `--check`, `--prune-latents` |
+| `h3.py upscale` | `h3upscale.py`: a final take at 2x — re-sampled (H3, LTX-2) or through a pixel upscale model (`--method pixel`, any target); the cut's takes, or `--only`/`--take`; `--check`, `--prune-latents` |
 | `h3.py align` | `h3align.py`: times the script against a dialogue recording |
 | `h3.py takes` / `pick` / `override` | takes and why they're stale; the take the cut uses; per-shot tweaks and retargeting (`h3edit.py`) |
 | `h3.py cut` | edit the cut itself: `--show`, `--order`, `--move … --before`, `--trim SH IN OUT`, `--lock`/`--unlock`, `--reset`, `--copy-from final\|proxy`, `--audio` (a clip's sound from another take, a file, none or its own) |

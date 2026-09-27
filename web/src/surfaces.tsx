@@ -18,6 +18,7 @@ import { PromoteDialog } from "./components/Promote";
 import { MissingWindow } from "./components/Readiness";
 import { RefsTab } from "./components/RefsTab";
 import { RenderDialog } from "./components/RenderDialog";
+import { UpscaleDialog } from "./components/UpscaleDialog";
 import { ShotsTab } from "./components/ShotsTab";
 import { SourceWindows } from "./components/SourceWindow";
 import { Timeline } from "./components/Timeline";
@@ -154,6 +155,7 @@ export const OVERLAY_WINDOWS: [string, ComponentType][] = [
   ["Cut menu", CutMenu],
   ["Redo", RedoDialog],
   ["Render", RenderDialog],
+  ["Upscale", UpscaleDialog],
   ["Browse", BrowseDialog],
   ["Supply", SupplyDialog],
   ["Issues", IssuesWindow],

@@ -20,6 +20,12 @@ graph (`upscale` in its target.json says how), with the sampler's latent
 replaced by the take's latent (<stem>.latent.safetensors, Phase 13a) or, for
 a take without one, its frames and audio through the VAE (`--vae` forces it).
 
+Two methods. `latent` (the targets with an `upscale` block: H3 Ref2VA, LTX-2)
+re-samples as above. `pixel` (any target, the default for the rest) runs an
+upscale model from ComfyUI's models/upscale_models (RealESRGAN, UltraSharp...)
+over the take's frames and copies its audio on: fast, adds no generated detail.
+`--method pixel --pixel-model RealESRGAN_x4.pth` picks it for any take.
+
 Stdlib only.
 """
 from __future__ import annotations
@@ -49,12 +55,14 @@ class UpscaleJob:
     take: T.Take
     target: "TG.Target"
     spec: dict
-    route: str                          # latent | vae
+    route: str                          # latent | vae | pixel
     scale: float
-    start_step: int
+    start_step: int | None              # None for the pixel method
     width: int
     height: int
     action: str = "upscale"             # upscale | skip | error
+    method: str = "latent"              # latent | pixel
+    pixel_model: str = ""
     why: str = ""
     notes: list = field(default_factory=list)
 
@@ -130,6 +138,43 @@ UPSCALE_NODES = ("H3LoadTakeLatent", "H3LoadTakeVideo", "H3HoldAudio", "H3SaveUp
                  "VAEEncodeAudio")
 AUDIO_ENCODE = {"class_type": "VAEEncodeAudio", "audio": "audio", "vae": "vae"}
 
+METHODS = ("latent", "pixel")
+PIXEL_NODES = ("H3LoadTakeVideo", "H3PixelUpscale", "UpscaleModelLoader", "H3SaveUpscale")
+DEFAULT_PIXEL_MODEL = "RealESRGAN_x2.pth"
+DETAILS = (0, 1, 2)                     # steps earlier than the default start
+
+
+def pixel_models(object_info: dict | None) -> list[str] | None:
+    """The upscale models this ComfyUI lists (models/upscale_models), or None."""
+    return J.choices_in(object_info or {}, "UpscaleModelLoader", "model_name") \
+        if object_info else None
+
+
+def default_pixel_model(models: list[str] | None) -> str:
+    """RealESRGAN_x2 when installed (exactly 2x, gentle on grain), else the
+    first 2x model, else the first one."""
+    models = models or []
+    if DEFAULT_PIXEL_MODEL in models:
+        return DEFAULT_PIXEL_MODEL
+    two = [m for m in models if "x2" in m.lower() or m.lower().startswith("2x")]
+    return (two or models or [DEFAULT_PIXEL_MODEL])[0]
+
+
+def pixel_readiness(object_info: dict | None, want: str | None = None) -> dict:
+    """Whether this ComfyUI can run the pixel method: its nodes, and an upscale
+    model (`want`, if named). {"status", "missing", "models", "default"}."""
+    if object_info is None:
+        return {"status": "unknown", "missing": [], "models": [], "default": DEFAULT_PIXEL_MODEL}
+    missing = [f"node {c} (update h3pipe's node pack, or ComfyUI, and restart it)"
+               for c in PIXEL_NODES if c not in object_info]
+    models = pixel_models(object_info) or []
+    if not models:
+        missing.append("an upscale model in models/upscale_models/ (RealESRGAN_x2.pth, say)")
+    elif want and want not in models:
+        missing.append(f"{want} in models/upscale_models/ (it has {', '.join(models)})")
+    return {"status": "not_ready" if missing else "ready", "missing": missing,
+            "models": models, "default": default_pixel_model(models)}
+
 
 def upscale_readiness(target: "TG.Target", object_info: dict | None) -> dict | None:
     """Whether the running ComfyUI can upscale this target's takes (None: the
@@ -172,28 +217,58 @@ def upscale_readiness(target: "TG.Target", object_info: dict | None) -> dict | N
 
 def plan_upscale(root: str, take: T.Take, *, scale: float | None = None,
                  start_step: int | None = None, route: str | None = None,
-                 redo: bool = False) -> UpscaleJob:
+                 redo: bool = False, method: str | None = None,
+                 pixel_model: str | None = None, detail: int | None = None) -> UpscaleJob:
     """What upscaling `take` would do. action "error" (with `why`) when it
-    can't: not final, not usable, a target without `upscale`, a size that
-    doesn't scale evenly; "skip" when it already has a fresh upscale."""
+    can't: not final, not usable, a latent upscale on a target without
+    `upscale`, a size that doesn't scale evenly; "skip" when it already has a
+    fresh upscale. `method`: latent (default where the target has one) or
+    pixel (the default elsewhere). `detail` (0-2) starts that many steps
+    earlier than the default; `start_step` names the step outright."""
     sc = take.sidecar or {}
     target_id = sc.get("target") or T.DEFAULT_TARGET
     target = TG.load_target(target_id, "video", root=root)
     spec = upscale_spec(target) or {}
+    m = method or ("latent" if spec else "pixel")
     w, h = int(sc.get("width") or 0), int(sc.get("height") or 0)
+    if m == "pixel":
+        job = UpscaleJob(root, take, target, spec, "pixel", float(scale or 2), None, w, h,
+                         method="pixel", pixel_model=pixel_model or DEFAULT_PIXEL_MODEL)
+        try:
+            if take.pass_ != PASS:
+                raise UpscaleError(f"{job.label} is a {take.pass_} take: only final takes are upscaled")
+            if not take.usable:
+                raise UpscaleError(f"{job.label} isn't a finished take ({take.status})")
+            if not w or not h:
+                raise UpscaleError(f"{job.label}'s sidecar doesn't say its size")
+            job.width, job.height = scaled(w, h, job.scale, 2)
+        except UpscaleError as e:
+            job.action, job.why = "error", str(e)
+            return job
+        up = T.upscale_of(take)
+        if up and up["fresh"] and not redo:
+            job.action, job.why = "skip", "already upscaled"
+        return job
     s = float(scale or spec.get("scale", 2))
     steps = schedule_steps(spec, int(sc.get("steps") or 8)) if spec else 8
-    step = int(start_step) if start_step is not None else start_of(steps, spec)
+    if start_step is not None:
+        step = int(start_step)
+    elif detail:
+        step = max(0, start_of(steps, spec) - int(detail))
+    else:
+        step = start_of(steps, spec)
     has_latent = bool(sc.get("latent")) and os.path.isfile(take.paths.latent)
     r = route or ("latent" if has_latent else "vae")
     job = UpscaleJob(root, take, target, spec, r, s, step, w, h)
     try:
+        if m not in METHODS:
+            raise UpscaleError(f"method {m!r}: it's latent or pixel")
         if take.pass_ != PASS:
             raise UpscaleError(f"{job.label} is a {take.pass_} take: only final takes are upscaled")
         if not take.usable:
             raise UpscaleError(f"{job.label} isn't a finished take ({take.status})")
         if not spec:
-            raise UpscaleError(f"{target.short} can't upscale (its target.json has no `upscale`)")
+            raise UpscaleError(f"{target.short} has no latent upscale: use the pixel method")
         if not os.path.isfile(take.paths.shotlist):
             raise UpscaleError(f"{job.label} has no frozen shotlist to upscale from")
         if r == "latent" and not has_latent:
@@ -323,7 +398,64 @@ def upscale_graph(base: dict, up: UpscaleJob) -> dict:
     return g
 
 
+def pixel_graph(up: UpscaleJob) -> dict:
+    """The pixel method: the take's frames through an upscale model, resized to
+    the target size, saved with the take's audio copied on. No model of the
+    take's target is loaded, so it works for any take."""
+    take, root = up.take, up.root
+    return {
+        "up_video": {"class_type": "H3LoadTakeVideo", "inputs": {
+            "project_root": root, "video_file": rel(root, take.paths.mp4), "audio_file": ""}},
+        "up_model": {"class_type": "UpscaleModelLoader", "inputs": {"model_name": up.pixel_model}},
+        "up_pixels": {"class_type": "H3PixelUpscale", "inputs": {
+            "images": ["up_video", 0], "upscale_model": ["up_model", 0],
+            "width": up.width, "height": up.height, "chunk": 4}},
+        "up_save": {"class_type": "H3SaveUpscale", "inputs": {
+            "images": ["up_pixels", 0], "project_root": root,
+            "source_mp4": rel(root, take.paths.mp4), "out_mp4": rel(root, take.paths.up_mp4),
+            "fps": float((take.sidecar or {}).get("fps") or 24),
+            "sidecar": rel(root, take.paths.up_sidecar)}},
+    }
+
+
+def not_ready(jobs: list[UpscaleJob], object_info: dict | None) -> list[str]:
+    """Why this ComfyUI can't run these jobs ([] when it can)."""
+    out = []
+    for t in {j.target.id: j.target for j in jobs if j.method == "latent"}.values():
+        r = upscale_readiness(t, object_info)
+        if r and r["status"] == "not_ready":
+            out += [f"{t.short}: {m}" for m in r["missing"]]
+    for want in sorted({j.pixel_model for j in jobs if j.method == "pixel"}):
+        r = pixel_readiness(object_info, want)
+        if r["status"] == "not_ready":
+            out += [f"pixel: {m}" for m in r["missing"]]
+    return list(dict.fromkeys(out))
+
+
+def graph_of(up: UpscaleJob, bases: dict, comfy_url: str) -> dict:
+    """The graph that runs this upscale (a latent one reads its target's graph
+    once per `bases`)."""
+    if up.method == "pixel":
+        return pixel_graph(up)
+    if up.target.id not in bases:
+        bases[up.target.id] = J.target_workflow(up.target, None, comfy_url)[0]
+    return upscale_graph(bases[up.target.id], up)
+
+
+def describe(up: UpscaleJob) -> str:
+    if up.method == "pixel":
+        return f"pixel ({up.pixel_model}), {up.scale:g}x -> {up.width}x{up.height}"
+    return (f"{up.route}, {up.scale:g}x -> {up.width}x{up.height}, from step {up.start_step}")
+
+
 def queued_record(up: UpscaleJob) -> dict:
+    if up.method == "pixel":
+        return {"shot": up.shot, "take": up.take.take, "status": "queued", "queued": T.now(),
+                "comfy_prompt_id": None, "target": up.target.id, "route": "pixel",
+                "method": "pixel", "mode": "pixel", "scale": up.scale, "start_step": None,
+                "steps": None, "seed": None, "upscaler": up.pixel_model,
+                "pixel_model": up.pixel_model,
+                "width": up.width, "height": up.height, **T.source_stamp(up.take.paths.mp4)}
     if up.spec.get("mode", RESAMPLE) == SECOND_STAGE:
         upscaler = f"{up.spec['upsampler']['class_type']} (the target's own second stage)"
     else:
@@ -331,7 +463,7 @@ def queued_record(up: UpscaleJob) -> dict:
         upscaler = (u.get("inputs") or {}).get("model_name") or u["class_type"]
     return {"shot": up.shot, "take": up.take.take, "status": "queued", "queued": T.now(),
             "comfy_prompt_id": None, "target": up.target.id, "route": up.route,
-            "mode": up.spec.get("mode", RESAMPLE),
+            "method": "latent", "mode": up.spec.get("mode", RESAMPLE),
             "scale": up.scale, "start_step": up.start_step,
             "steps": schedule_steps(up.spec, int((up.take.sidecar or {}).get("steps") or 0)),
             "seed": (up.take.sidecar or {}).get("seed"),
@@ -411,6 +543,12 @@ def main(argv=None) -> int:
                     help="where the re-sample starts, a step of the take's schedule "
                          "(default 7/8 of the way: step 7 of 8, which keeps the take's "
                          "performance; 6 or 5 of 8 add detail and change more)")
+    ap.add_argument("--method", choices=METHODS,
+                    help="latent (re-sample; the default where the target has one) or pixel "
+                         "(an upscale model over the frames; any target)")
+    ap.add_argument("--pixel-model", help=f"the pixel method's model (default {DEFAULT_PIXEL_MODEL})")
+    ap.add_argument("--detail", type=int, choices=DETAILS,
+                    help="latent: start 0-2 steps earlier than the default (more detail, more change)")
     ap.add_argument("--vae", action="store_true",
                     help="encode the take's frames even if it kept a latent")
     ap.add_argument("--check", action="store_true", help="list the jobs, queue nothing")
@@ -438,10 +576,10 @@ def main(argv=None) -> int:
             print(f"  -  {shot}: {why}")
             continue
         up = plan_upscale(root, take, scale=args.scale, start_step=args.start_step,
-                          route="vae" if args.vae else None, redo=args.redo)
+                          route="vae" if args.vae else None, redo=args.redo,
+                          method=args.method, pixel_model=args.pixel_model, detail=args.detail)
         mark = {"upscale": "..", "skip": "= ", "error": "!!"}[up.action]
-        what = (f"{up.route}, {up.scale:g}x -> {up.width}x{up.height}, from step {up.start_step}"
-                if up.action == "upscale" else up.why)
+        what = describe(up) if up.action == "upscale" else up.why
         print(f"  {mark} {up.label}: {what}")
         jobs.append(up)
     todo = [j for j in jobs if j.action == "upscale"]
@@ -455,22 +593,19 @@ def main(argv=None) -> int:
     except Exception as e:
         print(f"  !! cannot reach ComfyUI at {args.comfy}: {e}")
         return 1
-    for t in {j.target.id: j.target for j in todo}.values():
-        r = upscale_readiness(t, info)
-        if r and r["status"] == "not_ready":
-            print(f"  !! {t.short} can't upscale on this ComfyUI:")
-            for m in r["missing"]:
-                print(f"       {m}")
-            return 1
+    missing = not_ready(todo, info)
+    if missing:
+        print("  !! this ComfyUI can't run these upscales:")
+        for m in missing:
+            print(f"       {m}")
+        return 1
     bases: dict = {}
     done = failed = 0
     t_all = time.time()
     for up in todo:
         t0 = time.time()
         try:
-            if up.target.id not in bases:
-                bases[up.target.id] = J.target_workflow(up.target, None, args.comfy)[0]
-            g = upscale_graph(bases[up.target.id], up)
+            g = graph_of(up, bases, args.comfy)
             start(up)
             pid = comfy.queue(g)
             mark_queued(up, pid)

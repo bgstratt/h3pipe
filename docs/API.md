@@ -343,16 +343,35 @@ Body `{"ep", "shots"?: ["sh020"] | null, "takes"?: [{"shot", "take"}], "redo"?: 
 of each (the pick, else the latest usable; null: the whole final cut); `takes` names
 final takes directly and wins. A take with a fresh upscale is skipped unless `redo`.
 `vae` forces the VAE route; `start_step` is an exact step of the take's schedule.
-Queues and returns at once:
+`method`: `"latent"` (a re-sample: the default where the take's target has an `upscale`
+block) or `"pixel"` (an upscale model over the frames: any target, the default for the
+rest), null for each take's default. `pixel_model` names the pixel method's model, a file
+in ComfyUI's `models/upscale_models` (null: `RealESRGAN_x2.pth` if installed, else the first
+2x model); `detail` (0, 1 or 2) starts a re-sample that many steps earlier than the default
+(more detail, more change). The pixel method needs no latent, no frozen shotlist and none
+of the take's target's models, and a scale only has to land on even sides. Queues and
+returns at once:
 ```json
-{"queued": [{"shot": "sh020", "take": 3, "route": "latent", "scale": 2.0, "start_step": 7,
+{"queued": [{"shot": "sh020", "take": 3, "route": "latent", "method": "latent",
+             "pixel_model": null, "scale": 2.0, "start_step": 7,
              "width": 1920, "height": 1088, "prompt_id": "…"}],
  "skipped": [{"shot": "sh030", "take": 1, "reason": "already upscaled"}],
  "errors": [{"shot": "sh040", "take": 2, "error": "…"}]}
 ```
 409 when the running ComfyUI can't upscale (the reason names what's missing: an
-h3pipe node, the latent upscaler pack or its model file, or the pack's "Plus" fork,
-which has no temporal chunking); 502 when ComfyUI doesn't answer.
+h3pipe node, the latent upscaler pack or its model file, the pack's "Plus" fork, which
+has no temporal chunking, or the pixel method's model); 502 when ComfyUI doesn't answer.
+
+### `GET /h3pipe/upscale/options`
+What the editor's Upscale dialog offers on this ComfyUI:
+```json
+{"pixel": {"status": "ready", "missing": [], "default": "RealESRGAN_x2.pth",
+           "models": ["4x-UltraSharp.pth", "RealESRGAN_x2.pth", "RealESRGAN_x4.pth"]},
+ "latent": {"minimax_h3_ref2va": {"status": "ready", "missing": []},
+            "ltx2": {"status": "ready", "missing": []}, "wan22_i2v": null, "…": null},
+ "details": [0, 1, 2]}
+```
+`latent[target]` is null for a target with no latent upscale.
 
 ### `DELETE /h3pipe/upscale?ep=…&shot=sh020&take=3`
 Removes the take's upscale. 404 when it has none; 409 while ComfyUI still has it queued

@@ -257,7 +257,14 @@ config, never change the size unasked.
 
 An upscale starts 7/8 of the way through the take's schedule (step 7 of 8), which keeps a
 speaking mouth exactly as the take had it. A shot with no dialogue can take more detail with
-`h3.py upscale <ep> --only sh100 --redo --start-step 5` (more change: check it).
+`h3.py upscale <ep> --only sh100 --redo --detail 2` (two steps earlier: more change, check
+it).
+
+Takes on any other target (Wan, `ltx2_ingredients`, H3 from keyframes, a show's own) can
+still be upscaled by the **pixel method**: an upscale model (RealESRGAN, UltraSharp, from
+ComfyUI's `models/upscale_models`) over the frames, with the take's audio copied on. It is
+fast and needs nothing but the model, but it only sharpens what's there; it draws no new
+detail the way a re-sample does. `h3.py upscale <ep> --method pixel` uses it for any take.
 
 ### Render profiles
 

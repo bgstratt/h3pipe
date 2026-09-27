@@ -671,8 +671,12 @@ export interface TakeUpscale {
   fresh: boolean;
   width: number | null;
   height: number | null;
-  route: "latent" | "vae" | null;
+  route: "latent" | "vae" | "pixel" | null;
   start_step: number | null;
+  /** latent (a re-sample) or pixel (an upscale model over the frames) */
+  method?: "latent" | "pixel";
+  /** the pixel method's model file */
+  pixel_model?: string | null;
   comfy_prompt_id: string | null;
   /** the upscale's mp4, relative to the episode (null until it is written) */
   mp4: string | null;
@@ -689,10 +693,25 @@ export interface UpscaleRequest {
   scale?: number | null;
   start_step?: number | null;
   vae?: boolean;
+  /** null: each take's default (latent where its target has one, else pixel) */
+  method?: "latent" | "pixel" | null;
+  /** the pixel method's model (models/upscale_models); null: the default */
+  pixel_model?: string | null;
+  /** latent: start 0-2 steps earlier than the default (more detail, more change) */
+  detail?: 0 | 1 | 2 | null;
+}
+
+/** GET /h3pipe/upscale/options: what the Upscale dialog can offer here. */
+export interface UpscaleOptions {
+  pixel: { status: "ready" | "not_ready" | "unknown"; missing: string[]; models: string[]; default: string };
+  /** each video target's latent upscale: null when it has none */
+  latent: Record<string, { status: "ready" | "not_ready" | "unknown"; missing: string[] } | null>;
+  details: number[];
 }
 
 export interface UpscaleResult {
-  queued: { shot: string; take: number; route: "latent" | "vae"; scale: number; start_step: number;
+  queued: { shot: string; take: number; route: "latent" | "vae" | "pixel"; scale: number; start_step: number | null;
+            method?: "latent" | "pixel"; pixel_model?: string | null;
             width: number; height: number; prompt_id: string }[];
   skipped: { shot: string; take?: number; reason: string }[];
   errors: { shot: string; take?: number; error: string }[];

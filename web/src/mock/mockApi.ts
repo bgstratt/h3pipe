@@ -1194,13 +1194,24 @@ export function createMockApi(emit: Emit, opts: MockOptions = {}): Api & { outsi
         if (!t || t.status !== "ok") { out.skipped.push({ shot: w.shot, reason: "not a finished final take" }); continue; }
         if (t.upscale?.fresh && !req.redo) { out.skipped.push({ shot: w.shot, take: w.take, reason: "already upscaled" }); continue; }
         const stem = `${fin.folder}/${w.shot}/${w.shot}_t${String(w.take).padStart(2, "0")}`;
-        t.upscale = { status: "ok", fresh: true, width: 1920, height: 1088, route: req.vae ? "vae" : "latent",
-                      start_step: req.start_step ?? 7, comfy_prompt_id: null, mp4: t.mp4 ?? `${stem}.mp4`, save_notes: "mock" };
+        const pixel = req.method === "pixel";
+        t.upscale = { status: "ok", fresh: true, width: 1920, height: 1088, route: pixel ? "pixel" : req.vae ? "vae" : "latent",
+                      method: pixel ? "pixel" : "latent", pixel_model: pixel ? (req.pixel_model ?? "RealESRGAN_x2.pth") : null,
+                      start_step: pixel ? null : (req.start_step ?? 7 - (req.detail ?? 0)), comfy_prompt_id: null, mp4: t.mp4 ?? `${stem}.mp4`, save_notes: "mock" };
         out.queued.push({ shot: w.shot, take: w.take, route: t.upscale.route!, scale: 2, start_step: t.upscale.start_step!,
                           width: 1920, height: 1088, prompt_id: `mock-up-${w.shot}` });
         emit("h3pipe.upscale", { ep: EP, shot: w.shot, take: w.take, status: "ok" });
       }
       return out;
+    },
+    async upscaleOptions() {
+      await wait();
+      return {
+        pixel: { status: "ready", missing: [], models: ["4x-UltraSharp.pth", "RealESRGAN_x2.pth", "RealESRGAN_x4.pth"], default: "RealESRGAN_x2.pth" },
+        latent: { minimax_h3_ref2va: { status: "ready", missing: [] }, ltx2: { status: "ready", missing: [] },
+                  ltx2_ingredients: null, minimax_h3_fl2va: null, wan22_i2v: null, wan22_ti2v: null, wan22_vace: null },
+        details: [0, 1, 2],
+      };
     },
     async deleteUpscale(ep, shot, take) {
       await wait();

@@ -120,5 +120,61 @@ class UpscaleNodesTest(unittest.TestCase):
         self.assertEqual((rec["status"], rec["audio"]), ("ok", "none"))
 
 
+def fake_upscaler_modules(factor: int = 4) -> dict:
+    """sys.modules entries for comfy.utils (common_upscale) and core's
+    ImageUpscaleWithModel, so H3PixelUpscale runs outside ComfyUI: the "model"
+    repeats pixels `factor` times and counts its calls."""
+    import types
+    comfy = types.ModuleType("comfy")
+    utils = types.ModuleType("comfy.utils")
+
+    def common_upscale(s, w, h, method, crop):
+        return torch.nn.functional.interpolate(s, size=(h, w), mode="bilinear", align_corners=False)
+    utils.common_upscale = common_upscale
+    comfy.utils = utils
+    extras = types.ModuleType("comfy_extras")
+    mod = types.ModuleType("comfy_extras.nodes_upscale_model")
+    calls = []
+
+    class Out:
+        def __init__(self, x):
+            self.args = (x,)
+
+    class ImageUpscaleWithModel:
+        @classmethod
+        def execute(cls, model, image):
+            calls.append(int(image.shape[0]))
+            return Out(image.repeat_interleave(factor, 1).repeat_interleave(factor, 2))
+    mod.ImageUpscaleWithModel = ImageUpscaleWithModel
+    mod.calls = calls
+    extras.nodes_upscale_model = mod
+    return {"comfy": comfy, "comfy.utils": utils, "comfy_extras": extras,
+            "comfy_extras.nodes_upscale_model": mod}
+
+
+class PixelNodeTest(unittest.TestCase):
+    def test_batches_resized_to_the_target(self):
+        frames = clip(10)                                          # 10 x 48 x 96
+        mods = fake_upscaler_modules(4)
+        with mock.patch.dict(sys.modules, mods):
+            (out,) = UN.H3PixelUpscale().upscale(frames, object(), 192, 96, chunk=4)
+        self.assertEqual(tuple(out.shape), (10, 96, 192, 3))       # 4x model, 2x out
+        self.assertEqual(mods["comfy_extras.nodes_upscale_model"].calls, [4, 4, 2])
+        # frame order and content kept: frame i's red is i/9
+        for i in (0, 5, 9):
+            self.assertAlmostEqual(float(out[i, :, :, 0].mean()), i / 9, delta=0.01)
+
+    @needs_ffmpeg
+    def test_a_mute_take_still_loads(self):
+        with tempfile.TemporaryDirectory() as root:
+            out = os.path.join(root, "t.mp4")
+            subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i",
+                            "testsrc=size=96x48:rate=24:duration=1", "-frames:v", "24",
+                            "-c:v", "libx264", "-pix_fmt", "yuv420p", out], check=True)
+            images, audio = UN.H3LoadTakeVideo().load(root, "t.mp4", "")
+        self.assertEqual(int(images.shape[0]), 24)
+        self.assertEqual(float(audio["waveform"].abs().sum()), 0.0)  # silence
+
+
 if __name__ == "__main__":
     unittest.main()

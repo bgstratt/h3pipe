@@ -125,6 +125,15 @@ export interface RenderAsk {
   seedMode?: SeedMode;
 }
 
+/** Phase 13: the Upscale dialog's subject: named final takes, or the whole final cut. */
+export interface UpscaleAsk {
+  title: string;
+  /** null: the final cut's takes */
+  takes: { shot: string; take: number }[] | null;
+  /** start with "again, where already upscaled" ticked */
+  redo?: boolean;
+}
+
 export interface RefTakeRef {
   ep: string;
   ref: string;
@@ -276,6 +285,7 @@ export interface AppState {
   browse: BrowseState | null;
   /** the render confirmation (shots that will be skipped for missing refs) */
   renderAsk: RenderAsk | null;
+  upscaleAsk: UpscaleAsk | null;
   /** refs by episode (GET /h3pipe/refs) */
   refs: Record<string, Ref[]>;
   refsError: Record<string, string>;
@@ -395,6 +405,7 @@ export function initialState(prefs: Prefs = {}): AppState {
     cutPlay: { playing: false, pos: 0, seek: null },
     browse: null,
     renderAsk: null,
+    upscaleAsk: null,
     refs: {},
     refsError: {},
     refsLoading: {},

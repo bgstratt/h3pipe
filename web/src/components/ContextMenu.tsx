@@ -254,7 +254,7 @@ export function ContextMenu() {
                   : "Re-sample this take at 2x from late in its schedule: more detail, the same performance, its own audio"}
                 onClick={run(() => void upscaleTake({ ep, pass: menu.pass, shot: menu.shot, take: take.take }, !!take.upscale?.fresh))}
               >
-                <i className="pi pi-arrow-up-right" /> {take.upscale?.fresh ? "Upscale again (2x)" : "Upscale (2x)"}
+                <i className="pi pi-arrow-up-right" /> {take.upscale?.fresh ? "Upscale again (2x)…" : "Upscale (2x)…"}
               </button>
               {take.upscale && take.upscale.status !== "queued" && (
                 <button onClick={run(() => void removeUpscale({ ep, pass: menu.pass, shot: menu.shot, take: take.take }))}>

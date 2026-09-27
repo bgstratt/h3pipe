@@ -16,6 +16,9 @@ from the target's render graph; these are the pieces that graph doesn't have:
                        to the finished line
     H3SaveUpscale      <stem>.up.mp4: the picture, with the take's own audio
                        stream copied on unchanged, and <stem>.up.json closed
+    H3PixelUpscale     the pixel method (any target): an upscale model
+                       (RealESRGAN, UltraSharp, ...) over the frames a few at a
+                       time, each batch resized straight to the target size
 
 Paths are relative to `project_root` (the episode), like H3SaveShot's.
 """
@@ -106,8 +109,54 @@ class H3LoadTakeVideo:
         video = _abs(project_root, video_file)
         images = read_frames(video)
         src = _abs(project_root, audio_file) if audio_file else video
-        audio = load_audio(src)
+        try:
+            audio = load_audio(src)
+        except Exception:
+            # a mute take (dub / clone, or a Wan target): silence of its length
+            seconds = images.shape[0] / 24.0
+            audio = {"waveform": torch.zeros(1, 1, max(1, int(44100 * seconds))),
+                     "sample_rate": 44100}
         return (images, audio)
+
+
+# ---------------------------------------------------------------------------
+# H3PixelUpscale
+# ---------------------------------------------------------------------------
+
+class H3PixelUpscale:
+    """Upscale frames with an upscale model (UpscaleModelLoader's), `chunk`
+    frames at a time, resizing each batch to width x height (lanczos) as it
+    goes: a 4x model over a hundred frames at once would need tens of GB, this
+    holds one batch at the model's size and the rest at the target size."""
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {
+            "images": ("IMAGE",),
+            "upscale_model": ("UPSCALE_MODEL",),
+            "width": ("INT", {"default": 1920, "min": 16, "max": 16384, "step": 2}),
+            "height": ("INT", {"default": 1088, "min": 16, "max": 16384, "step": 2}),
+            "chunk": ("INT", {"default": 4, "min": 1, "max": 64}),
+        }}
+
+    RETURN_TYPES = ("IMAGE",)
+    FUNCTION = "upscale"
+    CATEGORY = "H3/upscale"
+
+    def upscale(self, images, upscale_model, width, height, chunk=4):
+        import comfy.utils
+        from comfy_extras.nodes_upscale_model import ImageUpscaleWithModel
+
+        n = int(images.shape[0])
+        out = torch.empty((n, int(height), int(width), 3), dtype=torch.float16)
+        for i in range(0, n, int(chunk)):
+            got = ImageUpscaleWithModel.execute(upscale_model, images[i:i + int(chunk)])
+            big = got.args[0] if hasattr(got, "args") else got[0]
+            if big.shape[1] != height or big.shape[2] != width:
+                big = comfy.utils.common_upscale(big.movedim(-1, 1), int(width), int(height),
+                                                 "lanczos", "disabled").movedim(1, -1)
+            out[i:i + big.shape[0]] = big.clamp(0, 1).to("cpu", torch.float16)
+        return (out,)
 
 
 # ---------------------------------------------------------------------------
@@ -250,6 +299,7 @@ NODE_CLASS_MAPPINGS = {
     "H3LoadTakeVideo": H3LoadTakeVideo,
     "H3HoldAudio": H3HoldAudio,
     "H3SaveUpscale": H3SaveUpscale,
+    "H3PixelUpscale": H3PixelUpscale,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -257,4 +307,5 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "H3LoadTakeVideo": "H3 Load Take Video",
     "H3HoldAudio": "H3 Hold Audio",
     "H3SaveUpscale": "H3 Save Upscale",
+    "H3PixelUpscale": "H3 Pixel Upscale",
 }

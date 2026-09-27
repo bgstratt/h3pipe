@@ -191,6 +191,12 @@ Only for upscaling final takes (`h3.py upscale`, the editor's **Upscale**); a re
 needs it. It is for takes made on `minimax_h3_ref2va`. Takes made on `ltx2` upscale with
 what LTX-2 already has (its own latent upsampler), so they need nothing from here.
 
+**The pixel method** upscales a take on any target with an upscale model instead. Put one
+or more in `models/upscale_models/` — RealESRGAN_x2 (the default: exactly 2x, gentle on
+film grain) and RealESRGAN_x4 from the `xinntao/Real-ESRGAN` releases, or 4x-UltraSharp
+from OpenModelDB (check its licence: it may be non-commercial). ComfyUI-Manager's Model
+Manager installs them too. They load with core ComfyUI nodes; no pack is needed.
+
 1. Clone **LBH-123-AI/Comfyui_Minimax_h3_latent_Upscaler** into `custom_nodes`:
    ```
    cd C:\AI\ComfyUI\ComfyUI\custom_nodes

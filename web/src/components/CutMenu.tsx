@@ -99,7 +99,7 @@ export function CutMenu() {
         <>
           <div className="h3-menu-sep" />
           <button onClick={run(() => upscaleCut())} title="Upscale every take of the final cut that isn't yet (2x, its own audio kept); Export 2x then assembles from them">
-            <i className="pi pi-arrow-up-right" /> Upscale the cut (2x)
+            <i className="pi pi-arrow-up-right" /> Upscale the cut (2x)…
           </button>
         </>
       )}

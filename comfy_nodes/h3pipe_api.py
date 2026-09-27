@@ -779,6 +779,15 @@ def post_upscale(ctx: Context, body):
         raise ApiError(400, "scale must be a number or null")
     if start_step is not None and (isinstance(start_step, bool) or not isinstance(start_step, int)):
         raise ApiError(400, "start_step must be a whole number or null")
+    method = body.get("method")
+    if method is not None and method not in U.METHODS:
+        raise ApiError(400, "method must be latent, pixel or null (each take's default)")
+    pixel_model = body.get("pixel_model")
+    if pixel_model is not None and (not isinstance(pixel_model, str) or not pixel_model):
+        raise ApiError(400, "pixel_model must be an upscale model's file name, or null")
+    detail = body.get("detail")
+    if detail is not None and detail not in U.DETAILS:
+        raise ApiError(400, "detail must be 0, 1 or 2, or null")
     if takes is not None:
         found = []
         for x in takes:
@@ -793,7 +802,8 @@ def post_upscale(ctx: Context, body):
             skipped.append({"shot": shot, "reason": why})
             continue
         up = U.plan_upscale(ep, t, scale=scale, start_step=start_step,
-                            route="vae" if vae else None, redo=redo)
+                            route="vae" if vae else None, redo=redo, method=method,
+                            pixel_model=pixel_model, detail=detail)
         if up.action == "skip":
             skipped.append({"shot": shot, "take": t.take, "reason": up.why})
         elif up.action == "error":
@@ -806,17 +816,13 @@ def post_upscale(ctx: Context, body):
             info = ctx.comfy.object_info()
         except Exception as e:
             raise ApiError(502, f"ComfyUI didn't answer: {e}")
-        for t in {j.target.id: j.target for j in jobs}.values():
-            r = U.upscale_readiness(t, info)
-            if r and r["status"] == "not_ready":
-                raise ApiError(409, f"{t.short} can't upscale on this ComfyUI: "
-                                    + "; ".join(r["missing"]))
+        missing = U.not_ready(jobs, info)
+        if missing:
+            raise ApiError(409, "this ComfyUI can't run these upscales: " + "; ".join(missing))
         bases: dict = {}
         for up in jobs:
             try:
-                if up.target.id not in bases:
-                    bases[up.target.id] = J.target_workflow(up.target, None, ctx.comfy_url)[0]
-                g = U.upscale_graph(bases[up.target.id], up)
+                g = U.graph_of(up, bases, ctx.comfy_url)
                 U.start(up)
                 pid = ctx.comfy.queue(g)
                 U.mark_queued(up, pid)
@@ -826,10 +832,27 @@ def post_upscale(ctx: Context, body):
                 errors.append({"shot": up.shot, "take": up.take.take, "error": str(e)})
                 continue
             queued.append({"shot": up.shot, "take": up.take.take, "route": up.route,
+                           "method": up.method, "pixel_model": up.pixel_model or None,
                            "scale": up.scale, "start_step": up.start_step,
                            "width": up.width, "height": up.height, "prompt_id": pid})
             upscale_event(ctx, ep, up.shot, up.take.take, "queued")
     return 200, {"queued": queued, "skipped": skipped, "errors": errors}
+
+
+@handler
+def get_upscale_options(ctx: Context, query: dict):
+    """What the Upscale dialog offers: the pixel method's models (this ComfyUI's
+    models/upscale_models) and default, and each video target's latent upscale
+    (null: it has none; else its readiness)."""
+    try:
+        info = ctx.comfy.object_info()
+    except Exception:
+        info = None
+    px = U.pixel_readiness(info)
+    latent = {}
+    for t in TG.list_targets("video"):
+        latent[t.id] = U.upscale_readiness(t, info)
+    return 200, {"pixel": px, "latent": latent, "details": list(U.DETAILS)}
 
 
 @handler
@@ -2369,6 +2392,7 @@ ROUTES = [
     ("POST", "/h3pipe/cancel", post_cancel, "body"),
     ("POST", "/h3pipe/discard", post_discard, "body"),
     ("POST", "/h3pipe/upscale", post_upscale, "body"),
+    ("GET", "/h3pipe/upscale/options", get_upscale_options, "query"),
     ("DELETE", "/h3pipe/upscale", delete_upscale, "query"),
     ("PUT", "/h3pipe/pick", put_pick, "body"),
     ("PUT", "/h3pipe/cut", put_cut, "body"),

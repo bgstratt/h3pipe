@@ -378,5 +378,82 @@ class LtxUpscaleTest(UpscaleTest):
         self.assertEqual(U.upscale_readiness(t, info)["status"], "not_ready")
 
 
+class PixelUpscaleTest(UpscaleRouteTest):
+    """The pixel method: an upscale model over the frames, for any target."""
+
+    def setUp(self):
+        super().setUp()
+        self.comfy.nodes |= set(U.PIXEL_NODES)
+        self.comfy.info["UpscaleModelLoader"] = {"input": {"required": {
+            "model_name": [["4x-UltraSharp.pth", "RealESRGAN_x2.pth", "RealESRGAN_x4.pth"], {}]}}}
+
+    def as_target(self, t: T.Take, target: str) -> T.Take:
+        T.update_sidecar(t.paths.sidecar, target=target)
+        return T.get_take(self.ep, "final", t.shot, t.take)
+
+    def test_default_method_follows_the_target(self):
+        t = self.final_take()
+        self.assertEqual(U.plan_upscale(self.ep, t).method, "latent")         # H3 has one
+        wan = self.as_target(t, "wan22_ti2v")
+        up = U.plan_upscale(self.ep, wan)
+        self.assertEqual((up.method, up.route, up.pixel_model, up.start_step),
+                         ("pixel", "pixel", "RealESRGAN_x2.pth", None))
+        self.assertEqual((up.width, up.height), (wan.sidecar["width"] * 2, wan.sidecar["height"] * 2))
+        # asked for a latent upscale it doesn't have: said plainly
+        bad = U.plan_upscale(self.ep, wan, method="latent")
+        self.assertEqual(bad.action, "error")
+        self.assertIn("use the pixel method", bad.why)
+        # any scale that lands on even sides
+        self.assertEqual(U.plan_upscale(self.ep, wan, scale=1.5).action, "upscale")
+
+    def test_pixel_graph(self):
+        t = self.final_take()
+        up = U.plan_upscale(self.ep, t, method="pixel", pixel_model="RealESRGAN_x4.pth")
+        g = U.pixel_graph(up)
+        self.assertEqual(g["up_model"]["inputs"]["model_name"], "RealESRGAN_x4.pth")
+        px = g["up_pixels"]["inputs"]
+        self.assertEqual((px["width"], px["height"]), (up.width, up.height))
+        self.assertEqual(px["images"], ["up_video", 0])
+        self.assertEqual(g["up_save"]["inputs"]["images"], ["up_pixels", 0])
+        self.assertTrue(g["up_save"]["inputs"]["out_mp4"].endswith(".up.mp4"))
+        self.assertEqual({v["class_type"] for v in g.values()}, set(U.PIXEL_NODES))
+
+    def test_detail_starts_earlier(self):
+        t = self.final_take()
+        steps = t.sidecar["steps"]                                  # kitchen_sink final: 6
+        base = U.start_of(steps, U.upscale_spec(TG.load_target("minimax_h3_ref2va", "video")))
+        self.assertEqual([U.plan_upscale(self.ep, t, detail=d).start_step for d in U.DETAILS],
+                         [base, base - 1, base - 2])
+
+    def test_route_and_options(self):
+        t = self.final_take()
+        res = self.ok(A.post_upscale(self.ctx, {"ep": self.ep, "takes": [{"shot": "sh010", "take": 1}],
+                                                "method": "pixel", "pixel_model": "4x-UltraSharp.pth"}))
+        q = res["queued"][0]
+        self.assertEqual((q["method"], q["pixel_model"], q["route"]), ("pixel", "4x-UltraSharp.pth", "pixel"))
+        self.assertTrue(any(v["class_type"] == "H3PixelUpscale" for v in self.comfy.graphs[-1].values()))
+        up = self.status_take()["upscale"]
+        self.assertEqual((up["method"], up["pixel_model"], up["fresh"]), ("pixel", "4x-UltraSharp.pth", True))
+        # a model this ComfyUI doesn't have
+        msg = self.err(A.post_upscale(self.ctx, {"ep": self.ep, "shots": ["sh010"], "redo": True,
+                                                 "method": "pixel", "pixel_model": "nope.pth"}), 409)
+        self.assertIn("nope.pth", msg)
+        self.err(A.post_upscale(self.ctx, {"ep": self.ep, "shots": ["sh010"], "method": "sharp"}), 400)
+        self.err(A.post_upscale(self.ctx, {"ep": self.ep, "shots": ["sh010"], "detail": 5}), 400)
+        opts = self.ok(A.get_upscale_options(self.ctx, {}))
+        self.assertEqual(opts["pixel"]["status"], "ready")
+        self.assertEqual(opts["pixel"]["default"], "RealESRGAN_x2.pth")
+        self.assertIn("RealESRGAN_x4.pth", opts["pixel"]["models"])
+        self.assertEqual(opts["latent"]["minimax_h3_ref2va"]["status"], "ready")
+        self.assertIsNone(opts["latent"]["wan22_ti2v"])
+        self.assertEqual(opts["details"], [0, 1, 2])
+
+    def test_default_pixel_model(self):
+        self.assertEqual(U.default_pixel_model(["4x-UltraSharp.pth", "RealESRGAN_x2.pth"]), "RealESRGAN_x2.pth")
+        self.assertEqual(U.default_pixel_model(["4x-UltraSharp.pth", "2x-Other.pth"]), "2x-Other.pth")
+        self.assertEqual(U.default_pixel_model(["4x-UltraSharp.pth"]), "4x-UltraSharp.pth")
+        self.assertEqual(U.pixel_readiness({})["status"], "not_ready")      # no nodes, no models
+
+
 if __name__ == "__main__":
     unittest.main()

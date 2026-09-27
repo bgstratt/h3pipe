@@ -434,7 +434,7 @@ export async function loadEpisodes() {
 
 export function selectEpisode(ep: string | null) {
   set((s) => ({
-    ep, shot: null, take: null, viewer: null, menu: null, redo: null, renderAsk: null, refSel: null,
+    ep, shot: null, take: null, viewer: null, menu: null, redo: null, renderAsk: null, upscaleAsk: null, refSel: null,
     cutPlay: { ...s.cutPlay, playing: false, pos: 0 },
     build: { busy: false, result: null, error: null },
     // Phase 9c: the Recording and voice-clip windows belong to one episode
@@ -965,16 +965,39 @@ export async function upscale(req: Omit<UpscaleRequest, "ep">, busyKey: string) 
   });
 }
 
-/** Phase 13: upscale one final take (`redo`: again, though it has a fresh one). */
+/** Phase 13: the Upscale dialog for one final take (`redo`: it already has a fresh one). */
 export function upscaleTake(ref: TakeRef, redo = false) {
-  return upscale({ takes: [{ shot: ref.shot, take: ref.take }], redo }, `${ref.shot}|${ref.take}`);
+  set({ menu: null, upscaleAsk: { title: `Upscale ${ref.shot} ${tn(ref.take)}`, takes: [{ shot: ref.shot, take: ref.take }], redo } });
 }
 
-/** Phase 13: upscale every take of the final cut that has no fresh upscale. */
+/** Phase 13: the Upscale dialog for every take of the final cut. */
 export function upscaleCut() {
-  const n = get().status[statusKey(get().ep ?? "", "final")]?.shots.filter((x) => x.cut.usable).length ?? 0;
-  if (n > 8 && !confirm(`Upscale the final cut's takes that aren't yet (up to ${n})? Each takes about half a minute on the GPU.`)) return;
-  return upscale({ shots: null }, "cut");
+  set({ menu: null, upscaleAsk: { title: "Upscale the final cut", takes: null } });
+}
+
+export function closeUpscale() {
+  set({ upscaleAsk: null });
+}
+
+/** The Upscale dialog's choices. `method` "auto" leaves each take's default. */
+export interface UpscaleForm {
+  method: "auto" | "latent" | "pixel";
+  pixelModel: string | null;
+  detail: 0 | 1 | 2;
+  redo: boolean;
+  vae: boolean;
+}
+
+/** The POST /h3pipe/upscale body (less `ep`) for the dialog's choices: only
+ * what differs from the server's defaults is sent. */
+export function upscaleRequestOf(f: UpscaleForm, ask: { takes: { shot: string; take: number }[] | null }): Omit<UpscaleRequest, "ep"> {
+  const req: Omit<UpscaleRequest, "ep"> = ask.takes ? { takes: ask.takes } : { shots: null };
+  if (f.method !== "auto") req.method = f.method;
+  if (f.method !== "latent" && f.pixelModel) req.pixel_model = f.pixelModel;
+  if (f.method !== "pixel" && f.detail) req.detail = f.detail;
+  if (f.method !== "pixel" && f.vae) req.vae = true;
+  if (f.redo) req.redo = true;
+  return req;
 }
 
 /** Phase 13: remove a take's upscale (DELETE /h3pipe/upscale). Asks first. */
