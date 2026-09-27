@@ -203,11 +203,11 @@ function UpscaleBody() {
           )}
           {summary && <div className={`h3-small ${bad.length ? "h3-error" : "h3-muted"}`}>{summary}</div>}
           <div className="h3-row" style={{ gap: 8, flexWrap: "wrap" }}>
-            <label className="h3-col" style={{ gap: 2 }} title="How the upscale's mp4 is written. Auto uses the GPU's NVENC when ffmpeg has it (H.264, HEVC past 4096 wide), else x264 on the CPU">
+            <label className="h3-col" style={{ gap: 2 }} title="How the upscale's mp4 is written. Auto: H.264 on the GPU (NVENC) up to 4096 wide, x264 on the CPU past that (slower, but it plays in the editor). GPU (NVENC) past 4096 wide writes HEVC: fast, but the browser may show it black">
               <span className="h3-h">Encoder</span>
               <select value={f.encoder} onChange={(e) => set({ encoder: e.target.value as UpscaleForm["encoder"] })}>
                 <option value="auto">Auto (GPU when it can)</option>
-                <option value="nvenc">GPU (NVENC)</option>
+                <option value="nvenc">GPU (NVENC; HEVC past 4096)</option>
                 <option value="x264">CPU (x264)</option>
               </select>
             </label>

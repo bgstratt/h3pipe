@@ -433,13 +433,16 @@ def x264_args(w: int, h: int) -> list:
 
 
 def encoder_args(encoder: str, w: int, h: int) -> tuple[str, list]:
-    """(the encoder used, its ffmpeg args). auto and nvenc use the GPU: H.264 up to
-    4096 on a side (NVENC's H.264 limit), HEVC above; auto falls back to x264
-    without NVENC, nvenc raises."""
+    """(the encoder used, its ffmpeg args). auto: H.264 on the GPU (NVENC) up to 4096
+    on a side, x264 past that or without NVENC: always H.264, which the editor's
+    browser plays (a 5376x3072 HEVC upscale played as black, 2026-09-27). nvenc
+    forces the GPU: H.264 up to 4096 (NVENC's H.264 limit), HEVC past it, which a
+    browser may not play; it raises without NVENC."""
     if encoder in ("auto", "nvenc"):
         have = nvenc_encoders()
-        name = ("h264_nvenc" if w <= 4096 and h <= 4096 and "h264_nvenc" in have
-                else "hevc_nvenc" if "hevc_nvenc" in have else None)
+        small = w <= 4096 and h <= 4096
+        name = ("h264_nvenc" if small and "h264_nvenc" in have
+                else "hevc_nvenc" if encoder == "nvenc" and "hevc_nvenc" in have else None)
         if name:
             args = ["-c:v", name, "-preset", "p5", "-rc", "vbr", "-cq", "19", "-b:v", "0",
                     "-pix_fmt", "yuv420p"]

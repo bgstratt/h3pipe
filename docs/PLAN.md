@@ -1788,7 +1788,9 @@ what this machine and the repo have today. Nothing below is built; each target g
   4K), streaming frames to ffmpeg one at a time; the upscale model runs fp16 under autocast
   by default (`precision`). Measured on the 5090: 5376×3072 HEVC NVENC ~9 fps against
   x264's ~1 fps (sh020 t03's encode was 105 s of a 320 s job). Assemble re-encodes a cut
-  whose clips mix codecs.
+  whose clips mix codecs. Revised 2026-09-27: `auto` no longer writes HEVC — sh040 t03's
+  5376×3072 HEVC upscale was a sound file but played black in the editor's browser — so
+  past 4096 auto uses x264 (H.264, playable); HEVC only with `nvenc` forced.
 - **Pixel on top of an upscale** (2026-09-26): `from_upscale` / `--from-upscale` / the dialog's
   "On top of the existing upscale": the pixel method reads the take's fresh `.up.mp4` and
   replaces it, sized from the upscale; the record nests the old one as `on_upscale`.

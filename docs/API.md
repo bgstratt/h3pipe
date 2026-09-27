@@ -365,9 +365,10 @@ the take (its `.up.mp4` is the input and is replaced; `scale` applies to the ups
 the take's audio is still what's copied on). The new record keeps the old one as
 `on_upscale` (nested for a longer chain); freshness stays tied to the take. A take with no
 fresh upscale is an error; with `method: "latent"` it's refused.
-`encoder`: `"auto"` (the default: NVENC when this ffmpeg has it — H.264 up to 4096 on a side,
-HEVC past that, which NVENC's H.264 can't do — else x264), `"nvenc"` (forced; fails
-without) or `"x264"` (the CPU; its faster preset past 4K). The `.up.json`'s `encoder` is
+`encoder`: `"auto"` (the default: H.264 on NVENC up to 4096 on a side, x264 past that or
+without NVENC — always H.264, which the editor's browser plays), `"nvenc"` (forced: H.264
+up to 4096, HEVC past it, which NVENC's H.264 can't do and a browser may show black; fails
+without NVENC) or `"x264"` (the CPU; its faster preset past 4K). The `.up.json`'s `encoder` is
 the one used. `precision`: the upscale model's, `"fp16"` (the default: autocast, about
 twice as fast) or `"fp32"`. Options lists both as `encoders` / `precisions`. An upscaled
 cut that mixes an HEVC upscale with H.264 clips is re-encoded by assemble, since concat

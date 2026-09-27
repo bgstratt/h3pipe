@@ -295,8 +295,9 @@ the upscale is resized to whatever scale you ask for: RealESRGAN_x2 at 1.5x is t
 model with 3x or 4x (a 4x model at 1.5x does four times the work to throw most of it away).
 For a 4K master from a 1344×768 take: re-sample 2x, then RealESRGAN_x2 at 1.5x (4032×2304),
 then `h3.py assemble <ep> --upscaled --size 3840x2160`. Past 4K the output is heavy to make
-and to play; upscales encode on the GPU (NVENC) by default, which is what keeps a 5K one
-from taking minutes to write.
+and to play: up to 4096 wide upscales encode on the GPU (NVENC); past it they're written
+with x264 on the CPU, which takes a couple of minutes but plays in the editor (the GPU
+encoder can only write HEVC that big, which browsers often show as black).
 
 A pixel model's output is finished before it's saved. By default its colour and tone come
 from the original frames and only its fine detail from the model (upscale models shift

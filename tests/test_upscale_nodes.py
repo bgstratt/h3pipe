@@ -174,7 +174,9 @@ class EncoderTest(unittest.TestCase):
         both = {"h264_nvenc", "hevc_nvenc"}
         with mock.patch.object(UN, "nvenc_encoders", return_value=both):
             self.assertEqual(UN.encoder_args("auto", 3840, 2176)[0], "h264_nvenc")
-            name, args = UN.encoder_args("auto", 5376, 3072)             # past NVENC H.264's 4096
+            # past NVENC H.264's 4096: auto stays H.264 (x264), which a browser plays
+            self.assertEqual(UN.encoder_args("auto", 5376, 3072)[0], "libx264")
+            name, args = UN.encoder_args("nvenc", 5376, 3072)           # forced: HEVC
             self.assertEqual(name, "hevc_nvenc")
             self.assertIn("hvc1", args)
             self.assertEqual(UN.encoder_args("nvenc", 1920, 1088)[0], "h264_nvenc")
