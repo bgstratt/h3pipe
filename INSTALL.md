@@ -588,6 +588,8 @@ Only to upscale takes (`python h3.py upscale`), never to render. The node comes 
 
 - `minimax_h3_latent_upscaler_3d_fp16.safetensors` → `models/latent_upscale_models/` (MinimaxH3LatentUpscaler3D, for `minimax_h3_ref2va`) — no URL: no ComfyUI template, saved workflow or ComfyUI-Manager model list on this machine records this file. Search Hugging Face for its exact name: the Comfyui_Minimax_h3_latent_Upscaler pack's README points to the LBH-123-AI/Minimax_h3_latent_Upscaler repo. Only needed to upscale (Phase 13), never to render.
 - `ltx2`: nothing extra. Its render already has a latent upsampler, and an upscale runs that second stage again on the take
+- `wan22_i2v`: an upscale model from `models/upscale_models/` (RealESRGAN_x2.pth by default), then its own sampler
+- `wan22_ti2v`: an upscale model from `models/upscale_models/` (RealESRGAN_x2.pth by default), then its own sampler
 
 #### Files with no recorded download URL
 

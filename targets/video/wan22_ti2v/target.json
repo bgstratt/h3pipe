@@ -99,6 +99,16 @@
     }
   },
 
+  "upscale": {
+    "_note": "Phase 13d (docs/PLAN.md, h3upscale.py): `pixel_refine`, as wan22_i2v: the take's frames through an upscale model, encoded with the Wan 2.2 VAE, then its KSampler's tail (denoise 1 - `start`: 0.25 of 20 steps) at the new size; the prompt is size-free. 1.5x by default: 1280x704 at 2x is 2560x1408, heavy for the 5B.",
+    "mode": "pixel_refine",
+    "scale": 1.5,
+    "start": 0.75,
+    "align": 32,
+    "pixel_model": "RealESRGAN_x2.pth",
+    "sampler": {"class_type": "KSampler", "upstream_of": "images"}
+  },
+
   "downloads": {
     "_note": "Where to get each file this target names (docs/API.md 'Downloads'). A url is only given when a trustworthy record has it: a ComfyUI template's or saved workflow's properties.models entry, or ComfyUI-Manager's model list; `source` says which. Otherwise url is null and source says what to search for. Never a guessed URL.",
     "wan2.2_ti2v_5B_fp16.safetensors": {"folder": "diffusion_models", "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/diffusion_models/wan2.2_ti2v_5B_fp16.safetensors", "source": "ComfyUI template video_wan2_2_5B_ti2v.json (properties.models)"},

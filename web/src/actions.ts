@@ -1001,10 +1001,11 @@ export interface UpscaleForm {
 
 /** The POST /h3pipe/upscale body (less `ep`) for the dialog's choices: only
  * what differs from the server's defaults is sent. */
-export function upscaleRequestOf(f: UpscaleForm, ask: { pass: Pass; takes: { shot: string; take: number }[] | null }): Omit<UpscaleRequest, "ep"> {
+export function upscaleRequestOf(f: UpscaleForm, ask: { pass: Pass; takes: { shot: string; take: number }[] | null },
+                                 /** a take's re-sample starts with a pixel model (Wan) */ refineNeedsModel = false): Omit<UpscaleRequest, "ep"> {
   const req: Omit<UpscaleRequest, "ep"> = ask.takes ? { pass: ask.pass, takes: ask.takes } : { pass: ask.pass, shots: null };
   if (f.method !== "auto") req.method = f.method;
-  if (f.method !== "latent" && f.pixelModel) req.pixel_model = f.pixelModel;
+  if ((f.method !== "latent" || refineNeedsModel) && f.pixelModel) req.pixel_model = f.pixelModel;
   if (f.method === "pixel" && f.fromUpscale) req.from_upscale = true;
   if (f.encoder !== "auto") req.encoder = f.encoder;
   if (f.precision !== "fp16") req.precision = f.precision;

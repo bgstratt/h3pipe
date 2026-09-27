@@ -211,8 +211,8 @@ def block() -> str:
         if name:
             dl = t.downloads.get(name) or {}
             ups.append((t.id, u["class_type"], name, dl))
-        elif spec.get("mode") == "second_stage":
-            own.append(t.id)
+        elif spec.get("mode") in ("second_stage", "pixel_refine"):
+            own.append((t.id, spec.get("mode")))
     if ups:
         lines += ["### For upscaling (optional)", "",
                   "Only to upscale takes (`python h3.py upscale`), never to render. The "
@@ -223,9 +223,12 @@ def block() -> str:
             where = dl.get("url") or dl.get("source") or "no download record"
             lines += [f"- `{name}` → `models/{dl.get('folder') or 'latent_upscale_models'}/` "
                       f"({cls}, for `{tid}`) — {where}"]
-        for tid in own:
+        for tid, mode in own:
             lines += [f"- `{tid}`: nothing extra. Its render already has a latent upsampler, "
-                      f"and an upscale runs that second stage again on the take"]
+                      f"and an upscale runs that second stage again on the take"
+                      if mode == "second_stage" else
+                      f"- `{tid}`: an upscale model from `models/upscale_models/` "
+                      f"(RealESRGAN_x2.pth by default), then its own sampler"]
         lines += [""]
 
     nourl = [r for r in records if not r["url"]]

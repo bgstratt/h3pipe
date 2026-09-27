@@ -728,7 +728,8 @@ export interface UpscaleOptions {
   latent: Record<string, {
     status: "ready" | "not_ready" | "unknown"; missing: string[];
     /** resample (H3: any scale on the `align` grid) or second_stage (LTX-2: `fixed_scale`) */
-    mode?: "resample" | "second_stage"; align?: number; fixed_scale?: number | null;
+    /** resample (H3), second_stage (LTX-2), pixel_refine (Wan: a pixel model, then its sampler) */
+    mode?: "resample" | "second_stage" | "pixel_refine"; align?: number; fixed_scale?: number | null;
   } | null>;
   details: number[];
   max_scale?: number;

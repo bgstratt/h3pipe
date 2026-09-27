@@ -121,6 +121,16 @@
     }
   },
 
+  "upscale": {
+    "_note": "Phase 13d (docs/PLAN.md, h3upscale.py): Wan has no latent upscaler, so `pixel_refine`: the take's frames through an upscale model (`pixel_model`), encoded with the Wan VAE, then the low-noise expert alone from `start` (0.75 of the take's 4 lightning steps: the last) at the new size, WanImageToVideo's first frame rebuilt at that size. Silent: nothing to hold.",
+    "mode": "pixel_refine",
+    "scale": 2,
+    "start": 0.75,
+    "align": 32,
+    "pixel_model": "RealESRGAN_x2.pth",
+    "sampler": {"class_type": "KSamplerAdvanced", "upstream_of": "images"}
+  },
+
   "downloads": {
     "_note": "Where to get each file this target names (docs/API.md 'Downloads'). A url is only given when a trustworthy record has it: a ComfyUI template's or saved workflow's properties.models entry, or ComfyUI-Manager's model list; `source` says which. Otherwise url is null and source says what to search for. Never a guessed URL.",
     "wan2.2_i2v_lightx2v_4steps_lora_v1_high_noise.safetensors": {"folder": "loras", "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/loras/wan2.2_i2v_lightx2v_4steps_lora_v1_high_noise.safetensors", "source": "ComfyUI template video_wan2_2_14B_i2v.json (properties.models)"},

@@ -305,7 +305,7 @@ class UpscaleRouteTest(UpscaleTest):
         self.assertEqual(r["status"], "not_ready")
         self.assertIn("H3HoldAudio", r["missing"][0])
         self.assertEqual(U.upscale_readiness(t, None)["status"], "unknown")
-        wan = next(x for x in TG.list_targets("video") if x.id.startswith("wan22"))
+        wan = TG.load_target("wan22_vace", "video")          # no re-sample of its own
         self.assertIsNone(U.upscale_readiness(wan, info))
         self.assertNotIn("upscale", E.readiness([wan], info)[wan.id])
         self.assertIn("upscale", E.readiness([t], info)[t.id])
@@ -397,7 +397,7 @@ class PixelUpscaleTest(UpscaleRouteTest):
     def test_default_method_follows_the_target(self):
         t = self.final_take()
         self.assertEqual(U.plan_upscale(self.ep, t).method, "latent")         # H3 has one
-        wan = self.as_target(t, "wan22_ti2v")
+        wan = self.as_target(t, "wan22_vace")              # no re-sample of its own
         up = U.plan_upscale(self.ep, wan)
         self.assertEqual((up.method, up.route, up.pixel_model, up.start_step),
                          ("pixel", "pixel", "RealESRGAN_x2.pth", None))
@@ -448,7 +448,7 @@ class PixelUpscaleTest(UpscaleRouteTest):
         self.assertEqual(opts["pixel"]["default"], "RealESRGAN_x2.pth")
         self.assertIn("RealESRGAN_x4.pth", opts["pixel"]["models"])
         self.assertEqual(opts["latent"]["minimax_h3_ref2va"]["status"], "ready")
-        self.assertIsNone(opts["latent"]["wan22_ti2v"])
+        self.assertIsNone(opts["latent"]["wan22_vace"])
         self.assertEqual(opts["details"], [0, 1, 2])
 
     def test_the_proxy_pass(self):
@@ -559,6 +559,56 @@ class PixelUpscaleTest(UpscaleRouteTest):
         self.err(A.post_upscale(self.ctx, {"ep": self.ep, "shots": ["sh010"], "precision": "fp8"}), 400)
         opts = self.ok(A.get_upscale_options(self.ctx, {}))
         self.assertEqual((opts["encoders"], opts["precisions"]), (["auto", "nvenc", "x264"], ["fp16", "fp32"]))
+
+    def wan_base(self, target: str) -> dict:
+        t = TG.load_target(target, "video")
+        return J.graph_from(json.load(open(t.binding.workflow, encoding="utf-8")))
+
+    def test_wan_i2v_refine(self):
+        """13d: Wan re-samples from the take's frames, upscaled by a pixel model:
+        the low-noise expert alone from the start step, the first frame at the new size."""
+        t = self.as_target(self.final_take(latent=False), "wan22_i2v")
+        # an i2v take records the first frame it was staged with; the upscale reuses it
+        T.update_sidecar(t.paths.sidecar, width=832, height=480, steps=4,
+                         inputs={"first": "h3pipe/sh010_t01_first.png"})
+        t = T.get_take(self.ep, "final", "sh010", 1)
+        up = U.plan_upscale(self.ep, t)
+        self.assertEqual((up.action, up.method, up.route, up.pixel_model), ("upscale", "latent", "vae", "RealESRGAN_x2.pth"))
+        self.assertEqual((up.width, up.height, up.start_step), (1664, 960, 3))
+        g = U.upscale_graph(self.wan_base("wan22_i2v"), up)
+        samplers = self.by_class(g, "KSamplerAdvanced")
+        self.assertEqual(len(samplers), 1)                                   # the high expert is gone
+        si = g[samplers[0]]["inputs"]
+        self.assertEqual((si["add_noise"], si["start_at_step"], si["latent_image"]), ("enable", 3, ["up_venc", 0]))
+        self.assertEqual((g["up_pixels"]["inputs"]["width"], g["up_pixels"]["inputs"]["height"]), (1664, 960))
+        wiv = g[self.by_class(g, "WanImageToVideo")[0]]["inputs"]
+        self.assertEqual((wiv["width"], wiv["height"]), (1664, 960))        # the first frame, rebuilt at 2x
+        first = g[wiv["start_image"][0]]["inputs"]["image"]
+        self.assertEqual(first, "h3pipe/sh010_t01_first.png")
+        self.assertEqual(g["up_venc"]["inputs"]["vae"][0], self.by_class(g, "VAELoader")[0])
+        self.assertFalse(self.by_class(g, "H3HoldAudio"))                    # silent
+        self.assertTrue(self.by_class(g, "H3SaveUpscale"))
+        rec = U.queued_record(up)
+        self.assertEqual((rec["mode"], rec["upscaler"]), ("pixel_refine", "RealESRGAN_x2.pth, then the target's own sampler"))
+        self.assertEqual(U.plan_upscale(self.ep, t, route="latent").action, "error")
+        # its readiness asks for the pixel pieces, and the model
+        info = {c: {"input": {}} for c in ("H3LoadTakeVideo", "H3PixelUpscale", "VAEEncode", "H3SaveUpscale")}
+        info["UpscaleModelLoader"] = {"input": {"required": {"model_name": [["RealESRGAN_x2.pth"], {}]}}}
+        self.assertEqual(U.not_ready([up], info), [])
+        missing = U.not_ready([U.plan_upscale(self.ep, t, pixel_model="RealESRGAN_x4.pth")], info)
+        self.assertEqual(len(missing), 1)
+        self.assertIn("RealESRGAN_x4.pth", missing[0])
+
+    def test_wan_ti2v_refine(self):
+        t = self.as_target(self.final_take(latent=False), "wan22_ti2v")
+        T.update_sidecar(t.paths.sidecar, width=1280, height=704, steps=20)
+        t = T.get_take(self.ep, "final", "sh010", 1)
+        up = U.plan_upscale(self.ep, t)
+        self.assertEqual((up.width, up.height, up.start_step), (1920, 1056, 15))   # 1.5x by default
+        g = U.upscale_graph(self.wan_base("wan22_ti2v"), up)
+        ks = g[self.by_class(g, "KSampler")[0]]["inputs"]
+        self.assertEqual((ks["denoise"], ks["latent_image"]), (0.25, ["up_venc", 0]))
+        self.assertEqual(U.plan_upscale(self.ep, t, scale=2).height, 1408)
 
     def test_default_pixel_model(self):
         self.assertEqual(U.default_pixel_model(["4x-UltraSharp.pth", "RealESRGAN_x2.pth"]), "RealESRGAN_x2.pth")

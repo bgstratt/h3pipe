@@ -54,6 +54,8 @@ function UpscaleBody() {
   const latentSome = !!opts && targets.some((id) => latentOf(id)?.status === "ready");
   const noLatent = targets.filter((id) => !latentOf(id));
   const pixelReady = opts?.pixel.status === "ready";
+  // Wan's re-sample starts by running the frames through an upscale model
+  const refineModel = targets.some((id) => latentOf(id)?.mode === "pixel_refine");
   const count = ask.takes ? ask.takes.length : takes.filter(Boolean).length;
 
   // what each take would come out as, at a scale (and the then-pixel step after a re-sample)
@@ -90,7 +92,7 @@ function UpscaleBody() {
     : bad.length ? `${bad.length} of ${real.length} can't at these settings (${bad[0].out.why})` : "";
 
   const submit = () => {
-    void upscale(upscaleRequestOf(f, ask), ask.takes ? ask.takes.map((t) => `${t.shot}|${t.take}`).join(",") : "cut");
+    void upscale(upscaleRequestOf(f, ask, refineModel && f.method !== "pixel"), ask.takes ? ask.takes.map((t) => `${t.shot}|${t.take}`).join(",") : "cut");
     closeUpscale();
   };
   const canQueue = !!ep && !!opts && count > 0 && bad.length < real.length
@@ -132,9 +134,9 @@ function UpscaleBody() {
               <div className="h3-muted h3-small">Pixel needs: {opts.pixel.missing.join("; ")}</div>
             )}
           </div>
-          {f.method !== "latent" && pixelReady && (
+          {(f.method !== "latent" || refineModel) && pixelReady && (
             <label className="h3-col" style={{ gap: 2 }}>
-              <span className="h3-h">Upscale model{f.method === "auto" ? " (for takes without a re-sample)" : ""}</span>
+              <span className="h3-h">Upscale model{f.method === "pixel" ? "" : refineModel ? " (pixel takes, and Wan's re-sample starts with it)" : " (for takes without a re-sample)"}</span>
               <select value={f.pixelModel ?? ""} onChange={(e) => set({ pixelModel: e.target.value })}>
                 {opts.pixel.models.map((m) => <option key={m} value={m}>{m}{m === opts.pixel.default ? " (default)" : ""}</option>)}
               </select>

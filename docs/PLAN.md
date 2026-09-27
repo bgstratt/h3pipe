@@ -1760,6 +1760,17 @@ what this machine and the repo have today. Nothing below is built; each target g
   frames go through `H3PixelUpscale` before the saver. Re-sample 2x then RealESRGAN_x2 = 4x
   with generated detail in the first half. Scales are capped at 4 (the H3 upscaler's own
   limit); a re-sample at 4x of 1344×768 is 5376×3072 conditioning, heavy on any GPU.
+- **Wan 2.2: built 2026-09-27** for `wan22_i2v` and `wan22_ti2v` (mode `pixel_refine`):
+  the take's frames through an upscale model (`pixel_model`, RealESRGAN_x2 by default),
+  `VAEEncode` with the target's VAE, then its final sampler alone from late in its schedule
+  at the new size (i2v: the low-noise `KSamplerAdvanced` from step 3 of 4, add_noise on,
+  `WanImageToVideo` and its staged first frame rebuilt at the new size; ti2v: its `KSampler`
+  at denoise 0.25). No latent kept or needed; silent, so nothing to hold. ti2v defaults to
+  1.5x (its 1280×704 at 2x is 2560×1408). `wan22_vace` stays on the pixel method: its latent
+  carries the reference frame in front, which a plain encoded video doesn't match. Live:
+  sh760 on wan22_ti2v (1280×704, 69 frames, 87 s) upscaled to 1920×1056 in 237 s (5 of 20
+  steps at 1080p on the 5B, h264_nvenc in 1.8 s): sharper eyes, hair, lettering and edges,
+  the face kept. Slow: a later `start` or the pixel method when time matters.
 - **Encoder and precision** (2026-09-26): upscales encode on NVENC by default (`encoder`
   auto / nvenc / x264; H.264 to 4096, HEVC past it; x264 fallback, its faster preset past
   4K), streaming frames to ffmpeg one at a time; the upscale model runs fp16 under autocast

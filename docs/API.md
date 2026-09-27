@@ -335,7 +335,10 @@ onto the result unchanged. Only a target with an `upscale` block in its target.j
 can upscale: `minimax_h3_ref2va` (an external latent upscaler, then its own sampler from late
 in its schedule) and `ltx2` (its render graph's second stage run again on the take: its
 own upsampler, the tail of its fixed sigmas; mode `second_stage`, always 2x). The
-`.up.json` records `mode` and the schedule's `steps`.
+`.up.json` records `mode` and the schedule's `steps`. `wan22_i2v` / `wan22_ti2v` use mode
+`pixel_refine`: the take's frames through the pixel model (`pixel_model` applies), encoded
+with the Wan VAE, then the target's last sampler from late in its schedule; always the VAE
+route (`route: "latent"` is refused).
 
 ### `POST /h3pipe/upscale`
 Body `{"ep", "shots"?: ["sh020"] | null, "takes"?: [{"shot", "take"}], "redo"?: false,

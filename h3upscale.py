@@ -96,7 +96,7 @@ def rel(root: str, path: str) -> str:
     return os.path.relpath(path, root)
 
 
-RESAMPLE, SECOND_STAGE = "resample", "second_stage"
+RESAMPLE, SECOND_STAGE, PIXEL_REFINE = "resample", "second_stage", "pixel_refine"
 
 
 def upscale_spec(target: "TG.Target") -> dict | None:
@@ -116,6 +116,8 @@ def upscale_spec(target: "TG.Target") -> dict | None:
     if mode == RESAMPLE and s.get("upscaler"):
         return s
     if mode == SECOND_STAGE and s.get("upsampler") and s.get("steps"):
+        return s
+    if mode == PIXEL_REFINE and s.get("sampler"):
         return s
     return None
 
@@ -218,6 +220,10 @@ def upscale_readiness(target: "TG.Target", object_info: dict | None) -> dict | N
         need.append(enc)
     if spec.get("mode", RESAMPLE) == SECOND_STAGE:
         need.append(spec["upsampler"]["class_type"])
+    if spec.get("mode", RESAMPLE) == PIXEL_REFINE:
+        # Wan: no latent, no audio; the pixel model's pieces instead
+        need = ["H3LoadTakeVideo", "H3PixelUpscale", "UpscaleModelLoader", "VAEEncode",
+                "H3SaveUpscale"]
     missing = [f"node {c} (update h3pipe's node pack, or ComfyUI, and restart it)"
                for c in need if c not in object_info]
     if spec.get("mode", RESAMPLE) == RESAMPLE:
@@ -311,9 +317,15 @@ def _plan(root: str, take: T.Take, *, scale: float | None = None,
     else:
         step = start_of(steps, spec)
     has_latent = bool(sc.get("latent")) and os.path.isfile(take.paths.latent)
-    r = route or ("latent" if has_latent else "vae")
+    refine = spec.get("mode") == PIXEL_REFINE
+    r = route or ("latent" if has_latent and not refine else "vae")
     job = UpscaleJob(root, take, target, spec, r, s, step, w, h)
+    if refine:
+        # Wan: the take's frames through an upscale model first, then its sampler
+        job.pixel_model = pixel_model or spec.get("pixel_model") or DEFAULT_PIXEL_MODEL
     try:
+        if refine and r == "latent":
+            raise UpscaleError(f"{target.short} re-samples from the take's frames, not a latent")
         if m not in METHODS:
             raise UpscaleError(f"method {m!r}: it's latent or pixel")
         if not take.usable:
@@ -407,8 +419,15 @@ def upscale_graph(base: dict, up: UpscaleJob) -> dict:
     b = t.binding
     g = J.graph_for(base, take_job(up), take, review_copy=False)
     saver = J.node_of(g, b.saver_class)
-    sampler = J.latent_node(g, saver, b.saver["latent"])
+    sampler = J.latent_node(g, saver, spec.get("sampler") or b.saver["latent"])
     si = g[sampler]["inputs"]
+
+    if spec.get("mode") == PIXEL_REFINE:
+        pixel_refine(g, up, sampler)
+        images = g[saver]["inputs"]["images"]
+        del g[saver]
+        return finish_graph(g, up, images)
+
     av = take_source(g, up)
     g["up_split_av"] = {"class_type": "LTXVSeparateAVLatent", "inputs": {"av_latent": av}}
 
@@ -448,6 +467,41 @@ def upscale_graph(base: dict, up: UpscaleJob) -> dict:
 
     images = g[saver]["inputs"]["images"]
     del g[saver]
+    return finish_graph(g, up, images)
+
+
+def pixel_refine(g: dict, up: UpscaleJob, sampler: str) -> None:
+    """Wan: the take's frames upscaled by a pixel model, encoded with the target's
+    VAE, and handed to its final sampler from late in its schedule; the sized
+    conditioning (a first frame, references) rebuilt at the new size. The
+    earlier samplers fall away in the prune."""
+    b, take, root = up.target.binding, up.take, up.root
+    for name, value in (("width", up.width), ("height", up.height)):
+        if b.specs(name):
+            J.patch_param(g, b, name, value)
+    vae = J.select_nodes(g, b.specs("vae")[0])[0]
+    g["up_video"] = {"class_type": "H3LoadTakeVideo", "inputs": {
+        "project_root": root, "video_file": rel(root, take.paths.mp4), "audio_file": ""}}
+    g["up_model"] = {"class_type": "UpscaleModelLoader", "inputs": {"model_name": up.pixel_model}}
+    g["up_pixels"] = {"class_type": "H3PixelUpscale", "inputs": {
+        "images": ["up_video", 0], "upscale_model": ["up_model", 0],
+        "width": up.width, "height": up.height, "chunk": 4, "precision": up.precision}}
+    g["up_venc"] = {"class_type": "VAEEncode", "inputs": {"pixels": ["up_pixels", 0], "vae": [vae, 0]}}
+    si = g[sampler]["inputs"]
+    si["latent_image"] = ["up_venc", 0]
+    steps = schedule_steps(up.spec, int((take.sidecar or {}).get("steps") or 0))
+    if g[sampler]["class_type"] == "KSamplerAdvanced":
+        # the last expert alone, from the start step: noise added at that level
+        si.update(add_noise="enable", start_at_step=up.start_step, end_at_step=10000,
+                  return_with_leftover_noise="disable")
+    else:
+        # a plain KSampler: its tail, as a denoise
+        si["denoise"] = round(1.0 - up.start_step / max(1, steps), 4)
+
+
+def finish_graph(g: dict, up: UpscaleJob, images: list) -> dict:
+    """The saver on `images` (and a then-pixel step before it), then the prune."""
+    take = up.take
     g["up_save"] = {"class_type": "H3SaveUpscale", "inputs": {
         "images": images, "project_root": up.root, "source_mp4": rel(up.root, take.paths.mp4),
         "out_mp4": rel(up.root, take.paths.up_mp4), "fps": float((take.sidecar or {}).get("fps") or 24),
@@ -496,6 +550,8 @@ def not_ready(jobs: list[UpscaleJob], object_info: dict | None) -> list[str]:
             out += [f"{t.short}: {m}" for m in r["missing"]]
     wants = {j.pixel_model for j in jobs if j.method == "pixel"}
     wants |= {j.then_model for j in jobs if j.method == "latent" and j.then_model}
+    wants |= {j.pixel_model for j in jobs
+              if j.method == "latent" and j.spec.get("mode") == PIXEL_REFINE}
     for want in sorted(wants):
         r = pixel_readiness(object_info, want)
         if r["status"] == "not_ready":
@@ -542,7 +598,9 @@ def queued_record(up: UpscaleJob) -> dict:
                 # tell "re-sample 2x, then pixel 2x"); the stamp stays the take's
                 **({"on_upscale": previous_summary(up.previous)} if up.previous else {}),
                 "width": up.width, "height": up.height, **T.source_stamp(up.take.paths.mp4)}
-    if up.spec.get("mode", RESAMPLE) == SECOND_STAGE:
+    if up.spec.get("mode") == PIXEL_REFINE:
+        upscaler = f"{up.pixel_model}, then the target's own sampler"
+    elif up.spec.get("mode", RESAMPLE) == SECOND_STAGE:
         upscaler = f"{up.spec['upsampler']['class_type']} (the target's own second stage)"
     else:
         u = up.spec["upscaler"]

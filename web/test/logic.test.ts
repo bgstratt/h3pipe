@@ -34,6 +34,9 @@ describe("upscaleRequestOf (the Upscale dialog)", () => {
     expect(upscaleRequestOf(f, one)).toEqual({ pass: "final", takes: [{ shot: "sh020", take: 3 }], pixel_model: "RealESRGAN_x2.pth" });
     expect(upscaleRequestOf(f, { pass: "proxy", takes: null })).toEqual({ pass: "proxy", shots: null, pixel_model: "RealESRGAN_x2.pth" });
   });
+  it("a Wan re-sample sends its pixel model", () => {
+    expect(upscaleRequestOf({ ...f, method: "latent" }, one, true).pixel_model).toBe("RealESRGAN_x2.pth");
+  });
   it("latent: detail and vae, never a pixel model", () => {
     expect(upscaleRequestOf({ ...f, method: "latent", detail: 2, vae: true, redo: true }, one))
       .toEqual({ pass: "final", takes: [{ shot: "sh020", take: 3 }], method: "latent", detail: 2, vae: true, redo: true });
