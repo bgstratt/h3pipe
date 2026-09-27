@@ -799,6 +799,13 @@ def post_upscale(ctx: Context, body):
     precision = body.get("precision") or "fp16"
     if precision not in U.PRECISIONS:
         raise ApiError(400, "precision must be fp16 or fp32")
+    frequency_split = body.get("frequency_split", True)
+    if not isinstance(frequency_split, bool):
+        raise ApiError(400, "frequency_split must be true or false")
+    keep_soft, grain = body.get("keep_soft", 0), body.get("grain", 0)
+    for name, v, hi in (("keep_soft", keep_soft, 1.0), ("grain", grain, 0.2)):
+        if isinstance(v, bool) or not isinstance(v, (int, float)) or not 0 <= v <= hi:
+            raise ApiError(400, f"{name} must be a number from 0 to {hi:g}")
     from_upscale = body.get("from_upscale", False)
     if not isinstance(from_upscale, bool):
         raise ApiError(400, "from_upscale must be true or false")
@@ -822,7 +829,8 @@ def post_upscale(ctx: Context, body):
                             route="vae" if vae else None, redo=redo, method=method,
                             pixel_model=pixel_model, detail=detail,
                             then_model=then_model, then_scale=then_scale,
-                            from_upscale=from_upscale, encoder=encoder, precision=precision)
+                            from_upscale=from_upscale, encoder=encoder, precision=precision,
+                            frequency_split=frequency_split, keep_soft=keep_soft, grain=grain)
         if up.action == "skip":
             skipped.append({"shot": shot, "take": t.take, "reason": up.why})
         elif up.action == "error":

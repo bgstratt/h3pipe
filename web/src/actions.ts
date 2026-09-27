@@ -997,6 +997,9 @@ export interface UpscaleForm {
   fromUpscale: boolean;
   encoder: "auto" | "nvenc" | "x264";
   precision: "fp16" | "fp32";
+  frequencySplit: boolean;
+  keepSoft: number;
+  grain: number;
 }
 
 /** The POST /h3pipe/upscale body (less `ep`) for the dialog's choices: only
@@ -1009,6 +1012,9 @@ export function upscaleRequestOf(f: UpscaleForm, ask: { pass: Pass; takes: { sho
   if (f.method === "pixel" && f.fromUpscale) req.from_upscale = true;
   if (f.encoder !== "auto") req.encoder = f.encoder;
   if (f.precision !== "fp16") req.precision = f.precision;
+  if (!f.frequencySplit) req.frequency_split = false;
+  if (f.keepSoft) req.keep_soft = f.keepSoft;
+  if (f.grain) req.grain = f.grain;
   if (f.method !== "pixel" && f.detail) req.detail = f.detail;
   if (f.method !== "pixel" && f.vae) req.vae = true;
   if (f.scale !== 2) req.scale = f.scale;

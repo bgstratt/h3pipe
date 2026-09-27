@@ -198,6 +198,68 @@ class EncoderTest(unittest.TestCase):
             self.assertEqual(n, "12")
 
 
+class FinishTest(unittest.TestCase):
+    """The pixel upscale's finish: frequency split, keep soft, box shrink, grain."""
+
+    def src(self, h=24, w=32, seed=0):
+        g = torch.Generator().manual_seed(seed)
+        return torch.rand((2, 3, h, w), generator=g)
+
+    def test_blur_keeps_flat_and_shape(self):
+        x = torch.full((1, 3, 20, 30), 0.4)
+        y = UN.gaussian_blur(x, 3.0)
+        self.assertEqual(tuple(y.shape), (1, 3, 20, 30))
+        self.assertTrue(torch.allclose(y, x, atol=1e-5))
+        self.assertTrue(torch.equal(UN.gaussian_blur(x, 0), x))
+
+    def test_frequency_split_takes_colour_from_the_source(self):
+        import torch.nn.functional as F
+        src = self.src()
+        base = F.interpolate(src, size=(48, 64), mode="bicubic", align_corners=False)
+        detail = UN.gaussian_blur(base, 3) - base          # some high-band "model detail"
+        tinted = (base - detail * 0.5 + 0.15).clamp(0, 1)  # the model shifted the colour
+        out = UN.finish(src, tinted, frequency_split=True)
+        low = lambda x: UN.gaussian_blur(x, UN.BAND_SIGMA * 2)
+        # colour and tone: the source's; the tint is gone
+        self.assertLess(float((low(out) - low(base)).abs().mean()), 0.03)
+        self.assertGreater(float((low(tinted) - low(base)).abs().mean()), 0.1)
+        # detail: the model's
+        hi = lambda x: x - low(x)
+        self.assertLess(float((hi(out) - hi(tinted)).abs().mean()), 0.03)
+        self.assertTrue(torch.equal(UN.finish(src, tinted, frequency_split=False), tinted))
+
+    def test_keep_soft_fades_detail_only_where_the_source_is_soft(self):
+        src = torch.full((1, 3, 24, 32), 0.5)
+        src[:, :, :, 16:] = self.src()[:1, :, :, 16:]     # right half detailed, left flat
+        up = torch.rand((1, 3, 48, 64), generator=torch.Generator().manual_seed(3))
+        out = UN.finish(src, up, frequency_split=False, keep_soft=1.0,
+                        level=float(UN.detail_map(src).max()))
+        hi = lambda x: (x - UN.gaussian_blur(x, 3)).abs().mean()
+        self.assertLess(float(hi(out[..., :, 4:24])), float(hi(up[..., :, 4:24])) * 0.25)
+        self.assertGreater(float(hi(out[..., :, 44:60])), float(hi(up[..., :, 44:60])) * 0.5)
+
+    def test_resize_to_box_averages_whole_factors(self):
+        x = torch.rand((1, 3, 8, 12))
+        called = []
+        lan = lambda t, w, h: called.append((w, h)) or torch.zeros((1, 3, h, w))
+        y = UN.resize_to(x, 4, 6, lan)
+        self.assertEqual(called, [])
+        self.assertTrue(torch.allclose(y[0, :, 0, 0], x[0, :, :2, :2].mean(dim=(1, 2))))
+        UN.resize_to(x, 6, 9, lan)                                  # 1.5x down: lanczos
+        self.assertEqual(called, [(9, 6)])
+        self.assertIs(UN.resize_to(x, 8, 12, lan), x)
+
+    def test_grain(self):
+        x = torch.full((3, 3, 16, 16), 0.5)
+        a, b = UN.add_grain(x, 0.05, 7, 0), UN.add_grain(x, 0.05, 7, 0)
+        self.assertTrue(torch.equal(a, b))                           # a redo repeats it
+        self.assertFalse(torch.equal(a[0], a[1]))                    # but frame to frame it moves
+        self.assertTrue(torch.equal(a[0, 0], a[0, 1]))               # monochrome
+        self.assertFalse(torch.equal(UN.add_grain(x, 0.05, 8, 0), a))
+        self.assertIs(UN.add_grain(x, 0, 7, 0), x)
+        self.assertGreaterEqual(UN.detail_scale(self.src().movedim(1, -1), "cpu"), 0.02)
+
+
 class PixelNodeTest(unittest.TestCase):
     def test_batches_resized_to_the_target(self):
         frames = clip(10)                                          # 10 x 48 x 96

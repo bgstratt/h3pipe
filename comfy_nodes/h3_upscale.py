@@ -123,6 +123,99 @@ class H3LoadTakeVideo:
 # H3PixelUpscale
 # ---------------------------------------------------------------------------
 
+# ---- finishing a pixel upscale ------------------------------------------------
+# Ideas from sajb0t/comfyui_ensemble_upscale (no licence, so nothing copied: the
+# maths is the ordinary low/high band split), fitted to video: every
+# measurement that could change from frame to frame is taken once per clip.
+
+BAND_SIGMA = 1.5          # the band cutoff, in the source's pixels
+
+
+def gaussian_blur(x, sigma: float):
+    """A separable Gaussian blur of BCHW `x` (reflect padding, radius 3 sigma)."""
+    import torch.nn.functional as F
+    if sigma <= 0:
+        return x
+    r = max(1, int(-(-3.0 * sigma // 1)))
+    t = torch.arange(-r, r + 1, device=x.device, dtype=torch.float32)
+    k = torch.exp(-(t * t) / (2.0 * sigma * sigma))
+    k = (k / k.sum()).to(x.dtype)
+    c = x.shape[1]
+    kx = k.view(1, 1, 1, -1).expand(c, 1, 1, -1)
+    ky = k.view(1, 1, -1, 1).expand(c, 1, -1, 1)
+    pr = min(r, x.shape[-1] - 1)
+    pc = min(r, x.shape[-2] - 1)
+    y = F.conv2d(F.pad(x, (pr, pr, 0, 0), mode="reflect"), kx[..., r - pr:r + pr + 1], groups=c)
+    return F.conv2d(F.pad(y, (0, 0, pc, pc), mode="reflect"), ky[:, :, r - pc:r + pc + 1, :], groups=c)
+
+
+def resize_to(x, height: int, width: int, lanczos):
+    """BCHW `x` at height x width: a box average when it shrinks by a whole factor
+    on both sides (a 4x model to 2x: no ringing), else `lanczos(x, w, h)`."""
+    import torch.nn.functional as F
+    h, w = x.shape[-2:]
+    if (h, w) == (height, width):
+        return x
+    if h > height and h % height == 0 and w % width == 0 and h // height == w // width:
+        return F.avg_pool2d(x, h // height)
+    return lanczos(x, width, height)
+
+
+def detail_map(src, sigma: float = BAND_SIGMA):
+    """How much fine detail each pixel of BCHW `src` has (B1HW, unnormalised)."""
+    high = (src - gaussian_blur(src, sigma)).abs().mean(dim=1, keepdim=True)
+    return gaussian_blur(high, sigma)
+
+
+def detail_scale(images, device, sigma: float = BAND_SIGMA) -> float:
+    """One normalising level for the whole clip (IMAGE [T, H, W, C]): the 90th
+    percentile of detail over about 8 frames. Per frame, it would flicker."""
+    n = int(images.shape[0])
+    pick = list(range(0, n, max(1, n // 8)))[:8]
+    d = detail_map(images[pick].movedim(-1, 1).to(device).float(), sigma).flatten()
+    d = d[:: max(1, d.numel() // (1 << 20))]
+    return max(0.02, float(torch.quantile(d.float(), 0.9)))
+
+
+def finish(src, up, *, frequency_split: bool = True, keep_soft: float = 0.0,
+           level: float = 1.0, sigma: float = BAND_SIGMA):
+    """The upscaled batch `up` (BCHW, target size) finished against its source
+    frames `src` (BCHW): with `frequency_split`, colour and tone (the low band)
+    from a bicubic enlarge of the source, only detail (the high band) from the
+    model; with `keep_soft` (0-1), the model's detail faded where the source had
+    none (bokeh, soft focus), `level` being the clip's detail_scale."""
+    import torch.nn.functional as F
+    if not frequency_split and keep_soft <= 0:
+        return up
+    h, w = up.shape[-2:]
+    s = sigma * h / float(src.shape[-2])
+    low_up = gaussian_blur(up, s)
+    high = up - low_up
+    if keep_soft > 0:
+        d = (detail_map(src, sigma) / level).clamp(0, 1)
+        d = F.interpolate(d, size=(h, w), mode="bilinear", align_corners=False).clamp(0, 1)
+        high = high * (1.0 - float(keep_soft) * (1.0 - d))
+    if frequency_split:
+        base = F.interpolate(src, size=(h, w), mode="bicubic", align_corners=False)
+        low = gaussian_blur(base, s)
+    else:
+        low = low_up
+    return (low + high).clamp(0, 1)
+
+
+def add_grain(x, amount: float, seed: int, first: int):
+    """Monochrome Gaussian grain on BCHW `x`, a different pattern each frame
+    (seeded by `seed` + the frame's index `first + b`, so a redo repeats it)."""
+    if amount <= 0:
+        return x
+    out = x.clone()
+    for b in range(x.shape[0]):
+        g = torch.Generator().manual_seed(int(seed) * 100003 + first + b)
+        noise = torch.randn((1, x.shape[-2], x.shape[-1]), generator=g)
+        out[b] = (x[b] + float(amount) * noise.to(x.device, x.dtype)).clamp(0, 1)
+    return out
+
+
 class H3PixelUpscale:
     """Upscale frames with an upscale model (UpscaleModelLoader's), `chunk`
     frames at a time, resizing each batch to width x height (lanczos) as it
@@ -140,13 +233,21 @@ class H3PixelUpscale:
             # fp16: the model under CUDA autocast (about twice as fast, what
             # RealESRGAN is normally run at); fp32: as core's node runs it
             "precision": (list(PRECISIONS), {"default": "fp16"}),
+            # colour and tone from the source, detail from the model
+            "frequency_split": ("BOOLEAN", {"default": True}),
+            # 0-1: fade invented detail where the source was soft (bokeh)
+            "keep_soft": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.05}),
+            # film grain after, per frame; 0 is off
+            "grain": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 0.2, "step": 0.005}),
+            "grain_seed": ("INT", {"default": 0, "min": 0, "max": 0xFFFFFFFF}),
         }}
 
     RETURN_TYPES = ("IMAGE",)
     FUNCTION = "upscale"
     CATEGORY = "H3/upscale"
 
-    def upscale(self, images, upscale_model, width, height, chunk=4, precision="fp16"):
+    def upscale(self, images, upscale_model, width, height, chunk=4, precision="fp16",
+                frequency_split=True, keep_soft=0.0, grain=0.0, grain_seed=0):
         # What core's ImageUpscaleWithModel does, but with the model loaded once
         # for the whole clip: calling that node per batch re-ran its load (and
         # logged "prepared for dynamic VRAM loading") for every batch.
@@ -170,6 +271,10 @@ class H3PixelUpscale:
                 return upscale_model(a.float()).float()
         pbar = comfy.utils.ProgressBar(n)
         out = torch.empty((n, height, width, 3), dtype=torch.float16)
+        level = detail_scale(images, device) if keep_soft > 0 else 1.0
+
+        def lanczos(x, w, h):
+            return comfy.utils.common_upscale(x, w, h, "lanczos", "disabled")
         tile, overlap = 512, 32
         for i in range(0, n, chunk):
             batch = images[i:i + chunk].movedim(-1, -3).to(device)
@@ -185,9 +290,10 @@ class H3PixelUpscale:
                     tile //= 2
                     if tile < 128:
                         raise
-            big = big.clamp(0, 1)
-            if big.shape[-2] != height or big.shape[-1] != width:
-                big = comfy.utils.common_upscale(big, width, height, "lanczos", "disabled")
+            big = resize_to(big.clamp(0, 1), height, width, lanczos)
+            big = finish(batch.float().to(big.device), big.float(), frequency_split=frequency_split,
+                         keep_soft=float(keep_soft), level=level)
+            big = add_grain(big, float(grain), int(grain_seed), i)
             out[i:i + big.shape[0]] = big.movedim(1, -1).to("cpu", torch.float16)
             pbar.update(big.shape[0])
         return (out,)

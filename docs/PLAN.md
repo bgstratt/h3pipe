@@ -1760,6 +1760,15 @@ what this machine and the repo have today. Nothing below is built; each target g
   frames go through `H3PixelUpscale` before the saver. Re-sample 2x then RealESRGAN_x2 = 4x
   with generated detail in the first half. Scales are capped at 4 (the H3 upscaler's own
   limit); a re-sample at 4x of 1344×768 is 5376×3072 conditioning, heavy on any GPU.
+- **The finish of a pixel model's output** (2026-09-27; ideas from sajb0t's
+  comfyui_ensemble_upscale, which has no licence, so our own code): in `H3PixelUpscale`,
+  per batch after the model — a box average when shrinking by a whole factor (a 4x model to
+  2x) else lanczos; the frequency split, on by default (low band from a bicubic enlarge of
+  the source, high band from the model, one Gaussian cutoff of 1.5 source pixels); keep
+  soft (0–1, the model's high band faded by the source's own detail, normalised once per
+  clip so it can't flicker); grain (per-frame seeded monochrome Gaussian). Its ensembles
+  of 2–3 models, face pass and photo filters were left out: per-frame weights and face
+  boxes flicker in video, and grading belongs to the conform.
 - **Wan 2.2: built 2026-09-27** for `wan22_i2v` and `wan22_ti2v` (mode `pixel_refine`):
   the take's frames through an upscale model (`pixel_model`, RealESRGAN_x2 by default),
   `VAEEncode` with the target's VAE, then its final sampler alone from late in its schedule

@@ -610,6 +610,32 @@ class PixelUpscaleTest(UpscaleRouteTest):
         self.assertEqual((ks["denoise"], ks["latent_image"]), (0.25, ["up_venc", 0]))
         self.assertEqual(U.plan_upscale(self.ep, t, scale=2).height, 1408)
 
+    def test_finish_reaches_every_pixel_node(self):
+        t = self.final_take()
+        kw = dict(frequency_split=False, keep_soft=0.5, grain=0.03)
+        seed = int(t.sidecar["seed"]) % (1 << 32)
+        g = U.pixel_graph(U.plan_upscale(self.ep, t, method="pixel", **kw))
+        px = g["up_pixels"]["inputs"]
+        self.assertEqual((px["frequency_split"], px["keep_soft"], px["grain"], px["grain_seed"]),
+                         (False, 0.5, 0.03, seed))
+        g = U.upscale_graph(self.base(), U.plan_upscale(self.ep, t, then_model="RealESRGAN_x2.pth", **kw))
+        self.assertEqual(g["up_then"]["inputs"]["grain"], 0.03)
+        # defaults: the split on, the rest off
+        px = U.pixel_graph(U.plan_upscale(self.ep, t, method="pixel"))["up_pixels"]["inputs"]
+        self.assertEqual((px["frequency_split"], px["keep_soft"], px["grain"]), (True, 0.0, 0.0))
+        rec = U.queued_record(U.plan_upscale(self.ep, t, method="pixel", **kw))
+        self.assertEqual(rec["finish"], {"frequency_split": False, "keep_soft": 0.5, "grain": 0.03})
+        self.assertEqual(U.plan_upscale(self.ep, t, method="pixel", grain=0.5).action, "error")
+        self.assertEqual(U.plan_upscale(self.ep, t, method="pixel", keep_soft=2).action, "error")
+        self.err(A.post_upscale(self.ctx, {"ep": self.ep, "shots": ["sh010"], "grain": 1}), 400)
+        self.err(A.post_upscale(self.ctx, {"ep": self.ep, "shots": ["sh010"], "frequency_split": "no"}), 400)
+        # Wan's re-sample: the finish before the sampler, but never grain
+        wan = self.as_target(t, "wan22_ti2v")
+        T.update_sidecar(wan.paths.sidecar, width=1280, height=704, steps=20)
+        wan = T.get_take(self.ep, "final", "sh010", 1)
+        g = U.upscale_graph(self.wan_base("wan22_ti2v"), U.plan_upscale(self.ep, wan, **kw))
+        self.assertEqual((g["up_pixels"]["inputs"]["keep_soft"], g["up_pixels"]["inputs"]["grain"]), (0.5, 0.0))
+
     def test_default_pixel_model(self):
         self.assertEqual(U.default_pixel_model(["4x-UltraSharp.pth", "RealESRGAN_x2.pth"]), "RealESRGAN_x2.pth")
         self.assertEqual(U.default_pixel_model(["4x-UltraSharp.pth", "2x-Other.pth"]), "2x-Other.pth")

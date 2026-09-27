@@ -285,6 +285,13 @@ then `h3.py assemble <ep> --upscaled --size 3840x2160`. Past 4K the output is he
 and to play; upscales encode on the GPU (NVENC) by default, which is what keeps a 5K one
 from taking minutes to write.
 
+A pixel model's output is finished before it's saved. By default its colour and tone come
+from the original frames and only its fine detail from the model (upscale models shift
+colour a little; this keeps an upscaled clip matching the cut around it). Two more, off by
+default: **keep soft areas soft** fades the detail the model invents where the original was
+out of focus, so shallow depth of field stays shallow (`--keep-soft 1`), and **grain** puts
+back the film grain the model scrubbed away (`--grain 0.02` is light).
+
 ### Render profiles
 
 A profile is a named render setup for a kind of shot, so you set it once instead of

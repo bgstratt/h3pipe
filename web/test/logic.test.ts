@@ -28,7 +28,8 @@ const kinds = (s: ShotStatus, r?: Set<number>) => shotBadges(s, r).map((b) => b.
 describe("upscaleRequestOf (the Upscale dialog)", () => {
   const f = { method: "auto" as const, pixelModel: "RealESRGAN_x2.pth", detail: 0 as const, redo: false, vae: false,
               scale: 2, thenModel: null, thenScale: 2, fromUpscale: false,
-              encoder: "auto" as const, precision: "fp16" as const };
+              encoder: "auto" as const, precision: "fp16" as const,
+              frequencySplit: true, keepSoft: 0, grain: 0 };
   const one = { pass: "final" as const, takes: [{ shot: "sh020", take: 3 }] };
   it("defaults send only what's asked: the pass, the take, and the pixel model for takes without a re-sample", () => {
     expect(upscaleRequestOf(f, one)).toEqual({ pass: "final", takes: [{ shot: "sh020", take: 3 }], pixel_model: "RealESRGAN_x2.pth" });
@@ -47,6 +48,12 @@ describe("upscaleRequestOf (the Upscale dialog)", () => {
     expect("then_scale" in upscaleRequestOf({ ...f, thenModel: "RealESRGAN_x2.pth" }, one)).toBe(false);
     expect(upscaleRequestOf({ ...f, thenModel: "RealESRGAN_x4.pth", thenScale: 4 }, one).then_scale).toBe(4);
     expect("then_pixel_model" in upscaleRequestOf({ ...f, method: "pixel", thenModel: "x.pth" }, one)).toBe(false);
+  });
+  it("the finish only when not the defaults", () => {
+    const d = upscaleRequestOf(f, one);
+    expect("frequency_split" in d || "keep_soft" in d || "grain" in d).toBe(false);
+    expect(upscaleRequestOf({ ...f, frequencySplit: false, keepSoft: 0.5, grain: 0.02 }, one))
+      .toMatchObject({ frequency_split: false, keep_soft: 0.5, grain: 0.02 });
   });
   it("encoder and precision only when not the defaults", () => {
     expect(upscaleRequestOf({ ...f, encoder: "nvenc", precision: "fp32" }, one)).toMatchObject({ encoder: "nvenc", precision: "fp32" });

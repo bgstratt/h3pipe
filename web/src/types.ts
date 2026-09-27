@@ -686,6 +686,7 @@ export interface TakeUpscale {
   /** the encoder the .up.mp4 was written with (h264_nvenc, hevc_nvenc, libx264) */
   encoder?: string | null;
   precision?: string | null;
+  finish?: { frequency_split: boolean; keep_soft: number; grain: number } | null;
   comfy_prompt_id: string | null;
   /** the upscale's mp4, relative to the episode (null until it is written) */
   mp4: string | null;
@@ -719,6 +720,11 @@ export interface UpscaleRequest {
   encoder?: "auto" | "nvenc" | "x264";
   /** the upscale model's precision: fp16 (the default, faster) or fp32 */
   precision?: "fp16" | "fp32";
+  /** a pixel model's finish: colour and tone from the source (default true), invented
+   * detail faded where the source was soft (0-1), film grain (0-0.2) */
+  frequency_split?: boolean;
+  keep_soft?: number;
+  grain?: number;
 }
 
 /** GET /h3pipe/upscale/options: what the Upscale dialog can offer here. */

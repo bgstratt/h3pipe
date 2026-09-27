@@ -32,7 +32,8 @@ function UpscaleBody() {
   const [err, setErr] = useState<string | null>(null);
   const [f, setF] = useState<UpscaleForm>({ method: "auto", pixelModel: null, detail: 0, redo: !!ask.redo, vae: false,
                                               scale: 2, thenModel: null, thenScale: 2, fromUpscale: false,
-                                              encoder: "auto", precision: "fp16" });
+                                              encoder: "auto", precision: "fp16",
+                                              frequencySplit: true, keepSoft: 0, grain: 0 });
   const set = (p: Partial<UpscaleForm>) => setF((x) => ({ ...x, ...p }));
 
   useEffect(() => {
@@ -203,6 +204,34 @@ function UpscaleBody() {
               </label>
             )}
           </div>
+          {(f.method !== "latent" || !!f.thenModel || refineModel) && pixelReady && (
+            <div className="h3-col" style={{ gap: 3 }}>
+              <span className="h3-h">Finish (upscale model)</span>
+              <label className="h3-check" title="Colour and tone from the original frames, only the fine detail from the model: upscale models shift colour a little, and this keeps an upscaled clip matching its neighbours in the cut">
+                <input type="checkbox" checked={f.frequencySplit} onChange={(e) => set({ frequencySplit: e.target.checked })} />
+                Keep the original's colour
+              </label>
+              <div className="h3-row" style={{ gap: 8, flexWrap: "wrap" }}>
+                <label className="h3-col" style={{ gap: 2 }} title="Fade the detail the model invents where the original was soft (out-of-focus backgrounds, bokeh), so shallow depth of field stays shallow">
+                  <span className="h3-small h3-muted">Keep soft areas soft</span>
+                  <select value={f.keepSoft} onChange={(e) => set({ keepSoft: Number(e.target.value) })}>
+                    <option value={0}>Off</option>
+                    <option value={0.5}>Some</option>
+                    <option value={1}>Full</option>
+                  </select>
+                </label>
+                <label className="h3-col" style={{ gap: 2 }} title="Film grain after the model (which scrubs grain away), different each frame; not added before a Wan re-sample">
+                  <span className="h3-small h3-muted">Grain</span>
+                  <select value={f.grain} onChange={(e) => set({ grain: Number(e.target.value) })}>
+                    <option value={0}>Off</option>
+                    <option value={0.02}>Light</option>
+                    <option value={0.04}>Medium</option>
+                    <option value={0.06}>Heavy</option>
+                  </select>
+                </label>
+              </div>
+            </div>
+          )}
           <label className="h3-check" title="Upscale again even where the take already has a fresh upscale (it is replaced)">
             <input type="checkbox" checked={f.redo} onChange={(e) => set({ redo: e.target.checked })} />
             Again, where already upscaled

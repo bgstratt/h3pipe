@@ -73,6 +73,23 @@ class UpscaleJob:
     # how the .up.mp4 is written and the upscale model run (ENCODERS, PRECISIONS)
     encoder: str = "auto"
     precision: str = "fp16"
+    # finishing a pixel model's output (H3PixelUpscale): colour and tone from
+    # the source, invented detail faded where it was soft, grain
+    frequency_split: bool = True
+    keep_soft: float = 0.0
+    grain: float = 0.0
+
+    def finish_inputs(self, grain: bool = True) -> dict:
+        """The finishing inputs of an H3PixelUpscale node (`grain` False: before a
+        re-sample, which would take grain for noise). The grain is seeded by
+        the take's seed, so a redo repeats it."""
+        seed = int((self.take.sidecar or {}).get("seed") or 0) % (1 << 32)
+        return {"frequency_split": self.frequency_split, "keep_soft": self.keep_soft,
+                "grain": self.grain if grain else 0.0, "grain_seed": seed}
+
+    def finish_record(self) -> dict:
+        return {"frequency_split": self.frequency_split, "keep_soft": self.keep_soft,
+                "grain": self.grain}
     out_width: int = 0
     out_height: int = 0
 
@@ -245,11 +262,18 @@ def upscale_readiness(target: "TG.Target", object_info: dict | None) -> dict | N
 
 
 def plan_upscale(root: str, take: T.Take, *, encoder: str = "auto", precision: str = "fp16",
+                 frequency_split: bool = True, keep_soft: float = 0.0, grain: float = 0.0,
                  **kw) -> UpscaleJob:
     """_plan (below), with how the result is encoded (`encoder`) and the upscale
     model run (`precision`), both checked."""
     job = _plan(root, take, **kw)
     job.encoder, job.precision = encoder or "auto", precision or "fp16"
+    job.frequency_split = bool(frequency_split)
+    job.keep_soft, job.grain = float(keep_soft or 0), float(grain or 0)
+    if job.action != "error" and not 0 <= job.keep_soft <= 1:
+        job.action, job.why = "error", f"keep_soft {keep_soft}: it's 0 to 1"
+    if job.action != "error" and not 0 <= job.grain <= 0.2:
+        job.action, job.why = "error", f"grain {grain}: it's 0 to 0.2"
     if job.action != "error" and job.encoder not in ENCODERS:
         job.action, job.why = "error", f"encoder {encoder!r}: it's {', '.join(ENCODERS)}"
     if job.action != "error" and job.precision not in PRECISIONS:
@@ -485,7 +509,8 @@ def pixel_refine(g: dict, up: UpscaleJob, sampler: str) -> None:
     g["up_model"] = {"class_type": "UpscaleModelLoader", "inputs": {"model_name": up.pixel_model}}
     g["up_pixels"] = {"class_type": "H3PixelUpscale", "inputs": {
         "images": ["up_video", 0], "upscale_model": ["up_model", 0],
-        "width": up.width, "height": up.height, "chunk": 4, "precision": up.precision}}
+        "width": up.width, "height": up.height, "chunk": 4, "precision": up.precision,
+        **up.finish_inputs(grain=False)}}
     g["up_venc"] = {"class_type": "VAEEncode", "inputs": {"pixels": ["up_pixels", 0], "vae": [vae, 0]}}
     si = g[sampler]["inputs"]
     si["latent_image"] = ["up_venc", 0]
@@ -513,7 +538,7 @@ def finish_graph(g: dict, up: UpscaleJob, images: list) -> dict:
         g["up_then"] = {"class_type": "H3PixelUpscale", "inputs": {
             "images": images, "upscale_model": ["up_then_model", 0],
             "width": up.out_size[0], "height": up.out_size[1], "chunk": 2,
-            "precision": up.precision}}
+            "precision": up.precision, **up.finish_inputs()}}
         g["up_save"]["inputs"]["images"] = ["up_then", 0]
     J.prune(g, "up_save")
     return g
@@ -532,7 +557,8 @@ def pixel_graph(up: UpscaleJob) -> dict:
         "up_model": {"class_type": "UpscaleModelLoader", "inputs": {"model_name": up.pixel_model}},
         "up_pixels": {"class_type": "H3PixelUpscale", "inputs": {
             "images": ["up_video", 0], "upscale_model": ["up_model", 0],
-            "width": up.width, "height": up.height, "chunk": 4, "precision": up.precision}},
+            "width": up.width, "height": up.height, "chunk": 4, "precision": up.precision,
+            **up.finish_inputs()}},
         "up_save": {"class_type": "H3SaveUpscale", "inputs": {
             "images": ["up_pixels", 0], "project_root": root,
             "source_mp4": rel(root, take.paths.mp4), "out_mp4": rel(root, take.paths.up_mp4),
@@ -593,7 +619,7 @@ def queued_record(up: UpscaleJob) -> dict:
                 "method": "pixel", "mode": "pixel", "scale": up.scale, "start_step": None,
                 "steps": None, "seed": None, "upscaler": up.pixel_model,
                 "pixel_model": up.pixel_model, "precision": up.precision,
-                "encoder_asked": up.encoder,
+                "encoder_asked": up.encoder, "finish": up.finish_record(),
                 # the chain: what the upscale it ran on was (so a later look can
                 # tell "re-sample 2x, then pixel 2x"); the stamp stays the take's
                 **({"on_upscale": previous_summary(up.previous)} if up.previous else {}),
@@ -612,7 +638,8 @@ def queued_record(up: UpscaleJob) -> dict:
             "steps": schedule_steps(up.spec, int((up.take.sidecar or {}).get("steps") or 0)),
             "seed": (up.take.sidecar or {}).get("seed"),
             "upscaler": upscaler, "encoder_asked": up.encoder,
-            **({"precision": up.precision} if up.then_model else {}),
+            **({"precision": up.precision, "finish": up.finish_record()}
+               if up.then_model or up.spec.get("mode") == PIXEL_REFINE else {}),
             **({"then_pixel": {"model": up.then_model, "scale": up.then_scale,
                                "from": [up.width, up.height]}} if up.then_model else {}),
             "width": up.out_size[0], "height": up.out_size[1], **T.source_stamp(up.take.paths.mp4)}
@@ -703,6 +730,12 @@ def main(argv=None) -> int:
                          "else x264; nvenc / x264 force one")
     ap.add_argument("--precision", choices=PRECISIONS, default="fp16",
                     help="the upscale model's precision (fp16: about twice as fast)")
+    ap.add_argument("--no-frequency-split", dest="frequency_split", action="store_false",
+                    help="a pixel model's colour and tone as it made them (default: the source's)")
+    ap.add_argument("--keep-soft", type=float, default=0.0,
+                    help="0-1: fade the model's invented detail where the source was soft")
+    ap.add_argument("--grain", type=float, default=0.0,
+                    help="film grain after a pixel model, 0-0.2 (0.02 is light)")
     ap.add_argument("--from-upscale", action="store_true",
                     help="the pixel method on the take's existing upscale (its .up.mp4 is the "
                          "input and is replaced): e.g. a re-sample first, pixel 2x later")
@@ -744,7 +777,8 @@ def main(argv=None) -> int:
                           method=args.method, pixel_model=args.pixel_model, detail=args.detail,
                           then_model=args.then_pixel, then_scale=args.then_scale,
                           from_upscale=args.from_upscale, encoder=args.encoder,
-                          precision=args.precision)
+                          precision=args.precision, frequency_split=args.frequency_split,
+                          keep_soft=args.keep_soft, grain=args.grain)
         mark = {"upscale": "..", "skip": "= ", "error": "!!"}[up.action]
         what = describe(up) if up.action == "upscale" else up.why
         print(f"  {mark} {up.label}: {what}")

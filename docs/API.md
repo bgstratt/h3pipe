@@ -371,7 +371,13 @@ without) or `"x264"` (the CPU; its faster preset past 4K). The `.up.json`'s `enc
 the one used. `precision`: the upscale model's, `"fp16"` (the default: autocast, about
 twice as fast) or `"fp32"`. Options lists both as `encoders` / `precisions`. An upscaled
 cut that mixes an HEVC upscale with H.264 clips is re-encoded by assemble, since concat
-can't copy mixed codecs. Queues and
+can't copy mixed codecs.
+The finish of anything a pixel model makes (the pixel method, a then-pixel step, the start
+of a Wan re-sample): `frequency_split` (default true: colour and tone from a bicubic enlarge
+of the source, only the high band from the model), `keep_soft` (0–1, default 0: the
+model's detail faded where the source had none, measured once per clip), `grain` (0–0.2,
+default 0: monochrome, per frame, seeded by the take's seed; never before a Wan re-sample).
+Recorded as the `.up.json`'s `finish`. Queues and
 returns at once:
 ```json
 {"queued": [{"shot": "sh020", "take": 3, "route": "latent", "method": "latent",
