@@ -2018,8 +2018,12 @@ Steps (in order; each ends with its exit check):
   all): sh010 H3 re-sample 2x → RealESRGAN_x2 → 3840×2176 cropped, 177 s; sh330 LTX
   1920×1024 → 4050×2160 cropped, 225 s (with the model switch from H3); sh760 Wan
   RealESRGAN_x4 → 3928×2160 cropped, 131 s; the master-quality x264 encode 11–13 s of each.
-  The master: 3840×2160 High, 227 frames, decodes clean, stream-copied. Idea, not built:
-  queue a master's upscales grouped by target, so ComfyUI loads each model once.
+  The master: 3840×2160 High, 227 frames, decodes clean, stream-copied.
+- **Queue order** (2026-09-28, the user's call: in order when watching, grouped for a
+  batch): `h3master.in_order` / `--order cut|target`, the route's `order`, the Master
+  dialog's Queue menu (remembered in the browser). `cut` is the default: stop at the first
+  bad shot and everything before it is good. `target` groups by `load_key` (a re-sample's
+  target model, else the pixel or SeedVR2 model), each group where its first shot is.
 - **13e5 — many episodes.** `h3.py master <ep> <ep> ...` (or a folder of episodes): one
   plan across them, queued episode by episode, a summary at the end; episodes whose cut
   has gaps are listed and skipped, not half-mastered.

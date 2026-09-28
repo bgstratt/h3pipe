@@ -160,6 +160,30 @@ class MasterTest(ApiTest):
         self.err(A.post_master(self.ctx, {"ep": self.ep, "action": "burn"}), 400)
         self.err(A.post_master(self.ctx, {"ep": self.ep, "conform": "yes"}), 400)
 
+    def test_queue_order(self):
+        """In cut order by default; grouped by what ComfyUI loads on request, each
+        group where its first shot is, cut order within it."""
+        from types import SimpleNamespace as NS
+
+        def row(shot, method, target, model=""):
+            job = NS(method=method, target=NS(id=target), then_method="pixel", then_model="",
+                     seedvr2_model=model, pixel_model=model)
+            return M.Row(shot, None, "upscale", job=job)
+        rows = [row("sh010", "latent", "minimax_h3_ref2va"), row("sh020", "latent", "ltx2"),
+                row("sh030", "latent", "minimax_h3_ref2va"), row("sh040", "pixel", "wan22_i2v", "x2.pth"),
+                row("sh050", "latent", "ltx2"), row("sh060", "pixel", "wan22_vace", "x2.pth"),
+                row("sh070", "seedvr2", "wan22_i2v", "7b")]
+        self.assertEqual([r.shot for r in M.in_order(rows)], [r.shot for r in rows])
+        self.assertEqual([r.shot for r in M.in_order(rows, "target")],
+                         ["sh010", "sh030", "sh020", "sh050", "sh040", "sh060", "sh070"])
+        with self.assertRaises(M.MasterError):
+            M.in_order(rows, "random")
+        self.render_all()
+        self.set_recipe(RECIPE)
+        self.err(A.post_master(self.ctx, {"ep": self.ep, "action": "queue", "order": "random"}), 400)
+        res = self.ok(A.post_master(self.ctx, {"ep": self.ep, "action": "queue", "order": "target"}))
+        self.assertTrue(res["queued"])
+
     def test_cli_check_and_show_folders(self):
         self.render_all()
         self.set_recipe(RECIPE)

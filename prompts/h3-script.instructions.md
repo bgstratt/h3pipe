@@ -388,6 +388,12 @@ the cut: lock the picks first. Several episodes, or a whole show folder, master 
 (`h3.py master Shows`); an episode with gaps is skipped, not half-made. `--check` shows the
 plan without queueing anything.
 
+The upscales are queued **in cut order** by default: watch them land, and if one is off you
+can stop there knowing everything before it is good. For a batch you'll leave running
+(overnight, over lunch), `--order target` (the dialog's Queue: Grouped by target) runs the
+shots that load the same model together, so ComfyUI loads each model once instead of at
+every change of target; the dialog remembers the choice.
+
 **Writing a new series config**, add an `upscale.master` block for the delivery they named
 (ask once if they didn't: 1080p is the usual; 4K when they say so). The patterns below are
 the best value in time and quality we've measured; say which you chose and why.

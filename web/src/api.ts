@@ -74,7 +74,7 @@ export interface Api {
    * request's fields; null clears it) */
   /** Phase 13e: POST /h3pipe/master: plan, queue the upscales, or assemble the master */
   master(req: { ep: string; pass?: Pass; action: "plan" | "queue" | "assemble"; conform?: boolean;
-                allow_gaps?: boolean; prores?: boolean }): Promise<MasterResult>;
+                allow_gaps?: boolean; prores?: boolean; order?: "cut" | "target" }): Promise<MasterResult>;
   /** Phase 13e: PUT /h3pipe/upscale/keep: mark a take's upscale Keep, or clear it */
   putUpscaleKeep(ep: string, shot: string, take: number, keep: boolean, pass?: Pass): Promise<{ shot: string; take: number; keep: boolean }>;
   putUpscaleRecipe(ep: string, shot: string, recipe: Record<string, unknown> | null): Promise<{ shot: string; recipe: Record<string, unknown> | null; text: string | null }>;
