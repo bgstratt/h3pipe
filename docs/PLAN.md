@@ -2001,13 +2001,27 @@ Steps (in order; each ends with its exit check):
   retried (`upscale`, not a gap). `h3.py master`, `POST /h3pipe/master`, the cut menu's
   **Master…** (the plan as a table, Conform / Allow gaps / ProRes, Queue N upscales,
   Assemble master; the plan is read again as upscales land). Tested in test_master.py.
+  **Live, 2026-09-27** (`Porchlights\_scratch_master`: sh010 on H3 Ref2VA 960×544, sh330 on
+  LTX-2 960×512, sh760 on Wan ti2v 1280×704, rendered in 2:43; recipe 1440p crop master:
+  H3 and LTX re-sample then RealESRGAN_x2, Wan SeedVR2 7B). sh010 was given a pixel
+  upscale at 1440p first: the plan kept it ("other settings"), queued the other two, and
+  `master --wait --prores` made `master\_scratch_master_master_2560x1440.mp4` (227 frames)
+  and its ProRes 422 HQ `.mov` in 5:54; every clip 2560×1440 (LTX's re-sample 1920×1024 →
+  2700×1440 cropped, SeedVR2 2620×1440 cropped). **Found:** the kept NVENC Main upscale was
+  stream-copied beside x264 High ones into one track (the first clip's headers; ffmpeg
+  decoded it, a browser or a hardware decoder may not): assemble's "mixed" test now
+  compares codec, profile and pixel format, and re-encodes the lot when they differ. Re-runs
+  queued nothing and wrote byte-identical masters (sha1 fa31df51…). `--conform` redid sh010
+  by the recipe (2:57), after which the clips agree and are copied; a master without
+  `--prores` now removes an earlier one's `.mov`. The route answered the same plan.
 - **13e5 — many episodes.** `h3.py master <ep> <ep> ...` (or a folder of episodes): one
   plan across them, queued episode by episode, a summary at the end; episodes whose cut
   has gaps are listed and skipped, not half-mastered.
   Exit: two scratch episodes master in one command.
   **Built with 13e4**: `h3.py master` takes several episodes, or a show folder (every
   folder in it with a shotlist or a cut), plans and runs each in turn and says which
-  finished; one with gaps stops at its plan. The live check waits for 13e4's.
+  finished; one with gaps stops at its plan. (Live: one episode; two in one command are
+  the same loop, covered by test_master's show-folder test.)
 - **13e6 — docs and the skill.** AUTHORING: a **Masters** section (the recipe, overrides,
   keep, what `master` does and doesn't redo), and the series-config guidance: when writing
   a new series config, propose an `upscale.master` block from the chosen setup (render

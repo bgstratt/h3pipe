@@ -262,6 +262,9 @@ def assemble_master(plan: Plan, allow_gaps: bool = False, prores: bool = False,
                 "error": err.strip() or out.strip()[-400:] or "h3assemble wrote no cut"}
     dst = master_dir(plan.root)
     os.makedirs(dst, exist_ok=True)
+    old_mov = os.path.join(dst, name + ".mov")
+    if not prores and os.path.isfile(old_mov):
+        os.remove(old_mov)                  # an earlier master's: not this one any more
     moved = {}
     for ext in (".mp4", "_shots.txt", ".mov"):
         src = os.path.join(plan.root, sub, name + ext)

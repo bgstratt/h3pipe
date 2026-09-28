@@ -241,6 +241,24 @@ class AssembleTest(unittest.TestCase):
         with open(self.out(), "rb") as fh:
             self.assertIn(b"crf=12.0", fh.read())
 
+    def test_mixed_profiles_are_reencoded(self):
+        """13e4's live check: an NVENC Main upscale beside x264 High ones concat-copied
+        into one track with the first clip's headers. Clips whose codec, profile or
+        pixel format differ are re-encoded, all of them."""
+        self.shotlist([("sh010", 22), ("sh020", 39)])
+        self.take("sh010", 22)
+        n = self.take("sh020", 39)
+        high = T.take_paths(self.root, "final", "sh020", n).mp4
+        r = ff("ffmpeg", "-y", "-v", "error", "-i", self.clips[("64x64", 39)], "-c:v", "libx264",
+               "-preset", "medium", "-profile:v", "high", "-c:a", "copy", high + ".tmp.mp4")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        os.replace(high + ".tmp.mp4", high)
+        out = self.assemble().stdout
+        self.assertIn("more than one encoding", out)
+        with open(self.out(), "rb") as fh:
+            self.assertIn(b"crf=16.0", fh.read())               # re-encoded, review quality
+        self.assertEqual(probe_frames(self.out()), 61)
+
     def test_trim_after_window_warns_with_master(self):
         doc = {"episode": "ep01", "defaults": {"width": 64, "height": 64},
                "shots": [{"id": "sh010", "length": 56, "audio_policy": "dub",

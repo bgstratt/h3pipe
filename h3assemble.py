@@ -123,11 +123,16 @@ def episode_fps(root: str, doc: dict) -> float:
 
 
 def video_codec(path: str) -> str | None:
-    """The first video stream's codec (h264, hevc, ...), or None."""
+    """The first video stream's codec, profile and pixel format ("h264 High
+    yuv420p"), or None. The concat demuxer can only copy clips that agree on all
+    three: an MP4 track keeps one set of H.264 headers, so an NVENC Main clip
+    copied beside x264 High ones plays in ffmpeg but can break a browser or a
+    hardware decoder at the join."""
     try:
         r = run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries",
-                 "stream=codec_name", "-of", "csv=p=0", path], timeout=60)
-        return r.stdout.decode("utf-8", "replace").strip() or None
+                 "stream=codec_name,profile,pix_fmt", "-of", "csv=p=0:s=|", path], timeout=60)
+        out = r.stdout.decode("utf-8", "replace").strip()
+        return " ".join(out.split("|")) if out else None
     except Exception:
         return None
 
@@ -696,11 +701,12 @@ def main() -> int:
     # once one clip is re-encoded every clip is, so the concat demuxer sees one
     # set of stream parameters.
     # So do clips at another frame rate or size (a mixed-target cut).
-    # an NVENC HEVC upscale beside H.264 clips: concat can't copy mixed codecs
+    # an NVENC HEVC upscale beside H.264 clips, or an NVENC Main one beside x264
+    # High ones: concat can't copy streams that don't agree (video_codec)
     codecs = {video_codec(p["path"]) for p in plan}
     mixed = len(codecs) > 1
     if mixed:
-        print(f"  clips in more than one codec ({', '.join(sorted(c or '?' for c in codecs))}): "
+        print(f"  clips in more than one encoding ({', '.join(sorted(c or '?' for c in codecs))}): "
               f"re-encoding them all")
     reencode = bool(windowed or trimmed or placeholders or converted or resized or mixed)
     size = None
