@@ -234,7 +234,7 @@ which ones your ComfyUI can render.
 |---|---|---|---|---|---|---|
 | **Render at size** (the default) | 1344×768 | 448×256 | 7:4 | ~53 s | not needed | 1344×768 as rendered |
 | **Render small, upscale to 1080p** | 960×544 | 448×256 | ≈7:4 | ~20 s | re-sample 2x → 1920×1088, ~25–35 s | 1920×1080 (8 rows cropped) |
-| **Render 16:9, upscale to 1080p or 4K** | 1024×576 | 512×288 | 16:9 | ~23–24 s (est.) | re-sample 2x → 2048×1152, then an upscale model to 3840×2160 | 1920×1080 or 3840×2160, exactly |
+| **Render 16:9, upscale to 1080p or 4K** | 1024×576 | 512×288 | 16:9 | ~23–24 s (est.) | re-sample 2x → 2048×1152 (scaled down to 1080p; for 4K, then an upscale model) | 1920×1080 or 3840×2160, exactly |
 
 (Measured on an RTX 5090 with the 8-step turbo LoRA; the 1024×576 time is estimated from
 its 13% more pixels than 960×544, since attention grows a little faster than the pixel
@@ -388,11 +388,90 @@ the cut: lock the picks first. Several episodes, or a whole show folder, master 
 (`h3.py master Shows`); an episode with gaps is skipped, not half-made. `--check` shows the
 plan without queueing anything.
 
-**Writing a new series config**, add an `upscale.master` block that matches the setup you
-chose: render small → re-sample, then an upscale model to the delivery (1080p or 4K); render
-at size → an upscale model or SeedVR2; Wan shots → SeedVR2 (their re-sample takes minutes).
-Pick `deliver` from what they said they deliver, and `fit: crop` unless they'd rather keep
-the whole frame with bars.
+The upscales are queued **in cut order** by default: watch them land, and if one is off you
+can stop there knowing everything before it is good. For a batch you'll leave running
+(overnight, over lunch), `--order target` (the dialog's Queue: Grouped by target) runs the
+shots that load the same model together, so ComfyUI loads each model once instead of at
+every change of target; the dialog remembers the choice.
+
+**Writing a new series config**, add an `upscale.master` block for the delivery they named
+(ask once if they didn't: 1080p is the usual; 4K when they say so). The patterns below are
+the best value in time and quality we've measured; say which you chose and why.
+
+#### Delivering 1080p
+
+Render small and re-sample 2x; nothing after it. Per picked take the re-sample costs about
+as much as one 960×544 render, and it redraws detail at full size under the take's own
+prompt, references and seed with its audio held, which no pixel upscale of a bigger render
+matches. Rendering at 1344×768 costs every take ~53 s instead of ~20 s and still needs an
+upscale to reach 1080p. With about 4 takes a shot, a 100-shot episode is roughly 3 hours
+this way against about 7 at 1344×768 (extrapolated from 3–5 s shots: master one real
+episode before planning a season on it).
+
+- **960×544** (proxy 448×256) when the shots are mostly H3: the re-sample makes 1920×1088,
+  cropped by 8 rows (0.7%, invisible).
+- **1024×576** (proxy 512×288) when many shots are on LTX, or for a touch more crispness:
+  it's on both H3's 32 grid and LTX's 64 (LTX snaps 960×544 to 960×512, whose 2x is
+  stretched about 5% to fill 1080), and the 2048×1152 re-sample is scaled down to exactly
+  1920×1080. About 15–25% more time a take and an upscale.
+- Wan shots: SeedVR2 7B (about a minute a shot), or a pixel model (about 40 s) when time
+  matters more; Wan's own re-sample takes minutes and isn't worth it at 1080p.
+
+```json
+"upscale": { "save_latents": "final",
+  "master": { "deliver": "1080p", "fit": "crop", "quality": "master",
+    "finish": { "frequency_split": true },
+    "targets": {
+      "minimax_h3_*": { "method": "latent" },
+      "ltx2*":        { "method": "latent" },
+      "wan22_*":      { "method": "seedvr2", "seedvr2_model": "7b" },
+      "*":            { "method": "pixel", "pixel_model": "RealESRGAN_x2.pth" } } } }
+```
+
+`save_latents: "final"` (the default) lets the re-sample start from the take's latent
+instead of re-encoding its video. A wide shot without dialogue that looks soft can take its
+own recipe with `detail: 1`; don't raise `detail` for every shot, it can change a speaking
+mouth.
+
+#### Delivering 4K
+
+The same small render, the same 2x re-sample, then an upscale model the rest of the way:
+`"then": "RealESRGAN_x2.pth"` with `"deliver": "4k"`. From 960×544 the model makes an
+exact 2x of the 1920×1088 re-sample (3840×2176, 16 rows cropped), so it runs at its own
+factor with no resize; from 1024×576 it takes 2048×1152 to exactly 3840×2160. Measured (RTX 5090, 3 s shots,
+master quality): **about 3 minutes a shot** on H3 (the re-sample ~30 s, the model's pass at
+4K ~2 minutes, the encode ~11 s), nearer 4 on LTX, about 2 for a Wan shot through
+RealESRGAN_x4, against well under a minute a shot for 1080p. For a 100-shot episode that's
+some 5 hours of upscaling at 4K against under an hour at 1080p: master 1080p as you go and
+4K when it's asked for.
+
+- Don't re-sample 4x in one go: a single refine step on a 4x latent is unmeasured and heavy
+  on VRAM. Re-sample 2x, then a model.
+- The model after the re-sample is the steadiest frame to frame. SeedVR2 there
+  (`"then": "seedvr2"`) gives the sharpest stills but is several minutes a shot at 4K:
+  give it to the shots that earn it, as their own recipe, not the whole series.
+- Rendering at 1344×768 for 4K works (re-sample 2x to 2688×1536, the model the last 1.43x)
+  but costs every take more and the re-sample more, for little.
+- Wan shots: a 4x model (`RealESRGAN_x4.pth`, about 3x from 1280×704), or SeedVR2 for the few
+  that need it.
+
+```json
+"upscale": { "save_latents": "final",
+  "master": { "deliver": "4k", "fit": "crop", "quality": "master",
+    "finish": { "frequency_split": true },
+    "targets": {
+      "minimax_h3_*": { "method": "latent", "then": "RealESRGAN_x2.pth" },
+      "ltx2*":        { "method": "latent", "then": "RealESRGAN_x2.pth" },
+      "wan22_*":      { "method": "pixel", "pixel_model": "RealESRGAN_x4.pth" },
+      "*":            { "method": "pixel", "pixel_model": "RealESRGAN_x4.pth" } } } }
+```
+
+**Both 1080p and 4K** from one cut: a take keeps one upscale, so make the 4K master and
+scale it down for 1080p, rather than upscaling every shot twice (switching the recipe's
+`deliver` makes the 1080p upscales the wrong size for a 4K master, and `--conform` replaces
+them).
+
+`fit: crop` unless they'd rather keep the whole frame with bars (`pad`).
 
 ### Render profiles
 

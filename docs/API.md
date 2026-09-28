@@ -447,7 +447,9 @@ H.264 8-bit so the editor plays it; the `.up.json` records `quality`.
 
 ### `POST /h3pipe/master`
 Body `{"ep", "pass"?, "action": "plan" | "queue" | "assemble", "conform"?, "allow_gaps"?,
-"prores"?}` (h3master). Every answer has `plan`: `{pass, size: [w, h], fit, quality,
+"prores"?, "order"?}` (h3master). `order` (queue only): `"cut"` (the default: the cut's
+order) or `"target"` (grouped by what ComfyUI loads: a re-sample's target model, else the
+upscale or SeedVR2 model; groups where their first shot is, cut order within). Every answer has `plan`: `{pass, size: [w, h], fit, quality,
 counts: {upscale, ok, kept, queued, gap}, ready, rows: [{shot, take, target, status, why,
 recipe, upscale: {width, height, status, keep} | null}]}`, a row per shot of the cut in
 order. `status`: `upscale` (none, from an older take, or failed: queued by the recipe),
