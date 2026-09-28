@@ -1,13 +1,16 @@
 # h3pipe — plan: a shot/take editor, then model-agnostic targets
 
-Status (2026-09-19): Phases 0–3, 5–8, 8.5 and 8.6 done; Phase 4 (evaluate) continues through use. Video targets:
+Status (2026-09-28): every phase below is in, through 13 (13a–13e: upscales of any take on
+every built-in video target, output sizes, the series' master recipe and `h3.py master`);
+the cut can leave a shot out (Phase 9b's addition). What is left is listed at the end of
+each phase ("Left:") and in the Phase 12/13 risks. As of 2026-09-19: Phases 0–3, 5–8, 8.5 and 8.6 done; Phase 4 (evaluate) continues through use. Video targets:
 `minimax_h3_ref2va` (default), `minimax_h3_fl2va` (H3 from first/last keyframes; dub anchors the recording),
 `ltx2` (LTX-2.5; `dur: model` predicts length once the duration head is installed; naming the dev
 transformer as the model renders the **quality profile**, 30 steps with real guidance, and a shot
 whose refs are on disk draws a **reference sheet** through the 2.5 ingredients IC-LoRA — both decided
 at queue time, both optional-tier, see **LTX-2.5: the quality profile and ingredients references** in
 docs/API.md), `ltx2_ingredients` (LTX-2.3 + IC-LoRA reference sheet: identity), `wan22_i2v` / `wan22_ti2v` / `wan22_vace` (Wan 2.2, silent,
-16/24 fps; assemble converts fps). Model files are checked against each target's family (name patterns +
+24 fps, Wan 14B's paced motion included since 2026-09-27; assemble converts older 16 fps takes). Model files are checked against each target's family (name patterns +
 safetensors header). Keyframe continuity is in the CLI, the routes and the editor. Readiness (backend,
 2026-09-19): each target's model params have tiers (required / accelerator / optional), accelerated presets a
 `base`, and `downloads` from trustworthy records only; queue time resolves every file to an installed one of its
@@ -23,8 +26,9 @@ editing and taken back (and the editor says which copy is in force), and a show 
 **targets of its own** — `<show>/targets/<id>/target.json`, data only, proposed from any saved
 ComfyUI workflow by `h3inspect.py` and rendered by the builtin prose compile. 12d (subject
 reference sheets for such a target) is deferred on purpose.
-Phase 13 (planned 2026-09-26): an optional 2x upscale of a picked final take, from its
-saved latent or through the VAE, keeping the take's own audio.
+Phase 13 (2026-09-26 to 09-28, in): an optional upscale of any take (a latent re-sample on
+every built-in video target, a pixel model or SeedVR2, to a multiple or an output size),
+the series' master recipe, and `h3.py master` (the cut upscaled by it and assembled).
 This is the working plan for the next round of development. `CLAUDE.md` points here.
 
 ## Goals
@@ -975,7 +979,7 @@ as built in `docs/API.md`, "Phase 9c")
 - **Known:** discarding a take doesn't clear an audio source naming it — it reads
   "(missing)", and assemble warns and lays silence.
 
-**Next up (2026-09-20): reference images from a video model.** The user's finding: exporting
+**Done (the user, 2026-09-28: H3 stills are already in place) — reference images from a video model.** The user's finding: exporting
 the first frame of a MiniMax H3 generation gives very good stills, and H3 with references
 behaves like an image edit (as Klein 9B edit does). So a ref/keyframe could be made by a
 video target's first frame instead of an image target. To work out: a video target used as
@@ -2054,11 +2058,13 @@ and re-rendering is enough), a colour grade (the conform's job), and cross-shot 
 (shots meet at hard cuts: one at a time is right).
 
 **Phase 13 risks**
-- **Lip sync.** Held audio fixes timing, and at step 7 the mouth matched the take on the one
+- ~~**Lip sync.** Held audio fixes timing, and at step 7 the mouth matched the take on the one
   dialogue shot measured (sh330). Earlier start steps re-draw it: more detail, and a mouth
   that no longer matches the take. Check a few more dialogue shots, a true close-up among
   them, before making step 7 the only default; a shot without dialogue could take step 6
-  for more detail.
+  for more detail.~~ Closed 2026-09-28 (the user's call): step 7 stays the default,
+  accepted on sh330 without further testing; `detail` / a shot's own recipe covers a shot
+  that wants more.
 - **Faces move** as the start step goes down. `--start-step` is per run so one shot can
   trade detail for fidelity.
 - **Length and VRAM.** Only a 3 s shot was measured. A 6–8 s shot at 2x may need

@@ -25,6 +25,7 @@ export function entryOf(s: ShotStatus, listPass: Pass): CutEntry {
   // Phase 9d: the clip's audio source, as cut.json holds it
   const au = normalizeAudio(audioOf(c), s.shot);
   if (au) e.audio = au;
+  if (c?.out) e.out = true;
   return e;
 }
 
@@ -313,6 +314,7 @@ export function sameEntries(a: CutEntry[], b: CutEntry[]): boolean {
     const fy = fieldsOf(y);
     if (fx.trim_in !== fy.trim_in || fx.trim_out !== fy.trim_out || fx.locked !== fy.locked || (x.note ?? "") !== (y.note ?? "")) return false;
     if (!sameAudio(fx.audio, fy.audio)) return false;
+    if (fx.out !== fy.out) return false;
   }
   return true;
 }
