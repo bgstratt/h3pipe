@@ -538,6 +538,33 @@ class PixelUpscaleTest(UpscaleRouteTest):
         self.assertEqual(opts["fits"], ["crop", "pad"])
         self.assertIn({"id": "4k", "width": 3840, "height": 2160}, opts["delivers"])
 
+    def test_then_seedvr2(self):
+        """Re-sample, then SeedVR2 in the same job (to an output size here)."""
+        t = self.final_take()
+        T.update_sidecar(t.paths.sidecar, width=1344, height=768)
+        t = T.get_take(self.ep, "final", "sh010", 1)
+        up = U.plan_upscale(self.ep, t, then_method="seedvr2", seedvr2_model="3b", deliver="4k")
+        self.assertEqual((up.action, up.then_method, up.then_model, up.made_size),
+                         ("upscale", "seedvr2", "seedvr2_3b_int8_convrot.safetensors", (3840, 2196)))
+        g = U.upscale_graph(self.base(), up)
+        decode = self.by_class(g, "VAEDecode")[0]
+        self.assertEqual(g["up_resize"]["inputs"]["image"], [decode, 0])
+        self.assertEqual((g["up_resize"]["inputs"]["width"], g["up_resize"]["inputs"]["height"]), (3840, 2196))
+        self.assertEqual(g["up_unet"]["inputs"]["unet_name"], "seedvr2_3b_int8_convrot.safetensors")
+        self.assertEqual(g["up_finish"]["inputs"]["source"], [decode, 0])
+        self.assertEqual(g["up_save"]["inputs"]["images"], ["up_finish", 0])
+        self.assertFalse(self.by_class(g, "H3PixelUpscale"))
+        self.assertTrue(self.by_class(g, "H3HoldAudio"))                  # still a re-sample first
+        rec = U.queued_record(up)
+        self.assertEqual((rec["then_pixel"]["method"], rec["width"], rec["height"]), ("seedvr2", 3840, 2160))
+        self.assertIn("then SeedVR2 (seedvr2_3b_int8_convrot.safetensors)", U.describe(up))
+        # readiness asks for SeedVR2's files, not an upscale model
+        missing = U.not_ready([up], {c: {"input": {}} for c in U.UPSCALE_NODES})
+        self.assertTrue(any(m.startswith("SeedVR2:") for m in missing))
+        self.assertFalse(any(m.startswith("pixel:") for m in missing))
+        self.assertEqual(U.plan_upscale(self.ep, t, then_method="sharp").action, "error")
+        self.err(A.post_upscale(self.ctx, {"ep": self.ep, "shots": ["sh010"], "then_method": "x"}), 400)
+
     def test_then_pixel(self):
         """Re-sample 2x, then an upscale model 2x more, in one job: 4x."""
         t = self.final_take()

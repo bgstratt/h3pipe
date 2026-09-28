@@ -74,6 +74,12 @@ describe("upscaleRequestOf (the Upscale dialog)", () => {
     expect(lat).toMatchObject({ scale: 1.5, then_pixel_model: "x.pth", deliver: "1080p" });
     expect("then_scale" in lat || "fit" in lat).toBe(false);
   });
+  it("then SeedVR2: its method and model, no upscale model", () => {
+    const r = upscaleRequestOf({ ...f, method: "latent", thenModel: "seedvr2", thenMethod: "seedvr2",
+                                 seedvr2Model: "seedvr2_3b_int8_convrot.safetensors", thenScale: 1.5 }, one);
+    expect(r).toMatchObject({ then_method: "seedvr2", seedvr2_model: "seedvr2_3b_int8_convrot.safetensors", then_scale: 1.5 });
+    expect("then_pixel_model" in r).toBe(false);
+  });
   it("on top of an upscale: pixel only", () => {
     expect(upscaleRequestOf({ ...f, method: "pixel", fromUpscale: true }, one).from_upscale).toBe(true);
     expect("from_upscale" in upscaleRequestOf({ ...f, method: "latent", fromUpscale: true }, one)).toBe(false);

@@ -37,7 +37,7 @@ export function upscaleBadge(t: TakeSummary | undefined): Badge | null {
     ? `SeedVR2, ${u.seedvr2_model ?? "?"}${u.on_upscale ? ", on an earlier upscale" : ""}`
     : u.method === "pixel"
     ? `pixel, ${u.pixel_model ?? "?"}${u.on_upscale ? ", on an earlier upscale" : ""}`
-    : `${u.route ?? "?"} route, from step ${u.start_step ?? "?"}${u.then_pixel ? `, then ${u.then_pixel.model}` : ""}`;
+    : `${u.route ?? "?"} route, from step ${u.start_step ?? "?"}${u.then_pixel ? `, then ${u.then_pixel.method === "seedvr2" ? "SeedVR2 " : ""}${u.then_pixel.model}` : ""}`;
   return { kind: "upscaled", label: "2x", title: `Upscaled to ${size} (${how}); Export 2x uses it` };
 }
 

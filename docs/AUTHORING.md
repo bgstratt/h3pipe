@@ -297,7 +297,10 @@ detail the way a re-sample does. `h3.py upscale <ep> --method pixel` uses it for
 in about a minute a shot, with no prompt (so nothing ties it to the take's performance but
 the picture); its frames change a little more from one to the next than a re-sample's, and
 the colour finish after it halves that. `h3.py upscale <ep> --method seedvr2` (the 7B;
-`--seedvr2-model 3b` for the smaller one).
+`--seedvr2-model 3b` for the smaller one). It can also follow a re-sample in the same job,
+in place of an upscale model: `h3.py upscale <ep> --then-seedvr2 --deliver 4k` (the dialog's
+Then: SeedVR2), so the take is redrawn under its own prompt with its lips held, then
+restored to the output size.
 
 `--scale` is any number above 1, up to 4 (a pixel upscale lands on even sides, an H3
 re-sample on the 32 grid, so 1.5x, 2x, 3x of 1024×576 all work; the LTX targets' is 2x

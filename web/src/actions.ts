@@ -995,6 +995,8 @@ export interface UpscaleForm {
   /** a pixel step after a re-sample: its model (null: none) and scale */
   thenModel: string | null;
   thenScale: number;
+  /** what the then step is: an upscale model (thenModel), or SeedVR2 (seedvr2Model) */
+  thenMethod?: "pixel" | "seedvr2";
   /** an exact output size ("1080p", "1440p", "4k", "WxH"; null: as scaled), and how a
    * frame of another shape meets it: crop to fill, or pad with bars */
   deliver?: string | null;
@@ -1028,7 +1030,12 @@ export function upscaleRequestOf(f: UpscaleForm, ask: { pass: Pass; takes: { sho
   const sized = !!f.deliver;
   if (f.scale !== 2 && !(sized && (f.method === "pixel" || f.method === "seedvr2"))) req.scale = f.scale;
   if (f.method !== "pixel" && f.method !== "seedvr2" && f.thenModel) {
-    req.then_pixel_model = f.thenModel;
+    if (f.thenMethod === "seedvr2") {
+      req.then_method = "seedvr2";
+      if (f.seedvr2Model) req.seedvr2_model = f.seedvr2Model;
+    } else {
+      req.then_pixel_model = f.thenModel;
+    }
     if (f.thenScale !== 2 && !sized) req.then_scale = f.thenScale;
   }
   if (sized) {

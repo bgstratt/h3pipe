@@ -682,7 +682,7 @@ export interface TakeUpscale {
   /** the SeedVR2 method's model file */
   seedvr2_model?: string | null;
   /** a pixel step after the re-sample: its model, scale and the re-sample's size */
-  then_pixel?: { model: string; scale: number; from: [number, number] } | null;
+  then_pixel?: { model: string; scale: number; from: [number, number]; method?: "seedvr2" } | null;
   /** a delivery size: what was asked for, the fit, and what the last step made */
   deliver?: { width: number; height: number; fit: "crop" | "pad"; made: [number, number] } | null;
   /** a pixel upscale run on an earlier upscale: that one's record (nested for a longer chain) */
@@ -720,6 +720,8 @@ export interface UpscaleRequest {
   /** latent: then an upscale model takes the re-sample on by `then_scale` (default 2) */
   then_pixel_model?: string | null;
   then_scale?: number | null;
+  /** latent: the then step is SeedVR2 (`seedvr2_model`) instead of an upscale model */
+  then_method?: "pixel" | "seedvr2";
   /** an exact size: "1080p", "1440p", "4k" or "WxH"; the last pixel step is sized to it
    * and the result cropped (`fit` crop, the default) or padded to it */
   deliver?: string | null;

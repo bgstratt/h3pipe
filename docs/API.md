@@ -370,6 +370,9 @@ an LTX-2 re-sample is 2x only. `then_pixel_model` (with `then_scale`, default 2)
 pixel step after a re-sample in the same job: that upscale model takes the re-sampled frames
 on (re-sample 2x then `RealESRGAN_x2.pth` 2x = 4x); `width`/`height` in the answer are the
 final size, and the `.up.json` records `then_pixel: {model, scale, from: [w, h]}`.
+`then_method: "seedvr2"` makes that step SeedVR2 instead (its model from `seedvr2_model`,
+7b by default; `then_pixel_model` is not needed): re-sample, then SeedVR2, in one job;
+`then_pixel` then has `method: "seedvr2"` and its `model` is the SeedVR2 file.
 `deliver` (`"1080p"`, `"1440p"`, `"4k"` or `"WxH"`, both even, 64 to 8192; null: the size
 the scale makes) makes the upscale exactly that size, and `fit` (`"crop"`, the default, or
 `"pad"`) says how a frame of another shape meets it. The last step that can make any size
