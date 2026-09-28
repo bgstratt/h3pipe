@@ -1273,6 +1273,19 @@ changes seeds and invalidates renders. An ID is unique across the whole episode,
 sequence: continue the numbering (`sh110` in the next sequence, or keep counting) rather than
 restarting at `sh010`.
 
+**A shot's ID is its identity**, beyond its seed: its takes, its overrides and everything the
+cut says about it (the pick, trims, lock, audio source, and whether it's left out of the cut)
+are kept by ID. So when revising a script:
+
+- **the same shot, rewritten:** keep its ID. Its takes are flagged stale where the prompt
+  changed, and the cut's decisions about it still apply;
+- **a different shot:** give it a new ID, and never reuse an ID you removed; the old one's
+  takes and cut decisions (a pick, trims, "left out") would land on the new shot;
+- **a shot added between two others:** an in-between ID (`sh065` between `sh060` and `sh070`),
+  so every other shot keeps its ID;
+- **a shot removed:** just delete it; its takes stay on disk, and its cut entry is skipped.
+  To try the cut without a shot, leave it out of the cut in the editor instead of deleting it.
+
 ## Reference slots (H3 Ref2VA)
 
 This section is about the default target, `minimax_h3_ref2va`. The other targets take no

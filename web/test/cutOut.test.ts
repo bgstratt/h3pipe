@@ -1,7 +1,7 @@
 // A shot left out of the cut: the entry carries `out`, Play all skips it, the
 // status follows at once, and its neighbours skip it (keyframes from the previous shot).
 import { describe, expect, it } from "vitest";
-import { applyEntries, withFields } from "../src/lib/cutEdit";
+import { applyEntries, entriesOf, sameEntries, withFields } from "../src/lib/cutEdit";
 import { buildPlaylist } from "../src/lib/playlist";
 import { cutNeighbour } from "../src/lib/keyframes";
 import { shotBadges } from "../src/lib/format";
@@ -25,6 +25,18 @@ describe("leaving a shot out of the cut", () => {
     const out = withFields(list, "b", { out: true });
     expect(out[1]).toEqual({ shot: "b", trim_in: 2, out: true });
     expect(withFields(out, "b", { out: false })[1]).toEqual({ shot: "b", trim_in: 2 });
+  });
+  it("an edit that leaves it out is a change, and a status carries it back into the entries", () => {
+    // the bug the user found: sameEntries ignored `out`, so the edit was never sent;
+    // and entryOf dropped it, so any later edit would have put the shot back
+    const s = st([shot("a"), shot("b"), shot("c")]);
+    const before = entriesOf(s);
+    const after = withFields(before, "b", { out: true });
+    expect(sameEntries(before, after)).toBe(false);
+    const left = st([shot("a"), shot("b", { out: true }), shot("c")]);
+    expect(entriesOf(left)[1]).toEqual({ shot: "b", out: true });
+    const trimmed = withFields(entriesOf(left), "c", { trim_in: 2 });
+    expect(trimmed[1]).toEqual({ shot: "b", out: true });
   });
   it("Play all skips it; the status follows the edit", () => {
     const s = st([shot("a"), shot("b"), shot("c")]);
