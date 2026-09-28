@@ -931,6 +931,50 @@ def recipe_view(ep: str) -> dict | None:
 
 
 @handler
+def post_master(ctx: Context, body):
+    """Phase 13e: an episode's master (h3master). `action`: "plan" (what each
+    shot of the cut is: upscale / ok / kept / queued / gap), "queue" (queue the
+    upscale ones by the recipe) or "assemble" (the master from the upscales into
+    <episode>/master/; 409 while any are to do, or with gaps unless
+    `allow_gaps`). `conform` redoes upscales made with other settings (never a
+    Keep); `prores` adds the ProRes .mov. Every answer carries the plan."""
+    import h3master as M
+    body = body_dict(body)
+    ep = check_ep(ctx, body.get("ep"))
+    pass_ = check_pass(body.get("pass"), "final")
+    action = body.get("action") or "plan"
+    if action not in ("plan", "queue", "assemble"):
+        raise ApiError(400, "action must be plan, queue or assemble")
+    flags = {k: body.get(k, False) for k in ("conform", "allow_gaps", "prores")}
+    if not all(isinstance(v, bool) for v in flags.values()):
+        raise ApiError(400, "conform, allow_gaps and prores must be true or false")
+    try:
+        plan = M.plan_master(ep, pass_, flags["conform"])
+    except M.MasterError as e:
+        raise ApiError(409, str(e))
+    out: dict = {}
+    if action == "queue":
+        try:
+            queued, errors = M.queue_master(plan, ctx.comfy, ctx.comfy_url)
+        except M.MasterError as e:
+            raise ApiError(409, str(e))
+        for r in queued:
+            upscale_event(ctx, ep, r.shot, r.take.take, "queued")
+        out = {"queued": [r.shot for r in queued],
+               "errors": [{"shot": r.shot, "error": e} for r, e in errors]}
+    elif action == "assemble":
+        try:
+            res = M.assemble_master(plan, flags["allow_gaps"], flags["prores"])
+        except M.MasterError as e:
+            raise ApiError(409, str(e))
+        if not res["ok"]:
+            raise ApiError(500, f"assembling the master failed: {res['error']}")
+        out = {"output": E.rel(ep, res["output"]), "mov": E.rel(ep, res["mov"]) if res["mov"] else None,
+               "report": E.rel(ep, res["report_md"])}
+    return 200, {"plan": plan.view(), **out}
+
+
+@handler
 def put_upscale_keep(ctx: Context, body):
     """Mark a take's finished upscale Keep (`keep`: true) or clear it."""
     body = body_dict(body)
@@ -2541,6 +2585,7 @@ ROUTES = [
     ("GET", "/h3pipe/upscale/options", get_upscale_options, "query"),
     ("PUT", "/h3pipe/upscale/recipe", put_upscale_recipe, "body"),
     ("PUT", "/h3pipe/upscale/keep", put_upscale_keep, "body"),
+    ("POST", "/h3pipe/master", post_master, "body"),
     ("DELETE", "/h3pipe/upscale", delete_upscale, "query"),
     ("PUT", "/h3pipe/pick", put_pick, "body"),
     ("PUT", "/h3pipe/cut", put_cut, "body"),

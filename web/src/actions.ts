@@ -434,7 +434,7 @@ export async function loadEpisodes() {
 
 export function selectEpisode(ep: string | null) {
   set((s) => ({
-    ep, shot: null, take: null, viewer: null, menu: null, redo: null, renderAsk: null, upscaleAsk: null, refSel: null,
+    ep, shot: null, take: null, viewer: null, menu: null, redo: null, renderAsk: null, upscaleAsk: null, masterAsk: null, refSel: null,
     cutPlay: { ...s.cutPlay, playing: false, pos: 0 },
     build: { busy: false, result: null, error: null },
     // Phase 9c: the Recording and voice-clip windows belong to one episode
@@ -979,6 +979,15 @@ export function upscaleCut() {
 
 export function closeUpscale() {
   set({ upscaleAsk: null });
+}
+
+/** Phase 13e: the Master dialog for the current pass's cut. */
+export function masterCut() {
+  set({ menu: null, masterAsk: { pass: get().pass } });
+}
+
+export function closeMaster() {
+  set({ masterAsk: null });
 }
 
 /** The Upscale dialog's choices. `method` "auto" leaves each take's default. */

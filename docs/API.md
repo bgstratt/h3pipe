@@ -445,6 +445,21 @@ on a field or value a recipe doesn't take. Answers `{shot, recipe, text}`.
 is x264 CRF 12 on a slow preset (NVENC p7/hq at CQ 14 when `encoder` is `"nvenc"`), still
 H.264 8-bit so the editor plays it; the `.up.json` records `quality`.
 
+### `POST /h3pipe/master`
+Body `{"ep", "pass"?, "action": "plan" | "queue" | "assemble", "conform"?, "allow_gaps"?,
+"prores"?}` (h3master). Every answer has `plan`: `{pass, size: [w, h], fit, quality,
+counts: {upscale, ok, kept, queued, gap}, ready, rows: [{shot, take, target, status, why,
+recipe, upscale: {width, height, status, keep} | null}]}`, a row per shot of the cut in
+order. `status`: `upscale` (none, from an older take, or failed: queued by the recipe),
+`ok` (fresh, the recipe's settings), `kept` (fresh, marked Keep or made with other
+settings; `conform: true` makes the unmarked ones `upscale`), `queued`, `gap` (no usable
+pick, the other pass's take, no recipe section for its target, or a kept upscale at
+another size). `queue` queues the `upscale` rows (409 when this ComfyUI can't) and adds
+`queued` / `errors`; `assemble` (409 while any are to upscale or queued, or with gaps
+unless `allow_gaps`) writes `master/<ep>_master_<WxH>.mp4` (and `.mov` with `prores`) and
+`<ep>_master.json` / `.md`, and adds `output`, `mov`, `report`. 409 without a recipe, or
+one without `deliver`.
+
 ### `PUT /h3pipe/upscale/keep`
 Body `{"ep", "pass"?, "shot", "take", "keep": true | false}`: mark a take's finished upscale
 Keep (409 without one). A fresh kept upscale is skipped by a whole-cut request (`shots`

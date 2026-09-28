@@ -771,6 +771,31 @@ export interface UpscaleOptions {
   recipe?: RecipeView | null;
 }
 
+/** Phase 13e: POST /h3pipe/master's plan: each shot of the cut against the recipe. */
+export interface MasterPlan {
+  pass: Pass;
+  size: [number, number];
+  fit: "crop" | "pad";
+  quality: "review" | "master";
+  counts: { upscale: number; ok: number; kept: number; queued: number; gap: number };
+  ready: boolean;
+  rows: {
+    shot: string; take: number | null; target: string | null;
+    status: "upscale" | "ok" | "kept" | "queued" | "gap"; why: string; recipe: string;
+    upscale: { width: number | null; height: number | null; status: string; keep: boolean } | null;
+  }[];
+}
+
+export interface MasterResult {
+  plan: MasterPlan;
+  queued?: string[];
+  errors?: { shot: string; error: string }[];
+  /** assemble: the master, its ProRes .mov and the report, relative to the episode */
+  output?: string;
+  mov?: string | null;
+  report?: string;
+}
+
 /** The series config's upscale.master, as the Upscale dialog shows it. */
 export interface RecipeView {
   deliver: string | null;

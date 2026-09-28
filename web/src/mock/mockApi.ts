@@ -1204,6 +1204,23 @@ export function createMockApi(emit: Emit, opts: MockOptions = {}): Api & { outsi
       }
       return out;
     },
+    async master(req) {
+      await wait();
+      need(req.ep);
+      const rows = st(req.pass ?? "final").shots.map((s) => {
+        const t = s.takes.find((x) => x.take === s.cut.take);
+        const status = !t ? "gap" as const : t.upscale?.status === "ok" && t.upscale.fresh ? "ok" as const : "upscale" as const;
+        return { shot: s.shot, take: t?.take ?? null, target: t?.target ?? null, status,
+                 why: status === "gap" ? "no usable pick" : "", recipe: "re-sample 2x → 1080p (crop)", upscale: null };
+      });
+      const count = (k: string) => rows.filter((r) => r.status === k).length;
+      const plan = { pass: req.pass ?? "final", size: [1920, 1080] as [number, number], fit: "crop" as const, quality: "master" as const,
+                     counts: { upscale: count("upscale"), ok: count("ok"), kept: 0, queued: 0, gap: count("gap") },
+                     ready: count("upscale") === 0 && count("gap") === 0, rows };
+      return req.action === "assemble"
+        ? { plan, output: "master/ep01_master_1920x1080.mp4", mov: null, report: "master/ep01_master.md" }
+        : { plan, queued: [], errors: [] };
+    },
     async putUpscaleKeep(ep, shot, take, keep, pass) {
       await wait();
       need(ep);

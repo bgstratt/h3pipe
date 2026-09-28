@@ -1992,16 +1992,31 @@ Steps (in order; each ends with its exit check):
   Exit: on the scratch episode with an H3, an LTX and a Wan shot, one `master --wait`
   upscales each through its own target's recipe, keeps a pre-existing upscale, and
   assembles; a re-run queues nothing and re-assembles byte-identically.
+  **Built 2026-09-27** (the live check pending: ComfyUI must reload the saver's `quality`
+  input first). `h3master.py`: `plan_master` → `Plan` of `Row`s, `queue_master`,
+  `wait_master` (ComfyUI's history by prompt id, then the saver's record),
+  `assemble_master` (h3assemble `--upscaled --size WxH --quality <recipe's> --name
+  <ep>_master_<WxH>.mp4`, `--partial` only with gaps allowed, then moved with its
+  `_shots.txt` and `.mov` into `<ep>/master/`), `write_report`. A failed upscale is
+  retried (`upscale`, not a gap). `h3.py master`, `POST /h3pipe/master`, the cut menu's
+  **Master…** (the plan as a table, Conform / Allow gaps / ProRes, Queue N upscales,
+  Assemble master; the plan is read again as upscales land). Tested in test_master.py.
 - **13e5 — many episodes.** `h3.py master <ep> <ep> ...` (or a folder of episodes): one
   plan across them, queued episode by episode, a summary at the end; episodes whose cut
   has gaps are listed and skipped, not half-mastered.
   Exit: two scratch episodes master in one command.
+  **Built with 13e4**: `h3.py master` takes several episodes, or a show folder (every
+  folder in it with a shotlist or a cut), plans and runs each in turn and says which
+  finished; one with gaps stops at its plan. The live check waits for 13e4's.
 - **13e6 — docs and the skill.** AUTHORING: a **Masters** section (the recipe, overrides,
   keep, what `master` does and doesn't redo), and the series-config guidance: when writing
   a new series config, propose an `upscale.master` block from the chosen setup (render
   small → re-sample then a model to 1080p/4K; render at size → a model or SeedVR2; Wan
   shots → SeedVR2). README's commands, API.md's routes, INSTALL unchanged.
   Exit: `tools/make_prompts.py` regenerated; `tests/test_docs.py` green.
+  **Built 2026-09-27**: AUTHORING's **Masters** section (the recipe, per-shot recipes,
+  what Master keeps and redoes, gaps, the report, several episodes) with the series-config
+  guidance; README's command and table row; API.md's `POST /h3pipe/master`.
 
 Not in 13e: automatic per-shot choice (dialogue detection for `detail`; the user: selecting
 and re-rendering is enough), a colour grade (the conform's job), and cross-shot processing

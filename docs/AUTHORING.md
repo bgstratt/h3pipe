@@ -335,6 +335,59 @@ default: **keep soft areas soft** fades the detail the model invents where the o
 out of focus, so shallow depth of field stays shallow (`--keep-soft 1`), and **grain** puts
 back the film grain the model scrubbed away (`--grain 0.02` is light).
 
+### Masters: one recipe for every shot
+
+A **master** is the locked cut delivered at one size, every shot upscaled the same way.
+The series config says how, once, in `upscale.master` (the **recipe**):
+
+```json
+"upscale": { "save_latents": "final",
+  "master": { "deliver": "4k", "fit": "crop", "quality": "master",
+    "finish": { "frequency_split": true },
+    "targets": {
+      "minimax_h3_*": { "method": "latent", "then": "RealESRGAN_x2.pth" },
+      "ltx2*":        { "method": "latent" },
+      "wan22_*":      { "method": "seedvr2" },
+      "*":            { "method": "pixel", "pixel_model": "RealESRGAN_x2.pth" } } } }
+```
+
+- `deliver` (1080p, 1440p, 4k or WxH), `fit` (crop or pad) and `quality` (`master`: x264
+  CRF 12, for delivery; `review` is quicker) are the whole master's: one size, one encoding.
+- `targets` has a section per video target (an id or a glob; the exact id wins, then the
+  most specific glob, then `"*"`). A take is always upscaled through its own target: an H3
+  shot re-samples with H3, an LTX shot with LTX. A section takes `method` (latent, pixel,
+  seedvr2), `scale`, `detail`, `pixel_model`, `seedvr2_model`, `then` (an upscale model
+  file, or `"seedvr2"`, after a re-sample), `then_scale`, and the finish (`keep_soft`,
+  `grain`); `finish` sets those for every section.
+- A shot can have its own recipe over its target's (a dialogue close-up kept light, a wide
+  given `detail: 1`, a shot SeedVR2 got wrong sent to the pixel method): the editor's
+  Upscale dialog, **Choose for this run**, then **Save as sh020's recipe**.
+
+`h3.py master Shows\ep05 --wait` (or the cut menu's **Master…**) goes through the cut:
+
+- a shot with no upscale, one made from an older take, or one that failed is upscaled by
+  the recipe;
+- a fresh upscale made with the recipe's settings is used as it is;
+- a fresh upscale made with **other settings** (an older recipe, or before upscales
+  recorded theirs) is **kept**, not redone: `--conform` (the dialog's Conform) redoes those;
+- an upscale marked **Keep** (the take menu's **Keep upscale**, `h3.py upscale --only sh020
+  --keep`) is never redone by Master, even with `--conform`;
+- a shot with no usable pick, or a kept upscale at another size, is a **gap**: no master is
+  made until it's fixed, unless `--allow-gaps`.
+
+Then it assembles the master from the upscales into `Shows\ep05\master\`
+(`ep05_master_3840x2160.mp4`, with `--prores` a ProRes 422 HQ `.mov` too) and writes
+`ep05_master.md` / `.json`: every shot's take, target, recipe and status. It never changes
+the cut: lock the picks first. Several episodes, or a whole show folder, master in one go
+(`h3.py master Shows`); an episode with gaps is skipped, not half-made. `--check` shows the
+plan without queueing anything.
+
+**Writing a new series config**, add an `upscale.master` block that matches the setup you
+chose: render small → re-sample, then an upscale model to the delivery (1080p or 4K); render
+at size → an upscale model or SeedVR2; Wan shots → SeedVR2 (their re-sample takes minutes).
+Pick `deliver` from what they said they deliver, and `fit: crop` unless they'd rather keep
+the whole frame with bars.
+
 ### Render profiles
 
 A profile is a named render setup for a kind of shot, so you set it once instead of
