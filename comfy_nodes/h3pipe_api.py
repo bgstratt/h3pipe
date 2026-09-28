@@ -821,6 +821,9 @@ def post_upscale(ctx: Context, body):
     then_method = body.get("then_method")
     if then_method not in (None, "pixel", "seedvr2"):
         raise ApiError(400, "then_method must be pixel, seedvr2 or null")
+    # the whole cut's upscales redone wholesale leave a Keep alone; naming shots
+    # or takes redoes them
+    whole = shots is None and takes is None
     use_recipe = body.get("recipe", False)
     if not isinstance(use_recipe, bool):
         raise ApiError(400, "recipe must be true or false")
@@ -856,10 +859,11 @@ def post_upscale(ctx: Context, body):
             except U.UpscaleError as e:
                 errors.append({"shot": shot, "take": t.take, "error": str(e)})
                 continue
-            up = U.plan_upscale(ep, t, redo=redo, **kw)
+            up = U.plan_upscale(ep, t, redo=redo, respect_keep=whole, **kw)
         else:
             up = U.plan_upscale(ep, t, scale=scale, start_step=start_step,
                                 route="vae" if vae else None, redo=redo, method=method,
+                                respect_keep=whole,
                                 pixel_model=pixel_model, detail=detail,
                                 then_model=then_model, then_scale=then_scale,
                                 then_method=then_method,
@@ -920,6 +924,28 @@ def recipe_view(ep: str) -> dict | None:
             "targets": targets,
             "shots": {s: {"fields": f, "text": U.describe_recipe(f)} for s, f in U.shot_recipes(ep).items()},
             "problems": U.check_recipe(r)}
+
+
+@handler
+def put_upscale_keep(ctx: Context, body):
+    """Mark a take's finished upscale Keep (`keep`: true) or clear it."""
+    body = body_dict(body)
+    ep = check_ep(ctx, body.get("ep"))
+    pass_ = check_pass(body.get("pass"), "final")
+    shot = check_shot(body.get("shot"))
+    n = check_take(body.get("take"))
+    keep = body.get("keep")
+    if not isinstance(keep, bool):
+        raise ApiError(400, "keep must be true or false")
+    t = T.get_take(ep, pass_, shot, n)
+    if t is None:
+        raise ApiError(404, f"{pass_} take {n} of {shot} doesn't exist")
+    try:
+        rec = U.set_keep(t, keep)
+    except U.UpscaleError as e:
+        raise ApiError(409, str(e))
+    upscale_event(ctx, ep, shot, n, "kept" if keep else "unkept")
+    return 200, {"shot": shot, "take": n, "keep": bool(rec.get("keep"))}
 
 
 @handler
@@ -2510,6 +2536,7 @@ ROUTES = [
     ("POST", "/h3pipe/upscale", post_upscale, "body"),
     ("GET", "/h3pipe/upscale/options", get_upscale_options, "query"),
     ("PUT", "/h3pipe/upscale/recipe", put_upscale_recipe, "body"),
+    ("PUT", "/h3pipe/upscale/keep", put_upscale_keep, "body"),
     ("DELETE", "/h3pipe/upscale", delete_upscale, "query"),
     ("PUT", "/h3pipe/pick", put_pick, "body"),
     ("PUT", "/h3pipe/cut", put_cut, "body"),

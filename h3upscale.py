@@ -617,11 +617,14 @@ def check_fields(sec: dict) -> list[str]:
 
 def plan_upscale(root: str, take: T.Take, *, encoder: str = "auto", precision: str = "fp16",
                  frequency_split: bool = True, keep_soft: float = 0.0, grain: float = 0.0,
-                 deliver=None, fit: str = "crop", **kw) -> UpscaleJob:
+                 deliver=None, fit: str = "crop", respect_keep: bool = False,
+                 **kw) -> UpscaleJob:
     """_plan (below), with how the result is encoded (`encoder`) and the upscale
     model run (`precision`), both checked, and sized to `deliver` (see
     deliver_to)."""
     job = _plan(root, take, **kw)
+    if respect_keep and job.action == "upscale" and kept(take):
+        job.action, job.why = "skip", "kept (its upscale is marked Keep)"
     if job.action != "error" and (deliver not in (None, "") or fit != "crop"):
         try:
             deliver_to(job, parse_deliver(deliver), fit or "crop")
@@ -1206,7 +1209,83 @@ def deliver_record(up: UpscaleJob) -> dict:
                         "made": list(up.made_size)}}
 
 
+def settings_of(up: UpscaleJob) -> dict:
+    """What decides an upscale's picture, normalised (the record's `recipe`):
+    method, scales, start, models, the then step, the finish, the size and fit.
+    Not the route (latent or VAE: the same settings either way) or the
+    encoder. Two upscales of a take with equal settings are the same recipe."""
+    d: dict = {"method": up.method, "scale": up.scale}
+    model = up.method == "pixel" or (up.method == "latent" and up.spec.get("mode") == PIXEL_REFINE)
+    if up.method == "latent":
+        d.update(mode=up.spec.get("mode", RESAMPLE), start_step=up.start_step)
+    if model:
+        d["pixel_model"] = up.pixel_model
+    if up.method == "seedvr2":
+        d["seedvr2_model"] = up.seedvr2_model
+    if up.then_model:
+        d["then"] = {"method": up.then_method, "model": up.then_model, "scale": up.then_scale}
+        model = model or up.then_method == "pixel"
+    if model:
+        d["precision"] = up.precision
+    if up.method != "latent" or up.then_model or up.spec.get("mode") == PIXEL_REFINE:
+        d["finish"] = up.finish_record()
+    if up.previous:
+        d["on_upscale"] = True
+    d["size"] = list(up.out_size)
+    if up.deliver:
+        d["fit"] = up.fit
+    return d
+
+
+def settings_hash(settings: dict) -> str:
+    import hashlib
+    import json
+    return hashlib.sha1(json.dumps(settings, sort_keys=True).encode()).hexdigest()[:12]
+
+
+def recipe_status(root: str, take: T.Take, recipe: dict | None = None,
+                  shots: dict | None = None, rec: dict | None = None) -> str | None:
+    """How a take's upscale stands against the master recipe: "same" (made with
+    the settings the recipe gives it now), "different", "unknown" (made before
+    upscales recorded their settings), or None (no upscale, or no recipe)."""
+    rec = T.upscale_of(take) if rec is None else rec
+    recipe = master_recipe(root) if recipe is None else recipe
+    if not rec or not recipe:
+        return None
+    if not rec.get("recipe_hash"):
+        return "unknown"
+    try:
+        job = plan_upscale(root, take, redo=True, **recipe_for(root, take, recipe, shots))
+    except UpscaleError:
+        return "different"
+    if job.action == "error":
+        return "different"
+    return "same" if settings_hash(settings_of(job)) == rec["recipe_hash"] else "different"
+
+
+def set_keep(take: T.Take, keep: bool) -> dict:
+    """Mark (or unmark) a take's upscale Keep: nothing that redoes a cut's
+    upscales wholesale (Master, --conform, the whole cut's redo) replaces it
+    while it is fresh; naming the take does. UpscaleError without a finished one."""
+    rec = T.upscale_of(take)
+    if not rec or rec.get("status") != "ok":
+        raise UpscaleError(f"{take.shot} t{take.take:02d} has no finished upscale to keep")
+    T.update_sidecar(take.paths.up_sidecar, keep=bool(keep) or None)
+    return T.upscale_of(take) or {}
+
+
+def kept(take: T.Take, rec: dict | None = None) -> bool:
+    """A fresh upscale marked Keep."""
+    rec = T.upscale_of(take) if rec is None else rec
+    return bool(rec and rec.get("keep") and rec.get("fresh"))
+
+
 def queued_record(up: UpscaleJob) -> dict:
+    s = settings_of(up)
+    return {**_queued_record(up), "recipe": s, "recipe_hash": settings_hash(s)}
+
+
+def _queued_record(up: UpscaleJob) -> dict:
     if up.method == "seedvr2":
         return {"shot": up.shot, "take": up.take.take, "status": "queued", "queued": T.now(),
                 "comfy_prompt_id": None, "target": up.target.id, "route": "seedvr2",
@@ -1366,6 +1445,10 @@ def main(argv=None) -> int:
                     help="latent: start 0-2 steps earlier than the default (more detail, more change)")
     ap.add_argument("--vae", action="store_true",
                     help="encode the take's frames even if it kept a latent")
+    ap.add_argument("--keep", action="store_true",
+                    help="mark the upscales of these takes (--only / --take) Keep: nothing that "
+                         "redoes the cut's upscales wholesale replaces them")
+    ap.add_argument("--unkeep", action="store_true", help="clear Keep on these takes' upscales")
     ap.add_argument("--recipe", action="store_true",
                     help="each take by the series config's upscale.master recipe (its target's "
                          "section, its shot's override); the method and size flags are ignored")
@@ -1389,6 +1472,17 @@ def main(argv=None) -> int:
         print(f"\n  {len(gone)} latent(s), {mb:.1f} MB"
               + (" would be deleted" if args.check else " deleted"))
         return 0
+    if args.keep or args.unkeep:
+        for shot, take, why in cut_takes(root, only, args.take, pass_=pass_):
+            if take is None:
+                print(f"  -  {shot}: {why}")
+                continue
+            try:
+                set_keep(take, args.keep)
+                print(f"  {'kept' if args.keep else 'unkept'}  {shot} t{take.take:02d}")
+            except UpscaleError as e:
+                print(f"  !! {e}")
+        return 0
     jobs = []
     recipe = master_recipe(root) if args.recipe else None
     if args.recipe and not recipe:
@@ -1400,13 +1494,15 @@ def main(argv=None) -> int:
             continue
         if recipe:
             try:
-                up = plan_upscale(root, take, redo=args.redo, **recipe_for(root, take, recipe))
+                up = plan_upscale(root, take, redo=args.redo, respect_keep=only is None,
+                                  **recipe_for(root, take, recipe))
             except UpscaleError as e:
                 print(f"  !! {shot} t{take.take:02d}: {e}")
                 continue
         else:
             up = plan_upscale(root, take, scale=args.scale, start_step=args.start_step,
                               route="vae" if args.vae else None, redo=args.redo,
+                              respect_keep=only is None and args.take is None,
                               method=args.method, pixel_model=args.pixel_model, detail=args.detail,
                               then_model=args.then_pixel, then_scale=args.then_scale,
                               then_method="seedvr2" if args.then_seedvr2 else None,

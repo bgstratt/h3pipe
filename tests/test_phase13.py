@@ -1014,6 +1014,57 @@ class RecipeTest(ApiTest):
         res = self.ok(A.post_upscale(self.ctx, {"ep": self.ep, "shots": ["sh010"], "recipe": True, "redo": True}))
         self.assertIn("no section for minimax_h3_ref2va", res["errors"][0]["error"])
 
+    def summary(self, shot="sh010", n=1):
+        data = self.ok(A.get_episode(self.ctx, {"ep": self.ep, "pass": "final"}))
+        s = next(x for x in data["shots"] if x["shot"] == shot)
+        return next(t for t in s["takes"] if t["take"] == n)["upscale"]
+
+    def test_upscales_remember_their_recipe(self):
+        """13e2: an upscale records its settings; against the recipe it is same,
+        different (the recipe changed) or unknown (from before); never stale for it."""
+        t = self.final_take()
+        self.ok(A.post_upscale(self.ctx, {"ep": self.ep, "shots": ["sh010"], "method": "pixel"}))
+        t = T.get_take(self.ep, "final", "sh010", 1)
+        rec = T.upscale_of(t)
+        self.assertEqual(rec["recipe"]["method"], "pixel")
+        self.assertEqual(len(rec["recipe_hash"]), 12)
+        self.assertIsNone(self.summary()["recipe_match"])                    # no recipe
+        self.set_recipe(RECIPE)
+        self.assertEqual(self.summary()["recipe_match"], "different")        # the recipe re-samples
+        self.ok(A.post_upscale(self.ctx, {"ep": self.ep, "shots": ["sh010"], "recipe": True, "redo": True}))
+        up = self.summary()
+        self.assertEqual((up["recipe_match"], up["fresh"]), ("same", True))
+        # the recipe changes: different, still fresh
+        self.set_recipe({**RECIPE, "fit": "pad"})
+        up = self.summary()
+        self.assertEqual((up["recipe_match"], up["fresh"]), ("different", True))
+        # so does a shot's own recipe
+        self.set_recipe(RECIPE)
+        U.set_shot_recipe(self.ep, "sh010", {"detail": 1})
+        self.assertEqual(self.summary()["recipe_match"], "different")
+        U.set_shot_recipe(self.ep, "sh010", None)
+        # an upscale from before 13e2
+        T.write_json(t.paths.up_sidecar, {k: v for k, v in T.read_json(t.paths.up_sidecar).items()
+                                          if k not in ("recipe", "recipe_hash")})
+        self.assertEqual(self.summary()["recipe_match"], "unknown")
+
+    def test_keep(self):
+        t = self.final_take()
+        self.err(A.put_upscale_keep(self.ctx, {"ep": self.ep, "shot": "sh010", "take": 1, "keep": True}), 409)
+        self.ok(A.post_upscale(self.ctx, {"ep": self.ep, "shots": ["sh010"], "method": "pixel"}))
+        self.ok(A.put_upscale_keep(self.ctx, {"ep": self.ep, "shot": "sh010", "take": 1, "keep": True}))
+        self.assertTrue(self.summary()["keep"])
+        t = T.get_take(self.ep, "final", "sh010", 1)
+        # the whole cut redone: a Keep is left alone; naming the shot redoes it
+        res = self.ok(A.post_upscale(self.ctx, {"ep": self.ep, "shots": None, "redo": True, "method": "pixel"}))
+        self.assertIn("kept", next(s["reason"] for s in res["skipped"] if s["shot"] == "sh010"))
+        self.assertEqual(U.plan_upscale(self.ep, t, redo=True, respect_keep=True).action, "skip")
+        res = self.ok(A.post_upscale(self.ctx, {"ep": self.ep, "shots": ["sh010"], "redo": True, "method": "pixel"}))
+        self.assertEqual(len(res["queued"]), 1)
+        self.assertFalse(self.summary()["keep"])                              # a new upscale, unkept
+        self.err(A.put_upscale_keep(self.ctx, {"ep": self.ep, "shot": "sh010", "take": 9, "keep": True}), 404)
+        self.err(A.put_upscale_keep(self.ctx, {"ep": self.ep, "shot": "sh010", "take": 1, "keep": "yes"}), 400)
+
 
 if __name__ == "__main__":
     unittest.main()

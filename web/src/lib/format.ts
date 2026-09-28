@@ -38,7 +38,12 @@ export function upscaleBadge(t: TakeSummary | undefined): Badge | null {
     : u.method === "pixel"
     ? `pixel, ${u.pixel_model ?? "?"}${u.on_upscale ? ", on an earlier upscale" : ""}`
     : `${u.route ?? "?"} route, from step ${u.start_step ?? "?"}${u.then_pixel ? `, then ${u.then_pixel.method === "seedvr2" ? "SeedVR2 " : ""}${u.then_pixel.model}` : ""}`;
-  return { kind: "upscaled", label: "2x", title: `Upscaled to ${size} (${how}); Export 2x uses it` };
+  const mark = u.keep ? " keep" : u.recipe_match === "different" ? " ≠" : u.recipe_match === "unknown" ? " ?" : "";
+  const why = u.keep ? "; marked Keep: Master leaves it alone"
+    : u.recipe_match === "different" ? "; not the series recipe's settings: Master keeps it, --conform would redo it"
+    : u.recipe_match === "unknown" ? "; made before upscales recorded their settings: Master keeps it"
+    : u.recipe_match === "same" ? "; the series recipe's settings" : "";
+  return { kind: "upscaled", label: `2x${mark}`, title: `Upscaled to ${size} (${how})${why}; Export 2x uses it` };
 }
 
 /** The take the cut uses for this shot (not for a placeholder: that's another pass). */

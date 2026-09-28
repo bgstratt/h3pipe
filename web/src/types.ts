@@ -683,6 +683,11 @@ export interface TakeUpscale {
   seedvr2_model?: string | null;
   /** a pixel step after the re-sample: its model, scale and the re-sample's size */
   then_pixel?: { model: string; scale: number; from: [number, number]; method?: "seedvr2" } | null;
+  /** Phase 13e: marked Keep (a wholesale redo or Master leaves it alone) */
+  keep?: boolean;
+  /** against the series' master recipe: same, different, unknown (made before
+   * upscales recorded their settings); null: no recipe */
+  recipe_match?: "same" | "different" | "unknown" | null;
   /** a delivery size: what was asked for, the fit, and what the last step made */
   deliver?: { width: number; height: number; fit: "crop" | "pad"; made: [number, number] } | null;
   /** a pixel upscale run on an earlier upscale: that one's record (nested for a longer chain) */

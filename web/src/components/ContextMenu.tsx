@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   cancelTake, clearRef, closeMenu, copyText, discardTake, generateKeyframe, keyframeFromTake, loadRefs, openClipAudio,
   openIssue,
-  openInspector, openRedo, openSidecar, openViewer, pickTake, playAll, removeUpscale, requestRender, showInScript, showMissingRefs,
+  keepUpscale, openInspector, openRedo, openSidecar, openViewer, pickTake, playAll, removeUpscale, requestRender, showInScript, showMissingRefs,
   upscaleTake,
 } from "../actions";
 import { clearClipAudio, nudgeClip, setTrims, toggleLock } from "../cutActions";
@@ -254,6 +254,16 @@ export function ContextMenu() {
           >
             <i className="pi pi-arrow-up-right" /> {take.upscale?.fresh ? "Upscale again (2x)…" : "Upscale (2x)…"}
           </button>
+          {take.upscale?.status === "ok" && (
+            <button
+              title={take.upscale.keep
+                ? "Let Master and a whole-cut redo replace this upscale again"
+                : "Keep this upscale: Master and a whole-cut redo leave it alone, even when the series recipe changes (naming this take still redoes it)"}
+              onClick={run(() => void keepUpscale({ ep, pass: menu.pass, shot: menu.shot, take: take.take }, !take.upscale!.keep))}
+            >
+              <i className={`pi ${take.upscale.keep ? "pi-lock-open" : "pi-lock"}`} /> {take.upscale.keep ? "Unkeep upscale" : "Keep upscale"}
+            </button>
+          )}
           {take.upscale && take.upscale.status !== "queued" && (
             <button onClick={run(() => void removeUpscale({ ep, pass: menu.pass, shot: menu.shot, take: take.take }))}>
               <i className="pi pi-times" /> Remove upscale

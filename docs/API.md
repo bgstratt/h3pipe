@@ -441,6 +441,15 @@ block, whose objects are per-target). `recipe` takes the upscale request's field
 dialog sends them (`then_pixel_model` / `then_method` become `then`); null clears it. 400
 on a field or value a recipe doesn't take. Answers `{shot, recipe, text}`.
 
+### `PUT /h3pipe/upscale/keep`
+Body `{"ep", "pass"?, "shot", "take", "keep": true | false}`: mark a take's finished upscale
+Keep (409 without one). A fresh kept upscale is skipped by a whole-cut request (`shots`
+and `takes` null) and by Master, whatever the recipe says; naming the shot or take redoes
+it, and the new upscale starts unkept. Every `.up.json` records `recipe` (the settings
+that made it: method, scales, start, models, the then step, precision, finish, size, fit)
+and `recipe_hash`; the episode's upscale summary adds `keep` and `recipe_match` (`same`,
+`different`, `unknown` for one from before, null without a series recipe).
+
 ### `GET /h3pipe/upscale/options`
 What the editor's Upscale dialog offers on this ComfyUI:
 ```json

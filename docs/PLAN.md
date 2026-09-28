@@ -1952,6 +1952,14 @@ Steps (in order; each ends with its exit check):
   `h3.py upscale --keep / --unkeep`.
   Exit: changing the series recipe turns existing upscales "different" but not stale; `keep`
   survives a redo attempt; goldens unchanged (records only).
+  **Built 2026-09-27.** `settings_of` (method, scales, start, models, the then step,
+  precision, finish, size and fit: not the route or the encoder) and `settings_hash` in
+  every `.up.json` as `recipe` / `recipe_hash`; `recipe_status` plans the take by the
+  recipe now and compares hashes. `set_keep` / `kept`; `plan_upscale(respect_keep=True)`
+  skips a fresh kept upscale, which the route does for a whole-cut request (`shots` and
+  `takes` both null) and the CLI without `--only` / `--take`; a new upscale starts unkept.
+  `PUT /h3pipe/upscale/keep`, `h3.py upscale --keep / --unkeep`, the take menu's Keep /
+  Unkeep upscale, the badge's "2x keep", "2x ≠" (different) or "2x ?" (unknown).
 - **13e3 — master quality.** An encoder quality `master` (x264, CRF ~14, preset slow, 8-bit
   4:2:0 so the editor's browser still plays it; NVENC's constqp equivalent when asked) beside
   today's `review` (CQ 19 NVENC). Assemble's master copies the clips' streams (concat, no

@@ -1047,6 +1047,19 @@ export function upscaleRequestOf(f: UpscaleForm, ask: { pass: Pass; takes: { sho
 }
 
 /** Phase 13: remove a take's upscale (DELETE /h3pipe/upscale). Asks first. */
+/** Phase 13e: mark a take's upscale Keep (Master and a wholesale redo leave it alone), or clear it. */
+export async function keepUpscale(ref: TakeRef, keep: boolean) {
+  set({ menu: null });
+  return withBusy(`keepup|${ref.shot}|${ref.take}`, async () => {
+    try {
+      await api().putUpscaleKeep(ref.ep, ref.shot, ref.take, keep, ref.pass);
+      scheduleRefresh(0);
+    } catch (e) {
+      report(`Couldn't ${keep ? "keep" : "unkeep"} ${ref.shot} ${tn(ref.take)}'s upscale`, e);
+    }
+  });
+}
+
 export async function removeUpscale(ref: TakeRef) {
   set({ menu: null });
   if (!confirm(`Remove ${ref.shot} ${tn(ref.take)}'s upscale? The take itself stays.`)) return;

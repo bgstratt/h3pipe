@@ -1204,6 +1204,15 @@ export function createMockApi(emit: Emit, opts: MockOptions = {}): Api & { outsi
       }
       return out;
     },
+    async putUpscaleKeep(ep, shot, take, keep, pass) {
+      await wait();
+      need(ep);
+      const t = st(pass ?? "final").shots.find((s) => s.shot === shot)?.takes.find((x) => x.take === take);
+      if (!t?.upscale || t.upscale.status !== "ok") throw new MockError(`${shot} take ${take} has no finished upscale`, 409);
+      t.upscale.keep = keep;
+      emit("h3pipe.upscale", { ep: EP, shot, take, status: keep ? "kept" : "unkept" });
+      return { shot, take, keep };
+    },
     async putUpscaleRecipe(ep, shot, recipe) {
       await wait();
       need(ep);
