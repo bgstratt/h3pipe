@@ -22,6 +22,20 @@ import { Dialog } from "./Dialogs";
 export function IssueDialog() {
   const d = useApp((s) => s.issueDraft);
   const box = useRef<HTMLTextAreaElement>(null);
+  // what had focus when the box opened (the Play all window, the timeline):
+  // it gets it back when the box closes, so space and J/K/L carry on there
+  const back = useRef<HTMLElement | null>(null);
+  const open = !!d;
+  useEffect(() => {
+    if (!open) return;
+    const prev = document.activeElement;
+    back.current = prev instanceof HTMLElement && prev !== document.body ? prev : null;
+    return () => {
+      const el = back.current;
+      back.current = null;
+      if (el && el.isConnected) el.focus({ preventScroll: true });
+    };
+  }, [open]);
   useEffect(() => {
     const el = box.current;
     if (!d || !el) return;
