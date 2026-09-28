@@ -189,6 +189,7 @@ python h3.py render   Shows\ep05             # full-res
 python h3.py assemble Shows\ep05
 python h3.py upscale  Shows\ep05             # optional: the cut's takes at 2x (--proxy too)
 python h3.py assemble Shows\ep05 --upscaled --size 1920x1080
+python h3.py master   Shows\ep05 --wait      # the series recipe on every shot, then the master
 ```
 
 Several episodes at once: list the folders (`Shows\ep06 Shows\ep07`) or use `--each` with a
@@ -206,6 +207,7 @@ disk alone. ComfyUI must be running for `targets`, `refs`, `keyframe --generate`
 | `h3.py keyframe` | a shot's first/last keyframe: from the previous shot's take (continuity), `--generate`, `--missing`, `--clear` |
 | `h3.py render` | `h3render.py`: queues shots through their targets, one take each |
 | `h3.py assemble` | `h3assemble.py`: the review cut, in `cut.json` order; `--upscaled` from the takes' upscales |
+| `h3.py master` | `h3master.py`: the series config's `upscale.master` recipe on every shot of the cut (keeping what's marked Keep or made otherwise, unless `--conform`), then the master assembled into `<episode>/master/` with a report; several episodes or a show folder at once; `--check`, `--wait`, `--allow-gaps`, `--prores` |
 | `h3.py upscale` | `h3upscale.py`: a take at 2x, either pass (`--proxy`) — re-sampled (H3, LTX-2, Wan), through a pixel upscale model (`--method pixel`) or SeedVR2 (`--method seedvr2`), the last two for any target; the cut's takes, or `--only`/`--take`; `--check`, `--prune-latents` |
 | `h3.py align` | `h3align.py`: times the script against a dialogue recording |
 | `h3.py takes` / `pick` / `override` | takes and why they're stale; the take the cut uses; per-shot tweaks and retargeting (`h3edit.py`) |

@@ -20,6 +20,11 @@ your projects, with the pipeline scripts beside it (see the README).
                                                     # (--only sh020, --take N, --start-step N,
                                                     #  --vae, --redo, --check, --prune-latents)
     python h3.py assemble Shows\\ep05 --upscaled # the final cut from its upscales
+    python h3.py master   Shows\\ep05 [Shows\\ep06 ...] --wait
+                                                    # the series recipe (upscale.master) on every
+                                                    # shot of the cut, then the master assembled
+                                                    # into ep05\\master\\ (--check: the plan only,
+                                                    #  --conform, --allow-gaps, --prores)
     python h3.py all      Shows\\ep05 --proxy    # build -> refs -> render -> assemble
     python h3.py all      Shows\\ep05 --proxy --skip-build
                                                     # refs -> render -> assemble, using the
@@ -200,6 +205,13 @@ def main() -> int:
         sys.path.insert(0, HERE)
         import h3upscale
         return h3upscale.main(argv[1:])
+    if argv and argv[0] == "master":
+        if len(argv) < 2 or argv[1].startswith("-"):
+            sys.exit("  !! usage: python h3.py master <episode> [<episode> ...] [--check] [--wait] "
+                     "[--conform] [--allow-gaps] [--prores]")
+        sys.path.insert(0, HERE)
+        import h3master
+        return h3master.main(argv[1:])
     if argv and argv[0] == "targets":
         # the episode is optional: it adds its series config (pass blocks,
         # model_families) and marks its target

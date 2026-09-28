@@ -125,6 +125,11 @@ export interface RenderAsk {
   seedMode?: SeedMode;
 }
 
+/** Phase 13e: the Master dialog's subject: a pass's cut. */
+export interface MasterAsk {
+  pass: Pass;
+}
+
 /** Phase 13: the Upscale dialog's subject: named takes of a pass, or that pass's whole cut. */
 export interface UpscaleAsk {
   title: string;
@@ -287,6 +292,7 @@ export interface AppState {
   /** the render confirmation (shots that will be skipped for missing refs) */
   renderAsk: RenderAsk | null;
   upscaleAsk: UpscaleAsk | null;
+  masterAsk: MasterAsk | null;
   /** refs by episode (GET /h3pipe/refs) */
   refs: Record<string, Ref[]>;
   refsError: Record<string, string>;
@@ -409,6 +415,7 @@ export function initialState(prefs: Prefs = {}): AppState {
     browse: null,
     renderAsk: null,
     upscaleAsk: null,
+    masterAsk: null,
     refs: {},
     refsError: {},
     refsLoading: {},

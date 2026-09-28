@@ -221,40 +221,64 @@ which ones your ComfyUI can render.
 
 ### Final resolution: render at size, or render small and upscale
 
-`series.width` / `series.height` is the size every final take renders at. There are two
-ways to use it:
+`series.width` / `series.height` is the size every final take renders at, and
+`proxy.width` / `proxy.height` the proxy pass's. The usual setups:
 
-| | final renders at | a 3 s take | the picked takes | you deliver |
-|---|---|---|---|---|
-| **Render at size** (the default) | 1344×768 | ~53 s | as rendered | 1344×768 |
-| **Render small, upscale** | 960×544 | ~20 s | `h3.py upscale`: 2x, ~25–35 s each, picks only | 1920×1088 (`h3.py assemble --upscaled --size 1920x1080`) |
+| | final | proxy | shape | a 3 s take | upscaled (picks only) | delivers |
+|---|---|---|---|---|---|---|
+| **Render at size** (the default) | 1344×768 | 448×256 | 7:4 | ~53 s | not needed | 1344×768 as rendered |
+| **Render small, upscale to 1080p** | 960×544 | 448×256 | ≈7:4 | ~20 s | re-sample 2x → 1920×1088, ~25–35 s | 1920×1080 (8 rows cropped) |
+| **Render 16:9, upscale to 1080p or 4K** | 1024×576 | 512×288 | 16:9 | ~23–24 s (est.) | re-sample 2x → 2048×1152, then an upscale model to 3840×2160 | 1920×1080 or 3840×2160, exactly |
 
-(Measured on an RTX 5090 with the 8-step turbo LoRA. The proxy pass stays 448×256 either way.)
+(Measured on an RTX 5090 with the 8-step turbo LoRA; the 1024×576 time is estimated from
+its 13% more pixels than 960×544, since attention grows a little faster than the pixel
+count.)
 
-- **Render small and upscale** when the episode renders on `minimax_h3_ref2va` with the
-  latent upscaler installed (INSTALL.md, **The upscaler**), or on `ltx2`, which upscales
-  with its own second stage and needs nothing extra (`python h3.py targets` says
-  `upscale ready` for each). Every take you try costs under half as much, and only the ones the cut
+**The shape matters as much as the size.** 1344×768 and 448×256 are 7:4 (1.75), not 16:9
+(1.78): H3 sizes are multiples of 32, and 1344×768 is the model's native size. A 7:4 take
+delivered at a 16:9 size is either cropped (1344×768 to 4K loses 18 rows top and bottom,
+1.6%) or padded (30 px of black each side); the upscale's **Output size** does either
+(`--deliver 4k --fit crop|pad`; the dialog's Crop to fill / Pad with bars). 1024×576 is the
+16:9 size on H3's 32 grid (512×288 its proxy), so nothing is lost at 1080p or 4K, at the
+cost of a slightly smaller frame than 1344×768. The LTX and Wan targets snap a size down to
+their own grid (LTX-2's is 64: a 512×288 proxy renders there at 512×256, a little wider than
+16:9); the H3 targets refuse a size off theirs, naming the nearest.
+
+- **Render small and upscale** when the episode renders on `minimax_h3_ref2va` or
+  `minimax_h3_fl2va` with the latent upscaler installed (INSTALL.md, **The upscaler**), on
+  `ltx2`, which upscales with its own second stage and needs nothing extra, or on
+  `ltx2_ingredients` with LTX-2.3's latent upsampler installed (INSTALL.md, **For
+  upscaling**; `python h3.py targets` says `upscale ready` for each). Every take you try costs under half as much, and only the ones the cut
   keeps are upscaled, once, after the cut is locked. The upscale re-samples the take from
   late in its schedule under its own prompt, references and seed, with its audio held, so
   the performance and the lip sync are the take's; it adds detail a 960×544 frame is short
   of (faces in wide shots, hands, small props).
-- **Render at size** when shots render on `ltx2_ingredients`, `minimax_h3_fl2va` or
-  `wan22_vace` (they have no re-sample: the pixel method is theirs), when the upscaler
-  isn't installed, or when 1344×768 is the delivery. `wan22_i2v` and `wan22_ti2v` do
-  re-sample (a pixel model, then their own sampler), but slowly: minutes a shot. Upscaling a 1344×768 take to 2688×1536 works
+- **Render at size** when shots render on Wan (`wan22_i2v`, `wan22_ti2v`, `wan22_vace`:
+  they re-sample, a pixel model then their own sampler, but slowly: minutes a shot), when
+  the upscaler isn't installed, or when 1344×768 is the delivery. Upscaling a 1344×768 take to 2688×1536 works
   but adds little: that frame already holds most of what the model can draw.
 - The two don't mix within a pass: pick one per series. Switching later only changes the
   takes rendered after the switch.
 
-**Writing a new series config for someone**, ask once which of the two they want, unless
-they already said (a delivery size, "upscale", "fast iterations"). With no answer, write
-1344×768: it renders on every target with nothing extra installed. For an existing series
-config, never change the size unasked.
+**Writing a new series config for someone**, ask once which setup they want, unless they
+already said (a delivery size, "upscale", "fast iterations", "4K"): render at size
+(1344×768), render small for 1080p (960×544), or 16:9 for exact 1080p/4K (1024×576, proxy
+512×288). With no answer, write 1344×768: it renders on every target with nothing extra
+installed. When they name a delivery size, say what shape the frame will be and whether
+the delivery crops or pads it. For an existing series config, never change the size
+unasked.
 
 ```json
 "series": { "id": "porchlight", "title": "Porchlight", "fps": 24,
             "width": 960, "height": 544, "steps": 8 }
+```
+
+For 16:9 (exact 1080p or 4K):
+
+```json
+"series": { "id": "porchlight", "title": "Porchlight", "fps": 24,
+            "width": 1024, "height": 576, "steps": 8 },
+"proxy": { "width": 512, "height": 288 }
 ```
 
 An upscale starts 7/8 of the way through the take's schedule (step 7 of 8), which keeps a
@@ -262,8 +286,8 @@ speaking mouth exactly as the take had it. A shot with no dialogue can take more
 `h3.py upscale <ep> --only sh100 --redo --detail 2` (two steps earlier: more change, check
 it).
 
-Takes on any other target (Wan, `ltx2_ingredients`, H3 from keyframes, a show's own) can
-still be upscaled by the **pixel method**: an upscale model (RealESRGAN, UltraSharp, from
+Takes on a show's own targets (and any take, by choice) can still be upscaled by the
+**pixel method**: an upscale model (RealESRGAN, UltraSharp, from
 ComfyUI's `models/upscale_models`) over the frames, with the take's audio copied on. It is
 fast and needs nothing but the model, but it only sharpens what's there; it draws no new
 detail the way a re-sample does. `h3.py upscale <ep> --method pixel` uses it for any take.
@@ -273,10 +297,14 @@ detail the way a re-sample does. `h3.py upscale <ep> --method pixel` uses it for
 in about a minute a shot, with no prompt (so nothing ties it to the take's performance but
 the picture); its frames change a little more from one to the next than a re-sample's, and
 the colour finish after it halves that. `h3.py upscale <ep> --method seedvr2` (the 7B;
-`--seedvr2-model 3b` for the smaller one).
+`--seedvr2-model 3b` for the smaller one). It can also follow a re-sample in the same job,
+in place of an upscale model: `h3.py upscale <ep> --then-seedvr2 --deliver 4k` (the dialog's
+Then: SeedVR2), so the take is redrawn under its own prompt with its lips held, then
+restored to the output size.
 
-`--scale` goes up to 4 (a pixel upscale lands on even sides, an H3 re-sample on the 32 grid;
-LTX-2's is 2x only). For 4x with generated detail, re-sample then upscale in one go:
+`--scale` is any number above 1, up to 4 (a pixel upscale lands on even sides, an H3
+re-sample on the 32 grid, so 1.5x, 2x, 3x of 1024×576 all work; the LTX targets' is 2x
+only). For 4x with generated detail, re-sample then upscale in one go:
 `h3.py upscale <ep> --then-pixel RealESRGAN_x2.pth` (re-sample 2x, then the model 2x more).
 The editor's Upscale dialog offers the same, and shows the size each choice makes. An
 upscale you already have can be taken further later with the pixel method alone:
@@ -287,10 +315,18 @@ A pixel model has a fixed factor of its own (RealESRGAN_x2 makes 2x, RealESRGAN_
 the upscale is resized to whatever scale you ask for: RealESRGAN_x2 at 1.5x is the model's
 2x shrunk to 1.5x, which is sharp and cheap. So pair a 2x model with 1.5x or 2x and a 4x
 model with 3x or 4x (a 4x model at 1.5x does four times the work to throw most of it away).
-For a 4K master from a 1344×768 take: re-sample 2x, then RealESRGAN_x2 at 1.5x (4032×2304),
-then `h3.py assemble <ep> --upscaled --size 3840x2160`. Past 4K the output is heavy to make
-and to play; upscales encode on the GPU (NVENC) by default, which is what keeps a 5K one
-from taking minutes to write.
+**Output size** (`--deliver 1080p|1440p|4k|WxH`, `--fit crop|pad`; the dialog's Output
+size) makes the upscale exactly that size instead of a multiple: the last step that can
+make any size (the upscale model, SeedVR2) is scaled to cover it (crop) or fit inside it
+(pad), and the rest is trimmed or barred. A 4K master from a 1344×768 take: `h3.py upscale
+<ep> --then-pixel RealESRGAN_x2.pth --deliver 4k` (re-sample 2x to 2688×1536, the model to
+3840×2196, 36 rows cropped); from 1024×576 the same makes 3840×2160 with nothing cropped. A
+re-sample alone keeps its own scale and is resized to the output size (a downscale is fine;
+a stretch up is noted, and an upscale model after it is the better way). Every upscale of a
+cut at the same output size assembles without resizing. Past 4K the output is heavy to make
+and to play: up to 4096 wide upscales encode on the GPU (NVENC); past it they're written
+with x264 on the CPU, which takes a couple of minutes but plays in the editor (the GPU
+encoder can only write HEVC that big, which browsers often show as black).
 
 A pixel model's output is finished before it's saved. By default its colour and tone come
 from the original frames and only its fine detail from the model (upscale models shift
@@ -298,6 +334,59 @@ colour a little; this keeps an upscaled clip matching the cut around it). Two mo
 default: **keep soft areas soft** fades the detail the model invents where the original was
 out of focus, so shallow depth of field stays shallow (`--keep-soft 1`), and **grain** puts
 back the film grain the model scrubbed away (`--grain 0.02` is light).
+
+### Masters: one recipe for every shot
+
+A **master** is the locked cut delivered at one size, every shot upscaled the same way.
+The series config says how, once, in `upscale.master` (the **recipe**):
+
+```json
+"upscale": { "save_latents": "final",
+  "master": { "deliver": "4k", "fit": "crop", "quality": "master",
+    "finish": { "frequency_split": true },
+    "targets": {
+      "minimax_h3_*": { "method": "latent", "then": "RealESRGAN_x2.pth" },
+      "ltx2*":        { "method": "latent" },
+      "wan22_*":      { "method": "seedvr2" },
+      "*":            { "method": "pixel", "pixel_model": "RealESRGAN_x2.pth" } } } }
+```
+
+- `deliver` (1080p, 1440p, 4k or WxH), `fit` (crop or pad) and `quality` (`master`: x264
+  CRF 12, for delivery; `review` is quicker) are the whole master's: one size, one encoding.
+- `targets` has a section per video target (an id or a glob; the exact id wins, then the
+  most specific glob, then `"*"`). A take is always upscaled through its own target: an H3
+  shot re-samples with H3, an LTX shot with LTX. A section takes `method` (latent, pixel,
+  seedvr2), `scale`, `detail`, `pixel_model`, `seedvr2_model`, `then` (an upscale model
+  file, or `"seedvr2"`, after a re-sample), `then_scale`, and the finish (`keep_soft`,
+  `grain`); `finish` sets those for every section.
+- A shot can have its own recipe over its target's (a dialogue close-up kept light, a wide
+  given `detail: 1`, a shot SeedVR2 got wrong sent to the pixel method): the editor's
+  Upscale dialog, **Choose for this run**, then **Save as sh020's recipe**.
+
+`h3.py master Shows\ep05 --wait` (or the cut menu's **Master…**) goes through the cut:
+
+- a shot with no upscale, one made from an older take, or one that failed is upscaled by
+  the recipe;
+- a fresh upscale made with the recipe's settings is used as it is;
+- a fresh upscale made with **other settings** (an older recipe, or before upscales
+  recorded theirs) is **kept**, not redone: `--conform` (the dialog's Conform) redoes those;
+- an upscale marked **Keep** (the take menu's **Keep upscale**, `h3.py upscale --only sh020
+  --keep`) is never redone by Master, even with `--conform`;
+- a shot with no usable pick, or a kept upscale at another size, is a **gap**: no master is
+  made until it's fixed, unless `--allow-gaps`.
+
+Then it assembles the master from the upscales into `Shows\ep05\master\`
+(`ep05_master_3840x2160.mp4`, with `--prores` a ProRes 422 HQ `.mov` too) and writes
+`ep05_master.md` / `.json`: every shot's take, target, recipe and status. It never changes
+the cut: lock the picks first. Several episodes, or a whole show folder, master in one go
+(`h3.py master Shows`); an episode with gaps is skipped, not half-made. `--check` shows the
+plan without queueing anything.
+
+**Writing a new series config**, add an `upscale.master` block that matches the setup you
+chose: render small → re-sample, then an upscale model to the delivery (1080p or 4K); render
+at size → an upscale model or SeedVR2; Wan shots → SeedVR2 (their re-sample takes minutes).
+Pick `deliver` from what they said they deliver, and `fit: crop` unless they'd rather keep
+the whole frame with bars.
 
 ### Render profiles
 

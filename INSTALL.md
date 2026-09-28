@@ -584,9 +584,10 @@ Every file any target names. `python h3.py targets` tells you which of these you
 
 ### For upscaling (optional)
 
-Only to upscale takes (`python h3.py upscale`), never to render. The node comes from the Comfyui_Minimax_h3_latent_Upscaler pack (LBH-123-AI) — not its "Plus" fork, which has the same node without temporal chunking. `python h3.py targets` says whether this ComfyUI can upscale.
+Only to upscale takes (`python h3.py upscale`), never to render. H3's MinimaxH3LatentUpscaler3D comes from the Comfyui_Minimax_h3_latent_Upscaler pack (LBH-123-AI) — not its "Plus" fork, which has the same node without temporal chunking; LTX's LTXVLatentUpsampler is ComfyUI's own. `python h3.py targets` says whether this ComfyUI can upscale.
 
-- `minimax_h3_latent_upscaler_3d_fp16.safetensors` → `models/latent_upscale_models/` (MinimaxH3LatentUpscaler3D, for `minimax_h3_ref2va`) — no URL: no ComfyUI template, saved workflow or ComfyUI-Manager model list on this machine records this file. Search Hugging Face for its exact name: the Comfyui_Minimax_h3_latent_Upscaler pack's README points to the LBH-123-AI/Minimax_h3_latent_Upscaler repo. Only needed to upscale (Phase 13), never to render.
+- `ltx-2.3-spatial-upscaler-x2-1.1.safetensors` → `models/latent_upscale_models/` (LTXVLatentUpsampler, for `ltx2_ingredients`) — [download](https://huggingface.co/Lightricks/LTX-2.3/resolve/main/ltx-2.3-spatial-upscaler-x2-1.1.safetensors) (ComfyUI-Manager model list (model-list.json; ComfyUI's blueprint Image to Video (LTX-2.3).json has the same URL). Only needed to upscale (Phase 13), never to render.)
+- `minimax_h3_latent_upscaler_3d_fp16.safetensors` → `models/latent_upscale_models/` (MinimaxH3LatentUpscaler3D, for `minimax_h3_fl2va`, `minimax_h3_ref2va`) — no URL: no ComfyUI template, saved workflow or ComfyUI-Manager model list on this machine records this file. Search Hugging Face for its exact name: the Comfyui_Minimax_h3_latent_Upscaler pack's README points to the LBH-123-AI/Minimax_h3_latent_Upscaler repo. Only needed to upscale (Phase 13), never to render.
 
 **SeedVR2** (any take; ComfyUI's own nodes, the models Apache 2.0): the VAE and at least one model.
 
@@ -597,6 +598,7 @@ Only to upscale takes (`python h3.py upscale`), never to render. The node comes 
 - `ltx2`: nothing extra. Its render already has a latent upsampler, and an upscale runs that second stage again on the take
 - `wan22_i2v`: an upscale model from `models/upscale_models/` (RealESRGAN_x2.pth by default), then its own sampler
 - `wan22_ti2v`: an upscale model from `models/upscale_models/` (RealESRGAN_x2.pth by default), then its own sampler
+- `wan22_vace`: an upscale model from `models/upscale_models/` (RealESRGAN_x2.pth by default), then its own sampler
 
 #### Files with no recorded download URL
 

@@ -421,7 +421,7 @@ def episode_status(root: str, pass_: str, folder: str | None = None) -> dict:
                 "finished": (t.sidecar or {}).get("finished"),
                 "save_notes": (t.sidecar or {}).get("save_notes", ""),
                 # Phase 13: its upscale (null: never upscaled)
-                "upscale": upscale_summary(root, t),
+                "upscale": upscale_summary(root, t, cache),
             } for t in takes],
         })
     d = doc0.get("defaults", {})
@@ -1470,18 +1470,29 @@ def _graph_key(graph: dict | None) -> str:
     return hashlib.sha1(blob.encode("utf-8")).hexdigest()[:16]
 
 
-def upscale_summary(root: str, t: T.Take) -> dict | None:
+def upscale_summary(root: str, t: T.Take, cache: dict | None = None) -> dict | None:
     """A take's upscale for the editor (None: it has none): status, whether
-    it is fresh (made from the take as it is now), its size and file."""
+    it is fresh (made from the take as it is now), its size and file, Keep,
+    and how it stands against the series' master recipe (Phase 13e)."""
     if not os.path.isfile(t.paths.up_sidecar):
         return None
     up = T.upscale_of(t) or {}
+    cache = {} if cache is None else cache
+    if "master_recipe" not in cache:
+        cache["master_recipe"] = U.master_recipe(root)
+        cache["shot_recipes"] = U.shot_recipes(root) if cache["master_recipe"] else {}
+    match = (U.recipe_status(root, t, cache["master_recipe"], cache["shot_recipes"], up)
+             if up.get("status") == "ok" and cache["master_recipe"] else None)
     return {"status": up.get("status", "queued"), "fresh": bool(up.get("fresh")),
             "width": up.get("width"), "height": up.get("height"),
             "route": up.get("route"), "start_step": up.get("start_step"),
             "method": up.get("method", "latent"), "pixel_model": up.get("pixel_model"),
             "seedvr2_model": up.get("seedvr2_model"),
             "then_pixel": up.get("then_pixel"),
+            "deliver": up.get("deliver"),
+            "keep": bool(up.get("keep")),
+            # same | different | unknown (before upscales recorded it) | null (no recipe)
+            "recipe_match": match,
             "on_upscale": up.get("on_upscale"),
             "encoder": up.get("encoder"), "precision": up.get("precision"),
             "finish": up.get("finish"),

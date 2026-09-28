@@ -490,6 +490,8 @@ class FakeComfy:
         else:
             loader = next(v["inputs"] for v in graph.values() if v["class_type"] == J.LOADER)
             w, h = (int(x) for x in loader["resolution_override"].split("x"))
+        if si.get("width") and si.get("height"):        # a delivery size: the saver makes it
+            w, h = si["width"], si["height"]
         with open(os.path.join(root, si["out_mp4"]), "wb") as fh:
             fh.write(b"upscaled")
         if self.mode == "node":

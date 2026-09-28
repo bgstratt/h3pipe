@@ -1204,12 +1204,46 @@ export function createMockApi(emit: Emit, opts: MockOptions = {}): Api & { outsi
       }
       return out;
     },
+    async master(req) {
+      await wait();
+      need(req.ep);
+      const rows = st(req.pass ?? "final").shots.map((s) => {
+        const t = s.takes.find((x) => x.take === s.cut.take);
+        const status = !t ? "gap" as const : t.upscale?.status === "ok" && t.upscale.fresh ? "ok" as const : "upscale" as const;
+        return { shot: s.shot, take: t?.take ?? null, target: t?.target ?? null, status,
+                 why: status === "gap" ? "no usable pick" : "", recipe: "re-sample 2x → 1080p (crop)", upscale: null };
+      });
+      const count = (k: string) => rows.filter((r) => r.status === k).length;
+      const plan = { pass: req.pass ?? "final", size: [1920, 1080] as [number, number], fit: "crop" as const, quality: "master" as const,
+                     counts: { upscale: count("upscale"), ok: count("ok"), kept: 0, queued: 0, gap: count("gap") },
+                     ready: count("upscale") === 0 && count("gap") === 0, rows };
+      return req.action === "assemble"
+        ? { plan, output: "master/ep01_master_1920x1080.mp4", mov: null, report: "master/ep01_master.md" }
+        : { plan, queued: [], errors: [] };
+    },
+    async putUpscaleKeep(ep, shot, take, keep, pass) {
+      await wait();
+      need(ep);
+      const t = st(pass ?? "final").shots.find((s) => s.shot === shot)?.takes.find((x) => x.take === take);
+      if (!t?.upscale || t.upscale.status !== "ok") throw new MockError(`${shot} take ${take} has no finished upscale`, 409);
+      t.upscale.keep = keep;
+      emit("h3pipe.upscale", { ep: EP, shot, take, status: keep ? "kept" : "unkept" });
+      return { shot, take, keep };
+    },
+    async putUpscaleRecipe(ep, shot, recipe) {
+      await wait();
+      need(ep);
+      return { shot, recipe, text: recipe ? "mock recipe" : null };
+    },
     async upscaleOptions() {
       await wait();
       return {
         pixel: { status: "ready", missing: [], models: ["4x-UltraSharp.pth", "RealESRGAN_x2.pth", "RealESRGAN_x4.pth"], default: "RealESRGAN_x2.pth" },
         seedvr2: { status: "ready", missing: [], models: ["seedvr2_3b_int8_convrot.safetensors", "seedvr2_7b_int8_convrot.safetensors"],
                    default: "seedvr2_7b_int8_convrot.safetensors" },
+        delivers: [{ id: "1080p", width: 1920, height: 1080 }, { id: "1440p", width: 2560, height: 1440 },
+                   { id: "4k", width: 3840, height: 2160 }],
+        fits: ["crop", "pad"],
         latent: { minimax_h3_ref2va: { status: "ready", missing: [], mode: "resample", align: 32, fixed_scale: null },
                   ltx2: { status: "ready", missing: [], mode: "second_stage", align: 32, fixed_scale: 2 },
                   ltx2_ingredients: null, minimax_h3_fl2va: null, wan22_vace: null,

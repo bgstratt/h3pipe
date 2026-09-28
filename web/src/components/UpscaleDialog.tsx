@@ -8,9 +8,36 @@ import { errText } from "../api";
 import { api } from "../host";
 import { closeUpscale, upscale, upscaleRequestOf, type UpscaleForm } from "../actions";
 import { statusKey, useApp } from "../store";
-import { SCALES, methodFor, thenSize, upscaleSize, type SizeCheck } from "../lib/upscale";
+import { DELIVERS, SCALES, fitSize, fitWords, methodFor, parseDeliver, thenSize, upscaleSize, type SizeCheck } from "../lib/upscale";
 import type { TakeSummary, UpscaleOptions } from "../types";
 import { Dialog } from "./Dialogs";
+
+/** A scale: the usual ones, or any number (Custom…). */
+function ScaleSelect({ value, onChange, labelOf, max }: {
+  value: number; onChange: (n: number) => void; max: number;
+  labelOf: (sc: number) => { label: string; none: boolean };
+}) {
+  const [custom, setCustom] = useState(!SCALES.includes(value));
+  return (
+    <div className="h3-row" style={{ gap: 6 }}>
+      <select value={custom ? "custom" : value} onChange={(e) => {
+        if (e.target.value === "custom") setCustom(true);
+        else { setCustom(false); onChange(Number(e.target.value)); }
+      }}>
+        {SCALES.map((sc) => {
+          const l = labelOf(sc);
+          return <option key={sc} value={sc} disabled={l.none}>{l.label}</option>;
+        })}
+        <option value="custom">Custom…</option>
+      </select>
+      {custom && (
+        <input type="number" min={1.05} max={max} step={0.05} value={value} style={{ width: 72 }}
+               title={`Any scale above 1, up to ${max}: a re-sample's sides must land on its grid`}
+               onChange={(e) => { const n = Number(e.target.value); if (n > 1 && n <= max) onChange(n); }} />
+      )}
+    </div>
+  );
+}
 
 const DETAIL_LABELS = [
   "Keep the take (default): a light pass, a speaking mouth stays as it was",
@@ -33,16 +60,30 @@ function UpscaleBody() {
   const [f, setF] = useState<UpscaleForm>({ method: "auto", pixelModel: null, detail: 0, redo: !!ask.redo, vae: false,
                                               scale: 2, thenModel: null, thenScale: 2, fromUpscale: false,
                                               encoder: "auto", precision: "fp16",
-                                              frequencySplit: true, keepSoft: 0, grain: 0 });
+                                              frequencySplit: true, keepSoft: 0, grain: 0,
+                                              deliver: null, fit: "crop", thenMethod: "pixel" });
+  const thenSv2 = !!f.thenModel && f.thenMethod === "seedvr2";
+  const thenLabel = thenSv2 ? `SeedVR2 ${f.seedvr2Model ?? opts?.seedvr2?.default ?? ""}` : f.thenModel;
+  // the Output size menu: none, a named size, or a W×H typed in
+  const [customSize, setCustomSize] = useState(false);
   const set = (p: Partial<UpscaleForm>) => setF((x) => ({ ...x, ...p }));
 
+  // Phase 13e: the series recipe (per target, per shot) or this run's own choices
+  const [useRecipe, setUseRecipe] = useState<boolean | null>(null);
+  const [saved, setSaved] = useState<string | null>(null);
+  const [reload, setReload] = useState(0);
   useEffect(() => {
     let live = true;
-    api().upscaleOptions()
-      .then((o: UpscaleOptions) => { if (live) { setOpts(o); setF((x) => ({ ...x, pixelModel: x.pixelModel ?? o.pixel.default })); } })
+    api().upscaleOptions(ep)
+      .then((o: UpscaleOptions) => {
+        if (!live) return;
+        setOpts(o);
+        setF((x) => ({ ...x, pixelModel: x.pixelModel ?? o.pixel.default }));
+        setUseRecipe((u) => u ?? !!o.recipe);
+      })
       .catch((e: unknown) => { if (live) setErr(errText(e)); });
     return () => { live = false; };
-  }, []);
+  }, [ep, reload]);
 
   // the targets of the takes this would upscale
   const shots = st?.shots ?? [];
@@ -63,6 +104,9 @@ function UpscaleBody() {
   // what each take would come out as, at a scale (and the then-pixel step after a re-sample)
   const maxScale = opts?.max_scale ?? 4;
   const real = takes.filter(Boolean) as TakeSummary[];
+  const parsed = parseDeliver(f.deliver);
+  const D = parsed === "bad" ? null : parsed;
+  const pixelish = f.method === "pixel" || f.method === "seedvr2";
   const plan = (t: TakeSummary, scale: number, withThen: boolean): { method: "latent" | "pixel" | "seedvr2"; first: SizeCheck; out: SizeCheck } => {
     const li = latentOf(t.target || "minimax_h3_ref2va");
     const m = methodFor(f.method, li);
@@ -74,11 +118,34 @@ function UpscaleBody() {
       : onUp && !(t.upscale?.status === "ok" && t.upscale.fresh)
         ? { ok: false, why: "it has no fresh upscale to build on" }
         : upscaleSize(base, m, scale, li, maxScale);
-    const out = withThen && m === "latent" && f.thenModel ? thenSize(first, f.thenScale, maxScale) : first;
-    return { method: m, first, out };
+    if (!D) {
+      const out = withThen && m === "latent" && f.thenModel ? thenSize(first, f.thenScale, maxScale) : first;
+      return { method: m, first, out };
+    }
+    // a delivery size: the last step that can make any size covers (crop) or fits in it
+    const fit = f.fit ?? "crop";
+    if (m === "pixel" || m === "seedvr2") {
+      const w = base.width ?? 0, h = base.height ?? 0;
+      if (!w || !h || !first.ok && first.why?.includes("fresh upscale")) return { method: m, first, out: first };
+      const [iw, ih] = fitSize(w, h, D.w, D.h, fit);
+      const s = iw / w;
+      const sized: SizeCheck = s > 1 && s <= maxScale ? { ok: true, w: iw, h: ih }
+        : { ok: false, why: `${D.w}×${D.h} from ${w}×${h} is ${s.toFixed(2)}x (more than 1, up to ${maxScale})` };
+      return { method: m, first: sized, out: sized };
+    }
+    if (withThen && f.thenModel && first.ok && first.w && first.h) {
+      const [iw, ih] = fitSize(first.w, first.h, D.w, D.h, fit);
+      const s = iw / first.w;
+      const out: SizeCheck = s <= 1 ? { ok: false, why: `the re-sample makes ${first.w}×${first.h} already: no upscale model needed after it` }
+        : s > maxScale ? { ok: false, why: `${D.w}×${D.h} is ${s.toFixed(2)}x the re-sample: at most ${maxScale}` }
+        : { ok: true, w: iw, h: ih };
+      return { method: m, first, out };
+    }
+    return { method: m, first, out: first };
   };
   const now = real.map((t) => plan(t, f.scale, true));
   const bad = now.filter((p) => !p.out.ok);
+  if (parsed === "bad") bad.push({ method: "pixel", first: { ok: false }, out: { ok: false, why: `${f.deliver} isn't a size: WxH, both even, 64 to 8192` } });
   const scaleLabel = (sc: number) => {
     const ps = real.map((t) => plan(t, sc, false));
     const n = ps.filter((p) => !p.first.ok).length;
@@ -89,21 +156,44 @@ function UpscaleBody() {
   const summary = one
     ? (one.out.ok
       ? `${(f.method === "pixel" || f.method === "seedvr2") && f.fromUpscale ? `its upscale ${real[0].upscale?.width}×${real[0].upscale?.height}` : `${real[0].width}×${real[0].height}`} → ${one.first.w}×${one.first.h} ${one.method === "pixel" ? `(${f.pixelModel})` : one.method === "seedvr2" ? `(SeedVR2 ${f.seedvr2Model ?? opts?.seedvr2?.default ?? ""})` : "(re-sample)"}`
-        + (one.method === "latent" && f.thenModel ? ` → ${one.out.w}×${one.out.h} (${f.thenModel})` : "")
+        + (one.method === "latent" && f.thenModel ? ` → ${one.out.w}×${one.out.h} (${thenLabel})` : "")
+        + (D && one.out.w && one.out.h && (one.out.w !== D.w || one.out.h !== D.h)
+          ? ` → ${D.w}×${D.h} (${fitWords(one.out.w, one.out.h, D.w, D.h, f.fit ?? "crop")})` : "")
+        + (D && one.method === "latent" && !f.thenModel && one.out.w && one.out.w < D.w
+          ? ". Stretched: an upscale model after the re-sample adds detail instead" : "")
       : `Can't: ${one.out.why}`)
     : bad.length ? `${bad.length} of ${real.length} can't at these settings (${bad[0].out.why})` : "";
 
+  const recipe = opts?.recipe ?? null;
+  const byRecipe = !!recipe && !!useRecipe;
   const submit = () => {
-    void upscale(upscaleRequestOf(f, ask, refineModel && f.method !== "pixel"), ask.takes ? ask.takes.map((t) => `${t.shot}|${t.take}`).join(",") : "cut");
+    const key = ask.takes ? ask.takes.map((t) => `${t.shot}|${t.take}`).join(",") : "cut";
+    const req = byRecipe
+      ? { ...(ask.takes ? { pass: ask.pass, takes: ask.takes } : { pass: ask.pass, shots: null }), recipe: true, ...(f.redo ? { redo: true } : {}) }
+      : upscaleRequestOf(f, ask, refineModel && f.method !== "pixel");
+    void upscale(req, key);
     closeUpscale();
   };
-  const canQueue = !!ep && !!opts && count > 0 && bad.length < real.length
+  // one take: its choices can be saved as that shot's recipe
+  const oneShot = ask.takes?.length === 1 ? ask.takes[0].shot : null;
+  const saveShot = (clear: boolean) => {
+    if (!ep || !oneShot) return;
+    const fields = clear ? null : upscaleRequestOf(f, ask, refineModel && f.method !== "pixel") as Record<string, unknown>;
+    api().putUpscaleRecipe(ep, oneShot, fields)
+      .then((r) => { setSaved(r.recipe ? `${oneShot}'s recipe: ${r.text}` : `${oneShot} follows its target's recipe again`); setReload((n) => n + 1); })
+      .catch((e: unknown) => setSaved(`Couldn't save: ${errText(e)}`));
+  };
+  const recipeTargets = recipe ? targets.map((id) => [id, recipe.targets[id]] as const) : [];
+  const shotIds = ask.takes ? ask.takes.map((t) => t.shot) : shots.filter((s) => s.cut.usable && !s.cut.placeholder).map((s) => s.shot);
+  const recipeShots = recipe ? shotIds.map((id) => [id, recipe.shots[id]] as const).filter(([, v]) => !!v) : [];
+  const canQueue = byRecipe ? !!ep && count > 0 && recipeTargets.some(([, v]) => !!v)
+    : !!ep && !!opts && count > 0 && bad.length < real.length && parsed !== "bad"
     && (f.method === "latent" ? latentSome : f.method === "pixel" ? pixelReady && !!f.pixelModel
       : f.method === "seedvr2" ? sv2Ready : latentSome || pixelReady);
 
   return (
     <Dialog
-      title={<>{ask.title} <span className="h3-muted h3-small">{ask.pass} · {f.scale}x{f.method !== "pixel" && f.thenModel ? ` then ${f.thenScale}x` : ""}</span></>}
+      title={<>{ask.title} <span className="h3-muted h3-small">{ask.pass} · {byRecipe ? "series recipe" : <>{D && pixelish ? "" : `${f.scale}x`}{f.method !== "pixel" && f.method !== "seedvr2" && f.thenModel ? (D ? " then a model" : ` then ${f.thenScale}x`) : ""}{D ? ` → ${D.w}×${D.h}` : ""}</>}</span></>}
       onClose={closeUpscale}
       footer={
         <>
@@ -117,7 +207,38 @@ function UpscaleBody() {
     >
       {err && <div className="h3-error h3-small">Couldn't read this ComfyUI's upscale options: {err}</div>}
       {!opts && !err && <div className="h3-muted h3-small"><i className="pi pi-spin pi-spinner" /> Reading what this ComfyUI can do…</div>}
-      {opts && (
+      {opts && recipe && (
+        <div className="h3-col" style={{ gap: 3, marginBottom: 8 }}>
+          <label className="h3-check" title="Each take as the series config's upscale.master says: its target's section, its shot's own recipe over it, the master's output size">
+            <input type="radio" name="up-recipe" checked={byRecipe} onChange={() => setUseRecipe(true)} />
+            Series recipe{recipe.deliver ? ` (→ ${recipe.deliver}, ${recipe.fit})` : ""}
+          </label>
+          <label className="h3-check" title="Choose the method, size and finish for this run only; the series recipe is left as it is">
+            <input type="radio" name="up-recipe" checked={!byRecipe} onChange={() => setUseRecipe(false)} />
+            Choose for this run
+          </label>
+        </div>
+      )}
+      {opts && byRecipe && recipe && (
+        <div className="h3-col" style={{ gap: 6 }}>
+          <div className="h3-col" style={{ gap: 2 }}>
+            {recipeTargets.map(([id, v]) => (
+              <div key={id} className={`h3-small ${v ? "" : "h3-error"}`}>
+                <b>{id}</b>: {v ? v.text : "no section in upscale.master covers it: these takes won't upscale"}
+              </div>
+            ))}
+            {recipeShots.map(([shot, v]) => (
+              <div key={shot} className="h3-small h3-muted">{shot}, its own: {v!.text}</div>
+            ))}
+            {recipe.problems.map((p) => <div key={p} className="h3-small h3-error">{p}</div>)}
+          </div>
+          <label className="h3-check" title="Upscale again even where the take already has a fresh upscale (it is replaced)">
+            <input type="checkbox" checked={f.redo} onChange={(e) => set({ redo: e.target.checked })} />
+            Again, where already upscaled
+          </label>
+        </div>
+      )}
+      {opts && !byRecipe && (
         <div className="h3-col" style={{ gap: 8 }}>
           <div className="h3-col" style={{ gap: 3 }}>
             <span className="h3-h">Method</span>
@@ -174,44 +295,95 @@ function UpscaleBody() {
               On top of the existing upscale
             </label>
           )}
-          <label className="h3-col" style={{ gap: 2 }}>
-            <span className="h3-h">Scale</span>
-            <select value={f.scale} onChange={(e) => set({ scale: Number(e.target.value) })}>
-              {SCALES.map((sc) => {
-                const l = scaleLabel(sc);
-                return <option key={sc} value={sc} disabled={l.none}>{l.label}</option>;
-              })}
-            </select>
-          </label>
-          {f.method !== "pixel" && f.method !== "seedvr2" && latentSome && pixelReady && (
+          <div className="h3-col" style={{ gap: 3 }}>
+            <label className="h3-col" style={{ gap: 2 }} title="An exact size for the result. The last step that can make any size (the upscale model, SeedVR2) is scaled to it; a re-sample keeps its own scale and is resized to it, so add an upscale model after it for detail. A take whose shape isn't the size's (1344×768 is 7:4, not 16:9) is cropped or padded, below">
+              <span className="h3-h">Output size</span>
+              <select value={customSize ? "custom" : (f.deliver ?? "")} onChange={(e) => {
+                const v = e.target.value;
+                if (v === "custom") { setCustomSize(true); set({ deliver: D ? `${D.w}x${D.h}` : "" }); }
+                else { setCustomSize(false); set({ deliver: v || null }); }
+              }}>
+                <option value="">As scaled</option>
+                {DELIVERS.map((d) => <option key={d.id} value={d.id}>{d.label}</option>)}
+                <option value="custom">Custom…</option>
+              </select>
+            </label>
+            {customSize && (
+              <input placeholder="3840x2160" value={f.deliver ?? ""} style={{ width: 120 }}
+                     onChange={(e) => set({ deliver: e.target.value || null })} />
+            )}
+            {D && (
+              <div className="h3-row" style={{ gap: 10 }}>
+                <label className="h3-check" title="Fill the frame: scaled just past it, the overhang trimmed evenly (1344×768 to 4K loses 18 rows top and bottom, 1.6%)">
+                  <input type="radio" name="up-fit" checked={(f.fit ?? "crop") === "crop"} onChange={() => set({ fit: "crop" })} />
+                  Crop to fill
+                </label>
+                <label className="h3-check" title="Keep the whole picture: scaled to fit inside, black bars on the short sides (1344×768 to 4K: 30 px each side)">
+                  <input type="radio" name="up-fit" checked={f.fit === "pad"} onChange={() => set({ fit: "pad" })} />
+                  Pad with bars
+                </label>
+              </div>
+            )}
+          </div>
+          {!(D && pixelish) && (
+            <label className="h3-col" style={{ gap: 2 }}>
+              <span className="h3-h">{pixelish ? "Scale" : "Re-sample scale"}</span>
+              <ScaleSelect value={f.scale} max={maxScale} labelOf={scaleLabel} onChange={(n) => set({ scale: n })} />
+            </label>
+          )}
+          {f.method !== "pixel" && f.method !== "seedvr2" && latentSome && (pixelReady || sv2Ready) && (
             <div className="h3-col" style={{ gap: 3 }}>
-              <label className="h3-check" title="After the re-sample, an upscale model takes the frames further in the same job: e.g. re-sample 2x then RealESRGAN_x2 = 4x, with generated detail in the first half">
-                <input type="checkbox" checked={!!f.thenModel} onChange={(e) => set({ thenModel: e.target.checked ? (f.pixelModel ?? opts.pixel.default) : null })} />
-                Then an upscale model (re-sampled takes)
+              <label className="h3-col" style={{ gap: 2 }} title="After the re-sample, a second step takes the frames further in the same job: an upscale model (re-sample 2x then RealESRGAN_x2 = 4x; steadiest frame to frame) or SeedVR2 (sharpest stills, a little more shimmer, which the colour finish halves). The re-sample's generated detail comes first either way">
+                <span className="h3-h">Then (re-sampled takes)</span>
+                <select value={!f.thenModel ? "" : f.thenMethod ?? "pixel"} onChange={(e) => {
+                  const v = e.target.value;
+                  if (!v) set({ thenModel: null });
+                  else if (v === "seedvr2") set({ thenMethod: "seedvr2", thenModel: "seedvr2" });
+                  else set({ thenMethod: "pixel", thenModel: f.pixelModel ?? opts.pixel.default });
+                }}>
+                  <option value="">Nothing: the re-sample is the upscale</option>
+                  <option value="pixel" disabled={!pixelReady}>An upscale model{!pixelReady ? " — not ready" : ""}</option>
+                  <option value="seedvr2" disabled={!sv2Ready}>SeedVR2{!sv2Ready ? " — not ready" : ""}</option>
+                </select>
               </label>
               {f.thenModel && (
                 <div className="h3-row" style={{ gap: 6 }}>
-                  <select value={f.thenModel} onChange={(e) => set({ thenModel: e.target.value })}>
-                    {opts.pixel.models.map((m) => <option key={m} value={m}>{m}</option>)}
-                  </select>
-                  <select value={f.thenScale} onChange={(e) => set({ thenScale: Number(e.target.value) })}>
-                    {SCALES.map((sc) => <option key={sc} value={sc}>{sc}x more</option>)}
-                  </select>
+                  {thenSv2 ? (
+                    <select value={f.seedvr2Model ?? opts.seedvr2!.default} onChange={(e) => set({ seedvr2Model: e.target.value })}>
+                      {opts.seedvr2!.models.map((m) => <option key={m} value={m}>{m}{m === opts.seedvr2!.default ? " (default)" : ""}</option>)}
+                    </select>
+                  ) : (
+                    <select value={f.thenModel} onChange={(e) => set({ thenModel: e.target.value })}>
+                      {opts.pixel.models.map((m) => <option key={m} value={m}>{m}</option>)}
+                    </select>
+                  )}
+                  {!D && (
+                    <ScaleSelect value={f.thenScale} max={maxScale} onChange={(n) => set({ thenScale: n })}
+                                 labelOf={(sc) => ({ label: `${sc}x more`, none: false })} />
+                  )}
+                  {D && <span className="h3-muted h3-small">to the output size</span>}
                 </div>
               )}
             </div>
           )}
           {summary && <div className={`h3-small ${bad.length ? "h3-error" : "h3-muted"}`}>{summary}</div>}
           <div className="h3-row" style={{ gap: 8, flexWrap: "wrap" }}>
-            <label className="h3-col" style={{ gap: 2 }} title="How the upscale's mp4 is written. Auto uses the GPU's NVENC when ffmpeg has it (H.264, HEVC past 4096 wide), else x264 on the CPU">
+            <label className="h3-col" style={{ gap: 2 }} title="How the upscale's mp4 is written. Auto: H.264 on the GPU (NVENC) up to 4096 wide, x264 on the CPU past that (slower, but it plays in the editor). GPU (NVENC) past 4096 wide writes HEVC: fast, but the browser may show it black">
               <span className="h3-h">Encoder</span>
               <select value={f.encoder} onChange={(e) => set({ encoder: e.target.value as UpscaleForm["encoder"] })}>
                 <option value="auto">Auto (GPU when it can)</option>
-                <option value="nvenc">GPU (NVENC)</option>
+                <option value="nvenc">GPU (NVENC; HEVC past 4096)</option>
                 <option value="x264">CPU (x264)</option>
               </select>
             </label>
-            {f.method !== "seedvr2" && (f.method !== "latent" || !!f.thenModel) && (
+            <label className="h3-col" style={{ gap: 2 }} title="Review: quick to write, fine to watch and cut. Master: x264 at CRF 12 on a slower preset, for delivery (a 4K shot takes a minute or two more to write); it still plays in the editor">
+              <span className="h3-h">Quality</span>
+              <select value={f.quality ?? "review"} onChange={(e) => set({ quality: e.target.value as "review" | "master" })}>
+                <option value="review">Review</option>
+                <option value="master">Master</option>
+              </select>
+            </label>
+            {f.method !== "seedvr2" && (f.method !== "latent" || (!!f.thenModel && !thenSv2)) && (
               <label className="h3-col" style={{ gap: 2 }} title="The upscale model's precision: 16-bit is about twice as fast and looks the same; 32-bit is how ComfyUI's own node runs it">
                 <span className="h3-h">Model precision</span>
                 <select value={f.precision} onChange={(e) => set({ precision: e.target.value as UpscaleForm["precision"] })}>
@@ -221,9 +393,9 @@ function UpscaleBody() {
               </label>
             )}
           </div>
-          {(f.method === "seedvr2" ? sv2Ready : (f.method !== "latent" || !!f.thenModel || refineModel) && pixelReady) && (
+          {(f.method === "seedvr2" || thenSv2 ? sv2Ready : (f.method !== "latent" || !!f.thenModel || refineModel) && pixelReady) && (
             <div className="h3-col" style={{ gap: 3 }}>
-              <span className="h3-h">Finish ({f.method === "seedvr2" ? "SeedVR2" : "upscale model"})</span>
+              <span className="h3-h">Finish ({f.method === "seedvr2" || thenSv2 ? "SeedVR2" : "upscale model"})</span>
               <label className="h3-check" title="Colour and tone from the original frames, only the fine detail from the model: upscale models shift colour a little, and this keeps an upscaled clip matching its neighbours in the cut">
                 <input type="checkbox" checked={f.frequencySplit} onChange={(e) => set({ frequencySplit: e.target.checked })} />
                 Keep the original's colour
@@ -259,6 +431,20 @@ function UpscaleBody() {
               From the video, not the saved latent
             </label>
           )}
+          {oneShot && recipe && (
+            <div className="h3-row" style={{ gap: 6, flexWrap: "wrap" }}>
+              <button className="h3-btn" disabled={!canQueue} onClick={() => saveShot(false)}
+                      title={`Save these choices as ${oneShot}'s own recipe: the series recipe and Master use them for this shot (its size stays the master's)`}>
+                Save as {oneShot}'s recipe
+              </button>
+              {recipe.shots[oneShot] && (
+                <button className="h3-btn" onClick={() => saveShot(true)} title={`${oneShot} goes back to its target's section of the series recipe`}>
+                  Clear {oneShot}'s recipe
+                </button>
+              )}
+            </div>
+          )}
+          {saved && <div className="h3-small h3-muted">{saved}</div>}
         </div>
       )}
     </Dialog>

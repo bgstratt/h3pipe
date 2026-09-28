@@ -682,7 +682,14 @@ export interface TakeUpscale {
   /** the SeedVR2 method's model file */
   seedvr2_model?: string | null;
   /** a pixel step after the re-sample: its model, scale and the re-sample's size */
-  then_pixel?: { model: string; scale: number; from: [number, number] } | null;
+  then_pixel?: { model: string; scale: number; from: [number, number]; method?: "seedvr2" } | null;
+  /** Phase 13e: marked Keep (a wholesale redo or Master leaves it alone) */
+  keep?: boolean;
+  /** against the series' master recipe: same, different, unknown (made before
+   * upscales recorded their settings); null: no recipe */
+  recipe_match?: "same" | "different" | "unknown" | null;
+  /** a delivery size: what was asked for, the fit, and what the last step made */
+  deliver?: { width: number; height: number; fit: "crop" | "pad"; made: [number, number] } | null;
   /** a pixel upscale run on an earlier upscale: that one's record (nested for a longer chain) */
   on_upscale?: Record<string, unknown> | null;
   /** the encoder the .up.mp4 was written with (h264_nvenc, hevc_nvenc, libx264) */
@@ -718,6 +725,17 @@ export interface UpscaleRequest {
   /** latent: then an upscale model takes the re-sample on by `then_scale` (default 2) */
   then_pixel_model?: string | null;
   then_scale?: number | null;
+  /** latent: the then step is SeedVR2 (`seedvr2_model`) instead of an upscale model */
+  then_method?: "pixel" | "seedvr2";
+  /** Phase 13e3: how the .up.mp4 is encoded: review (the default) or master (x264 CRF 12) */
+  quality?: "review" | "master";
+  /** Phase 13e: each take by the series config's upscale.master recipe (the
+   * other choices are ignored) */
+  recipe?: boolean;
+  /** an exact size: "1080p", "1440p", "4k" or "WxH"; the last pixel step is sized to it
+   * and the result cropped (`fit` crop, the default) or padded to it */
+  deliver?: string | null;
+  fit?: "crop" | "pad";
   /** pixel: run on each take's existing upscale (its .up.mp4, replaced) instead of the take */
   from_upscale?: boolean;
   /** how the .up.mp4 is encoded: auto (NVENC when there, else x264), nvenc, x264 */
@@ -747,6 +765,48 @@ export interface UpscaleOptions {
   max_scale?: number;
   encoders?: string[];
   precisions?: string[];
+  delivers?: { id: string; width: number; height: number }[];
+  fits?: string[];
+  /** Phase 13e: the episode's master recipe (asked with `ep`; null: none) */
+  recipe?: RecipeView | null;
+}
+
+/** Phase 13e: POST /h3pipe/master's plan: each shot of the cut against the recipe. */
+export interface MasterPlan {
+  pass: Pass;
+  size: [number, number];
+  fit: "crop" | "pad";
+  quality: "review" | "master";
+  counts: { upscale: number; ok: number; kept: number; queued: number; gap: number };
+  ready: boolean;
+  rows: {
+    shot: string; take: number | null; target: string | null;
+    status: "upscale" | "ok" | "kept" | "queued" | "gap"; why: string; recipe: string;
+    upscale: { width: number | null; height: number | null; status: string; keep: boolean } | null;
+  }[];
+}
+
+export interface MasterResult {
+  plan: MasterPlan;
+  queued?: string[];
+  errors?: { shot: string; error: string }[];
+  /** assemble: the master, its ProRes .mov and the report, relative to the episode */
+  output?: string;
+  mov?: string | null;
+  report?: string;
+}
+
+/** The series config's upscale.master, as the Upscale dialog shows it. */
+export interface RecipeView {
+  deliver: string | null;
+  fit: "crop" | "pad";
+  quality: "review" | "master";
+  encoder: string;
+  /** each video target's section (null: none covers it) */
+  targets: Record<string, { key: string; fields: Record<string, unknown>; text: string } | null>;
+  /** shots with their own recipe (overrides.json) */
+  shots: Record<string, { fields: Record<string, unknown>; text: string }>;
+  problems: string[];
 }
 
 export interface UpscaleResult {

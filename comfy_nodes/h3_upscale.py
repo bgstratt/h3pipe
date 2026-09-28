@@ -25,6 +25,7 @@ Paths are relative to `project_root` (the episode), like H3SaveShot's.
 from __future__ import annotations
 
 import json
+import math
 import os
 import subprocess
 import tempfile
@@ -346,7 +347,8 @@ class H3FinishUpscale:
 class H3HoldAudio:
     """Re-sample the picture, keep the audio: a per-stream noise mask of ones on
     the video and zeros on the audio, on a joint AV latent. The sampler then
-    sees the audio clean at every step and the lips follow it."""
+    sees the audio clean at every step and the lips follow it. A video mask the
+    latent already has is kept (LTX's guide frames, a first frame held)."""
 
     @classmethod
     def INPUT_TYPES(cls):
@@ -364,9 +366,10 @@ class H3HoldAudio:
             raise ValueError("H3HoldAudio needs a joint audio/video latent (H3's), "
                              "not a video-only one")
         video, audio = samples.unbind()[:2]
+        mask = latent.get("noise_mask")
+        vmask = mask.unbind()[0] if getattr(mask, "is_nested", False) else torch.ones_like(video)
         out = dict(latent)
-        out["noise_mask"] = comfy.nested_tensor.NestedTensor(
-            (torch.ones_like(video), torch.zeros_like(audio)))
+        out["noise_mask"] = comfy.nested_tensor.NestedTensor((vmask, torch.zeros_like(audio)))
         return (out,)
 
 
@@ -426,40 +429,85 @@ def nvenc_encoders() -> set:
     return _NVENC
 
 
-def x264_args(w: int, h: int) -> list:
+QUALITIES = ("review", "master")
+
+
+def x264_args(w: int, h: int, quality: str = "review") -> list:
+    """x264 at `review` (CRF 16) or `master` quality (CRF 12, a slower preset:
+    for delivery, still 8-bit 4:2:0 High so the editor's browser plays it)."""
+    big = w * h > 4096 * 2304
+    if quality == "master":
+        return ["-c:v", "libx264", "-crf", "12", "-preset", "medium" if big else "slow",
+                "-profile:v", "high", "-pix_fmt", "yuv420p"]
     # a frame past 4K takes the faster preset: CRF 16 on "medium" is ~1 fps at 5376x3072
-    return ["-c:v", "libx264", "-crf", "16", "-preset", "medium" if w * h <= 4096 * 2304 else "fast",
+    return ["-c:v", "libx264", "-crf", "16", "-preset", "fast" if big else "medium",
             "-pix_fmt", "yuv420p"]
 
 
-def encoder_args(encoder: str, w: int, h: int) -> tuple[str, list]:
-    """(the encoder used, its ffmpeg args). auto and nvenc use the GPU: H.264 up to
-    4096 on a side (NVENC's H.264 limit), HEVC above; auto falls back to x264
-    without NVENC, nvenc raises."""
+def encoder_args(encoder: str, w: int, h: int, quality: str = "review") -> tuple[str, list]:
+    """(the encoder used, its ffmpeg args). auto: H.264 on the GPU (NVENC) up to 4096
+    on a side, x264 past that or without NVENC: always H.264, which the editor's
+    browser plays (a 5376x3072 HEVC upscale played as black, 2026-09-27). nvenc
+    forces the GPU: H.264 up to 4096 (NVENC's H.264 limit), HEVC past it, which a
+    browser may not play; it raises without NVENC. `master` quality: auto is x264
+    at master quality (the GPU encoder trades quality for speed); a forced NVENC
+    runs its slowest preset at a lower CQ."""
+    if encoder == "auto" and quality == "master":
+        return "libx264", x264_args(w, h, quality)
     if encoder in ("auto", "nvenc"):
         have = nvenc_encoders()
-        name = ("h264_nvenc" if w <= 4096 and h <= 4096 and "h264_nvenc" in have
-                else "hevc_nvenc" if "hevc_nvenc" in have else None)
+        small = w <= 4096 and h <= 4096
+        name = ("h264_nvenc" if small and "h264_nvenc" in have
+                else "hevc_nvenc" if encoder == "nvenc" and "hevc_nvenc" in have else None)
         if name:
-            args = ["-c:v", name, "-preset", "p5", "-rc", "vbr", "-cq", "19", "-b:v", "0",
-                    "-pix_fmt", "yuv420p"]
+            hq = quality == "master"
+            args = ["-c:v", name, "-preset", "p7" if hq else "p5", *(["-tune", "hq"] if hq else []),
+                    "-rc", "vbr", "-cq", "14" if hq else "19", "-b:v", "0", "-pix_fmt", "yuv420p"]
             return name, args + (["-tag:v", "hvc1"] if name == "hevc_nvenc" else [])
         if encoder == "nvenc":
             raise RuntimeError("this ffmpeg has no NVENC encoder (h264_nvenc / hevc_nvenc)")
-    return "libx264", x264_args(w, h)
+    return "libx264", x264_args(w, h, quality)
 
 
-def encode_stream(images, path: str, fps: float, encoder: str = "auto") -> str:
+def fit_size(w: int, h: int, W: int, H: int, fit: str = "crop") -> tuple[int, int]:
+    """What a w x h frame is scaled to, keeping its aspect, before it is cropped
+    (`crop`: it covers W x H) or padded (`pad`: it fits inside) to W x H; even
+    sides. 1344x768 to 3840x2160: 3840x2196 cropped (18 rows off the top and
+    bottom), or 3780x2160 padded (30 columns of black each side)."""
+    if fit == "crop":
+        s = max(W / w, H / h)
+        return (max(W, 2 * math.ceil(w * s / 2 - 1e-9)), max(H, 2 * math.ceil(h * s / 2 - 1e-9)))
+    s = min(W / w, H / h)
+    return (min(W, 2 * math.floor(w * s / 2 + 1e-9)), min(H, 2 * math.floor(h * s / 2 + 1e-9)))
+
+
+def fit_filter(w: int, h: int, W: int, H: int, fit: str = "crop") -> str | None:
+    """The ffmpeg -vf that makes a w x h frame exactly W x H (None: it is): a
+    lanczos resize to fit_size when it isn't that already, then a centred crop
+    or black pad."""
+    if not W or not H or (w, h) == (W, H):
+        return None
+    iw, ih = fit_size(w, h, W, H, fit)
+    parts = [f"scale={iw}:{ih}:flags=lanczos"] if (iw, ih) != (w, h) else []
+    parts.append(f"crop={W}:{H}" if fit == "crop" else f"pad={W}:{H}:(ow-iw)/2:(oh-ih)/2:black")
+    return ",".join(parts)
+
+
+def encode_stream(images, path: str, fps: float, encoder: str = "auto",
+                  size: tuple = (0, 0), fit: str = "crop", quality: str = "review") -> str:
     """Write `images` (IMAGE [T, H, W, 3]) to a mute mp4, one frame at a time into
-    ffmpeg (no whole-clip byte copy: at 5376x3072 that was ~20 GB). Returns the
-    encoder used; on auto, a failed NVENC encode is retried on x264."""
+    ffmpeg (no whole-clip byte copy: at 5376x3072 that was ~20 GB), made exactly
+    `size` (W, H) by fit_filter when one is given. Returns the encoder used; on
+    auto, a failed NVENC encode is retried on x264."""
     n, h, w = int(images.shape[0]), int(images.shape[1]), int(images.shape[2])
-    name, args = encoder_args(encoder, w, h)
+    vf = fit_filter(w, h, int(size[0]), int(size[1]), fit)
+    ow, oh = (int(size[0]), int(size[1])) if vf else (w, h)
+    name, args = encoder_args(encoder, ow, oh, quality)
 
     def run(args: list) -> None:
         cmd = ["ffmpeg", "-y", "-v", "error", "-f", "rawvideo", "-pix_fmt", "rgb24",
                "-s", f"{w}x{h}", "-framerate", str(fps), "-i", "-", "-frames:v", str(n),
-               *args, path]
+               *(["-vf", vf] if vf else []), *args, path]
         proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stderr=subprocess.PIPE)
         try:
             for i in range(n):
@@ -485,7 +533,7 @@ def encode_stream(images, path: str, fps: float, encoder: str = "auto") -> str:
         if encoder != "auto" or name == "libx264":
             raise
         name = "libx264"
-        run(x264_args(w, h))
+        run(x264_args(ow, oh, quality))
     return name
 
 
@@ -504,8 +552,16 @@ class H3SaveUpscale:
             "out_mp4": ("STRING", {"default": "renders/sh010/sh010_t01.up.mp4"}),
             "fps": ("FLOAT", {"default": 24.0, "min": 1.0, "max": 60.0, "step": 1.0}),
             "sidecar": ("STRING", {"default": ""}),
-            # auto: NVENC when ffmpeg has it (H.264 up to 4096, HEVC above), else x264
+            # auto: H.264, NVENC up to 4096 wide, x264 past it (nvenc: HEVC past 4096)
             "encoder": (list(ENCODERS), {"default": "auto"}),
+        }, "optional": {
+            # a delivery size (0: the frames' own): the frames resized, aspect
+            # kept, then cropped to fill it or padded to fit inside it
+            "width": ("INT", {"default": 0, "min": 0, "max": 8192, "step": 2}),
+            "height": ("INT", {"default": 0, "min": 0, "max": 8192, "step": 2}),
+            "fit": (["crop", "pad"], {"default": "crop"}),
+            # review (the default) or master (x264 CRF 12: for delivery)
+            "quality": (list(QUALITIES), {"default": "review"}),
         }}
 
     RETURN_TYPES = ("STRING",)
@@ -514,7 +570,8 @@ class H3SaveUpscale:
     OUTPUT_NODE = True
     CATEGORY = "H3/upscale"
 
-    def save(self, images, project_root, source_mp4, out_mp4, fps, sidecar="", encoder="auto"):
+    def save(self, images, project_root, source_mp4, out_mp4, fps, sidecar="", encoder="auto",
+             width=0, height=0, fit="crop", quality="review"):
         root = os.path.normpath(project_root)
         out = _abs(root, out_mp4)
         source = _abs(root, source_mp4)
@@ -525,7 +582,7 @@ class H3SaveUpscale:
         os.close(fd)
         try:
             t0 = clock()
-            used = encode_stream(images, picture, float(fps), encoder)
+            used = encode_stream(images, picture, float(fps), encoder, (width, height), fit, quality)
             ms["mp4"] = round((clock() - t0) * 1000)
             notes.append(f"mp4 written ({used})")
             if os.path.isfile(picture):
@@ -549,9 +606,11 @@ class H3SaveUpscale:
             except (OSError, ValueError):
                 data = {}
             data.update(status="ok" if ok else "failed", finished=_now(),
-                        frames=int(images.shape[0]), width=int(images.shape[2]),
-                        height=int(images.shape[1]), mp4=stem if ok else None,
-                        audio=audio, encoder=used, save_ms=ms,
+                        frames=int(images.shape[0]),
+                        width=int(width) if width and height else int(images.shape[2]),
+                        height=int(height) if width and height else int(images.shape[1]),
+                        mp4=stem if ok else None,
+                        audio=audio, encoder=used, quality=quality, save_ms=ms,
                         save_notes=f"{stem}: " + "; ".join(notes))
             _write_json_atomic(path, data)
             _notify(root, data.get("shot"), data.get("take"), "ok" if ok else "failed")

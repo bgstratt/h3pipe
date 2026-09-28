@@ -123,11 +123,16 @@ def episode_fps(root: str, doc: dict) -> float:
 
 
 def video_codec(path: str) -> str | None:
-    """The first video stream's codec (h264, hevc, ...), or None."""
+    """The first video stream's codec, profile and pixel format ("h264 High
+    yuv420p"), or None. The concat demuxer can only copy clips that agree on all
+    three: an MP4 track keeps one set of H.264 headers, so an NVENC Main clip
+    copied beside x264 High ones plays in ffmpeg but can break a browser or a
+    hardware decoder at the join."""
     try:
         r = run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries",
-                 "stream=codec_name", "-of", "csv=p=0", path], timeout=60)
-        return r.stdout.decode("utf-8", "replace").strip() or None
+                 "stream=codec_name,profile,pix_fmt", "-of", "csv=p=0:s=|", path], timeout=60)
+        out = r.stdout.decode("utf-8", "replace").strip()
+        return " ".join(out.split("|")) if out else None
     except Exception:
         return None
 
@@ -236,9 +241,15 @@ def normalise(src: str, dst: str, audio_wav: str | None, fps: float,
                            f"{r.stderr.decode('utf-8', 'replace')[-300:]}")
 
 
+# how a re-encoded clip is written: review, or master (Phase 13e3: for delivery)
+QUALITY_ARGS = {"review": ["-crf", "16", "-preset", "medium"],
+                "master": ["-crf", "12", "-preset", "slow", "-profile:v", "high"]}
+
+
 def conform(src: str, dst: str, audio: str | None, fps: float, frames: int,
             start: int = 0, size: tuple[int, int] | None = None,
-            src_fps: float | None = None, ready: bool = False) -> None:
+            src_fps: float | None = None, ready: bool = False,
+            quality: str = "review") -> None:
     """Re-encode one clip to exactly `frames` frames with a matching audio track.
 
     `audio` is the clip itself (use its own sound), a wav path, or None for
@@ -297,7 +308,7 @@ def conform(src: str, dst: str, audio: str | None, fps: float, frames: int,
     if vf:
         cmd += ["-vf", ",".join(vf)]
     cmd += ["-frames:v", str(frames),
-            "-c:v", "libx264", "-crf", "16", "-preset", "medium", "-pix_fmt", "yuv420p",
+            "-c:v", "libx264", *QUALITY_ARGS[quality], "-pix_fmt", "yuv420p",
             "-r", f"{fps:g}", "-c:a", "aac", "-b:a", "192k", "-ar", "44100", "-ac", "2",
             "-af", ",".join(af), "-t", dur, dst]
     r = run(cmd)
@@ -377,6 +388,12 @@ def main() -> int:
     ap.add_argument("--upscaled", action="store_true",
                     help="each clip from its fresh upscale (h3upscale), the "
                          "cut at the upscale size; clips without one are scaled up")
+    ap.add_argument("--quality", choices=sorted(QUALITY_ARGS), default="review",
+                    help="how clips that must be re-encoded are written: review (x264 CRF 16) or "
+                         "master (CRF 12, slow); clips that needn't be are copied either way")
+    ap.add_argument("--intermediate", choices=["prores"], default=None,
+                    help="also write the cut as a ProRes 422 HQ .mov (10-bit, PCM audio) beside "
+                         "it, for an editor downstream")
     ap.add_argument("--size", default=None, metavar="WxH",
                     help="the cut's size (every clip scaled, letterboxed if its aspect "
                          "differs), e.g. 1920x1080")
@@ -684,11 +701,12 @@ def main() -> int:
     # once one clip is re-encoded every clip is, so the concat demuxer sees one
     # set of stream parameters.
     # So do clips at another frame rate or size (a mixed-target cut).
-    # an NVENC HEVC upscale beside H.264 clips: concat can't copy mixed codecs
+    # an NVENC HEVC upscale beside H.264 clips, or an NVENC Main one beside x264
+    # High ones: concat can't copy streams that don't agree (video_codec)
     codecs = {video_codec(p["path"]) for p in plan}
     mixed = len(codecs) > 1
     if mixed:
-        print(f"  clips in more than one codec ({', '.join(sorted(c or '?' for c in codecs))}): "
+        print(f"  clips in more than one encoding ({', '.join(sorted(c or '?' for c in codecs))}): "
               f"re-encoding them all")
     reencode = bool(windowed or trimmed or placeholders or converted or resized or mixed)
     size = None
@@ -737,7 +755,7 @@ def main() -> int:
                     conform(src, norm, sound,
                             fps, p["used"], start=p["trim_in"],
                             size=size if (p["placeholder"] or p in resized) else None,
-                            src_fps=p["src_fps"], ready=p["sourced"])
+                            src_fps=p["src_fps"], ready=p["sourced"], quality=args.quality)
                 elif sound != src:
                     normalise(src, norm, sound, fps, p.get("frames", 0), layout=layout)
                 else:
@@ -766,6 +784,13 @@ def main() -> int:
                          "-t", f"{total / fps:.6f}", tmp_out], timeout=1800)
                 if r.returncode == 0:
                     shutil.move(tmp_out, out_path)
+        if r.returncode == 0 and args.intermediate == "prores":
+            mov = os.path.splitext(out_path)[0] + ".mov"
+            p = run(["ffmpeg", "-y", "-v", "error", "-i", out_path, "-map", "0:v:0", "-map", "0:a?",
+                     "-c:v", "prores_ks", "-profile:v", "3", "-vendor", "apl0",
+                     "-pix_fmt", "yuv422p10le", "-c:a", "pcm_s24le", mov], timeout=3600)
+            print(f"  ProRes 422 HQ: {os.path.relpath(mov, root)}" if p.returncode == 0 else
+                  f"  ! the ProRes export failed: {p.stderr.decode('utf-8', 'replace')[-300:]}")
         if r.returncode != 0:
             print(f"\n  concat failed: "
                   f"{r.stderr.decode('utf-8', 'replace')[-400:]}\n", file=sys.stderr)

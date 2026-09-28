@@ -160,6 +160,9 @@ def story_warnings(story: ir.Episode, series_cfg: dict | None = None) -> list[st
     if mode is not None and mode not in ("final", "always", "never"):
         out.append(f"series.json upscale.save_latents is {mode!r}: it takes \"final\" (the "
                    f"default), \"always\" or \"never\", so renders use \"final\".")
+    if "master" in ((series_cfg or {}).get("upscale") or {}):
+        import h3upscale                               # the master recipe (Phase 13e)
+        out += h3upscale.check_recipe(series_cfg["upscale"]["master"])
     return out
 
 

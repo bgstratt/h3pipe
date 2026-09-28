@@ -3,7 +3,7 @@
 // dialog can grey out a scale before anything is queued:
 //   - pixel: any scale above 1 up to the limit whose sides land on even numbers
 //   - a re-sample (resample mode, H3): the sides land on the target's `align` (32)
-//   - a re-sample (second_stage mode, LTX-2): only the target's fixed scale
+//   - a re-sample with a fixed upsampler (LTX: 2x): only the target's fixed scale
 //   - then pixel: the re-sample's size times its scale, on even sides
 
 import type { UpscaleOptions } from "../types";
@@ -42,7 +42,7 @@ export function upscaleSize(
   // SeedVR2 pads what it needs: any even size, as the pixel method
   if (method === "pixel" || method === "seedvr2") return onGrid(w, h, scale, 2);
   if (!latent) return { ok: false, why: "its target has no re-sample" };
-  if (latent.mode === "second_stage" && latent.fixed_scale != null && scale !== latent.fixed_scale) {
+  if (latent.fixed_scale != null && scale !== latent.fixed_scale) {
     return { ok: false, why: `its re-sample is fixed at ${latent.fixed_scale}x` };
   }
   return onGrid(w, h, scale, latent.align ?? 32);
@@ -53,6 +53,48 @@ export function thenSize(first: SizeCheck, scale: number, maxScale = 4): SizeChe
   if (!first.ok || !first.w || !first.h) return first;
   if (!(scale > 1 && scale <= maxScale)) return { ok: false, why: `scale is more than 1, up to ${maxScale}` };
   return onGrid(first.w, first.h, scale, 2);
+}
+
+/** Delivery sizes by name (the server's DELIVER); any "WxH" works too. */
+export const DELIVERS = [
+  { id: "1080p", w: 1920, h: 1080, label: "1080p (1920×1080)" },
+  { id: "1440p", w: 2560, h: 1440, label: "1440p / 2K (2560×1440)" },
+  { id: "4k", w: 3840, h: 2160, label: "4K UHD (3840×2160)" },
+];
+
+/** {w, h} of a delivery ("4k", "2048x1080"), null for none, "bad" when it isn't one. */
+export function parseDeliver(v: string | null | undefined): { w: number; h: number } | null | "bad" {
+  if (!v) return null;
+  const p = DELIVERS.find((d) => d.id === v.toLowerCase());
+  if (p) return { w: p.w, h: p.h };
+  const m = /^\s*(\d+)\s*[x×]\s*(\d+)\s*$/i.exec(v);
+  if (!m) return "bad";
+  const w = Number(m[1]), h = Number(m[2]);
+  return w % 2 || h % 2 || w < 64 || h < 64 || w > 8192 || h > 8192 ? "bad" : { w, h };
+}
+
+/** What w×h is scaled to, aspect kept, before it is cropped to fill W×H ("crop")
+ * or padded to fit inside it ("pad"); even sides (h3upscale.fit_size). */
+export function fitSize(w: number, h: number, W: number, H: number, fit: "crop" | "pad"): [number, number] {
+  if (fit === "crop") {
+    const s = Math.max(W / w, H / h);
+    return [Math.max(W, 2 * Math.ceil((w * s) / 2 - 1e-9)), Math.max(H, 2 * Math.ceil((h * s) / 2 - 1e-9))];
+  }
+  const s = Math.min(W / w, H / h);
+  return [Math.min(W, 2 * Math.floor((w * s) / 2 + 1e-9)), Math.min(H, 2 * Math.floor((h * s) / 2 + 1e-9))];
+}
+
+/** How a frame the last step makes (mw×mh) becomes W×H, in words. */
+export function fitWords(mw: number, mh: number, W: number, H: number, fit: "crop" | "pad"): string {
+  if (mw === W && mh === H) return "";
+  const [iw, ih] = fitSize(mw, mh, W, H, fit);
+  const resized = iw !== mw || ih !== mh ? "resized, " : "";
+  if (fit === "crop") {
+    const cut = iw > W ? `${iw - W} columns` : `${ih - H} rows`;
+    return `${resized}${cut} cropped (${(100 * ((iw - W) / iw + (ih - H) / ih)).toFixed(1)}%)`;
+  }
+  const bars = iw < W ? `bars left and right (${(W - iw) / 2} px each)` : `bars top and bottom (${(H - ih) / 2} px each)`;
+  return `${resized}${bars}`;
 }
 
 /** "Best for each take": a re-sample where the take's target has one that's ready. */

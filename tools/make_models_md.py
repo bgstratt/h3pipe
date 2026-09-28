@@ -203,27 +203,31 @@ def block() -> str:
         lines += [""]
 
     # Phase 13: what an upscale needs besides the target's own files (never a render)
-    ups, own = [], []
+    import h3upscale as U
+    ups, own = {}, []
     for t in TG.list_targets():
         spec = t.spec.get("upscale") or {}
-        u = spec.get("upscaler") or {}
-        name = (u.get("inputs") or {}).get("model_name")
+        name = U.upscaler_model(spec)
         if name:
-            dl = t.downloads.get(name) or {}
-            ups.append((t.id, u["class_type"], name, dl))
+            # one line per file, however many targets share it
+            u = ups.setdefault(name, {"cls": spec["upscaler"]["class_type"], "targets": [],
+                                      "dl": t.downloads.get(name) or {}})
+            u["targets"].append(t.id)
         elif spec.get("mode") in ("second_stage", "pixel_refine"):
             own.append((t.id, spec.get("mode")))
-    import h3upscale as U
     if ups or own:
         lines += ["### For upscaling (optional)", "",
-                  "Only to upscale takes (`python h3.py upscale`), never to render. The "
-                  "node comes from the Comfyui_Minimax_h3_latent_Upscaler pack (LBH-123-AI) — "
-                  "not its \"Plus\" fork, which has the same node without temporal chunking. "
+                  "Only to upscale takes (`python h3.py upscale`), never to render. H3's "
+                  "MinimaxH3LatentUpscaler3D comes from the Comfyui_Minimax_h3_latent_Upscaler "
+                  "pack (LBH-123-AI) — not its \"Plus\" fork, which has the same node without "
+                  "temporal chunking; LTX's LTXVLatentUpsampler is ComfyUI's own. "
                   "`python h3.py targets` says whether this ComfyUI can upscale.", ""]
-        for tid, cls, name, dl in ups:
-            where = dl.get("url") or dl.get("source") or "no download record"
+        for name, u in ups.items():
+            dl = u["dl"]
+            where = (f"[download]({dl['url']}) ({dl.get('source') or 'no source'})" if dl.get("url")
+                     else dl.get("source") or "no download record")
             lines += [f"- `{name}` → `models/{dl.get('folder') or 'latent_upscale_models'}/` "
-                      f"({cls}, for `{tid}`) — {where}"]
+                      f"({u['cls']}, for {', '.join(f'`{i}`' for i in u['targets'])}) — {where}"]
         lines += ["", "**SeedVR2** (any take; ComfyUI's own nodes, the models Apache 2.0): the VAE "
                   "and at least one model.", ""]
         for name, (folder, url) in U.SEEDVR2_DOWNLOADS.items():

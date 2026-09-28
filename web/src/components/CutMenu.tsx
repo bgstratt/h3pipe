@@ -3,7 +3,7 @@
 // from the other pass.
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { upscaleCut } from "../actions";
+import { masterCut, upscaleCut } from "../actions";
 import { copyCut, redoCut, resetCut, toggleWaves, undoCut } from "../cutActions";
 import { clipsWithAudio } from "../lib/audioSource";
 import { statusKey, store, useApp } from "../store";
@@ -98,6 +98,9 @@ export function CutMenu() {
       <div className="h3-menu-sep" />
       <button onClick={run(() => upscaleCut())} title={`Upscale every take of the ${pass} cut that isn't yet (2x, its own audio kept); Export 2x then assembles from them`}>
         <i className="pi pi-arrow-up-right" /> Upscale the cut (2x)…
+      </button>
+      <button onClick={run(() => masterCut())} title={`The series recipe (upscale.master) on every shot of the ${pass} cut, then the master assembled into the episode's master folder`}>
+        <i className="pi pi-video" /> Master…
       </button>
       <div className="h3-menu-sep" />
       <button onClick={run(() => toggleWaves())}>

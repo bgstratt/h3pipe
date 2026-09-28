@@ -434,7 +434,7 @@ export async function loadEpisodes() {
 
 export function selectEpisode(ep: string | null) {
   set((s) => ({
-    ep, shot: null, take: null, viewer: null, menu: null, redo: null, renderAsk: null, upscaleAsk: null, refSel: null,
+    ep, shot: null, take: null, viewer: null, menu: null, redo: null, renderAsk: null, upscaleAsk: null, masterAsk: null, refSel: null,
     cutPlay: { ...s.cutPlay, playing: false, pos: 0 },
     build: { busy: false, result: null, error: null },
     // Phase 9c: the Recording and voice-clip windows belong to one episode
@@ -981,6 +981,15 @@ export function closeUpscale() {
   set({ upscaleAsk: null });
 }
 
+/** Phase 13e: the Master dialog for the current pass's cut. */
+export function masterCut() {
+  set({ menu: null, masterAsk: { pass: get().pass } });
+}
+
+export function closeMaster() {
+  set({ masterAsk: null });
+}
+
 /** The Upscale dialog's choices. `method` "auto" leaves each take's default. */
 export interface UpscaleForm {
   method: "auto" | "latent" | "pixel" | "seedvr2";
@@ -995,9 +1004,17 @@ export interface UpscaleForm {
   /** a pixel step after a re-sample: its model (null: none) and scale */
   thenModel: string | null;
   thenScale: number;
+  /** what the then step is: an upscale model (thenModel), or SeedVR2 (seedvr2Model) */
+  thenMethod?: "pixel" | "seedvr2";
+  /** an exact output size ("1080p", "1440p", "4k", "WxH"; null: as scaled), and how a
+   * frame of another shape meets it: crop to fill, or pad with bars */
+  deliver?: string | null;
+  fit?: "crop" | "pad";
   /** pixel: on each take's existing upscale instead of the take */
   fromUpscale: boolean;
   encoder: "auto" | "nvenc" | "x264";
+  /** how the .up.mp4 is encoded: review, or master (for delivery; slower) */
+  quality?: "review" | "master";
   precision: "fp16" | "fp32";
   frequencySplit: boolean;
   keepSoft: number;
@@ -1014,22 +1031,47 @@ export function upscaleRequestOf(f: UpscaleForm, ask: { pass: Pass; takes: { sho
   if (f.method === "seedvr2" && f.seedvr2Model) req.seedvr2_model = f.seedvr2Model;
   if ((f.method === "pixel" || f.method === "seedvr2") && f.fromUpscale) req.from_upscale = true;
   if (f.encoder !== "auto") req.encoder = f.encoder;
+  if (f.quality === "master") req.quality = "master";
   if (f.precision !== "fp16") req.precision = f.precision;
   if (!f.frequencySplit) req.frequency_split = false;
   if (f.keepSoft) req.keep_soft = f.keepSoft;
   if (f.grain) req.grain = f.grain;
   if (f.method !== "pixel" && f.method !== "seedvr2" && f.detail) req.detail = f.detail;
   if (f.method !== "pixel" && f.method !== "seedvr2" && f.vae) req.vae = true;
-  if (f.scale !== 2) req.scale = f.scale;
+  // a delivery size decides the pixel method's scale, and a then-pixel step's
+  const sized = !!f.deliver;
+  if (f.scale !== 2 && !(sized && (f.method === "pixel" || f.method === "seedvr2"))) req.scale = f.scale;
   if (f.method !== "pixel" && f.method !== "seedvr2" && f.thenModel) {
-    req.then_pixel_model = f.thenModel;
-    if (f.thenScale !== 2) req.then_scale = f.thenScale;
+    if (f.thenMethod === "seedvr2") {
+      req.then_method = "seedvr2";
+      if (f.seedvr2Model) req.seedvr2_model = f.seedvr2Model;
+    } else {
+      req.then_pixel_model = f.thenModel;
+    }
+    if (f.thenScale !== 2 && !sized) req.then_scale = f.thenScale;
+  }
+  if (sized) {
+    req.deliver = f.deliver!;
+    if (f.fit === "pad") req.fit = "pad";
   }
   if (f.redo) req.redo = true;
   return req;
 }
 
 /** Phase 13: remove a take's upscale (DELETE /h3pipe/upscale). Asks first. */
+/** Phase 13e: mark a take's upscale Keep (Master and a wholesale redo leave it alone), or clear it. */
+export async function keepUpscale(ref: TakeRef, keep: boolean) {
+  set({ menu: null });
+  return withBusy(`keepup|${ref.shot}|${ref.take}`, async () => {
+    try {
+      await api().putUpscaleKeep(ref.ep, ref.shot, ref.take, keep, ref.pass);
+      scheduleRefresh(0);
+    } catch (e) {
+      report(`Couldn't ${keep ? "keep" : "unkeep"} ${ref.shot} ${tn(ref.take)}'s upscale`, e);
+    }
+  });
+}
+
 export async function removeUpscale(ref: TakeRef) {
   set({ menu: null });
   if (!confirm(`Remove ${ref.shot} ${tn(ref.take)}'s upscale? The take itself stays.`)) return;

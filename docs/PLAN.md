@@ -1710,9 +1710,10 @@ the one clip that wasn't upscaled scaled and named; `h3assemble` without it is u
   badges, viewer toggle and Export 2x were checked by type and unit tests and the mock API;
   the look of them is the user's to confirm.
 
-**13d — upscale on LTX and Wan (planned 2026-09-26, not started).** What each needs, from
-what this machine and the repo have today. Nothing below is built; each target gets an
-`upscale` block in its target.json and its own graph surgery in h3upscale.
+**13d — upscale on LTX and Wan (planned 2026-09-26; every built-in video target built by
+2026-09-27).** What each needed, from what this machine and the repo had; each target got
+an `upscale` block in its target.json and its own graph surgery in h3upscale. The plan's
+text is kept under each "built" note.
 
 - **`ltx2`: built 2026-09-26** (mode `second_stage` in h3upscale; `saver.latent` names the
   final sampler by `upstream_of: images`, since the graph has two). Live on the scratch
@@ -1732,7 +1733,8 @@ what this machine and the repo have today. Nothing below is built; each target g
   widgets), audio held. LTX's AV latent is the same NestedTensor pair, so `H3HoldAudio`
   works on it (worth a target-neutral name). 768×512 → 1536×1024. To find out: whether a
   2x of the *final* output fits and is worth it, and how much of the tail keeps the mouth.
-- **`ltx2_ingredients` (LTX-2.3 + IC-LoRA): no new downloads**
+- **`ltx2_ingredients` (LTX-2.3 + IC-LoRA): built 2026-09-27**, see "The rest" below.
+  Planned: no new downloads
   (`ltx-2.3-spatial-upscaler-x2-1.1.safetensors` is in `latent_upscale_models`, and
   `LTXVLatentUpsampler` is core). Harder: the reference sheet goes in as IC-LoRA guides
   (`LTXVAddGuide` / `LTXVCropGuides`) that must be rebuilt at the new size.
@@ -1778,17 +1780,63 @@ what this machine and the repo have today. Nothing below is built; each target g
   at the new size (i2v: the low-noise `KSamplerAdvanced` from step 3 of 4, add_noise on,
   `WanImageToVideo` and its staged first frame rebuilt at the new size; ti2v: its `KSampler`
   at denoise 0.25). No latent kept or needed; silent, so nothing to hold. ti2v defaults to
-  1.5x (its 1280×704 at 2x is 2560×1408). `wan22_vace` stays on the pixel method: its latent
-  carries the reference frame in front, which a plain encoded video doesn't match. Live:
+  1.5x (its 1280×704 at 2x is 2560×1408). (`wan22_vace` waited: its latent carries the
+  reference frame in front, which a plain encoded video doesn't match; see "The rest".) Live:
   sh760 on wan22_ti2v (1280×704, 69 frames, 87 s) upscaled to 1920×1056 in 237 s (5 of 20
   steps at 1080p on the 5B, h264_nvenc in 1.8 s): sharper eyes, hair, lettering and edges,
   the face kept. Slow: a later `start` or the pixel method when time matters.
+- **The rest: `minimax_h3_fl2va`, `wan22_vace`, `ltx2_ingredients`, built 2026-09-27**
+  (on the `upscale` branch after PR #1; unit-tested, the live check pending a ComfyUI
+  restart for the `H3HoldAudio` change):
+  - **FL2VA** (mode `resample`, as Ref2VA's, the same H3 latent upscaler): no loader, so
+    `size: "params"` puts the new size on `MiniMaxH3ImageToVideo`'s width/height, which
+    stretches the keyframes to it; its keyframes and the dialogue anchor
+    (`MiniMaxH3AddGuide`, which reads its size from that node's latent) are conditioning,
+    not latent, so replacing the latent keeps them. `saver.latent` is its one
+    `SamplerCustomAdvanced`.
+  - **VACE** (mode `pixel_refine`, as I2V's, plus `reference`): `WanVaceToVideo`'s latent
+    has `trim_latent` frames in front for the reference picture (cut off after sampling by
+    `TrimVideoLatent`), so the refine's latent is the reference sized as the node sizes it
+    (`ImageScale` bilinear, centre crop), `VAEEncode`d, then core `LatentConcat` on `t` in
+    front of the encoded frames. Its staged `reference` input comes back from the sidecar.
+  - **LTX-2.3 ingredients** (mode `resample`, generalised): the upscaler may load a model
+    (`upscaler.model`: `LatentUpscaleModelLoader` with
+    `ltx-2.3-spatial-upscaler-x2-1.1.safetensors`, now in its `downloads` from ComfyUI-Manager's
+    model list) and take the video VAE (`upscaler.vae`); with no scale input it is
+    fixed at 2x (`fixed_scale`, for any mode now, so the dialog greys other scales).
+    The upscaled video goes `into` the graph's own `LTXVAddGuide`, which appends the sheet
+    again at the new size (`ResizeAndPadImage` through the width/height params); the join
+    after it takes the take's audio; a kept latent (the KSampler's, guides and all:
+    `saver.latent` is the KSampler) is cut to its first `(length - 1) / 8 + 1` frames by
+    core `LatentCut` (`trim`). The KSampler becomes the `KSamplerAdvanced` it is with
+    `start_at_step` (`sampler_tail`), since a denoise would stretch its schedule rather
+    than cut it: step 7 of its 8 linear_quadratic steps starts at sigma 0.4219, where
+    `ltx2`'s default starts too (its tail is 0.9094, 0.725, 0.4219, 0). The VAEs are the
+    checkpoint's third output and `LTXVAudioVAELoader` (`video_vae` / `audio_vae` in the
+    block). `take_job` now keeps a staged `sheet` except for a second stage.
+  - **`H3HoldAudio` keeps a video mask the latent already has** (LTX's guide frames held
+    at 0, so the IC-LoRA sees its sheet clean; a first frame a second stage re-imposes),
+    where it used to set ones over the whole video.
+  - Every built-in video target now re-samples; the tests of "a target without one" drop
+    `wan22_vace`'s block for their duration.
 - **Encoder and precision** (2026-09-26): upscales encode on NVENC by default (`encoder`
   auto / nvenc / x264; H.264 to 4096, HEVC past it; x264 fallback, its faster preset past
   4K), streaming frames to ffmpeg one at a time; the upscale model runs fp16 under autocast
   by default (`precision`). Measured on the 5090: 5376×3072 HEVC NVENC ~9 fps against
   x264's ~1 fps (sh020 t03's encode was 105 s of a 320 s job). Assemble re-encodes a cut
-  whose clips mix codecs.
+  whose clips mix codecs. Revised 2026-09-27: `auto` no longer writes HEVC — sh040 t03's
+  5376×3072 HEVC upscale was a sound file but played black in the editor's browser — so
+  past 4096 auto uses x264 (H.264, playable); HEVC only with `nvenc` forced.
+- **Output size** (2026-09-27, the user's ask: "limit the upscale to 3840x2160"): an upscale
+  can be delivered at an exact size (`deliver`: 1080p / 1440p / 4k / WxH) with `fit` crop
+  (default) or pad, beside the multiple, which now takes any number (the dialog's
+  Custom…). The last step that can make any size is sized to cover or fit the delivery
+  (`fit_size`, aspect kept; the same function in h3upscale, the node pack and the editor);
+  `H3SaveUpscale` resizes (a re-sample alone), crops or pads with an ffmpeg filter as it
+  encodes. Why crop/pad at all: H3's native 1344×768 and its 448×256 proxy are 7:4, not
+  16:9 (1344×768 to 4K: 36 rows cropped, 1.6%, or 30 px bars each side). AUTHORING's size
+  table now has a third setup, 16:9 on the 32 grid (1024×576, proxy 512×288), which
+  re-samples 2x to 2048×1152 and meets 1080p and 4K exactly.
 - **Pixel on top of an upscale** (2026-09-26): `from_upscale` / `--from-upscale` / the dialog's
   "On top of the existing upscale": the pixel method reads the take's fresh `.up.mp4` and
   replaces it, sized from the upscale; the record nests the old one as `on_upscale`.
@@ -1833,6 +1881,160 @@ what this machine and the repo have today. Nothing below is built; each target g
   it can't pull a face toward a sheet, or away from one), works on any take and would give
   Wan and custom targets an upscale without per-target graphs. To measure: VRAM and time
   at 1080p, and whether it flickers across a 3–8 s clip.
+
+**13e — masters: one recipe, the whole cut, one action** (planned 2026-09-27, on the
+`upscale` branch)
+
+Why: 13a–13d made upscaling possible for every target, but every run is picked by hand in
+the dialog (method, then-step, size, fit, finish), nothing records which settings made an
+upscale, "fresh" only means "made from the current take", and `assemble --upscaled` quietly
+scales up any clip without one. That suits trying things; a master wants the same treatment
+on every shot, a clear list of what's missing, and nothing redone by accident. The goal:
+lock the cut, press **Master**, get `<ep>_master.mp4` and a report.
+
+Decisions (the user's, 2026-09-27):
+- **A recipe per target, one size per master.** There is one latent upscaler per model family
+  (H3: LBH-123-AI's; LTX: each version's own spatial x2, matched to its VAE; Wan: none, a
+  pixel model first), and a re-sample always runs on the take's own model: an H3 take can't
+  go through LTX. What differs is everything around it (start/detail, the then-step, the
+  pixel model, the finish). So the recipe has per-target sections (H3, LTX and Wan shots in
+  one cut each get theirs) and one `deliver`, `fit` and encoding for the whole master.
+- **Per-shot overrides.** A dialogue close-up wants the lightest re-sample (the mouth), a wide
+  without dialogue can take `detail`, a shot where SeedVR2 or a re-sample went wrong falls back
+  to the pixel method. Overrides sit with the episode's other overrides (h3edit), as render
+  overrides do.
+- **Never redo what's kept.** `master` upscales only a pick with no upscale, or one made from
+  an older take. An upscale made with a different recipe (or before recipes, with none on
+  record) is **kept and listed** ("different recipe"), not redone; `--conform` redoes those,
+  except any marked **Keep** (the editor's "Keep this upscale", `h3.py upscale --keep`), which
+  nothing redoes but an explicit per-shot redo.
+- **The cut is the cut.** `master` works from the pass's cut as locked (the picks); it never
+  changes a pick. A shot with no usable pick, or whose upscale failed, is reported and the
+  master isn't assembled (`--allow-gaps` makes it anyway, the review-cut way, and says so).
+
+Steps (in order; each ends with its exit check):
+
+- **13e1 — the recipe.** `upscale.master` in the series config:
+  ```json
+  "upscale": { "save_latents": "final",
+    "master": { "deliver": "4k", "fit": "crop", "quality": "master",
+      "targets": {
+        "minimax_h3_*": { "method": "latent", "scale": 2, "then": "RealESRGAN_x2.pth" },
+        "ltx2*":        { "method": "latent" },
+        "wan22_*":      { "method": "seedvr2", "seedvr2_model": "7b" },
+        "*":            { "method": "pixel", "pixel_model": "RealESRGAN_x2.pth" } },
+      "finish": { "frequency_split": true, "keep_soft": 0, "grain": 0 } } }
+  ```
+  Target keys are ids or globs, most specific wins; `then` is an upscale model file or
+  `"seedvr2"`; any field of the upscale request (`detail`, `start_step`, `then_scale`...) may
+  appear. `h3.py check` validates it (unknown target keys, methods, models it can see, a
+  `deliver` that parses); a per-shot `upscale` override (h3edit, the editor's shot menu)
+  merges over the target's section. `h3upscale.recipe_for(root, take)` resolves it into the
+  kwargs `plan_upscale` takes. The dialog opens on the recipe when there is one ("Series
+  recipe" with a "Change for this run" that leaves it alone).
+  Exit: the kitchen-sink fixture's recipe resolves per target and per override; `check`
+  reports a bad one; the dialog defaults to it (vitest).
+  **Built 2026-09-27.** h3upscale: `master_recipe`, `recipe_section`, `recipe_for`,
+  `recipe_kwargs`, `shot_recipes` / `set_shot_recipe`, `describe_recipe`, `check_recipe`
+  (in the build's warnings). A shot's own recipe sits in overrides.json's top-level
+  `"upscale"`, not in its override block: h3promote reads every object there as a
+  per-target block. `POST /h3pipe/upscale` `recipe: true`, `PUT /h3pipe/upscale/recipe`,
+  the options' `recipe` (with `?ep=`), `h3.py upscale --recipe`. The dialog opens on
+  "Series recipe" when there is one (each target's section in words, the shots' own, the
+  problems), "Choose for this run" otherwise, and a single take's choices can be saved as
+  its shot's recipe. Tested in RecipeTest (the dialog's default is a one-line component
+  state, left to the live check).
+- **13e2 — upscales remember their recipe.** `queued_record` writes `recipe` (the resolved
+  settings, normalised: model files, sizes, finish) and `recipe_hash`; `upscale_of` adds
+  `recipe_match` (against the recipe the take would get now: `same`, `different`, `unknown`
+  for an upscale from before 13e) and `keep`. The editor's badge says which (a 2x badge with
+  a mark for "different", a pin for "keep"); `keep` is set and cleared from the take menu and
+  `h3.py upscale --keep / --unkeep`.
+  Exit: changing the series recipe turns existing upscales "different" but not stale; `keep`
+  survives a redo attempt; goldens unchanged (records only).
+  **Built 2026-09-27.** `settings_of` (method, scales, start, models, the then step,
+  precision, finish, size and fit: not the route or the encoder) and `settings_hash` in
+  every `.up.json` as `recipe` / `recipe_hash`; `recipe_status` plans the take by the
+  recipe now and compares hashes. `set_keep` / `kept`; `plan_upscale(respect_keep=True)`
+  skips a fresh kept upscale, which the route does for a whole-cut request (`shots` and
+  `takes` both null) and the CLI without `--only` / `--take`; a new upscale starts unkept.
+  `PUT /h3pipe/upscale/keep`, `h3.py upscale --keep / --unkeep`, the take menu's Keep /
+  Unkeep upscale, the badge's "2x keep", "2x ≠" (different) or "2x ?" (unknown).
+- **13e3 — master quality.** An encoder quality `master` (x264, CRF ~14, preset slow, 8-bit
+  4:2:0 so the editor's browser still plays it; NVENC's constqp equivalent when asked) beside
+  today's `review` (CQ 19 NVENC). Assemble's master copies the clips' streams (concat, no
+  second encode) when every clip matches in codec, size and fps, which a master's always do;
+  the audio mixed as assemble already does. A ProRes 422 HQ `.mov` export from assemble
+  (`--intermediate prores`) for an editor downstream, not for the browser.
+  Exit: a master of the scratch episode is stream-copied (ffprobe: the clips' bitrate, no
+  re-encode in assemble's log); the ProRes export opens in ffprobe as prores_ks HQ.
+  **Built 2026-09-27.** `quality` (`review` | `master`) on the upscale request, the recipe,
+  the CLI (`--quality`) and the dialog (beside the encoder): `H3SaveUpscale` writes a
+  master with x264 CRF 12 (slow; medium past 4K) High 8-bit 4:2:0, or NVENC p7/hq CQ 14
+  when NVENC is forced; the record keeps `quality`, and a master-quality upscale's settings
+  differ from a review one's (so the master recipe can tell). Assemble already copied clips
+  that needn't be re-encoded (same codec, size and fps, no window, trim or placeholder);
+  `--quality master` makes the ones that must be (dialogue windows, trims) CRF 12 slow,
+  and `--intermediate prores` writes a ProRes 422 HQ `.mov` (yuv422p10le, PCM 24-bit) from
+  the finished cut. Tested in test_assemble (copied streams keep their own x264 settings,
+  a trim is CRF 12, the .mov probes as prores HQ with every frame). The live check on the
+  scratch episode waits for 13e4's Master.
+- **13e4 — `h3.py master <ep>` and the editor's Master.** Plans every shot of the cut:
+  `upscale` (missing, or from an older take), `ok` (fresh, same recipe), `kept` (different
+  recipe or keep), `gap` (no usable pick, a failed upscale). Queues the `upscale` ones with
+  their resolved recipes (one ComfyUI queue, in cut order); `--wait` follows the queue, else
+  a later `master` (or the editor, when the last one lands) assembles. Assembly is strict:
+  every clip at the master size, no scaling, no gaps unless `--allow-gaps`. Writes
+  `<ep>/master/<ep>_master_<WxH>.mp4` and `<ep>_master.json` / `.md` (each shot: take,
+  target, recipe, upscale time, and anything kept or missing). `--check` plans only.
+  Route `POST /h3pipe/master` (plan / queue / assemble) and a **Master…** item in the cut
+  menu with the plan as a table before anything is queued.
+  Exit: on the scratch episode with an H3, an LTX and a Wan shot, one `master --wait`
+  upscales each through its own target's recipe, keeps a pre-existing upscale, and
+  assembles; a re-run queues nothing and re-assembles byte-identically.
+  **Built 2026-09-27** (the live check pending: ComfyUI must reload the saver's `quality`
+  input first). `h3master.py`: `plan_master` → `Plan` of `Row`s, `queue_master`,
+  `wait_master` (ComfyUI's history by prompt id, then the saver's record),
+  `assemble_master` (h3assemble `--upscaled --size WxH --quality <recipe's> --name
+  <ep>_master_<WxH>.mp4`, `--partial` only with gaps allowed, then moved with its
+  `_shots.txt` and `.mov` into `<ep>/master/`), `write_report`. A failed upscale is
+  retried (`upscale`, not a gap). `h3.py master`, `POST /h3pipe/master`, the cut menu's
+  **Master…** (the plan as a table, Conform / Allow gaps / ProRes, Queue N upscales,
+  Assemble master; the plan is read again as upscales land). Tested in test_master.py.
+  **Live, 2026-09-27** (`Porchlights\_scratch_master`: sh010 on H3 Ref2VA 960×544, sh330 on
+  LTX-2 960×512, sh760 on Wan ti2v 1280×704, rendered in 2:43; recipe 1440p crop master:
+  H3 and LTX re-sample then RealESRGAN_x2, Wan SeedVR2 7B). sh010 was given a pixel
+  upscale at 1440p first: the plan kept it ("other settings"), queued the other two, and
+  `master --wait --prores` made `master\_scratch_master_master_2560x1440.mp4` (227 frames)
+  and its ProRes 422 HQ `.mov` in 5:54; every clip 2560×1440 (LTX's re-sample 1920×1024 →
+  2700×1440 cropped, SeedVR2 2620×1440 cropped). **Found:** the kept NVENC Main upscale was
+  stream-copied beside x264 High ones into one track (the first clip's headers; ffmpeg
+  decoded it, a browser or a hardware decoder may not): assemble's "mixed" test now
+  compares codec, profile and pixel format, and re-encodes the lot when they differ. Re-runs
+  queued nothing and wrote byte-identical masters (sha1 fa31df51…). `--conform` redid sh010
+  by the recipe (2:57), after which the clips agree and are copied; a master without
+  `--prores` now removes an earlier one's `.mov`. The route answered the same plan.
+- **13e5 — many episodes.** `h3.py master <ep> <ep> ...` (or a folder of episodes): one
+  plan across them, queued episode by episode, a summary at the end; episodes whose cut
+  has gaps are listed and skipped, not half-mastered.
+  Exit: two scratch episodes master in one command.
+  **Built with 13e4**: `h3.py master` takes several episodes, or a show folder (every
+  folder in it with a shotlist or a cut), plans and runs each in turn and says which
+  finished; one with gaps stops at its plan. (Live: one episode; two in one command are
+  the same loop, covered by test_master's show-folder test.)
+- **13e6 — docs and the skill.** AUTHORING: a **Masters** section (the recipe, overrides,
+  keep, what `master` does and doesn't redo), and the series-config guidance: when writing
+  a new series config, propose an `upscale.master` block from the chosen setup (render
+  small → re-sample then a model to 1080p/4K; render at size → a model or SeedVR2; Wan
+  shots → SeedVR2). README's commands, API.md's routes, INSTALL unchanged.
+  Exit: `tools/make_prompts.py` regenerated; `tests/test_docs.py` green.
+  **Built 2026-09-27**: AUTHORING's **Masters** section (the recipe, per-shot recipes,
+  what Master keeps and redoes, gaps, the report, several episodes) with the series-config
+  guidance; README's command and table row; API.md's `POST /h3pipe/master`.
+
+Not in 13e: automatic per-shot choice (dialogue detection for `detail`; the user: selecting
+and re-rendering is enough), a colour grade (the conform's job), and cross-shot processing
+(shots meet at hard cuts: one at a time is right).
 
 **Phase 13 risks**
 - **Lip sync.** Held audio fixes timing, and at step 7 the mouth matched the take on the one

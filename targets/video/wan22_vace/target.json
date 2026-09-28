@@ -299,6 +299,22 @@
     },
     "review_nodes": []
   },
+  "upscale": {
+    "_note": "Phase 13d (docs/PLAN.md, h3upscale.py): as wan22_i2v's `pixel_refine`: the take's frames through an upscale model (`pixel_model`), encoded with the Wan VAE, then the low-noise expert alone from `start` (0.75 of the take's 4 lightning steps: the last) at the new size. VACE's latent starts with its reference picture's frame (`trim_latent` cuts it off after sampling), so the refine's does too (`reference`): the picture at the new size (bilinear, centre crop, as WanVaceToVideo sizes it), encoded, in front. Silent: nothing to hold.",
+    "mode": "pixel_refine",
+    "scale": 2,
+    "start": 0.75,
+    "align": 32,
+    "pixel_model": "RealESRGAN_x2.pth",
+    "sampler": {
+      "class_type": "KSamplerAdvanced",
+      "upstream_of": "images"
+    },
+    "reference": {
+      "class_type": "WanVaceToVideo",
+      "image": "reference_image"
+    }
+  },
   "presets": {
     "_note": "The Wan 2.2 Fun VACE 14B fp8 pair with lightx2v's Wan2.2-Lightning T2V A14B 4-step LoRA (one per noise stage, routed by `stage`), which is the accelerator for these experts -- the I2V pair wan22_i2v uses does not fit them. 4 steps at cfg 1, euler / shift 8, split half-way. `base` is what a pass renders when the pair isn't installed: the 20 / 10 step cfg 3.5 settings this target shipped with, slower but needing no LoRA. Every release of the pair ships as high_noise_model / low_noise_model, so the variant is in the name you save it under: 250928 reads as more natural with finer detail, Seko V2 does better on stylised and synthetic work -- swap the names here to A/B them. The negative prompt is Wan's standard one, from ComfyUI's Wan templates.",
     "final": {

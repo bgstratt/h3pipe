@@ -34,6 +34,9 @@ its own (data only, proposed from a workflow by `h3inspect.py`).
 - `h3issues.py` — a pass's notepad (`<ep>/_issues.json`): what is wrong with a shot as it
   was rendered, snapshotting the script lines and compiled prompt, exported as markdown
   to hand to an assistant (`h3.py issues`). Meant to be emptied, not kept
+- `h3upscale.py` — a take's upscale (re-sample, pixel model, SeedVR2; output size) and the
+  series' master recipe (`upscale.master`); `h3master.py` — the recipe on every shot of a
+  cut, then the master assembled into `<episode>/master/` (`h3.py master`)
 - `h3align.py` — times the script against a dialogue recording
 - `h3assemble.py` — review cut (ffmpeg)
 - `h3peaks.py` — a media file's sound: has it any, duration, waveform peaks (the editor's

@@ -37,6 +37,16 @@ from test_api import ApiTest  # noqa: E402
 
 KITCHEN = os.path.join(HERE, "fixtures", "kitchen_sink")
 
+# every built-in video target re-samples now; the tests of one that doesn't use
+# wan22_vace with its `upscale` block taken away (targets are cached by folder)
+PLAIN = "wan22_vace"
+
+
+def without_resample(case: unittest.TestCase, target_id: str = PLAIN) -> None:
+    spec = TG.load_target(target_id, "video").spec
+    block = spec.pop("upscale")
+    case.addCleanup(spec.__setitem__, "upscale", block)
+
 
 class LatentDefaultTest(unittest.TestCase):
     def setUp(self):
@@ -305,7 +315,8 @@ class UpscaleRouteTest(UpscaleTest):
         self.assertEqual(r["status"], "not_ready")
         self.assertIn("H3HoldAudio", r["missing"][0])
         self.assertEqual(U.upscale_readiness(t, None)["status"], "unknown")
-        wan = TG.load_target("wan22_vace", "video")          # no re-sample of its own
+        without_resample(self)
+        wan = TG.load_target(PLAIN, "video")                  # no re-sample of its own
         self.assertIsNone(U.upscale_readiness(wan, info))
         self.assertNotIn("upscale", E.readiness([wan], info)[wan.id])
         self.assertIn("upscale", E.readiness([t], info)[t.id])
@@ -397,7 +408,8 @@ class PixelUpscaleTest(UpscaleRouteTest):
     def test_default_method_follows_the_target(self):
         t = self.final_take()
         self.assertEqual(U.plan_upscale(self.ep, t).method, "latent")         # H3 has one
-        wan = self.as_target(t, "wan22_vace")              # no re-sample of its own
+        without_resample(self)
+        wan = self.as_target(t, PLAIN)                     # no re-sample of its own
         up = U.plan_upscale(self.ep, wan)
         self.assertEqual((up.method, up.route, up.pixel_model, up.start_step),
                          ("pixel", "pixel", "RealESRGAN_x2.pth", None))
@@ -429,6 +441,7 @@ class PixelUpscaleTest(UpscaleRouteTest):
                          [base, base - 1, base - 2])
 
     def test_route_and_options(self):
+        without_resample(self)
         t = self.final_take()
         res = self.ok(A.post_upscale(self.ctx, {"ep": self.ep, "takes": [{"shot": "sh010", "take": 1}],
                                                 "method": "pixel", "pixel_model": "4x-UltraSharp.pth"}))
@@ -448,7 +461,7 @@ class PixelUpscaleTest(UpscaleRouteTest):
         self.assertEqual(opts["pixel"]["default"], "RealESRGAN_x2.pth")
         self.assertIn("RealESRGAN_x4.pth", opts["pixel"]["models"])
         self.assertEqual(opts["latent"]["minimax_h3_ref2va"]["status"], "ready")
-        self.assertIsNone(opts["latent"]["wan22_vace"])
+        self.assertIsNone(opts["latent"][PLAIN])
         self.assertEqual(opts["details"], [0, 1, 2])
 
     def test_the_proxy_pass(self):
@@ -467,6 +480,90 @@ class PixelUpscaleTest(UpscaleRouteTest):
         self.err(A.delete_upscale(self.ctx, {"ep": self.ep, "shot": "sh010", "take": "1"}), 404)
         self.ok(A.delete_upscale(self.ctx, {"ep": self.ep, "pass": "proxy", "shot": "sh010", "take": "1"}))
         self.assertFalse(os.path.exists(t.paths.up_mp4))
+
+    def test_deliver(self):
+        """A delivery size: the last step that can make any size is sized to cover
+        (crop) or fit inside (pad) it, aspect kept; the saver crops or pads."""
+        self.assertEqual(U.parse_deliver("4K"), (3840, 2160))
+        self.assertEqual(U.parse_deliver("2048x1080"), (2048, 1080))
+        self.assertIsNone(U.parse_deliver(None))
+        for bad in ("huge", "1921x1080", "10x10"):
+            with self.assertRaises(U.UpscaleError):
+                U.parse_deliver(bad)
+        import h3_upscale as UN                      # the node's copy agrees
+        for case in ((1344, 768, 3840, 2160, "crop"), (960, 544, 1920, 1080, "pad"),
+                     (1024, 576, 3840, 2160, "crop"), (832, 480, 2560, 1440, "pad")):
+            self.assertEqual(U.fit_size(*case), UN.fit_size(*case))
+        t = self.final_take()
+        T.update_sidecar(t.paths.sidecar, width=1344, height=768)
+        t = T.get_take(self.ep, "final", "sh010", 1)
+        # re-sample 2x, then the model to 4K: cover, then crop
+        up = U.plan_upscale(self.ep, t, then_model="RealESRGAN_x2.pth", deliver="4k")
+        self.assertEqual((up.action, (up.width, up.height), up.made_size, up.out_size),
+                         ("upscale", (2688, 1536), (3840, 2196), (3840, 2160)))
+        self.assertEqual(up.then_scale, round(3840 / 2688, 4))
+        g = U.upscale_graph(self.base(), up)
+        self.assertEqual((g["up_then"]["inputs"]["width"], g["up_then"]["inputs"]["height"]), (3840, 2196))
+        si = g["up_save"]["inputs"]
+        self.assertEqual((si["width"], si["height"], si["fit"]), (3840, 2160, "crop"))
+        rec = U.queued_record(up)
+        self.assertEqual((rec["width"], rec["height"]), (3840, 2160))
+        self.assertEqual(rec["deliver"], {"width": 3840, "height": 2160, "fit": "crop", "made": [3840, 2196]})
+        self.assertIn("-> 3840x2160 (cropped)", U.describe(up))
+        # padded instead: fits inside
+        up = U.plan_upscale(self.ep, t, then_model="RealESRGAN_x2.pth", deliver="4k", fit="pad")
+        self.assertEqual(up.made_size, (3780, 2160))
+        # the pixel method: its scale worked out from the take
+        up = U.plan_upscale(self.ep, t, method="pixel", deliver="1080p", scale=4)
+        self.assertEqual((up.scale, up.width, up.height), (round(1920 / 1344, 4), 1920, 1098))
+        g = U.graph_of(up, {}, "")
+        self.assertEqual((g["up_pixels"]["inputs"]["width"], g["up_save"]["inputs"]["height"]), (1920, 1080))
+        # a re-sample alone keeps its scale; the saver resizes, with a note
+        up = U.plan_upscale(self.ep, t, deliver="4k")
+        self.assertEqual((up.width, up.out_size), (2688, (3840, 2160)))
+        self.assertTrue(any("stretched" in n for n in up.notes))
+        self.assertEqual(U.plan_upscale(self.ep, t, deliver="1080p").notes, [])
+        # what can't be: a pixel step that would shrink, a bad fit
+        self.assertIn("needs no upscale model", U.plan_upscale(
+            self.ep, t, then_model="RealESRGAN_x2.pth", deliver="1080p").why)
+        self.assertEqual(U.plan_upscale(self.ep, t, method="pixel", deliver="1280x720").action, "error")
+        self.assertEqual(U.plan_upscale(self.ep, t, deliver="4k", fit="stretch").action, "error")
+        # the route and the options
+        self.err(A.post_upscale(self.ctx, {"ep": self.ep, "shots": ["sh010"], "deliver": "big"}), 400)
+        self.err(A.post_upscale(self.ctx, {"ep": self.ep, "shots": ["sh010"], "fit": "zoom"}), 400)
+        res = self.ok(A.post_upscale(self.ctx, {"ep": self.ep, "shots": ["sh010"], "redo": True,
+                                                "method": "pixel", "deliver": "1440p", "fit": "pad"}))
+        self.assertEqual((res["queued"][0]["width"], res["queued"][0]["height"]), (2560, 1440))
+        opts = self.ok(A.get_upscale_options(self.ctx, {}))
+        self.assertEqual(opts["fits"], ["crop", "pad"])
+        self.assertIn({"id": "4k", "width": 3840, "height": 2160}, opts["delivers"])
+
+    def test_then_seedvr2(self):
+        """Re-sample, then SeedVR2 in the same job (to an output size here)."""
+        t = self.final_take()
+        T.update_sidecar(t.paths.sidecar, width=1344, height=768)
+        t = T.get_take(self.ep, "final", "sh010", 1)
+        up = U.plan_upscale(self.ep, t, then_method="seedvr2", seedvr2_model="3b", deliver="4k")
+        self.assertEqual((up.action, up.then_method, up.then_model, up.made_size),
+                         ("upscale", "seedvr2", "seedvr2_3b_int8_convrot.safetensors", (3840, 2196)))
+        g = U.upscale_graph(self.base(), up)
+        decode = self.by_class(g, "VAEDecode")[0]
+        self.assertEqual(g["up_resize"]["inputs"]["image"], [decode, 0])
+        self.assertEqual((g["up_resize"]["inputs"]["width"], g["up_resize"]["inputs"]["height"]), (3840, 2196))
+        self.assertEqual(g["up_unet"]["inputs"]["unet_name"], "seedvr2_3b_int8_convrot.safetensors")
+        self.assertEqual(g["up_finish"]["inputs"]["source"], [decode, 0])
+        self.assertEqual(g["up_save"]["inputs"]["images"], ["up_finish", 0])
+        self.assertFalse(self.by_class(g, "H3PixelUpscale"))
+        self.assertTrue(self.by_class(g, "H3HoldAudio"))                  # still a re-sample first
+        rec = U.queued_record(up)
+        self.assertEqual((rec["then_pixel"]["method"], rec["width"], rec["height"]), ("seedvr2", 3840, 2160))
+        self.assertIn("then SeedVR2 (seedvr2_3b_int8_convrot.safetensors)", U.describe(up))
+        # readiness asks for SeedVR2's files, not an upscale model
+        missing = U.not_ready([up], {c: {"input": {}} for c in U.UPSCALE_NODES})
+        self.assertTrue(any(m.startswith("SeedVR2:") for m in missing))
+        self.assertFalse(any(m.startswith("pixel:") for m in missing))
+        self.assertEqual(U.plan_upscale(self.ep, t, then_method="sharp").action, "error")
+        self.err(A.post_upscale(self.ctx, {"ep": self.ep, "shots": ["sh010"], "then_method": "x"}), 400)
 
     def test_then_pixel(self):
         """Re-sample 2x, then an upscale model 2x more, in one job: 4x."""
@@ -610,6 +707,119 @@ class PixelUpscaleTest(UpscaleRouteTest):
         self.assertEqual((ks["denoise"], ks["latent_image"]), (0.25, ["up_venc", 0]))
         self.assertEqual(U.plan_upscale(self.ep, t, scale=2).height, 1408)
 
+    def test_fl2va_resample(self):
+        """H3 FL2V re-samples as Ref2VA does; its size goes to the I2V node, which
+        stretches the keyframes to it (they and the anchor are conditioning)."""
+        t = self.as_target(self.final_take(), "minimax_h3_fl2va")
+        T.update_sidecar(t.paths.sidecar, width=1344, height=768, steps=8,
+                         inputs={"first": "h3pipe/sh010_first.png", "audio": "h3pipe/sh010_line.wav"})
+        t = T.get_take(self.ep, "final", "sh010", 1)
+        up = U.plan_upscale(self.ep, t)
+        self.assertEqual((up.action, up.method, up.route, up.start_step), ("upscale", "latent", "latent", 7))
+        self.assertEqual((up.width, up.height), (2688, 1536))
+        g = U.upscale_graph(self.wan_base("minimax_h3_fl2va"), up)
+        samplers = self.by_class(g, "SamplerCustomAdvanced")
+        self.assertEqual(len(samplers), 1)
+        si = g[samplers[0]]["inputs"]
+        self.assertEqual(si["latent_image"], ["up_hold", 0])
+        self.assertEqual(g[si["sigmas"][0]]["class_type"], "SplitSigmas")
+        self.assertEqual(g[si["sigmas"][0]]["inputs"]["step"], 7)
+        i2v = g[self.by_class(g, "MiniMaxH3ImageToVideo")[0]]["inputs"]
+        self.assertEqual((i2v["width"], i2v["height"]), (2688, 1536))
+        self.assertEqual(g[i2v["first_frame"][0]]["inputs"]["image"], "h3pipe/sh010_first.png")
+        self.assertTrue(self.by_class(g, "MiniMaxH3AddGuide"))              # the anchor, kept
+        self.assertEqual(g["up_scale"]["class_type"], "MinimaxH3LatentUpscaler3D")
+        self.assertEqual(g["up_scale"]["inputs"]["mode.scale"], 2.0)
+        self.assertEqual(g["up_source"]["class_type"], "H3LoadTakeLatent")
+        info = {c: {"input": {}} for c in U.UPSCALE_NODES}
+        info["MinimaxH3LatentUpscaler3D"] = UPSCALER
+        self.assertEqual(U.upscale_readiness(up.target, info)["status"], "ready")
+
+    def test_vace_refine_keeps_its_reference_in_front(self):
+        """VACE refines as Wan I2V does, its latent led by the reference picture's
+        frame (trim_latent cuts it off after sampling), sized as the node sizes it."""
+        t = self.as_target(self.final_take(latent=False), "wan22_vace")
+        T.update_sidecar(t.paths.sidecar, width=832, height=480, steps=4,
+                         inputs={"reference": "h3pipe/sh010_ref.png"})
+        t = T.get_take(self.ep, "final", "sh010", 1)
+        up = U.plan_upscale(self.ep, t)
+        self.assertEqual((up.action, up.route, up.start_step, up.width, up.height),
+                         ("upscale", "vae", 3, 1664, 960))
+        g = U.upscale_graph(self.wan_base("wan22_vace"), up)
+        samplers = self.by_class(g, "KSamplerAdvanced")
+        self.assertEqual(len(samplers), 1)                                   # the high expert is gone
+        si = g[samplers[0]]["inputs"]
+        self.assertEqual((si["start_at_step"], si["latent_image"]), (3, ["up_with_ref", 0]))
+        cat = g["up_with_ref"]["inputs"]
+        self.assertEqual((cat["samples1"], cat["samples2"], cat["dim"]), (["up_ref_enc", 0], ["up_venc", 0], "t"))
+        ref = g["up_ref"]["inputs"]
+        self.assertEqual((ref["width"], ref["height"], ref["upscale_method"], ref["crop"]), (1664, 960, "bilinear", "center"))
+        vace = self.by_class(g, "WanVaceToVideo")[0]
+        self.assertEqual(ref["image"], g[vace]["inputs"]["reference_image"])
+        self.assertEqual(g[ref["image"][0]]["inputs"]["image"], "h3pipe/sh010_ref.png")
+        self.assertEqual((g[vace]["inputs"]["width"], g[vace]["inputs"]["height"]), (1664, 960))
+        self.assertTrue(self.by_class(g, "TrimVideoLatent"))
+        info = {c: {"input": {}} for c in ("H3LoadTakeVideo", "H3PixelUpscale", "UpscaleModelLoader",
+                                           "VAEEncode", "H3SaveUpscale", "ImageScale")}
+        r = U.upscale_readiness(up.target, info)
+        self.assertEqual(r["status"], "not_ready")
+        self.assertIn("LatentConcat", r["missing"][0])
+
+    def test_ltx_ingredients_resample(self):
+        """LTX-2.3 ingredients: the take's video (its guide frames cut off) through
+        LTX's 2x latent upsampler into the graph's own guide node, which appends
+        the sheet again at the new size; the KSampler started late."""
+        t = self.as_target(self.final_take(), "ltx2_ingredients")
+        T.update_sidecar(t.paths.sidecar, width=768, height=448, steps=8, length=121, seed=41,
+                         inputs={"sheet": "h3pipe/sh010_sheet.png"})
+        t = T.get_take(self.ep, "final", "sh010", 1)
+        up = U.plan_upscale(self.ep, t)
+        self.assertEqual((up.action, up.route, up.start_step, up.width, up.height),
+                         ("upscale", "latent", 7, 1536, 896))
+        self.assertEqual(U.plan_upscale(self.ep, t, scale=1.5).action, "error")   # fixed 2x
+        g = U.upscale_graph(self.wan_base("ltx2_ingredients"), up)
+        self.assertFalse(self.by_class(g, "KSampler"))
+        self.assertFalse(self.by_class(g, "EmptyLTXVLatentVideo"))
+        ks = self.by_class(g, "KSamplerAdvanced")
+        self.assertEqual(len(ks), 1)
+        si = g[ks[0]]["inputs"]
+        self.assertEqual((si["start_at_step"], si["add_noise"], si["latent_image"]), (7, "enable", ["up_hold", 0]))
+        self.assertNotIn("denoise", si)
+        self.assertIn("noise_seed", si)
+        join = g["up_hold"]["inputs"]["latent"][0]
+        self.assertEqual(g[join]["class_type"], "LTXVConcatAVLatent")
+        self.assertEqual(g[join]["inputs"]["audio_latent"], ["up_split_av", 1])     # the take's audio
+        guide = g[join]["inputs"]["video_latent"][0]
+        self.assertEqual(g[guide]["class_type"], "LTXVAddGuide")
+        self.assertEqual(g[guide]["inputs"]["latent"], ["up_scale", 0])
+        self.assertEqual(g[g[guide]["inputs"]["image"][0]]["inputs"]["target_width"], 1536)
+        ckpt = self.by_class(g, "CheckpointLoaderSimple")[0]
+        ups = g["up_scale"]["inputs"]
+        self.assertEqual(g["up_scale"]["class_type"], "LTXVLatentUpsampler")
+        self.assertEqual((ups["samples"], ups["upscale_model"], ups["vae"]),
+                         (["up_trim", 0], ["up_scale_model", 0], [ckpt, 2]))
+        self.assertEqual(g["up_scale_model"]["inputs"]["model_name"], "ltx-2.3-spatial-upscaler-x2-1.1.safetensors")
+        self.assertEqual((g["up_trim"]["inputs"]["dim"], g["up_trim"]["inputs"]["amount"]), ("t", 16))
+        self.assertTrue(self.by_class(g, "LTXVCropGuides"))
+        loads = [g[n]["inputs"]["image"] for n in self.by_class(g, "LoadImage")]
+        self.assertEqual(loads, ["h3pipe/sh010_sheet.png"])
+        # through the VAE: the checkpoint's VAE and LTX's audio encoder, nothing to trim
+        os.remove(t.paths.latent)
+        g = U.upscale_graph(self.wan_base("ltx2_ingredients"), U.plan_upscale(self.ep, t))
+        self.assertNotIn("up_trim", g)
+        self.assertEqual(g["up_venc"]["inputs"]["vae"], [ckpt, 2])
+        self.assertEqual(g["up_aenc"]["class_type"], "LTXVAudioVAEEncode")
+        self.assertEqual(g[g["up_aenc"]["inputs"]["audio_vae"][0]]["class_type"], "LTXVAudioVAELoader")
+        # the options say it's fixed at 2x; readiness asks for the upsampler's file
+        opts = self.ok(A.get_upscale_options(self.ctx, {}))
+        self.assertEqual(opts["latent"]["ltx2_ingredients"]["fixed_scale"], 2.0)
+        info = {c: {"input": {}} for c in U.UPSCALE_NODES + ("LTXVAudioVAEEncode", "LTXVLatentUpsampler",
+                                                             "LatentCut", "KSamplerAdvanced")}
+        info["LatentUpscaleModelLoader"] = {"input": {"required": {"model_name": [["other.safetensors"], {}]}}}
+        r = U.upscale_readiness(up.target, info)
+        self.assertEqual(r["status"], "not_ready")
+        self.assertIn("ltx-2.3-spatial-upscaler-x2-1.1.safetensors", r["missing"][0])
+
     def test_finish_reaches_every_pixel_node(self):
         t = self.final_take()
         kw = dict(frequency_split=False, keep_soft=0.5, grain=0.03)
@@ -692,6 +902,183 @@ class PixelUpscaleTest(UpscaleRouteTest):
         self.assertEqual(U.default_pixel_model(["4x-UltraSharp.pth", "2x-Other.pth"]), "2x-Other.pth")
         self.assertEqual(U.default_pixel_model(["4x-UltraSharp.pth"]), "4x-UltraSharp.pth")
         self.assertEqual(U.pixel_readiness({})["status"], "not_ready")      # no nodes, no models
+
+
+RECIPE = {"deliver": "4k", "fit": "crop", "quality": "master",
+          "finish": {"frequency_split": True, "grain": 0.02},
+          "targets": {"minimax_h3_*": {"method": "latent", "then": "RealESRGAN_x2.pth"},
+                      "minimax_h3_fl2va": {"method": "pixel"},
+                      "wan22_*": {"method": "seedvr2", "seedvr2_model": "3b"},
+                      "*": {"method": "pixel", "pixel_model": "4x-UltraSharp.pth"}}}
+
+
+class RecipeTest(ApiTest):
+    """13e1: the master recipe (series.json upscale.master) and per-shot overrides."""
+
+    final_take = UpscaleTest.final_take
+    as_target = PixelUpscaleTest.as_target
+
+    def setUp(self):
+        super().setUp()
+        self.comfy.nodes |= set(U.UPSCALE_NODES) | set(U.PIXEL_NODES)
+        self.comfy.info["MinimaxH3LatentUpscaler3D"] = UPSCALER
+        self.comfy.info["UpscaleModelLoader"] = {"input": {"required": {
+            "model_name": [["4x-UltraSharp.pth", "RealESRGAN_x2.pth", "RealESRGAN_x4.pth"], {}]}}}
+
+    def set_recipe(self, recipe):
+        p = os.path.join(self.ep, "series.json")
+        cfg = json.load(open(p, encoding="utf-8"))
+        cfg.setdefault("upscale", {})["master"] = recipe
+        with open(p, "w", encoding="utf-8") as fh:
+            json.dump(cfg, fh)
+
+    def test_sections_and_resolution(self):
+        self.assertEqual(U.recipe_section(RECIPE, "minimax_h3_fl2va")[0], "minimax_h3_fl2va")   # exact
+        self.assertEqual(U.recipe_section(RECIPE, "minimax_h3_ref2va")[0], "minimax_h3_*")     # glob
+        self.assertEqual(U.recipe_section(RECIPE, "ltx2")[0], "*")                             # the rest
+        self.assertEqual(U.recipe_section({"targets": {"wan*": {}}}, "ltx2"), (None, {}))
+        t = self.final_take()
+        with self.assertRaises(U.UpscaleError):
+            U.recipe_for(self.ep, t)                                        # no recipe yet
+        self.set_recipe(RECIPE)
+        kw = U.recipe_for(self.ep, t)
+        self.assertEqual(kw, {"method": "latent", "then_model": "RealESRGAN_x2.pth",
+                              "frequency_split": True, "grain": 0.02,
+                              "deliver": "4k", "fit": "crop", "quality": "master"})
+        # a shot's override merges over its target's section
+        U.set_shot_recipe(self.ep, "sh010", {"detail": 1, "then": "seedvr2"})
+        kw = U.recipe_for(self.ep, t)
+        self.assertEqual((kw["detail"], kw["then_method"], "then_model" in kw), (1, "seedvr2", False))
+        self.assertEqual(U.shot_recipes(self.ep), {"sh010": {"detail": 1, "then": "seedvr2"}})
+        U.set_shot_recipe(self.ep, "sh010", None)
+        self.assertNotIn("upscale", T.load_overrides(self.ep))
+        with self.assertRaises(U.UpscaleError):
+            U.set_shot_recipe(self.ep, "sh010", {"colour": "warm"})
+        # the Wan section
+        wan = self.as_target(t, "wan22_vace")
+        up = U.plan_upscale(self.ep, wan, **U.recipe_for(self.ep, wan))
+        self.assertEqual((up.method, up.seedvr2_model, up.out_size),
+                         ("seedvr2", "seedvr2_3b_int8_convrot.safetensors", (3840, 2160)))
+        self.assertEqual(U.describe_recipe(RECIPE["targets"]["minimax_h3_*"], RECIPE),
+                         "re-sample 2x, then RealESRGAN_x2.pth → 4k (crop)")
+
+    def test_check(self):
+        self.assertEqual(U.check_recipe(RECIPE), [])
+        bad = U.check_recipe({"deliver": "huge", "fit": "zoom", "size": 1,
+                              "targets": {"*": {"method": "magic", "detail": 5, "scale": 9,
+                                                "then": "x.pth"}}})
+        text = "\n".join(bad)
+        for want in ("size: not a recipe field", "deliver 'huge'", "fit 'zoom'", "method 'magic'",
+                     "detail 5", "scale 9", "then: only after a re-sample"):
+            self.assertIn(want, text)
+        self.assertTrue(U.check_recipe({"deliver": "4k"}))                   # no targets
+        # the build says so too
+        cfg = load_series_config(os.path.join(KITCHEN, "series.json"))
+        with open(os.path.join(KITCHEN, "script.md"), encoding="utf-8") as fh:
+            story = parse_story(fh.read(), subject_ids(cfg), character_ids(cfg),
+                                series_info(cfg), variant_of(cfg))
+        cfg["upscale"] = {"master": RECIPE}
+        self.assertFalse([w for w in h3build.story_warnings(story, cfg) if "upscale.master" in w])
+        cfg["upscale"] = {"master": {"targets": {"*": {"method": "magic"}}}}
+        self.assertTrue([w for w in h3build.story_warnings(story, cfg) if "method 'magic'" in w])
+
+    def test_routes(self):
+        t = self.final_take()
+        opts = self.ok(A.get_upscale_options(self.ctx, {"ep": self.ep}))
+        self.assertIsNone(opts["recipe"])
+        self.err(A.post_upscale(self.ctx, {"ep": self.ep, "shots": ["sh010"], "recipe": True}), 409)
+        self.set_recipe(RECIPE)
+        opts = self.ok(A.get_upscale_options(self.ctx, {"ep": self.ep}))
+        r = opts["recipe"]
+        self.assertEqual((r["deliver"], r["fit"], r["quality"], r["problems"]), ("4k", "crop", "master", []))
+        self.assertEqual(r["targets"]["minimax_h3_ref2va"]["key"], "minimax_h3_*")
+        self.assertIn("SeedVR2 3b", r["targets"]["wan22_i2v"]["text"])
+        # a shot's recipe from the dialog's fields
+        res = self.ok(A.put_upscale_recipe(self.ctx, {"ep": self.ep, "shot": "sh010", "recipe": {
+            "method": "latent", "detail": 1, "then_pixel_model": "4x-UltraSharp.pth", "grain": 0}}))
+        self.assertEqual(res["recipe"], {"method": "latent", "detail": 1, "grain": 0, "then": "4x-UltraSharp.pth"})
+        self.assertEqual(self.ok(A.get_upscale_options(self.ctx, {"ep": self.ep}))["recipe"]["shots"]["sh010"]["fields"]["detail"], 1)
+        self.err(A.put_upscale_recipe(self.ctx, {"ep": self.ep, "shot": "sh010", "recipe": {"detail": 7}}), 400)
+        # queued by the recipe: the shot's override over its target's section, the master's size
+        res = self.ok(A.post_upscale(self.ctx, {"ep": self.ep, "shots": ["sh010"], "recipe": True,
+                                                "method": "pixel", "scale": 3}))   # ignored
+        q = res["queued"][0]
+        self.assertEqual((q["method"], q["then_pixel_model"], q["width"], q["height"]),
+                         ("latent", "4x-UltraSharp.pth", 3840, 2160))
+        rec = T.upscale_of(T.get_take(self.ep, "final", "sh010", 1))
+        self.assertEqual(rec["deliver"]["width"], 3840)
+        self.ok(A.put_upscale_recipe(self.ctx, {"ep": self.ep, "shot": "sh010", "recipe": None}))
+        self.assertEqual(U.shot_recipes(self.ep), {})
+        # a target the recipe doesn't cover: that take's error, the rest go on
+        self.set_recipe({"targets": {"wan22_*": {"method": "pixel"}}})
+        res = self.ok(A.post_upscale(self.ctx, {"ep": self.ep, "shots": ["sh010"], "recipe": True, "redo": True}))
+        self.assertIn("no section for minimax_h3_ref2va", res["errors"][0]["error"])
+
+    def summary(self, shot="sh010", n=1):
+        data = self.ok(A.get_episode(self.ctx, {"ep": self.ep, "pass": "final"}))
+        s = next(x for x in data["shots"] if x["shot"] == shot)
+        return next(t for t in s["takes"] if t["take"] == n)["upscale"]
+
+    def test_upscales_remember_their_recipe(self):
+        """13e2: an upscale records its settings; against the recipe it is same,
+        different (the recipe changed) or unknown (from before); never stale for it."""
+        t = self.final_take()
+        self.ok(A.post_upscale(self.ctx, {"ep": self.ep, "shots": ["sh010"], "method": "pixel"}))
+        t = T.get_take(self.ep, "final", "sh010", 1)
+        rec = T.upscale_of(t)
+        self.assertEqual(rec["recipe"]["method"], "pixel")
+        self.assertEqual(len(rec["recipe_hash"]), 12)
+        self.assertIsNone(self.summary()["recipe_match"])                    # no recipe
+        self.set_recipe(RECIPE)
+        self.assertEqual(self.summary()["recipe_match"], "different")        # the recipe re-samples
+        self.ok(A.post_upscale(self.ctx, {"ep": self.ep, "shots": ["sh010"], "recipe": True, "redo": True}))
+        up = self.summary()
+        self.assertEqual((up["recipe_match"], up["fresh"]), ("same", True))
+        # the recipe changes: different, still fresh
+        self.set_recipe({**RECIPE, "fit": "pad"})
+        up = self.summary()
+        self.assertEqual((up["recipe_match"], up["fresh"]), ("different", True))
+        # so does a shot's own recipe
+        self.set_recipe(RECIPE)
+        U.set_shot_recipe(self.ep, "sh010", {"detail": 1})
+        self.assertEqual(self.summary()["recipe_match"], "different")
+        U.set_shot_recipe(self.ep, "sh010", None)
+        # an upscale from before 13e2
+        T.write_json(t.paths.up_sidecar, {k: v for k, v in T.read_json(t.paths.up_sidecar).items()
+                                          if k not in ("recipe", "recipe_hash")})
+        self.assertEqual(self.summary()["recipe_match"], "unknown")
+
+    def test_master_quality(self):
+        """13e3: the recipe's quality reaches the saver and the record; a review-quality
+        upscale isn't the master recipe's."""
+        t = self.final_take()
+        self.set_recipe(RECIPE)
+        up = U.plan_upscale(self.ep, t, **U.recipe_for(self.ep, t))
+        self.assertEqual(up.quality, "master")
+        g = U.graph_of(up, {}, "")
+        self.assertEqual(g["up_save"]["inputs"]["quality"], "master")
+        self.assertEqual(U.queued_record(up)["recipe"]["quality"], "master")
+        review = U.plan_upscale(self.ep, t, method="pixel")
+        self.assertNotIn("quality", U.graph_of(review, {}, "")["up_save"]["inputs"])
+        self.assertEqual(U.plan_upscale(self.ep, t, quality="best").action, "error")
+        self.err(A.post_upscale(self.ctx, {"ep": self.ep, "shots": ["sh010"], "quality": "best"}), 400)
+
+    def test_keep(self):
+        t = self.final_take()
+        self.err(A.put_upscale_keep(self.ctx, {"ep": self.ep, "shot": "sh010", "take": 1, "keep": True}), 409)
+        self.ok(A.post_upscale(self.ctx, {"ep": self.ep, "shots": ["sh010"], "method": "pixel"}))
+        self.ok(A.put_upscale_keep(self.ctx, {"ep": self.ep, "shot": "sh010", "take": 1, "keep": True}))
+        self.assertTrue(self.summary()["keep"])
+        t = T.get_take(self.ep, "final", "sh010", 1)
+        # the whole cut redone: a Keep is left alone; naming the shot redoes it
+        res = self.ok(A.post_upscale(self.ctx, {"ep": self.ep, "shots": None, "redo": True, "method": "pixel"}))
+        self.assertIn("kept", next(s["reason"] for s in res["skipped"] if s["shot"] == "sh010"))
+        self.assertEqual(U.plan_upscale(self.ep, t, redo=True, respect_keep=True).action, "skip")
+        res = self.ok(A.post_upscale(self.ctx, {"ep": self.ep, "shots": ["sh010"], "redo": True, "method": "pixel"}))
+        self.assertEqual(len(res["queued"]), 1)
+        self.assertFalse(self.summary()["keep"])                              # a new upscale, unkept
+        self.err(A.put_upscale_keep(self.ctx, {"ep": self.ep, "shot": "sh010", "take": 9, "keep": True}), 404)
+        self.err(A.put_upscale_keep(self.ctx, {"ep": self.ep, "shot": "sh010", "take": 1, "keep": "yes"}), 400)
 
 
 if __name__ == "__main__":

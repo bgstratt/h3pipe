@@ -218,6 +218,47 @@ class AssembleTest(unittest.TestCase):
         self.assertEqual([int(r[3]) for r in rows], [44, 19])
         self.assertEqual(probe_frames(self.out()), 63)
 
+    def test_master_quality_and_prores(self):
+        """13e3: --quality master re-encodes what must be at CRF 12; clips that
+        needn't be are copied as they are; --intermediate prores adds a .mov."""
+        self.shotlist([("sh010", 22), ("sh020", 39)])
+        self.take("sh010", 22)
+        self.take("sh020", 39)
+        self.assemble("--quality", "master", "--intermediate", "prores")
+        with open(self.out(), "rb") as fh:
+            data = fh.read()
+        # nothing to re-encode: the clips' own x264 streams (ultrafast, CRF 23) copied
+        self.assertIn(b"crf=23.0", data)
+        self.assertNotIn(b"crf=12.0", data)
+        mov = os.path.splitext(self.out())[0] + ".mov"
+        r = ff("ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries",
+               "stream=codec_name,profile", "-of", "csv=p=0", mov)
+        self.assertEqual(r.stdout.strip(), "prores,HQ")
+        self.assertEqual(probe_frames(mov), 61)
+        # a trim re-encodes, at master quality
+        self.cut([{"shot": "sh010", "trim_in": 2}, {"shot": "sh020"}])
+        self.assemble("--quality", "master")
+        with open(self.out(), "rb") as fh:
+            self.assertIn(b"crf=12.0", fh.read())
+
+    def test_mixed_profiles_are_reencoded(self):
+        """13e4's live check: an NVENC Main upscale beside x264 High ones concat-copied
+        into one track with the first clip's headers. Clips whose codec, profile or
+        pixel format differ are re-encoded, all of them."""
+        self.shotlist([("sh010", 22), ("sh020", 39)])
+        self.take("sh010", 22)
+        n = self.take("sh020", 39)
+        high = T.take_paths(self.root, "final", "sh020", n).mp4
+        r = ff("ffmpeg", "-y", "-v", "error", "-i", self.clips[("64x64", 39)], "-c:v", "libx264",
+               "-preset", "medium", "-profile:v", "high", "-c:a", "copy", high + ".tmp.mp4")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        os.replace(high + ".tmp.mp4", high)
+        out = self.assemble().stdout
+        self.assertIn("more than one encoding", out)
+        with open(self.out(), "rb") as fh:
+            self.assertIn(b"crf=16.0", fh.read())               # re-encoded, review quality
+        self.assertEqual(probe_frames(self.out()), 61)
+
     def test_trim_after_window_warns_with_master(self):
         doc = {"episode": "ep01", "defaults": {"width": 64, "height": 64},
                "shots": [{"id": "sh010", "length": 56, "audio_policy": "dub",

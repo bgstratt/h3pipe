@@ -72,6 +72,15 @@ class UpscaleNodesTest(unittest.TestCase):
         self.assertEqual(out["x"], 1)
         with mock.patch.dict(sys.modules, fake_comfy_nested()), self.assertRaises(ValueError):
             UN.H3HoldAudio().hold({"samples": video})
+        # a video mask the latent has is kept (LTX's guide frames held at 0)
+        guide = torch.ones(1, 1, 3, 6, 12)
+        guide[:, :, -1] = 0
+        with mock.patch.dict(sys.modules, fake_comfy_nested()):
+            (out,) = UN.H3HoldAudio().hold({"samples": FakeNested((video, audio)),
+                                            "noise_mask": FakeNested((guide, torch.ones_like(audio)))})
+        vm, am = out["noise_mask"].tensors
+        self.assertTrue(torch.equal(vm, guide))
+        self.assertTrue(torch.equal(am, torch.zeros_like(audio)))
 
     def test_load_take_latent(self):
         video, audio = torch.randn(1, 4, 3, 6, 12), torch.randn(1, 8, 20)
@@ -107,6 +116,23 @@ class UpscaleNodesTest(unittest.TestCase):
         self.assertEqual((rec["frames"], rec["width"], rec["height"]), (24, 96, 48))
         self.assertEqual((rec["mp4"], rec["audio"], rec["scale"]), ("sh010_t01.up.mp4", "copied", 2.0))
         self.assertEqual([f for f in os.listdir(os.path.dirname(out)) if f.startswith(".tmp_")], [])
+
+    @needs_ffmpeg
+    def test_save_upscale_delivers_an_exact_size(self):
+        self.take_mp4()
+        size = lambda p: subprocess.run(
+            ["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries",
+             "stream=width,height", "-of", "csv=p=0", p], capture_output=True, text=True).stdout.strip()
+        for (w, h, fit) in ((80, 48, "crop"), (96, 64, "pad"), (192, 108, "crop")):
+            with open(self.p("sh010_t01.up.json"), "w", encoding="utf-8") as fh:
+                json.dump({"shot": "sh010", "take": 1, "status": "queued"}, fh)
+            UN.H3SaveUpscale().save(clip(24), self.root, "renders/sh010/sh010_t01.mp4",
+                                    "renders/sh010/sh010_t01.up.mp4", 24.0,
+                                    "renders/sh010/sh010_t01.up.json", "x264", w, h, fit)
+            self.assertEqual(size(self.p("sh010_t01.up.mp4")), f"{w},{h}")
+            rec = json.load(open(self.p("sh010_t01.up.json"), encoding="utf-8"))
+            self.assertEqual((rec["status"], rec["width"], rec["height"]), ("ok", w, h))
+
 
     @needs_ffmpeg
     def test_save_upscale_of_a_mute_take(self):
@@ -170,11 +196,25 @@ def fake_upscaler_modules() -> dict:
 
 
 class EncoderTest(unittest.TestCase):
+    def test_master_quality(self):
+        both = {"h264_nvenc", "hevc_nvenc"}
+        with mock.patch.object(UN, "nvenc_encoders", return_value=both):
+            name, args = UN.encoder_args("auto", 3840, 2160, "master")   # x264 for a master
+            self.assertEqual(name, "libx264")
+            self.assertEqual(args[args.index("-crf") + 1], "12")
+            name, args = UN.encoder_args("nvenc", 3840, 2160, "master")  # forced: NVENC's best
+            self.assertEqual((name, args[args.index("-cq") + 1], args[args.index("-preset") + 1]),
+                             ("h264_nvenc", "14", "p7"))
+            self.assertEqual(UN.encoder_args("auto", 3840, 2160)[0], "h264_nvenc")   # review: as before
+        self.assertIn("slow", UN.x264_args(3840, 2160, "master"))
+
     def test_encoder_choice(self):
         both = {"h264_nvenc", "hevc_nvenc"}
         with mock.patch.object(UN, "nvenc_encoders", return_value=both):
             self.assertEqual(UN.encoder_args("auto", 3840, 2176)[0], "h264_nvenc")
-            name, args = UN.encoder_args("auto", 5376, 3072)             # past NVENC H.264's 4096
+            # past NVENC H.264's 4096: auto stays H.264 (x264), which a browser plays
+            self.assertEqual(UN.encoder_args("auto", 5376, 3072)[0], "libx264")
+            name, args = UN.encoder_args("nvenc", 5376, 3072)           # forced: HEVC
             self.assertEqual(name, "hevc_nvenc")
             self.assertIn("hvc1", args)
             self.assertEqual(UN.encoder_args("nvenc", 1920, 1088)[0], "h264_nvenc")
@@ -196,6 +236,15 @@ class EncoderTest(unittest.TestCase):
                                 "-show_entries", "stream=nb_read_frames", "-of", "csv=p=0", out],
                                capture_output=True, text=True).stdout.strip()
             self.assertEqual(n, "12")
+
+    def test_fit_filter(self):
+        self.assertEqual(UN.fit_size(1344, 768, 3840, 2160, "crop"), (3840, 2196))
+        self.assertEqual(UN.fit_size(1344, 768, 3840, 2160, "pad"), (3780, 2160))
+        self.assertIsNone(UN.fit_filter(3840, 2160, 3840, 2160))
+        self.assertIsNone(UN.fit_filter(3840, 2160, 0, 0))
+        self.assertEqual(UN.fit_filter(3840, 2196, 3840, 2160, "crop"), "crop=3840:2160")
+        self.assertEqual(UN.fit_filter(2688, 1536, 3840, 2160, "pad"),
+                         "scale=3780:2160:flags=lanczos,pad=3840:2160:(ow-iw)/2:(oh-ih)/2:black")
 
 
 class FinishTest(unittest.TestCase):

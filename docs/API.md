@@ -332,13 +332,23 @@ its own schedule (the target's `start`, 0.875: step 7 of 8) under the take's fro
 shotlist, from its kept latent (Phase 13a) or, without one, its frames and `_h3.wav`
 through the VAE. The take's audio is held while it samples and its audio stream is copied
 onto the result unchanged. Only a target with an `upscale` block in its target.json
-can upscale: `minimax_h3_ref2va` (an external latent upscaler, then its own sampler from late
-in its schedule) and `ltx2` (its render graph's second stage run again on the take: its
-own upsampler, the tail of its fixed sigmas; mode `second_stage`, always 2x). The
-`.up.json` records `mode` and the schedule's `steps`. `wan22_i2v` / `wan22_ti2v` use mode
-`pixel_refine`: the take's frames through the pixel model (`pixel_model` applies), encoded
-with the Wan VAE, then the target's last sampler from late in its schedule; always the VAE
-route (`route: "latent"` is refused).
+can re-sample (every built-in video target has one):
+- mode `resample`: `minimax_h3_ref2va` and `minimax_h3_fl2va` (an external latent upscaler,
+  then their own sampler from late in its schedule; FL2VA's size goes to its I2V node,
+  which stretches the keyframes to it), and `ltx2_ingredients` (LTX-2.3's own 2x latent
+  upsampler, `ltx-2.3-spatial-upscaler-x2-1.1.safetensors`, into the graph's `LTXVAddGuide`,
+  which appends the ingredient sheet again at the new size; a kept latent has its guide
+  frames cut off first; the KSampler run as the KSamplerAdvanced it is, from the step;
+  always 2x);
+- mode `second_stage`: `ltx2` (its render graph's second stage run again on the take: its
+  own upsampler, the tail of its fixed sigmas; always 2x);
+- mode `pixel_refine`: `wan22_i2v`, `wan22_ti2v` and `wan22_vace` (the take's frames through
+  the pixel model, `pixel_model` applies, encoded with the Wan VAE, then the target's last
+  sampler from late in its schedule; VACE's reference picture encoded in front, as its
+  latent has it; always the VAE route: `route: "latent"` is refused).
+
+The `.up.json` records `mode` and the schedule's `steps`. Options' `latent[target]`
+`fixed_scale` is the one scale a fixed upsampler makes (the LTX targets: 2), else null.
 
 ### `POST /h3pipe/upscale`
 Body `{"ep", "shots"?: ["sh020"] | null, "takes"?: [{"shot", "take"}], "redo"?: false,
@@ -360,14 +370,28 @@ an LTX-2 re-sample is 2x only. `then_pixel_model` (with `then_scale`, default 2)
 pixel step after a re-sample in the same job: that upscale model takes the re-sampled frames
 on (re-sample 2x then `RealESRGAN_x2.pth` 2x = 4x); `width`/`height` in the answer are the
 final size, and the `.up.json` records `then_pixel: {model, scale, from: [w, h]}`.
+`then_method: "seedvr2"` makes that step SeedVR2 instead (its model from `seedvr2_model`,
+7b by default; `then_pixel_model` is not needed): re-sample, then SeedVR2, in one job;
+`then_pixel` then has `method: "seedvr2"` and its `model` is the SeedVR2 file.
+`deliver` (`"1080p"`, `"1440p"`, `"4k"` or `"WxH"`, both even, 64 to 8192; null: the size
+the scale makes) makes the upscale exactly that size, and `fit` (`"crop"`, the default, or
+`"pad"`) says how a frame of another shape meets it. The last step that can make any size
+(the pixel method, SeedVR2, the then-pixel step) is sized to cover the delivery (crop) or
+fit inside it (pad), aspect kept, its scale worked out from what it starts from (`scale` /
+`then_scale` are then ignored); a re-sample alone keeps its scale. `H3SaveUpscale` then
+resizes (only when no step made that size), crops or pads to the delivery with ffmpeg. A
+pixel step that would have to shrink is an error. The answer's `width`/`height` and the
+`.up.json`'s are the delivery; the `.up.json` adds `deliver: {width, height, fit, made:
+[w, h]}` (what the last step made), and so does the episode's upscale summary.
 `from_upscale: true` runs the pixel method on each take's existing fresh upscale instead of
 the take (its `.up.mp4` is the input and is replaced; `scale` applies to the upscale's size;
 the take's audio is still what's copied on). The new record keeps the old one as
 `on_upscale` (nested for a longer chain); freshness stays tied to the take. A take with no
 fresh upscale is an error; with `method: "latent"` it's refused.
-`encoder`: `"auto"` (the default: NVENC when this ffmpeg has it — H.264 up to 4096 on a side,
-HEVC past that, which NVENC's H.264 can't do — else x264), `"nvenc"` (forced; fails
-without) or `"x264"` (the CPU; its faster preset past 4K). The `.up.json`'s `encoder` is
+`encoder`: `"auto"` (the default: H.264 on NVENC up to 4096 on a side, x264 past that or
+without NVENC — always H.264, which the editor's browser plays), `"nvenc"` (forced: H.264
+up to 4096, HEVC past it, which NVENC's H.264 can't do and a browser may show black; fails
+without NVENC) or `"x264"` (the CPU; its faster preset past 4K). The `.up.json`'s `encoder` is
 the one used. `precision`: the upscale model's, `"fp16"` (the default: autocast, about
 twice as fast) or `"fp32"`. Options lists both as `encoders` / `precisions`. An upscaled
 cut that mixes an HEVC upscale with H.264 clips is re-encoded by assemble, since concat
@@ -390,6 +414,61 @@ returns at once:
 h3pipe node, the latent upscaler pack or its model file, the pack's "Plus" fork, which
 has no temporal chunking, or the pixel method's model); 502 when ComfyUI doesn't answer.
 
+**The master recipe (Phase 13e).** `recipe: true` upscales each take by the series
+config's `upscale.master` instead of the body's choices (only `pass`, `shots` / `takes`
+and `redo` still apply): the take's target's section (its id, else the longest matching
+glob, else `"*"`), the shot's own recipe over it, the recipe's `finish`, and the master's
+`deliver` / `fit` / `encoder`. A take whose target no section covers is that take's error;
+no recipe at all is 409.
+
+```json
+"upscale": {"master": {"deliver": "4k", "fit": "crop", "quality": "master",
+  "finish": {"frequency_split": true, "keep_soft": 0, "grain": 0},
+  "targets": {"minimax_h3_*": {"method": "latent", "then": "RealESRGAN_x2.pth"},
+              "wan22_*": {"method": "seedvr2", "seedvr2_model": "7b"},
+              "*": {"method": "pixel", "pixel_model": "RealESRGAN_x2.pth"}}}}
+```
+
+A section's fields: `method`, `scale`, `detail`, `start_step`, `vae`, `pixel_model`,
+`seedvr2_model`, `then` (an upscale model file, or `"seedvr2"`), `then_scale`, `precision`,
+`frequency_split`, `keep_soft`, `grain`. `quality` (`review` | `master`) is read by Phase
+13e3. The build warns about anything else (h3upscale.check_recipe).
+
+### `PUT /h3pipe/upscale/recipe`
+Body `{"ep", "shot", "recipe": {…} | null}`: one shot's own recipe, kept in the episode's
+overrides.json under a top-level `"upscale": {"sh020": {…}}` (not in the shot's override
+block, whose objects are per-target). `recipe` takes the upscale request's fields as the
+dialog sends them (`then_pixel_model` / `then_method` become `then`); null clears it. 400
+on a field or value a recipe doesn't take. Answers `{shot, recipe, text}`.
+
+`quality`: `"review"` (the default) or `"master"`: how the `.up.mp4` is encoded. A master
+is x264 CRF 12 on a slow preset (NVENC p7/hq at CQ 14 when `encoder` is `"nvenc"`), still
+H.264 8-bit so the editor plays it; the `.up.json` records `quality`.
+
+### `POST /h3pipe/master`
+Body `{"ep", "pass"?, "action": "plan" | "queue" | "assemble", "conform"?, "allow_gaps"?,
+"prores"?}` (h3master). Every answer has `plan`: `{pass, size: [w, h], fit, quality,
+counts: {upscale, ok, kept, queued, gap}, ready, rows: [{shot, take, target, status, why,
+recipe, upscale: {width, height, status, keep} | null}]}`, a row per shot of the cut in
+order. `status`: `upscale` (none, from an older take, or failed: queued by the recipe),
+`ok` (fresh, the recipe's settings), `kept` (fresh, marked Keep or made with other
+settings; `conform: true` makes the unmarked ones `upscale`), `queued`, `gap` (no usable
+pick, the other pass's take, no recipe section for its target, or a kept upscale at
+another size). `queue` queues the `upscale` rows (409 when this ComfyUI can't) and adds
+`queued` / `errors`; `assemble` (409 while any are to upscale or queued, or with gaps
+unless `allow_gaps`) writes `master/<ep>_master_<WxH>.mp4` (and `.mov` with `prores`) and
+`<ep>_master.json` / `.md`, and adds `output`, `mov`, `report`. 409 without a recipe, or
+one without `deliver`.
+
+### `PUT /h3pipe/upscale/keep`
+Body `{"ep", "pass"?, "shot", "take", "keep": true | false}`: mark a take's finished upscale
+Keep (409 without one). A fresh kept upscale is skipped by a whole-cut request (`shots`
+and `takes` null) and by Master, whatever the recipe says; naming the shot or take redoes
+it, and the new upscale starts unkept. Every `.up.json` records `recipe` (the settings
+that made it: method, scales, start, models, the then step, precision, finish, size, fit)
+and `recipe_hash`; the episode's upscale summary adds `keep` and `recipe_match` (`same`,
+`different`, `unknown` for one from before, null without a series recipe).
+
 ### `GET /h3pipe/upscale/options`
 What the editor's Upscale dialog offers on this ComfyUI:
 ```json
@@ -404,7 +483,11 @@ is `"7b"` (the default), `"3b"` or a file name; it takes `scale`, `from_upscale`
 finish like the pixel method, and options lists it as `seedvr2: {status, missing, models,
 default}`. `latent[target]` is null for a target with no latent upscale; otherwise it also has `mode`
 (`resample` | `second_stage`), `align` and `fixed_scale` (second_stage's only scale), and
-the answer has `max_scale`. Each take in `GET /h3pipe/episode` has its `width` and `height`,
+the answer has `max_scale`, `recipe` (with `?ep=`: the episode's master recipe, null
+without one: `deliver`, `fit`, `quality`, `encoder`, `targets` (each video target's matching
+section as `{key, fields, text}`, null when none covers it), `shots` (the shots' own, as
+`{fields, text}`) and `problems`), `delivers` (`[{id, width, height}]`: 1080p, 1440p, 4k) and
+`fits` (`["crop", "pad"]`). Each take in `GET /h3pipe/episode` has its `width` and `height`,
 so the dialog can show what every scale makes before anything is queued.
 
 ### `DELETE /h3pipe/upscale?ep=…&shot=sh020&take=3[&pass=proxy]`
