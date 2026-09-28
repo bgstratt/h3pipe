@@ -1355,15 +1355,18 @@ def mark_failed(up: UpscaleJob, why: str) -> None:
 
 
 def cut_takes(root: str, only: set[str] | None = None, take_n: int | None = None,
-              pass_: str = PASS) -> list:
+              pass_: str = PASS, include_out: bool = False) -> list:
     """(shot, Take | None, why) for each shot of the pass's cut (or `only`): the
     pick, else the latest usable take; `take_n` forces a number. A placeholder
-    (a take from the other pass) is left out."""
+    (a take from the other pass) is left out. A shot left out of the cut isn't
+    listed unless `only` names it or `include_out`."""
     from h3assemble import choose_take
     entries = T.resolve_cut(T.load_cut(root), pass_, J.script_order(root))
     out = []
     for e in entries:
         if only is not None and e.shot not in only:
+            continue
+        if e.out and not include_out and only is None:
             continue
         if e.pass_ != pass_:
             out.append((e.shot, None, f"the cut uses its {e.pass_} take"))
@@ -1379,7 +1382,9 @@ def prune_latents(root: str, only: set[str] | None = None,
     of takes with a fresh upscale (either can still be upscaled, through the
     VAE). Returns (path, bytes, why) for each; `dry_run` deletes nothing. The
     sidecar's `latent` goes with the file (and `latent_pruned` says when)."""
-    picked = {shot: take.take for shot, take, _ in cut_takes(root, only, pass_=pass_)
+    # a shot left out keeps its pick's latent: it may come back
+    picked = {shot: take.take for shot, take, _ in cut_takes(root, only, pass_=pass_,
+                                                           include_out=True)
               if take is not None}
     out = []
     for shot in J.script_order(root):

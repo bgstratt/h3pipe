@@ -221,12 +221,14 @@ export interface CutFields {
   locked: boolean;
   /** Phase 9d: the clip's audio source (null: its own take's sound) */
   audio: CutAudioSource | null;
+  /** left out of the cut */
+  out: boolean;
 }
 
 export function fieldsOf(e: CutEntry | undefined): CutFields {
   return {
     trim_in: frameInt(e?.trim_in), trim_out: frameInt(e?.trim_out), locked: !!e?.locked,
-    audio: normalizeAudio(audioOf(e), e?.shot),
+    audio: normalizeAudio(audioOf(e), e?.shot), out: !!e?.out,
   };
 }
 
@@ -241,12 +243,14 @@ export function withFields(entries: CutEntry[], shot: string, patch: Partial<Cut
     delete out.locked;
     delete out.note;
     delete out.audio;
+    delete out.out;
     if (f.trim_in > 0) out.trim_in = Math.floor(f.trim_in);
     if (f.trim_out > 0) out.trim_out = Math.floor(f.trim_out);
     if (f.locked) out.locked = true;
     if (e.note) out.note = e.note;
     const au = normalizeAudio(f.audio, shot);
     if (au) out.audio = au;
+    if (f.out) out.out = true;
     return out;
   });
 }
@@ -282,8 +286,8 @@ export function applyEntries(st: EpisodeStatus, entries: CutEntry[]): EpisodeSta
       const e = by.get(s.shot);
       const f = e
         ? fieldsOf(e)
-        : { trim_in: s.cut.trim_in, trim_out: s.cut.trim_out, locked: s.cut.locked, audio: audioOf(s.cut) };
-      const cut = { ...s.cut, trim_in: f.trim_in, trim_out: f.trim_out, locked: f.locked, in_cut_file: e ? true : s.cut.in_cut_file };
+        : { trim_in: s.cut.trim_in, trim_out: s.cut.trim_out, locked: s.cut.locked, audio: audioOf(s.cut), out: !!s.cut.out };
+      const cut = { ...s.cut, trim_in: f.trim_in, trim_out: f.trim_out, locked: f.locked, out: f.out, in_cut_file: e ? true : s.cut.in_cut_file };
       // Phase 9d: the badge and the inspector follow at once; the server sends
       // its own `audio_file` / `audio_why` with the next status
       if (!sameAudio(audioOf(s.cut), f.audio)) {

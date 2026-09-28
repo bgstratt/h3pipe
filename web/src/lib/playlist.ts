@@ -136,7 +136,7 @@ export function buildPlaylist(st: EpisodeStatus | undefined, other?: EpisodeStat
   const out: PlayItem[] = [];
   let t = 0;
   for (const s of st.shots) {
-    if (s.orphan) continue;
+    if (s.orphan || s.cut?.out) continue;
     const take = clipTake(s, s.cut.placeholder ? other : undefined);
     const { frames, rate, total } = spanOf(s, fps, take, base);
     const usable = !!take && take.status === "ok" && take.has_video && !!take.mp4;

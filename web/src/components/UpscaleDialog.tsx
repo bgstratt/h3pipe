@@ -89,7 +89,7 @@ function UpscaleBody() {
   const shots = st?.shots ?? [];
   const takes = ask.takes
     ? ask.takes.map((r) => shots.find((s) => s.shot === r.shot)?.takes.find((t) => t.take === r.take))
-    : shots.filter((s) => s.cut.usable && !s.cut.placeholder).map((s) => s.takes.find((t) => t.take === s.cut.take));
+    : shots.filter((s) => s.cut.usable && !s.cut.placeholder && !s.cut.out).map((s) => s.takes.find((t) => t.take === s.cut.take));
   const targets = [...new Set(takes.filter(Boolean).map((t) => t!.target || "minimax_h3_ref2va"))];
   const latentOf = (id: string) => opts?.latent[id] ?? null;
   const latentAll = !!opts && targets.length > 0 && targets.every((id) => latentOf(id)?.status === "ready");
@@ -184,7 +184,7 @@ function UpscaleBody() {
       .catch((e: unknown) => setSaved(`Couldn't save: ${errText(e)}`));
   };
   const recipeTargets = recipe ? targets.map((id) => [id, recipe.targets[id]] as const) : [];
-  const shotIds = ask.takes ? ask.takes.map((t) => t.shot) : shots.filter((s) => s.cut.usable && !s.cut.placeholder).map((s) => s.shot);
+  const shotIds = ask.takes ? ask.takes.map((t) => t.shot) : shots.filter((s) => s.cut.usable && !s.cut.placeholder && !s.cut.out).map((s) => s.shot);
   const recipeShots = recipe ? shotIds.map((id) => [id, recipe.shots[id]] as const).filter(([, v]) => !!v) : [];
   const canQueue = byRecipe ? !!ep && count > 0 && recipeTargets.some(([, v]) => !!v)
     : !!ep && !!opts && count > 0 && bad.length < real.length && parsed !== "bad"

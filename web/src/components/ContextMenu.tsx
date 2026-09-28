@@ -5,7 +5,7 @@ import {
   keepUpscale, openInspector, openRedo, openSidecar, openViewer, pickTake, playAll, removeUpscale, requestRender, showInScript, showMissingRefs,
   upscaleTake,
 } from "../actions";
-import { clearClipAudio, nudgeClip, setTrims, toggleLock } from "../cutActions";
+import { clearClipAudio, nudgeClip, setTrims, toggleLock, toggleOut } from "../cutActions";
 import { audioOf, audioWhy } from "../lib/audioSource";
 import { absPath, tn } from "../lib/format";
 import { cutNeighbour, keyframeNote, keyframeRefId } from "../lib/keyframes";
@@ -151,6 +151,15 @@ export function ContextMenu() {
         onClick={run(() => void toggleLock(menu.shot))}
       >
         <i className={locked ? "pi pi-lock-open" : "pi pi-lock"} /> {locked ? "Unlock in the cut" : "Lock in the cut"}
+      </button>
+      <button
+        disabled={!cutShot || locked}
+        title={locked ? `${menu.shot} is locked: unlock it first`
+          : cutShot?.cut.out ? `Put ${menu.shot} back in the ${curPass} cut, where it was`
+          : `Leave ${menu.shot} out of the ${curPass} cut: it stays in the script with its takes, and assemble, Play all and Master skip it`}
+        onClick={run(() => void toggleOut(menu.shot))}
+      >
+        <i className={cutShot?.cut.out ? "pi pi-plus-circle" : "pi pi-minus-circle"} /> {cutShot?.cut.out ? "Put back in the cut" : "Leave out of the cut"}
       </button>
       {trimmed && (
         <button disabled={locked} title={locked ? `${menu.shot} is locked` : `Back to the whole take (${cutShot!.cut.trim_in || 0} + ${cutShot!.cut.trim_out || 0} frames trimmed)`} onClick={run(() => void setTrims(menu.shot, 0, 0, `Clear ${menu.shot} trims`))}>

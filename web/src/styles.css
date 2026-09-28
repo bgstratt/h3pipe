@@ -115,6 +115,7 @@
 .h3-b-placeholder { color: var(--h3-muted); border-style: dashed; }
 .h3-b-none { color: var(--h3-muted); }
 .h3-b-orphan { color: var(--h3-failed); border-style: dashed; }
+.h3-b-out { opacity: 0.7; border-style: dashed; }
 .h3-b-failed, .h3-b-unusable { color: var(--h3-failed); }
 .h3-b-cut { color: var(--h3-accent); }
 .h3-b-upscaled { color: var(--h3-ok); font-weight: 600; }
@@ -191,6 +192,8 @@
 .h3-clip .h3-progress { position: absolute; left: 0; right: 0; bottom: 0; height: 3px; border-radius: 0; }
 .h3-clip.h3-placeholder .h3-clip-media { opacity: 0.6; }
 .h3-clip.h3-orphan { opacity: 0.55; border-style: dashed; }
+.h3-clip.h3-out { opacity: 0.4; border-style: dashed; }
+.h3-clip.h3-out > * { visibility: hidden; }
 
 /* floating layers: menu, viewer, dialogs, toasts */
 .h3-overlay { position: fixed; inset: 0; pointer-events: none; z-index: 2000; }
