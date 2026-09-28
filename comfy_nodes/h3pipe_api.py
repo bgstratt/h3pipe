@@ -818,6 +818,9 @@ def post_upscale(ctx: Context, body):
     then_scale = body.get("then_scale")
     if then_scale is not None and (isinstance(then_scale, bool) or not isinstance(then_scale, (int, float))):
         raise ApiError(400, "then_scale must be a number or null")
+    quality = body.get("quality") or "review"
+    if quality not in U.QUALITIES:
+        raise ApiError(400, "quality must be review or master")
     then_method = body.get("then_method")
     if then_method not in (None, "pixel", "seedvr2"):
         raise ApiError(400, "then_method must be pixel, seedvr2 or null")
@@ -869,7 +872,8 @@ def post_upscale(ctx: Context, body):
                                 then_method=then_method,
                                 from_upscale=from_upscale, encoder=encoder, precision=precision,
                                 frequency_split=frequency_split, keep_soft=keep_soft, grain=grain,
-                                seedvr2_model=seedvr2_model, deliver=deliver, fit=fit)
+                                seedvr2_model=seedvr2_model, deliver=deliver, fit=fit,
+                                quality=quality)
         if up.action == "skip":
             skipped.append({"shot": shot, "take": t.take, "reason": up.why})
         elif up.action == "error":

@@ -429,30 +429,44 @@ def nvenc_encoders() -> set:
     return _NVENC
 
 
-def x264_args(w: int, h: int) -> list:
+QUALITIES = ("review", "master")
+
+
+def x264_args(w: int, h: int, quality: str = "review") -> list:
+    """x264 at `review` (CRF 16) or `master` quality (CRF 12, a slower preset:
+    for delivery, still 8-bit 4:2:0 High so the editor's browser plays it)."""
+    big = w * h > 4096 * 2304
+    if quality == "master":
+        return ["-c:v", "libx264", "-crf", "12", "-preset", "medium" if big else "slow",
+                "-profile:v", "high", "-pix_fmt", "yuv420p"]
     # a frame past 4K takes the faster preset: CRF 16 on "medium" is ~1 fps at 5376x3072
-    return ["-c:v", "libx264", "-crf", "16", "-preset", "medium" if w * h <= 4096 * 2304 else "fast",
+    return ["-c:v", "libx264", "-crf", "16", "-preset", "fast" if big else "medium",
             "-pix_fmt", "yuv420p"]
 
 
-def encoder_args(encoder: str, w: int, h: int) -> tuple[str, list]:
+def encoder_args(encoder: str, w: int, h: int, quality: str = "review") -> tuple[str, list]:
     """(the encoder used, its ffmpeg args). auto: H.264 on the GPU (NVENC) up to 4096
     on a side, x264 past that or without NVENC: always H.264, which the editor's
     browser plays (a 5376x3072 HEVC upscale played as black, 2026-09-27). nvenc
     forces the GPU: H.264 up to 4096 (NVENC's H.264 limit), HEVC past it, which a
-    browser may not play; it raises without NVENC."""
+    browser may not play; it raises without NVENC. `master` quality: auto is x264
+    at master quality (the GPU encoder trades quality for speed); a forced NVENC
+    runs its slowest preset at a lower CQ."""
+    if encoder == "auto" and quality == "master":
+        return "libx264", x264_args(w, h, quality)
     if encoder in ("auto", "nvenc"):
         have = nvenc_encoders()
         small = w <= 4096 and h <= 4096
         name = ("h264_nvenc" if small and "h264_nvenc" in have
                 else "hevc_nvenc" if encoder == "nvenc" and "hevc_nvenc" in have else None)
         if name:
-            args = ["-c:v", name, "-preset", "p5", "-rc", "vbr", "-cq", "19", "-b:v", "0",
-                    "-pix_fmt", "yuv420p"]
+            hq = quality == "master"
+            args = ["-c:v", name, "-preset", "p7" if hq else "p5", *(["-tune", "hq"] if hq else []),
+                    "-rc", "vbr", "-cq", "14" if hq else "19", "-b:v", "0", "-pix_fmt", "yuv420p"]
             return name, args + (["-tag:v", "hvc1"] if name == "hevc_nvenc" else [])
         if encoder == "nvenc":
             raise RuntimeError("this ffmpeg has no NVENC encoder (h264_nvenc / hevc_nvenc)")
-    return "libx264", x264_args(w, h)
+    return "libx264", x264_args(w, h, quality)
 
 
 def fit_size(w: int, h: int, W: int, H: int, fit: str = "crop") -> tuple[int, int]:
@@ -480,7 +494,7 @@ def fit_filter(w: int, h: int, W: int, H: int, fit: str = "crop") -> str | None:
 
 
 def encode_stream(images, path: str, fps: float, encoder: str = "auto",
-                  size: tuple = (0, 0), fit: str = "crop") -> str:
+                  size: tuple = (0, 0), fit: str = "crop", quality: str = "review") -> str:
     """Write `images` (IMAGE [T, H, W, 3]) to a mute mp4, one frame at a time into
     ffmpeg (no whole-clip byte copy: at 5376x3072 that was ~20 GB), made exactly
     `size` (W, H) by fit_filter when one is given. Returns the encoder used; on
@@ -488,7 +502,7 @@ def encode_stream(images, path: str, fps: float, encoder: str = "auto",
     n, h, w = int(images.shape[0]), int(images.shape[1]), int(images.shape[2])
     vf = fit_filter(w, h, int(size[0]), int(size[1]), fit)
     ow, oh = (int(size[0]), int(size[1])) if vf else (w, h)
-    name, args = encoder_args(encoder, ow, oh)
+    name, args = encoder_args(encoder, ow, oh, quality)
 
     def run(args: list) -> None:
         cmd = ["ffmpeg", "-y", "-v", "error", "-f", "rawvideo", "-pix_fmt", "rgb24",
@@ -519,7 +533,7 @@ def encode_stream(images, path: str, fps: float, encoder: str = "auto",
         if encoder != "auto" or name == "libx264":
             raise
         name = "libx264"
-        run(x264_args(ow, oh))
+        run(x264_args(ow, oh, quality))
     return name
 
 
@@ -546,6 +560,8 @@ class H3SaveUpscale:
             "width": ("INT", {"default": 0, "min": 0, "max": 8192, "step": 2}),
             "height": ("INT", {"default": 0, "min": 0, "max": 8192, "step": 2}),
             "fit": (["crop", "pad"], {"default": "crop"}),
+            # review (the default) or master (x264 CRF 12: for delivery)
+            "quality": (list(QUALITIES), {"default": "review"}),
         }}
 
     RETURN_TYPES = ("STRING",)
@@ -555,7 +571,7 @@ class H3SaveUpscale:
     CATEGORY = "H3/upscale"
 
     def save(self, images, project_root, source_mp4, out_mp4, fps, sidecar="", encoder="auto",
-             width=0, height=0, fit="crop"):
+             width=0, height=0, fit="crop", quality="review"):
         root = os.path.normpath(project_root)
         out = _abs(root, out_mp4)
         source = _abs(root, source_mp4)
@@ -566,7 +582,7 @@ class H3SaveUpscale:
         os.close(fd)
         try:
             t0 = clock()
-            used = encode_stream(images, picture, float(fps), encoder, (width, height), fit)
+            used = encode_stream(images, picture, float(fps), encoder, (width, height), fit, quality)
             ms["mp4"] = round((clock() - t0) * 1000)
             notes.append(f"mp4 written ({used})")
             if os.path.isfile(picture):
@@ -594,7 +610,7 @@ class H3SaveUpscale:
                         width=int(width) if width and height else int(images.shape[2]),
                         height=int(height) if width and height else int(images.shape[1]),
                         mp4=stem if ok else None,
-                        audio=audio, encoder=used, save_ms=ms,
+                        audio=audio, encoder=used, quality=quality, save_ms=ms,
                         save_notes=f"{stem}: " + "; ".join(notes))
             _write_json_atomic(path, data)
             _notify(root, data.get("shot"), data.get("take"), "ok" if ok else "failed")

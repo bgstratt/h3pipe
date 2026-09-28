@@ -727,6 +727,8 @@ export interface UpscaleRequest {
   then_scale?: number | null;
   /** latent: the then step is SeedVR2 (`seedvr2_model`) instead of an upscale model */
   then_method?: "pixel" | "seedvr2";
+  /** Phase 13e3: how the .up.mp4 is encoded: review (the default) or master (x264 CRF 12) */
+  quality?: "review" | "master";
   /** Phase 13e: each take by the series config's upscale.master recipe (the
    * other choices are ignored) */
   recipe?: boolean;

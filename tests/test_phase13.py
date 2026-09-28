@@ -944,7 +944,7 @@ class RecipeTest(ApiTest):
         kw = U.recipe_for(self.ep, t)
         self.assertEqual(kw, {"method": "latent", "then_model": "RealESRGAN_x2.pth",
                               "frequency_split": True, "grain": 0.02,
-                              "deliver": "4k", "fit": "crop"})
+                              "deliver": "4k", "fit": "crop", "quality": "master"})
         # a shot's override merges over its target's section
         U.set_shot_recipe(self.ep, "sh010", {"detail": 1, "then": "seedvr2"})
         kw = U.recipe_for(self.ep, t)
@@ -1047,6 +1047,21 @@ class RecipeTest(ApiTest):
         T.write_json(t.paths.up_sidecar, {k: v for k, v in T.read_json(t.paths.up_sidecar).items()
                                           if k not in ("recipe", "recipe_hash")})
         self.assertEqual(self.summary()["recipe_match"], "unknown")
+
+    def test_master_quality(self):
+        """13e3: the recipe's quality reaches the saver and the record; a review-quality
+        upscale isn't the master recipe's."""
+        t = self.final_take()
+        self.set_recipe(RECIPE)
+        up = U.plan_upscale(self.ep, t, **U.recipe_for(self.ep, t))
+        self.assertEqual(up.quality, "master")
+        g = U.graph_of(up, {}, "")
+        self.assertEqual(g["up_save"]["inputs"]["quality"], "master")
+        self.assertEqual(U.queued_record(up)["recipe"]["quality"], "master")
+        review = U.plan_upscale(self.ep, t, method="pixel")
+        self.assertNotIn("quality", U.graph_of(review, {}, "")["up_save"]["inputs"])
+        self.assertEqual(U.plan_upscale(self.ep, t, quality="best").action, "error")
+        self.err(A.post_upscale(self.ctx, {"ep": self.ep, "shots": ["sh010"], "quality": "best"}), 400)
 
     def test_keep(self):
         t = self.final_take()

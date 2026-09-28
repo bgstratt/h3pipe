@@ -1004,6 +1004,8 @@ export interface UpscaleForm {
   /** pixel: on each take's existing upscale instead of the take */
   fromUpscale: boolean;
   encoder: "auto" | "nvenc" | "x264";
+  /** how the .up.mp4 is encoded: review, or master (for delivery; slower) */
+  quality?: "review" | "master";
   precision: "fp16" | "fp32";
   frequencySplit: boolean;
   keepSoft: number;
@@ -1020,6 +1022,7 @@ export function upscaleRequestOf(f: UpscaleForm, ask: { pass: Pass; takes: { sho
   if (f.method === "seedvr2" && f.seedvr2Model) req.seedvr2_model = f.seedvr2Model;
   if ((f.method === "pixel" || f.method === "seedvr2") && f.fromUpscale) req.from_upscale = true;
   if (f.encoder !== "auto") req.encoder = f.encoder;
+  if (f.quality === "master") req.quality = "master";
   if (f.precision !== "fp16") req.precision = f.precision;
   if (!f.frequencySplit) req.frequency_split = false;
   if (f.keepSoft) req.keep_soft = f.keepSoft;

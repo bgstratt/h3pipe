@@ -441,6 +441,10 @@ block, whose objects are per-target). `recipe` takes the upscale request's field
 dialog sends them (`then_pixel_model` / `then_method` become `then`); null clears it. 400
 on a field or value a recipe doesn't take. Answers `{shot, recipe, text}`.
 
+`quality`: `"review"` (the default) or `"master"`: how the `.up.mp4` is encoded. A master
+is x264 CRF 12 on a slow preset (NVENC p7/hq at CQ 14 when `encoder` is `"nvenc"`), still
+H.264 8-bit so the editor plays it; the `.up.json` records `quality`.
+
 ### `PUT /h3pipe/upscale/keep`
 Body `{"ep", "pass"?, "shot", "take", "keep": true | false}`: mark a take's finished upscale
 Keep (409 without one). A fresh kept upscale is skipped by a whole-cut request (`shots`

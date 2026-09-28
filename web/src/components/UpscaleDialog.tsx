@@ -376,6 +376,13 @@ function UpscaleBody() {
                 <option value="x264">CPU (x264)</option>
               </select>
             </label>
+            <label className="h3-col" style={{ gap: 2 }} title="Review: quick to write, fine to watch and cut. Master: x264 at CRF 12 on a slower preset, for delivery (a 4K shot takes a minute or two more to write); it still plays in the editor">
+              <span className="h3-h">Quality</span>
+              <select value={f.quality ?? "review"} onChange={(e) => set({ quality: e.target.value as "review" | "master" })}>
+                <option value="review">Review</option>
+                <option value="master">Master</option>
+              </select>
+            </label>
             {f.method !== "seedvr2" && (f.method !== "latent" || (!!f.thenModel && !thenSv2)) && (
               <label className="h3-col" style={{ gap: 2 }} title="The upscale model's precision: 16-bit is about twice as fast and looks the same; 32-bit is how ComfyUI's own node runs it">
                 <span className="h3-h">Model precision</span>

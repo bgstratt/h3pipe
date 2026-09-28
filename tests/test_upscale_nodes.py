@@ -196,6 +196,18 @@ def fake_upscaler_modules() -> dict:
 
 
 class EncoderTest(unittest.TestCase):
+    def test_master_quality(self):
+        both = {"h264_nvenc", "hevc_nvenc"}
+        with mock.patch.object(UN, "nvenc_encoders", return_value=both):
+            name, args = UN.encoder_args("auto", 3840, 2160, "master")   # x264 for a master
+            self.assertEqual(name, "libx264")
+            self.assertEqual(args[args.index("-crf") + 1], "12")
+            name, args = UN.encoder_args("nvenc", 3840, 2160, "master")  # forced: NVENC's best
+            self.assertEqual((name, args[args.index("-cq") + 1], args[args.index("-preset") + 1]),
+                             ("h264_nvenc", "14", "p7"))
+            self.assertEqual(UN.encoder_args("auto", 3840, 2160)[0], "h264_nvenc")   # review: as before
+        self.assertIn("slow", UN.x264_args(3840, 2160, "master"))
+
     def test_encoder_choice(self):
         both = {"h264_nvenc", "hevc_nvenc"}
         with mock.patch.object(UN, "nvenc_encoders", return_value=both):

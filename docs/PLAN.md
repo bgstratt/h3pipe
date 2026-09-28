@@ -1968,6 +1968,17 @@ Steps (in order; each ends with its exit check):
   (`--intermediate prores`) for an editor downstream, not for the browser.
   Exit: a master of the scratch episode is stream-copied (ffprobe: the clips' bitrate, no
   re-encode in assemble's log); the ProRes export opens in ffprobe as prores_ks HQ.
+  **Built 2026-09-27.** `quality` (`review` | `master`) on the upscale request, the recipe,
+  the CLI (`--quality`) and the dialog (beside the encoder): `H3SaveUpscale` writes a
+  master with x264 CRF 12 (slow; medium past 4K) High 8-bit 4:2:0, or NVENC p7/hq CQ 14
+  when NVENC is forced; the record keeps `quality`, and a master-quality upscale's settings
+  differ from a review one's (so the master recipe can tell). Assemble already copied clips
+  that needn't be re-encoded (same codec, size and fps, no window, trim or placeholder);
+  `--quality master` makes the ones that must be (dialogue windows, trims) CRF 12 slow,
+  and `--intermediate prores` writes a ProRes 422 HQ `.mov` (yuv422p10le, PCM 24-bit) from
+  the finished cut. Tested in test_assemble (copied streams keep their own x264 settings,
+  a trim is CRF 12, the .mov probes as prores HQ with every frame). The live check on the
+  scratch episode waits for 13e4's Master.
 - **13e4 — `h3.py master <ep>` and the editor's Master.** Plans every shot of the cut:
   `upscale` (missing, or from an older take), `ok` (fresh, same recipe), `kept` (different
   recipe or keep), `gap` (no usable pick, a failed upscale). Queues the `upscale` ones with

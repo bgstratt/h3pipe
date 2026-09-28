@@ -92,6 +92,8 @@ class UpscaleJob:
     # step made that size: a re-sample alone). None: the size the scale makes
     deliver: tuple | None = None
     fit: str = "crop"
+    # how the .up.mp4 is encoded: review, or master (Phase 13e3: for delivery)
+    quality: str = "review"
 
     def finish_inputs(self, grain: bool = True) -> dict:
         """The finishing inputs of an H3PixelUpscale node (`grain` False: before a
@@ -121,10 +123,11 @@ class UpscaleJob:
         return (self.out_width or self.width, self.out_height or self.height)
 
     def save_inputs(self) -> dict:
-        """H3SaveUpscale's delivery inputs ({} without one)."""
-        if not self.deliver:
-            return {}
-        return {"width": self.deliver[0], "height": self.deliver[1], "fit": self.fit}
+        """H3SaveUpscale's delivery and quality inputs (only what isn't its default)."""
+        out = {"quality": self.quality} if self.quality != "review" else {}
+        if self.deliver:
+            out.update(width=self.deliver[0], height=self.deliver[1], fit=self.fit)
+        return out
     why: str = ""
     notes: list = field(default_factory=list)
 
@@ -508,7 +511,7 @@ def recipe_kwargs(fields: dict, recipe: dict | None = None) -> dict:
         kw["then_method"] = "seedvr2"
     elif then:
         kw["then_model"] = then
-    for k in ("deliver", "fit", "encoder"):
+    for k in ("deliver", "fit", "encoder", "quality"):
         if g.get(k) is not None:
             kw[k] = g[k]
     return kw
@@ -618,7 +621,7 @@ def check_fields(sec: dict) -> list[str]:
 def plan_upscale(root: str, take: T.Take, *, encoder: str = "auto", precision: str = "fp16",
                  frequency_split: bool = True, keep_soft: float = 0.0, grain: float = 0.0,
                  deliver=None, fit: str = "crop", respect_keep: bool = False,
-                 **kw) -> UpscaleJob:
+                 quality: str = "review", **kw) -> UpscaleJob:
     """_plan (below), with how the result is encoded (`encoder`) and the upscale
     model run (`precision`), both checked, and sized to `deliver` (see
     deliver_to)."""
@@ -641,6 +644,9 @@ def plan_upscale(root: str, take: T.Take, *, encoder: str = "auto", precision: s
         job.action, job.why = "error", f"encoder {encoder!r}: it's {', '.join(ENCODERS)}"
     if job.action != "error" and job.precision not in PRECISIONS:
         job.action, job.why = "error", f"precision {precision!r}: it's fp16 or fp32"
+    job.quality = quality or "review"
+    if job.action != "error" and job.quality not in QUALITIES:
+        job.action, job.why = "error", f"quality {quality!r}: it's review or master"
     return job
 
 
@@ -1234,6 +1240,8 @@ def settings_of(up: UpscaleJob) -> dict:
     d["size"] = list(up.out_size)
     if up.deliver:
         d["fit"] = up.fit
+    if up.quality != "review":
+        d["quality"] = up.quality
     return d
 
 
@@ -1282,7 +1290,8 @@ def kept(take: T.Take, rec: dict | None = None) -> bool:
 
 def queued_record(up: UpscaleJob) -> dict:
     s = settings_of(up)
-    return {**_queued_record(up), "recipe": s, "recipe_hash": settings_hash(s)}
+    return {**_queued_record(up), "quality": up.quality, "recipe": s,
+            "recipe_hash": settings_hash(s)}
 
 
 def _queued_record(up: UpscaleJob) -> dict:
@@ -1416,6 +1425,9 @@ def main(argv=None) -> int:
     ap.add_argument("--encoder", choices=ENCODERS, default="auto",
                     help="auto: H.264, on the GPU (NVENC) up to 4096 wide, x264 past it; "
                          "nvenc forces the GPU (HEVC past 4096); x264 the CPU")
+    ap.add_argument("--quality", choices=QUALITIES, default="review",
+                    help="how the .up.mp4 is encoded: review (the default) or master "
+                         "(x264 CRF 12, slower: for delivery)")
     ap.add_argument("--precision", choices=PRECISIONS, default="fp16",
                     help="the upscale model's precision (fp16: about twice as fast)")
     ap.add_argument("--no-frequency-split", dest="frequency_split", action="store_false",
@@ -1509,7 +1521,8 @@ def main(argv=None) -> int:
                               from_upscale=args.from_upscale, encoder=args.encoder,
                               precision=args.precision, frequency_split=args.frequency_split,
                               keep_soft=args.keep_soft, grain=args.grain,
-                              seedvr2_model=args.seedvr2_model, deliver=args.deliver, fit=args.fit)
+                              seedvr2_model=args.seedvr2_model, deliver=args.deliver, fit=args.fit,
+                              quality=args.quality)
         mark = {"upscale": "..", "skip": "= ", "error": "!!"}[up.action]
         what = describe(up) if up.action == "upscale" else up.why
         print(f"  {mark} {up.label}: {what}")
