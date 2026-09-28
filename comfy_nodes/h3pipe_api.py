@@ -815,6 +815,13 @@ def post_upscale(ctx: Context, body):
     then_scale = body.get("then_scale")
     if then_scale is not None and (isinstance(then_scale, bool) or not isinstance(then_scale, (int, float))):
         raise ApiError(400, "then_scale must be a number or null")
+    deliver, fit = body.get("deliver"), body.get("fit") or "crop"
+    try:
+        U.parse_deliver(deliver)
+    except U.UpscaleError as e:
+        raise ApiError(400, str(e))
+    if fit not in U.FITS:
+        raise ApiError(400, "fit must be crop or pad")
     if takes is not None:
         found = []
         for x in takes:
@@ -834,7 +841,7 @@ def post_upscale(ctx: Context, body):
                             then_model=then_model, then_scale=then_scale,
                             from_upscale=from_upscale, encoder=encoder, precision=precision,
                             frequency_split=frequency_split, keep_soft=keep_soft, grain=grain,
-                            seedvr2_model=seedvr2_model)
+                            seedvr2_model=seedvr2_model, deliver=deliver, fit=fit)
         if up.action == "skip":
             skipped.append({"shot": shot, "take": t.take, "reason": up.why})
         elif up.action == "error":
@@ -895,7 +902,9 @@ def get_upscale_options(ctx: Context, query: dict):
         latent[t.id] = r
     return 200, {"pixel": px, "seedvr2": sv2, "latent": latent, "details": list(U.DETAILS),
                  "max_scale": U.MAX_SCALE, "encoders": list(U.ENCODERS),
-                 "precisions": list(U.PRECISIONS)}
+                 "precisions": list(U.PRECISIONS),
+                 "delivers": [{"id": k, "width": w, "height": h} for k, (w, h) in U.DELIVER.items()],
+                 "fits": list(U.FITS)}
 
 
 @handler

@@ -1827,6 +1827,16 @@ text is kept under each "built" note.
   whose clips mix codecs. Revised 2026-09-27: `auto` no longer writes HEVC — sh040 t03's
   5376×3072 HEVC upscale was a sound file but played black in the editor's browser — so
   past 4096 auto uses x264 (H.264, playable); HEVC only with `nvenc` forced.
+- **Output size** (2026-09-27, the user's ask: "limit the upscale to 3840x2160"): an upscale
+  can be delivered at an exact size (`deliver`: 1080p / 1440p / 4k / WxH) with `fit` crop
+  (default) or pad, beside the multiple, which now takes any number (the dialog's
+  Custom…). The last step that can make any size is sized to cover or fit the delivery
+  (`fit_size`, aspect kept; the same function in h3upscale, the node pack and the editor);
+  `H3SaveUpscale` resizes (a re-sample alone), crops or pads with an ffmpeg filter as it
+  encodes. Why crop/pad at all: H3's native 1344×768 and its 448×256 proxy are 7:4, not
+  16:9 (1344×768 to 4K: 36 rows cropped, 1.6%, or 30 px bars each side). AUTHORING's size
+  table now has a third setup, 16:9 on the 32 grid (1024×576, proxy 512×288), which
+  re-samples 2x to 2048×1152 and meets 1080p and 4K exactly.
 - **Pixel on top of an upscale** (2026-09-26): `from_upscale` / `--from-upscale` / the dialog's
   "On top of the existing upscale": the pixel method reads the take's fresh `.up.mp4` and
   replaces it, sized from the upscale; the record nests the old one as `on_upscale`.

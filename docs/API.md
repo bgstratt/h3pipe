@@ -370,6 +370,16 @@ an LTX-2 re-sample is 2x only. `then_pixel_model` (with `then_scale`, default 2)
 pixel step after a re-sample in the same job: that upscale model takes the re-sampled frames
 on (re-sample 2x then `RealESRGAN_x2.pth` 2x = 4x); `width`/`height` in the answer are the
 final size, and the `.up.json` records `then_pixel: {model, scale, from: [w, h]}`.
+`deliver` (`"1080p"`, `"1440p"`, `"4k"` or `"WxH"`, both even, 64 to 8192; null: the size
+the scale makes) makes the upscale exactly that size, and `fit` (`"crop"`, the default, or
+`"pad"`) says how a frame of another shape meets it. The last step that can make any size
+(the pixel method, SeedVR2, the then-pixel step) is sized to cover the delivery (crop) or
+fit inside it (pad), aspect kept, its scale worked out from what it starts from (`scale` /
+`then_scale` are then ignored); a re-sample alone keeps its scale. `H3SaveUpscale` then
+resizes (only when no step made that size), crops or pads to the delivery with ffmpeg. A
+pixel step that would have to shrink is an error. The answer's `width`/`height` and the
+`.up.json`'s are the delivery; the `.up.json` adds `deliver: {width, height, fit, made:
+[w, h]}` (what the last step made), and so does the episode's upscale summary.
 `from_upscale: true` runs the pixel method on each take's existing fresh upscale instead of
 the take (its `.up.mp4` is the input and is replaced; `scale` applies to the upscale's size;
 the take's audio is still what's copied on). The new record keeps the old one as
@@ -415,7 +425,8 @@ is `"7b"` (the default), `"3b"` or a file name; it takes `scale`, `from_upscale`
 finish like the pixel method, and options lists it as `seedvr2: {status, missing, models,
 default}`. `latent[target]` is null for a target with no latent upscale; otherwise it also has `mode`
 (`resample` | `second_stage`), `align` and `fixed_scale` (second_stage's only scale), and
-the answer has `max_scale`. Each take in `GET /h3pipe/episode` has its `width` and `height`,
+the answer has `max_scale`, `delivers` (`[{id, width, height}]`: 1080p, 1440p, 4k) and
+`fits` (`["crop", "pad"]`). Each take in `GET /h3pipe/episode` has its `width` and `height`,
 so the dialog can show what every scale makes before anything is queued.
 
 ### `DELETE /h3pipe/upscale?ep=…&shot=sh020&take=3[&pass=proxy]`

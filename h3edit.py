@@ -1482,6 +1482,7 @@ def upscale_summary(root: str, t: T.Take) -> dict | None:
             "method": up.get("method", "latent"), "pixel_model": up.get("pixel_model"),
             "seedvr2_model": up.get("seedvr2_model"),
             "then_pixel": up.get("then_pixel"),
+            "deliver": up.get("deliver"),
             "on_upscale": up.get("on_upscale"),
             "encoder": up.get("encoder"), "precision": up.get("precision"),
             "finish": up.get("finish"),

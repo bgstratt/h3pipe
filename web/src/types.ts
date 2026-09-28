@@ -683,6 +683,8 @@ export interface TakeUpscale {
   seedvr2_model?: string | null;
   /** a pixel step after the re-sample: its model, scale and the re-sample's size */
   then_pixel?: { model: string; scale: number; from: [number, number] } | null;
+  /** a delivery size: what was asked for, the fit, and what the last step made */
+  deliver?: { width: number; height: number; fit: "crop" | "pad"; made: [number, number] } | null;
   /** a pixel upscale run on an earlier upscale: that one's record (nested for a longer chain) */
   on_upscale?: Record<string, unknown> | null;
   /** the encoder the .up.mp4 was written with (h264_nvenc, hevc_nvenc, libx264) */
@@ -718,6 +720,10 @@ export interface UpscaleRequest {
   /** latent: then an upscale model takes the re-sample on by `then_scale` (default 2) */
   then_pixel_model?: string | null;
   then_scale?: number | null;
+  /** an exact size: "1080p", "1440p", "4k" or "WxH"; the last pixel step is sized to it
+   * and the result cropped (`fit` crop, the default) or padded to it */
+  deliver?: string | null;
+  fit?: "crop" | "pad";
   /** pixel: run on each take's existing upscale (its .up.mp4, replaced) instead of the take */
   from_upscale?: boolean;
   /** how the .up.mp4 is encoded: auto (NVENC when there, else x264), nvenc, x264 */
@@ -747,6 +753,8 @@ export interface UpscaleOptions {
   max_scale?: number;
   encoders?: string[];
   precisions?: string[];
+  delivers?: { id: string; width: number; height: number }[];
+  fits?: string[];
 }
 
 export interface UpscaleResult {

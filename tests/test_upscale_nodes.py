@@ -118,6 +118,23 @@ class UpscaleNodesTest(unittest.TestCase):
         self.assertEqual([f for f in os.listdir(os.path.dirname(out)) if f.startswith(".tmp_")], [])
 
     @needs_ffmpeg
+    def test_save_upscale_delivers_an_exact_size(self):
+        self.take_mp4()
+        size = lambda p: subprocess.run(
+            ["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries",
+             "stream=width,height", "-of", "csv=p=0", p], capture_output=True, text=True).stdout.strip()
+        for (w, h, fit) in ((80, 48, "crop"), (96, 64, "pad"), (192, 108, "crop")):
+            with open(self.p("sh010_t01.up.json"), "w", encoding="utf-8") as fh:
+                json.dump({"shot": "sh010", "take": 1, "status": "queued"}, fh)
+            UN.H3SaveUpscale().save(clip(24), self.root, "renders/sh010/sh010_t01.mp4",
+                                    "renders/sh010/sh010_t01.up.mp4", 24.0,
+                                    "renders/sh010/sh010_t01.up.json", "x264", w, h, fit)
+            self.assertEqual(size(self.p("sh010_t01.up.mp4")), f"{w},{h}")
+            rec = json.load(open(self.p("sh010_t01.up.json"), encoding="utf-8"))
+            self.assertEqual((rec["status"], rec["width"], rec["height"]), ("ok", w, h))
+
+
+    @needs_ffmpeg
     def test_save_upscale_of_a_mute_take(self):
         self.take_mp4(audio=False)
         (status,) = UN.H3SaveUpscale().save(
@@ -207,6 +224,15 @@ class EncoderTest(unittest.TestCase):
                                 "-show_entries", "stream=nb_read_frames", "-of", "csv=p=0", out],
                                capture_output=True, text=True).stdout.strip()
             self.assertEqual(n, "12")
+
+    def test_fit_filter(self):
+        self.assertEqual(UN.fit_size(1344, 768, 3840, 2160, "crop"), (3840, 2196))
+        self.assertEqual(UN.fit_size(1344, 768, 3840, 2160, "pad"), (3780, 2160))
+        self.assertIsNone(UN.fit_filter(3840, 2160, 3840, 2160))
+        self.assertIsNone(UN.fit_filter(3840, 2160, 0, 0))
+        self.assertEqual(UN.fit_filter(3840, 2196, 3840, 2160, "crop"), "crop=3840:2160")
+        self.assertEqual(UN.fit_filter(2688, 1536, 3840, 2160, "pad"),
+                         "scale=3780:2160:flags=lanczos,pad=3840:2160:(ow-iw)/2:(oh-ih)/2:black")
 
 
 class FinishTest(unittest.TestCase):

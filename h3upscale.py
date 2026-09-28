@@ -34,7 +34,9 @@ from __future__ import annotations
 
 import argparse
 import copy
+import math
 import os
+import re
 import sys
 import time
 from dataclasses import dataclass, field
@@ -81,6 +83,12 @@ class UpscaleJob:
     frequency_split: bool = True
     keep_soft: float = 0.0
     grain: float = 0.0
+    # a delivery size (W, H): the last step makes the frame, aspect kept, just
+    # big enough to cover it (fit "crop") or fit inside it ("pad"), and the
+    # saver crops or pads it to exactly W x H (and resizes it first when no
+    # step made that size: a re-sample alone). None: the size the scale makes
+    deliver: tuple | None = None
+    fit: str = "crop"
 
     def finish_inputs(self, grain: bool = True) -> dict:
         """The finishing inputs of an H3PixelUpscale node (`grain` False: before a
@@ -98,8 +106,22 @@ class UpscaleJob:
 
     @property
     def out_size(self) -> tuple[int, int]:
-        """What the .up.mp4 is: after the then-pixel step if there is one."""
+        """What the .up.mp4 is: the delivery size, else after the then-pixel step
+        if there is one."""
+        if self.deliver:
+            return tuple(self.deliver)
         return (self.out_width or self.width, self.out_height or self.height)
+
+    @property
+    def made_size(self) -> tuple[int, int]:
+        """What the last step makes, before the saver crops or pads it."""
+        return (self.out_width or self.width, self.out_height or self.height)
+
+    def save_inputs(self) -> dict:
+        """H3SaveUpscale's delivery inputs ({} without one)."""
+        if not self.deliver:
+            return {}
+        return {"width": self.deliver[0], "height": self.deliver[1], "fit": self.fit}
     why: str = ""
     notes: list = field(default_factory=list)
 
@@ -167,6 +189,42 @@ def schedule_steps(spec: dict, take_steps: int) -> int:
     if spec.get("mode", RESAMPLE) == SECOND_STAGE:
         return int(spec["steps"])
     return take_steps
+
+
+# delivery sizes by name (`deliver`); any "WxH" is taken too
+DELIVER = {"1080p": (1920, 1080), "1440p": (2560, 1440), "4k": (3840, 2160)}
+FITS = ("crop", "pad")
+
+
+def parse_deliver(v) -> tuple | None:
+    """(W, H) from "1080p" / "1440p" / "4k" / "WxH", None from None or ""."""
+    if v in (None, ""):
+        return None
+    if isinstance(v, (list, tuple)) and len(v) == 2:
+        w, h = v
+    elif str(v).lower() in DELIVER:
+        return DELIVER[str(v).lower()]
+    else:
+        m = re.fullmatch(r"\s*(\d+)\s*[xX×]\s*(\d+)\s*", str(v))
+        if not m:
+            raise UpscaleError(f"deliver {v!r}: it's 1080p, 1440p, 4k or WxH")
+        w, h = m.groups()
+    w, h = int(w), int(h)
+    if w % 2 or h % 2 or not (64 <= w <= 8192 and 64 <= h <= 8192):
+        raise UpscaleError(f"deliver {w}x{h}: both sides even, 64 to 8192")
+    return (w, h)
+
+
+def fit_size(w: int, h: int, W: int, H: int, fit: str = "crop") -> tuple[int, int]:
+    """What a w x h frame is scaled to, keeping its aspect, before it is cropped
+    (`crop`: it covers W x H) or padded (`pad`: it fits inside) to W x H; even
+    sides. 1344x768 to 3840x2160: 3840x2196 cropped (18 rows off the top and
+    bottom), or 3780x2160 padded (30 columns of black each side)."""
+    if fit == "crop":
+        s = max(W / w, H / h)
+        return (max(W, 2 * math.ceil(w * s / 2 - 1e-9)), max(H, 2 * math.ceil(h * s / 2 - 1e-9)))
+    s = min(W / w, H / h)
+    return (min(W, 2 * math.floor(w * s / 2 + 1e-9)), min(H, 2 * math.floor(h * s / 2 + 1e-9)))
 
 
 def align_of(spec: dict) -> int:
@@ -347,10 +405,16 @@ def upscale_readiness(target: "TG.Target", object_info: dict | None) -> dict | N
 
 def plan_upscale(root: str, take: T.Take, *, encoder: str = "auto", precision: str = "fp16",
                  frequency_split: bool = True, keep_soft: float = 0.0, grain: float = 0.0,
-                 **kw) -> UpscaleJob:
+                 deliver=None, fit: str = "crop", **kw) -> UpscaleJob:
     """_plan (below), with how the result is encoded (`encoder`) and the upscale
-    model run (`precision`), both checked."""
+    model run (`precision`), both checked, and sized to `deliver` (see
+    deliver_to)."""
     job = _plan(root, take, **kw)
+    if job.action != "error" and (deliver not in (None, "") or fit != "crop"):
+        try:
+            deliver_to(job, parse_deliver(deliver), fit or "crop")
+        except UpscaleError as e:
+            job.action, job.why = "error", str(e)
     job.encoder, job.precision = encoder or "auto", precision or "fp16"
     job.frequency_split = bool(frequency_split)
     job.keep_soft, job.grain = float(keep_soft or 0), float(grain or 0)
@@ -469,6 +533,45 @@ def _plan(root: str, take: T.Take, *, scale: float | None = None,
     if up and up["fresh"] and not redo:
         job.action, job.why = "skip", "already upscaled"
     return job
+
+
+def deliver_to(job: UpscaleJob, size: tuple | None, fit: str) -> None:
+    """Size a planned job to deliver `size`: the last step that can make any size
+    (the pixel method, SeedVR2, a then-pixel step) makes the frame that covers
+    or fits it (fit_size), its scale worked out from what it starts from; a
+    re-sample alone keeps its own scale and the saver resizes. UpscaleError
+    when the delivery needs a step to shrink."""
+    if fit not in FITS:
+        raise UpscaleError(f"fit {fit!r}: it's crop or pad")
+    job.fit = fit
+    if size is None:
+        return
+    job.deliver = size
+    W, H = size
+    if job.method in ("pixel", "seedvr2"):
+        # the step's input: the take, or the upscale it runs on
+        src = job.previous or job.take.sidecar or {}
+        w, h = int(src.get("width") or 0), int(src.get("height") or 0)
+        iw, ih = fit_size(w, h, W, H, fit)
+        s = round(iw / w, 4)
+        if not 1 < s <= MAX_SCALE:
+            raise UpscaleError(f"{W}x{H} from {w}x{h} is {s:g}x: it's more than 1, up to {MAX_SCALE:g}")
+        job.scale, job.width, job.height = s, iw, ih
+    elif job.then_model:
+        iw, ih = fit_size(job.width, job.height, W, H, fit)
+        s = round(iw / job.width, 4)
+        if s <= 1:
+            raise UpscaleError(f"the re-sample makes {job.width}x{job.height} already: {W}x{H} "
+                               f"needs no upscale model after it")
+        if s > MAX_SCALE:
+            raise UpscaleError(f"{W}x{H} from the re-sample's {job.width}x{job.height} is {s:g}x: "
+                               f"at most {MAX_SCALE:g}")
+        job.then_scale, job.out_width, job.out_height = s, iw, ih
+    else:
+        iw, ih = fit_size(job.width, job.height, W, H, fit)
+        if iw > job.width:
+            job.notes.append(f"the re-sample's {job.width}x{job.height} is stretched to {iw}x{ih} "
+                             f"for {W}x{H}: an upscale model after it adds detail instead")
 
 
 def take_job(up: UpscaleJob) -> J.Job:
@@ -713,14 +816,15 @@ def finish_graph(g: dict, up: UpscaleJob, images: list) -> dict:
     g["up_save"] = {"class_type": "H3SaveUpscale", "inputs": {
         "images": images, "project_root": up.root, "source_mp4": rel(up.root, take.paths.mp4),
         "out_mp4": rel(up.root, take.paths.up_mp4), "fps": float((take.sidecar or {}).get("fps") or 24),
-        "sidecar": rel(up.root, take.paths.up_sidecar), "encoder": up.encoder}}
+        "sidecar": rel(up.root, take.paths.up_sidecar), "encoder": up.encoder,
+        **up.save_inputs()}}
     if up.then_model:
         # the re-sample's frames through an upscale model before they're saved
         g["up_then_model"] = {"class_type": "UpscaleModelLoader",
                               "inputs": {"model_name": up.then_model}}
         g["up_then"] = {"class_type": "H3PixelUpscale", "inputs": {
             "images": images, "upscale_model": ["up_then_model", 0],
-            "width": up.out_size[0], "height": up.out_size[1], "chunk": 2,
+            "width": up.made_size[0], "height": up.made_size[1], "chunk": 2,
             "precision": up.precision, **up.finish_inputs()}}
         g["up_save"]["inputs"]["images"] = ["up_then", 0]
     J.prune(g, "up_save")
@@ -768,7 +872,8 @@ def seedvr2_graph(up: UpscaleJob) -> dict:
             "images": ["up_finish", 0], "project_root": root,
             "source_mp4": rel(root, take.paths.mp4), "out_mp4": rel(root, take.paths.up_mp4),
             "fps": float((take.sidecar or {}).get("fps") or 24),
-            "sidecar": rel(root, take.paths.up_sidecar), "encoder": up.encoder}},
+            "sidecar": rel(root, take.paths.up_sidecar), "encoder": up.encoder,
+            **up.save_inputs()}},
     }
 
 
@@ -791,7 +896,8 @@ def pixel_graph(up: UpscaleJob) -> dict:
             "images": ["up_pixels", 0], "project_root": root,
             "source_mp4": rel(root, take.paths.mp4), "out_mp4": rel(root, take.paths.up_mp4),
             "fps": float((take.sidecar or {}).get("fps") or 24),
-            "sidecar": rel(root, take.paths.up_sidecar), "encoder": up.encoder}},
+            "sidecar": rel(root, take.paths.up_sidecar), "encoder": up.encoder,
+            **up.save_inputs()}},
     }
 
 
@@ -830,6 +936,12 @@ def graph_of(up: UpscaleJob, bases: dict, comfy_url: str) -> dict:
 
 
 def describe(up: UpscaleJob) -> str:
+    d = (f" -> {up.deliver[0]}x{up.deliver[1]} ({'cropped' if up.fit == 'crop' else 'padded'})"
+         if up.deliver and tuple(up.deliver) != up.made_size else "")
+    return _describe(up) + d + "".join(f"\n       note: {n}" for n in up.notes)
+
+
+def _describe(up: UpscaleJob) -> str:
     if up.method == "seedvr2":
         on = " on its upscale" if up.previous else ""
         return f"SeedVR2 ({up.seedvr2_model}){on}, {up.scale:g}x -> {up.width}x{up.height}"
@@ -845,8 +957,16 @@ def previous_summary(prev: dict) -> dict:
     """The parts of an upscale record that say what it was (for the next one's
     `on_upscale`), its own `on_upscale` kept, so a chain reads back in full."""
     keep = ("method", "route", "mode", "scale", "start_step", "pixel_model", "then_pixel",
-            "width", "height", "finished", "on_upscale")
+            "deliver", "width", "height", "finished", "on_upscale")
     return {k: prev[k] for k in keep if prev.get(k) is not None}
+
+
+def deliver_record(up: UpscaleJob) -> dict:
+    """`deliver`: the size asked for, the fit, and what the last step made."""
+    if not up.deliver:
+        return {}
+    return {"deliver": {"width": up.deliver[0], "height": up.deliver[1], "fit": up.fit,
+                        "made": list(up.made_size)}}
 
 
 def queued_record(up: UpscaleJob) -> dict:
@@ -859,7 +979,8 @@ def queued_record(up: UpscaleJob) -> dict:
                 "color_correction": "lab", "encoder_asked": up.encoder,
                 "finish": up.finish_record(),
                 **({"on_upscale": previous_summary(up.previous)} if up.previous else {}),
-                "width": up.width, "height": up.height, **T.source_stamp(up.take.paths.mp4)}
+                **deliver_record(up),
+                "width": up.out_size[0], "height": up.out_size[1], **T.source_stamp(up.take.paths.mp4)}
     if up.method == "pixel":
         return {"shot": up.shot, "take": up.take.take, "status": "queued", "queued": T.now(),
                 "comfy_prompt_id": None, "target": up.target.id, "route": "pixel",
@@ -870,7 +991,8 @@ def queued_record(up: UpscaleJob) -> dict:
                 # the chain: what the upscale it ran on was (so a later look can
                 # tell "re-sample 2x, then pixel 2x"); the stamp stays the take's
                 **({"on_upscale": previous_summary(up.previous)} if up.previous else {}),
-                "width": up.width, "height": up.height, **T.source_stamp(up.take.paths.mp4)}
+                **deliver_record(up),
+                "width": up.out_size[0], "height": up.out_size[1], **T.source_stamp(up.take.paths.mp4)}
     if up.spec.get("mode") == PIXEL_REFINE:
         upscaler = f"{up.pixel_model}, then the target's own sampler"
     elif up.spec.get("mode", RESAMPLE) == SECOND_STAGE:
@@ -888,6 +1010,7 @@ def queued_record(up: UpscaleJob) -> dict:
                if up.then_model or up.spec.get("mode") == PIXEL_REFINE else {}),
             **({"then_pixel": {"model": up.then_model, "scale": up.then_scale,
                                "from": [up.width, up.height]}} if up.then_model else {}),
+            **deliver_record(up),
             "width": up.out_size[0], "height": up.out_size[1], **T.source_stamp(up.take.paths.mp4)}
 
 
@@ -973,8 +1096,8 @@ def main(argv=None) -> int:
     ap.add_argument("--pixel-model", help=f"the pixel method's model (default {DEFAULT_PIXEL_MODEL})")
     ap.add_argument("--seedvr2-model", help="the SeedVR2 method's model: 7b (default) or 3b, or a file name")
     ap.add_argument("--encoder", choices=ENCODERS, default="auto",
-                    help="auto: the GPU's NVENC when there is one (H.264, HEVC above 4096 wide), "
-                         "else x264; nvenc / x264 force one")
+                    help="auto: H.264, on the GPU (NVENC) up to 4096 wide, x264 past it; "
+                         "nvenc forces the GPU (HEVC past 4096); x264 the CPU")
     ap.add_argument("--precision", choices=PRECISIONS, default="fp16",
                     help="the upscale model's precision (fp16: about twice as fast)")
     ap.add_argument("--no-frequency-split", dest="frequency_split", action="store_false",
@@ -990,6 +1113,13 @@ def main(argv=None) -> int:
                     help="after a re-sample, an upscale model takes it on by --then-scale "
                          "(e.g. re-sample 2x then RealESRGAN_x2.pth: 4x)")
     ap.add_argument("--then-scale", type=float, help="the --then-pixel step's scale (default 2)")
+    ap.add_argument("--deliver", metavar="SIZE",
+                    help="the upscale's exact size: 1080p, 1440p, 4k or WxH. The last pixel step "
+                         "(pixel, SeedVR2, --then-pixel) is scaled to it, aspect kept, then --fit "
+                         "crops or pads; a re-sample alone is resized to it")
+    ap.add_argument("--fit", choices=FITS, default="crop",
+                    help="when the take's aspect isn't the delivery's: crop (fill, trim the "
+                         "overhang; the default) or pad (fit inside, black bars)")
     ap.add_argument("--detail", type=int, choices=DETAILS,
                     help="latent: start 0-2 steps earlier than the default (more detail, more change)")
     ap.add_argument("--vae", action="store_true",
@@ -1026,7 +1156,7 @@ def main(argv=None) -> int:
                           from_upscale=args.from_upscale, encoder=args.encoder,
                           precision=args.precision, frequency_split=args.frequency_split,
                           keep_soft=args.keep_soft, grain=args.grain,
-                          seedvr2_model=args.seedvr2_model)
+                          seedvr2_model=args.seedvr2_model, deliver=args.deliver, fit=args.fit)
         mark = {"upscale": "..", "skip": "= ", "error": "!!"}[up.action]
         what = describe(up) if up.action == "upscale" else up.why
         print(f"  {mark} {up.label}: {what}")

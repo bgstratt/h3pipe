@@ -66,6 +66,14 @@ describe("upscaleRequestOf (the Upscale dialog)", () => {
     expect(r).toMatchObject({ method: "seedvr2", seedvr2_model: "seedvr2_3b_int8_convrot.safetensors", from_upscale: true });
     expect("pixel_model" in r || "detail" in r || "vae" in r || "then_pixel_model" in r).toBe(false);
   });
+  it("a delivery size: sent with its fit; it decides the pixel and then-pixel scales", () => {
+    const px = upscaleRequestOf({ ...f, method: "pixel", scale: 3, deliver: "4k", fit: "pad" }, one);
+    expect(px).toMatchObject({ deliver: "4k", fit: "pad" });
+    expect("scale" in px).toBe(false);
+    const lat = upscaleRequestOf({ ...f, method: "latent", scale: 1.5, thenModel: "x.pth", thenScale: 3, deliver: "1080p" }, one);
+    expect(lat).toMatchObject({ scale: 1.5, then_pixel_model: "x.pth", deliver: "1080p" });
+    expect("then_scale" in lat || "fit" in lat).toBe(false);
+  });
   it("on top of an upscale: pixel only", () => {
     expect(upscaleRequestOf({ ...f, method: "pixel", fromUpscale: true }, one).from_upscale).toBe(true);
     expect("from_upscale" in upscaleRequestOf({ ...f, method: "latent", fromUpscale: true }, one)).toBe(false);

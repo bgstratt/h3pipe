@@ -25,6 +25,7 @@ Paths are relative to `project_root` (the episode), like H3SaveShot's.
 from __future__ import annotations
 
 import json
+import math
 import os
 import subprocess
 import tempfile
@@ -454,17 +455,45 @@ def encoder_args(encoder: str, w: int, h: int) -> tuple[str, list]:
     return "libx264", x264_args(w, h)
 
 
-def encode_stream(images, path: str, fps: float, encoder: str = "auto") -> str:
+def fit_size(w: int, h: int, W: int, H: int, fit: str = "crop") -> tuple[int, int]:
+    """What a w x h frame is scaled to, keeping its aspect, before it is cropped
+    (`crop`: it covers W x H) or padded (`pad`: it fits inside) to W x H; even
+    sides. 1344x768 to 3840x2160: 3840x2196 cropped (18 rows off the top and
+    bottom), or 3780x2160 padded (30 columns of black each side)."""
+    if fit == "crop":
+        s = max(W / w, H / h)
+        return (max(W, 2 * math.ceil(w * s / 2 - 1e-9)), max(H, 2 * math.ceil(h * s / 2 - 1e-9)))
+    s = min(W / w, H / h)
+    return (min(W, 2 * math.floor(w * s / 2 + 1e-9)), min(H, 2 * math.floor(h * s / 2 + 1e-9)))
+
+
+def fit_filter(w: int, h: int, W: int, H: int, fit: str = "crop") -> str | None:
+    """The ffmpeg -vf that makes a w x h frame exactly W x H (None: it is): a
+    lanczos resize to fit_size when it isn't that already, then a centred crop
+    or black pad."""
+    if not W or not H or (w, h) == (W, H):
+        return None
+    iw, ih = fit_size(w, h, W, H, fit)
+    parts = [f"scale={iw}:{ih}:flags=lanczos"] if (iw, ih) != (w, h) else []
+    parts.append(f"crop={W}:{H}" if fit == "crop" else f"pad={W}:{H}:(ow-iw)/2:(oh-ih)/2:black")
+    return ",".join(parts)
+
+
+def encode_stream(images, path: str, fps: float, encoder: str = "auto",
+                  size: tuple = (0, 0), fit: str = "crop") -> str:
     """Write `images` (IMAGE [T, H, W, 3]) to a mute mp4, one frame at a time into
-    ffmpeg (no whole-clip byte copy: at 5376x3072 that was ~20 GB). Returns the
-    encoder used; on auto, a failed NVENC encode is retried on x264."""
+    ffmpeg (no whole-clip byte copy: at 5376x3072 that was ~20 GB), made exactly
+    `size` (W, H) by fit_filter when one is given. Returns the encoder used; on
+    auto, a failed NVENC encode is retried on x264."""
     n, h, w = int(images.shape[0]), int(images.shape[1]), int(images.shape[2])
-    name, args = encoder_args(encoder, w, h)
+    vf = fit_filter(w, h, int(size[0]), int(size[1]), fit)
+    ow, oh = (int(size[0]), int(size[1])) if vf else (w, h)
+    name, args = encoder_args(encoder, ow, oh)
 
     def run(args: list) -> None:
         cmd = ["ffmpeg", "-y", "-v", "error", "-f", "rawvideo", "-pix_fmt", "rgb24",
                "-s", f"{w}x{h}", "-framerate", str(fps), "-i", "-", "-frames:v", str(n),
-               *args, path]
+               *(["-vf", vf] if vf else []), *args, path]
         proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stderr=subprocess.PIPE)
         try:
             for i in range(n):
@@ -490,7 +519,7 @@ def encode_stream(images, path: str, fps: float, encoder: str = "auto") -> str:
         if encoder != "auto" or name == "libx264":
             raise
         name = "libx264"
-        run(x264_args(w, h))
+        run(x264_args(ow, oh))
     return name
 
 
@@ -509,8 +538,14 @@ class H3SaveUpscale:
             "out_mp4": ("STRING", {"default": "renders/sh010/sh010_t01.up.mp4"}),
             "fps": ("FLOAT", {"default": 24.0, "min": 1.0, "max": 60.0, "step": 1.0}),
             "sidecar": ("STRING", {"default": ""}),
-            # auto: NVENC when ffmpeg has it (H.264 up to 4096, HEVC above), else x264
+            # auto: H.264, NVENC up to 4096 wide, x264 past it (nvenc: HEVC past 4096)
             "encoder": (list(ENCODERS), {"default": "auto"}),
+        }, "optional": {
+            # a delivery size (0: the frames' own): the frames resized, aspect
+            # kept, then cropped to fill it or padded to fit inside it
+            "width": ("INT", {"default": 0, "min": 0, "max": 8192, "step": 2}),
+            "height": ("INT", {"default": 0, "min": 0, "max": 8192, "step": 2}),
+            "fit": (["crop", "pad"], {"default": "crop"}),
         }}
 
     RETURN_TYPES = ("STRING",)
@@ -519,7 +554,8 @@ class H3SaveUpscale:
     OUTPUT_NODE = True
     CATEGORY = "H3/upscale"
 
-    def save(self, images, project_root, source_mp4, out_mp4, fps, sidecar="", encoder="auto"):
+    def save(self, images, project_root, source_mp4, out_mp4, fps, sidecar="", encoder="auto",
+             width=0, height=0, fit="crop"):
         root = os.path.normpath(project_root)
         out = _abs(root, out_mp4)
         source = _abs(root, source_mp4)
@@ -530,7 +566,7 @@ class H3SaveUpscale:
         os.close(fd)
         try:
             t0 = clock()
-            used = encode_stream(images, picture, float(fps), encoder)
+            used = encode_stream(images, picture, float(fps), encoder, (width, height), fit)
             ms["mp4"] = round((clock() - t0) * 1000)
             notes.append(f"mp4 written ({used})")
             if os.path.isfile(picture):
@@ -554,8 +590,10 @@ class H3SaveUpscale:
             except (OSError, ValueError):
                 data = {}
             data.update(status="ok" if ok else "failed", finished=_now(),
-                        frames=int(images.shape[0]), width=int(images.shape[2]),
-                        height=int(images.shape[1]), mp4=stem if ok else None,
+                        frames=int(images.shape[0]),
+                        width=int(width) if width and height else int(images.shape[2]),
+                        height=int(height) if width and height else int(images.shape[1]),
+                        mp4=stem if ok else None,
                         audio=audio, encoder=used, save_ms=ms,
                         save_notes=f"{stem}: " + "; ".join(notes))
             _write_json_atomic(path, data)

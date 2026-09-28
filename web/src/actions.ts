@@ -995,6 +995,10 @@ export interface UpscaleForm {
   /** a pixel step after a re-sample: its model (null: none) and scale */
   thenModel: string | null;
   thenScale: number;
+  /** an exact output size ("1080p", "1440p", "4k", "WxH"; null: as scaled), and how a
+   * frame of another shape meets it: crop to fill, or pad with bars */
+  deliver?: string | null;
+  fit?: "crop" | "pad";
   /** pixel: on each take's existing upscale instead of the take */
   fromUpscale: boolean;
   encoder: "auto" | "nvenc" | "x264";
@@ -1020,10 +1024,16 @@ export function upscaleRequestOf(f: UpscaleForm, ask: { pass: Pass; takes: { sho
   if (f.grain) req.grain = f.grain;
   if (f.method !== "pixel" && f.method !== "seedvr2" && f.detail) req.detail = f.detail;
   if (f.method !== "pixel" && f.method !== "seedvr2" && f.vae) req.vae = true;
-  if (f.scale !== 2) req.scale = f.scale;
+  // a delivery size decides the pixel method's scale, and a then-pixel step's
+  const sized = !!f.deliver;
+  if (f.scale !== 2 && !(sized && (f.method === "pixel" || f.method === "seedvr2"))) req.scale = f.scale;
   if (f.method !== "pixel" && f.method !== "seedvr2" && f.thenModel) {
     req.then_pixel_model = f.thenModel;
-    if (f.thenScale !== 2) req.then_scale = f.thenScale;
+    if (f.thenScale !== 2 && !sized) req.then_scale = f.thenScale;
+  }
+  if (sized) {
+    req.deliver = f.deliver!;
+    if (f.fit === "pad") req.fit = "pad";
   }
   if (f.redo) req.redo = true;
   return req;

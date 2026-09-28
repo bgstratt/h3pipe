@@ -481,6 +481,63 @@ class PixelUpscaleTest(UpscaleRouteTest):
         self.ok(A.delete_upscale(self.ctx, {"ep": self.ep, "pass": "proxy", "shot": "sh010", "take": "1"}))
         self.assertFalse(os.path.exists(t.paths.up_mp4))
 
+    def test_deliver(self):
+        """A delivery size: the last step that can make any size is sized to cover
+        (crop) or fit inside (pad) it, aspect kept; the saver crops or pads."""
+        self.assertEqual(U.parse_deliver("4K"), (3840, 2160))
+        self.assertEqual(U.parse_deliver("2048x1080"), (2048, 1080))
+        self.assertIsNone(U.parse_deliver(None))
+        for bad in ("huge", "1921x1080", "10x10"):
+            with self.assertRaises(U.UpscaleError):
+                U.parse_deliver(bad)
+        import h3_upscale as UN                      # the node's copy agrees
+        for case in ((1344, 768, 3840, 2160, "crop"), (960, 544, 1920, 1080, "pad"),
+                     (1024, 576, 3840, 2160, "crop"), (832, 480, 2560, 1440, "pad")):
+            self.assertEqual(U.fit_size(*case), UN.fit_size(*case))
+        t = self.final_take()
+        T.update_sidecar(t.paths.sidecar, width=1344, height=768)
+        t = T.get_take(self.ep, "final", "sh010", 1)
+        # re-sample 2x, then the model to 4K: cover, then crop
+        up = U.plan_upscale(self.ep, t, then_model="RealESRGAN_x2.pth", deliver="4k")
+        self.assertEqual((up.action, (up.width, up.height), up.made_size, up.out_size),
+                         ("upscale", (2688, 1536), (3840, 2196), (3840, 2160)))
+        self.assertEqual(up.then_scale, round(3840 / 2688, 4))
+        g = U.upscale_graph(self.base(), up)
+        self.assertEqual((g["up_then"]["inputs"]["width"], g["up_then"]["inputs"]["height"]), (3840, 2196))
+        si = g["up_save"]["inputs"]
+        self.assertEqual((si["width"], si["height"], si["fit"]), (3840, 2160, "crop"))
+        rec = U.queued_record(up)
+        self.assertEqual((rec["width"], rec["height"]), (3840, 2160))
+        self.assertEqual(rec["deliver"], {"width": 3840, "height": 2160, "fit": "crop", "made": [3840, 2196]})
+        self.assertIn("-> 3840x2160 (cropped)", U.describe(up))
+        # padded instead: fits inside
+        up = U.plan_upscale(self.ep, t, then_model="RealESRGAN_x2.pth", deliver="4k", fit="pad")
+        self.assertEqual(up.made_size, (3780, 2160))
+        # the pixel method: its scale worked out from the take
+        up = U.plan_upscale(self.ep, t, method="pixel", deliver="1080p", scale=4)
+        self.assertEqual((up.scale, up.width, up.height), (round(1920 / 1344, 4), 1920, 1098))
+        g = U.graph_of(up, {}, "")
+        self.assertEqual((g["up_pixels"]["inputs"]["width"], g["up_save"]["inputs"]["height"]), (1920, 1080))
+        # a re-sample alone keeps its scale; the saver resizes, with a note
+        up = U.plan_upscale(self.ep, t, deliver="4k")
+        self.assertEqual((up.width, up.out_size), (2688, (3840, 2160)))
+        self.assertTrue(any("stretched" in n for n in up.notes))
+        self.assertEqual(U.plan_upscale(self.ep, t, deliver="1080p").notes, [])
+        # what can't be: a pixel step that would shrink, a bad fit
+        self.assertIn("needs no upscale model", U.plan_upscale(
+            self.ep, t, then_model="RealESRGAN_x2.pth", deliver="1080p").why)
+        self.assertEqual(U.plan_upscale(self.ep, t, method="pixel", deliver="1280x720").action, "error")
+        self.assertEqual(U.plan_upscale(self.ep, t, deliver="4k", fit="stretch").action, "error")
+        # the route and the options
+        self.err(A.post_upscale(self.ctx, {"ep": self.ep, "shots": ["sh010"], "deliver": "big"}), 400)
+        self.err(A.post_upscale(self.ctx, {"ep": self.ep, "shots": ["sh010"], "fit": "zoom"}), 400)
+        res = self.ok(A.post_upscale(self.ctx, {"ep": self.ep, "shots": ["sh010"], "redo": True,
+                                                "method": "pixel", "deliver": "1440p", "fit": "pad"}))
+        self.assertEqual((res["queued"][0]["width"], res["queued"][0]["height"]), (2560, 1440))
+        opts = self.ok(A.get_upscale_options(self.ctx, {}))
+        self.assertEqual(opts["fits"], ["crop", "pad"])
+        self.assertIn({"id": "4k", "width": 3840, "height": 2160}, opts["delivers"])
+
     def test_then_pixel(self):
         """Re-sample 2x, then an upscale model 2x more, in one job: 4x."""
         t = self.final_take()
