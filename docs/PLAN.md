@@ -937,6 +937,13 @@ trims, undo, locks, ruler seek and J/K/L, a recording-under-the-cut toggle, wave
 - Drag-reorder and trims in the timeline; play-through of the cut (partly there: play all);
   master dialogue waveform under the timeline (only useful with a recorded track).
 
+Added 2026-09-28 (the user's ask: take a shot out of the timeline without editing the
+script): a cut entry's `"out": true` leaves the shot out of that pass's cut. It keeps its
+script lines, takes, place and pick; assemble, Play all, the cut's upscales, Master and the
+cut's neighbours skip it, the timeline shows it as a stub, and its menu puts it back
+(`h3.py cut --out SH / --in SH`, `PUT /h3pipe/cut`). A locked entry refuses; reset keeps it;
+copying the other pass's order copies it; latent pruning keeps its pick's latent.
+
 **Phase 9c — audio** ✅ done 2026-09-19 (`h3track.py`, `targets/audio/ltx2_voice`; contract and
 as built in `docs/API.md`, "Phase 9c")
 - **A — a recording from the editor:** attach one (`POST /h3pipe/track`), then align

@@ -1139,6 +1139,11 @@ def _cut_entry(raw) -> dict:
             raise ApiError(400, f"{raw['shot']}: note must be text")
         if raw["note"]:
             e["note"] = raw["note"]
+    if raw.get("out") is not None:
+        if not isinstance(raw["out"], bool):
+            raise ApiError(400, f"{raw['shot']}: out must be true or false")
+        if raw["out"]:
+            e["out"] = True
     if raw.get("audio") is not None:
         # the shape and what it points at are checked together, in
         # h3edit.check_audio (E.replace_cut), so the CLI checks them too

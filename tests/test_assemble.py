@@ -241,6 +241,16 @@ class AssembleTest(unittest.TestCase):
         with open(self.out(), "rb") as fh:
             self.assertIn(b"crf=12.0", fh.read())
 
+    def test_left_out_shot_is_skipped(self):
+        self.shotlist([("sh010", 22), ("sh020", 39), ("sh030", 22)])
+        for sid, n in (("sh010", 22), ("sh020", 39), ("sh030", 22)):
+            self.take(sid, n)
+        self.cut([{"shot": "sh010"}, {"shot": "sh020", "out": True}, {"shot": "sh030"}])
+        r = self.assemble()
+        self.assertIn("left out of the cut (1): sh020", r.stdout)
+        self.assertEqual(self.order(), [("sh010", 1), ("sh030", 1)])
+        self.assertEqual(probe_frames(self.out()), 44)
+
     def test_mixed_profiles_are_reencoded(self):
         """13e4's live check: an NVENC Main upscale beside x264 High ones concat-copied
         into one track with the first clip's headers. Clips whose codec, profile or

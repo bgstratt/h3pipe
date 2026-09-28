@@ -13,6 +13,7 @@ export type BadgeKind =
   | "placeholder"
   | "none"
   | "orphan"
+  | "out"
   | "failed"
   | "unusable"
   | "missing-refs"
@@ -73,6 +74,7 @@ export function staleTitle(reasons: string[]): string {
 export function shotBadges(s: ShotStatus, rendering: ReadonlySet<number> = new Set()): Badge[] {
   const out: Badge[] = [];
   if (s.orphan) out.push({ kind: "orphan", label: "orphan", title: "In cut.json but no longer in the script; assemble skips it" });
+  if (s.cut?.out) out.push({ kind: "out", label: "left out", title: "Left out of the cut: still in the script with its takes; assemble, Play all and Master skip it (its menu puts it back)" });
   // Phase 9b: the cut's own edits
   if (s.cut?.locked) out.push({ kind: "locked", label: "locked", title: "Locked in the cut: it can't be moved, trimmed or given another take until unlocked" });
   if (s.cut?.out_of_order && !s.orphan) out.push({ kind: "moved", label: "moved", title: "Out of script order: the cut moved it (the cut menu's Reset order puts it back)" });

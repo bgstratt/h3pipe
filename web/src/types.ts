@@ -74,6 +74,9 @@ export interface CutInfo {
   locked: boolean;
   note: string;
   in_cut_file: boolean;
+  /** left out of the cut: still in the script, with its takes and place; assemble,
+   * Play all and Master skip it. Absent from older servers. */
+  out?: boolean;
   /** The cut take's real frame count (its sidecar's), or null. The shot's
    * `seconds` is the build's (for `dur: model`, an estimate); the timeline and
    * Play all use this when present. Absent from older servers. */
@@ -614,6 +617,8 @@ export interface CutEntry {
   note?: string;
   /** Phase 9d: this clip's audio from elsewhere (absent / null: its own). */
   audio?: CutAudioSource | null;
+  /** left out of the cut (still in the script) */
+  out?: boolean;
 }
 
 export interface CutFile {

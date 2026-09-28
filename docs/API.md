@@ -84,7 +84,7 @@ queued takes whose ComfyUI job is gone (`h3takes.sweep_queued`, with `as_of` tak
    "seconds": 4.458, "size": "medium", "subjects": ["dean"], "audio_policy": "generate",
    "cut": {"take": 1, "picked": true, "pass": "proxy", "placeholder": false,
            "usable": true, "trim_in": 0, "trim_out": 0, "locked": false, "note": "",
-           "in_cut_file": true, "frames": 107},
+           "in_cut_file": true, "frames": 107, "out": false},
    "override": {"fields": ["prompt", "seed"], "stale": false},
    "takes": [{"take": 1, "status": "ok", "has_video": true,
               "seed": "6430499148929255544", "seed_source": "stable", "frames": 107, "note": "",
@@ -289,8 +289,14 @@ Uses `h3takes.pick`. A take that isn't usable answers 409 unless `"force": true`
 
 ### `PUT /h3pipe/cut`
 Body `{"ep", "pass", "entries": [{"shot", "take"?, "pass"?, "trim_in"?, "trim_out"?,
-"locked"?, "note"?}, …]}`. Replaces that pass's list, for reordering and trims.
+"locked"?, "note"?, "audio"?, "out"?}, …]}`. Replaces that pass's list, for reordering and trims.
 Unknown shots are allowed; they become orphans. Returns `{"cut": …}`.
+`"out": true` leaves the shot out of the cut: it stays in the script with its takes, its
+place and its pick, and the status's `cut.out` says so; assemble, Play all, the cut's
+upscales (`shots: null`), Master and the cut's neighbours (keyframes from the previous
+shot) skip it, and the timeline shows it as a stub. A shot named outright (an upscale's
+`shots` / `takes`) is still done. Latent pruning keeps its pick's latent. Reset keeps it
+(as it keeps picks and locks); copying the other pass's order copies it.
 
 ### `PUT /h3pipe/override`
 Body:
@@ -1987,9 +1993,10 @@ waveforms, and play-through polish. Backend and UI build in parallel; the backen
   recorded dialogue, `audio.track`), and each shot with a dialogue window carries
   `audio_in` / `audio_out` (seconds on that track) if it doesn't already.
 - **`locked`** entries: `PUT /h3pipe/pick` answers 409 for a locked shot unless `force`;
-  the UI also refuses to move or trim them.
+  the UI also refuses to move, trim, leave out or put back them.
 - **CLI:** `h3.py cut <ep> [--proxy] (--show | --order sh010,sh030,... | --move SH (--before|
-  --after) SH | --trim SH IN OUT | --lock SH | --unlock SH | --reset order|trims|all |
+  --after) SH | --trim SH IN OUT | --lock SH | --unlock SH | --out SH | --in SH |
+  --reset order|trims|all |
   --copy-from final|proxy [order|trims|all])`.
 
 ### Waveforms (backend)

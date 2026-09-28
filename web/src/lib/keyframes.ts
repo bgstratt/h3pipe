@@ -30,7 +30,8 @@ export function shotKeyframes(refs: Ref[] | undefined, shot: string): Partial<Re
  * lists shots in cut order. null at either end, or if the shot isn't there.
  */
 export function cutNeighbour(st: Pick<EpisodeStatus, "shots"> | undefined, shot: string, step: -1 | 1): string | null {
-  const shots = (st?.shots ?? []).filter((s) => !s.orphan);
+  // a shot left out is skipped too (its own neighbours still answer)
+  const shots = (st?.shots ?? []).filter((s) => !s.orphan && (!s.cut?.out || s.shot === shot));
   const i = shots.findIndex((s) => s.shot === shot);
   if (i < 0) return null;
   return shots[i + step]?.shot ?? null;

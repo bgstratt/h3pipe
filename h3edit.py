@@ -24,6 +24,7 @@ cut, set per-shot overrides. The command-line face of what the editor does;
     python h3.py cut      Shows\\ep05 --order sh010,sh030,sh020  # these first, the rest after
     python h3.py cut      Shows\\ep05 --trim sh020 4 2           # frames off the head / tail
     python h3.py cut      Shows\\ep05 --lock sh020 | --unlock sh020
+    python h3.py cut      Shows\\ep05 --out sh040 | --in sh040   # leave a shot out of the cut
     python h3.py cut      Shows\\ep05 --reset order|trims|audio|all
     python h3.py cut      Shows\\ep05 --proxy --copy-from final [order|trims|audio|all]
     python h3.py cut      Shows\\ep05 --audio sh020 take sh020:1 --at 0.2 --gain 1.5
@@ -286,9 +287,11 @@ def cut_entries(root: str, pass_: str) -> list[T.CutEntry]:
 
 def cut_neighbour(root: str, pass_: str, shot_id: str, step: int) -> T.CutEntry | None:
     """The shot `step` places from `shot_id` in the pass's cut (-1: the one
-    before it, 1: the one after), skipping orphans as assemble does. None at
+    before it, 1: the one after), skipping orphans and shots left out, as
+    assemble does. None at
     either end; KeyError if the shot isn't in the cut."""
-    entries = [e for e in cut_entries(root, pass_) if not e.orphan]
+    entries = [e for e in cut_entries(root, pass_)
+               if not e.orphan and (not e.out or e.shot == shot_id)]
     idx = next((i for i, e in enumerate(entries) if e.shot == shot_id), None)
     if idx is None:
         raise KeyError(f"{shot_id} is not in the {pass_} cut")
@@ -376,6 +379,8 @@ def episode_status(root: str, pass_: str, folder: str | None = None) -> dict:
                     "placeholder": e.placeholder, "usable": chosen_ok,
                     "trim_in": e.trim_in, "trim_out": e.trim_out, "locked": e.locked,
                     "note": e.note, "in_cut_file": e.in_cut_file,
+                    # left out of the cut: assemble, Play all and Master skip it
+                    "out": e.out,
                     # the cut take's real length (its sidecar's saved frame
                     # count; a `dur: model` take's is the model's), or None
                     "frames": take_frames(chosen) if chosen_ok else None,
@@ -1055,6 +1060,11 @@ def copy_cut(root: str, src: str, dst: str, what: str) -> dict:
     a = cut_entries(root, src)
     b = cut_entries(root, dst)
     if order:
+        # the order includes what the other pass left out (a locked entry keeps its own)
+        left = {e.shot: e.out for e in a}
+        for e in b:
+            if e.shot in left and not e.locked:
+                e.out = left[e.shot]
         pos = {e.shot: i for i, e in enumerate(a)}
         out = sorted((e for e in b if e.shot in pos), key=lambda e: pos[e.shot])
         for i, e in enumerate(b):
@@ -1130,12 +1140,12 @@ def reorder_cut(root: str, pass_: str, shots: list[str]) -> dict:
 
 def set_cut_entry(root: str, pass_: str, shot_id: str, force: bool = False,
                   **fields) -> dict:
-    """Change one entry's trim_in / trim_out / locked / note / audio. Trims
-    and audio sources on a locked entry are Locked unless `force`; both are
-    checked as PUT /h3pipe/cut checks them."""
+    """Change one entry's trim_in / trim_out / locked / note / audio / out.
+    Trims, audio sources and leaving it out on a locked entry are Locked unless
+    `force`; trims and audio are checked as PUT /h3pipe/cut checks them."""
     entries = cut_entries(root, pass_)
     e = entries[_find(entries, shot_id, pass_)]
-    if ({"trim_in", "trim_out", "audio"} & set(fields)) and e.locked and not force:
+    if ({"trim_in", "trim_out", "audio", "out"} & set(fields)) and e.locked and not force:
         raise Locked(f"{shot_id} is locked in the {pass_} cut: unlock it first")
     for k, v in fields.items():
         setattr(e, k, v)
@@ -2126,7 +2136,8 @@ def print_cut(root: str, pass_: str) -> None:
         c = s["cut"]
         take = f"{'t%02d' % c['take'] if c['take'] else '--':4}"
         trim = f"{c['trim_in']}/{c['trim_out']}" if c["trim_in"] or c["trim_out"] else "-"
-        flags = [f for f, on in (("locked", c["locked"]), ("picked", c["picked"]),
+        flags = [f for f, on in (("LEFT OUT", c.get("out")), ("locked", c["locked"]),
+                                 ("picked", c["picked"]),
                                  (f"placeholder({c['pass']})", c["placeholder"]),
                                  (f"audio: {c['audio_why']}", bool(c["audio_why"])),
                                  ("OUT OF ORDER", c["out_of_order"]),
@@ -2191,6 +2202,9 @@ def cmd_cut(root: str, argv: list[str]) -> int:
     g.add_argument("--move", metavar="SH", help="move a shot (with --before or --after)")
     g.add_argument("--trim", nargs=3, metavar=("SH", "IN", "OUT"),
                    help="trim frames from the head and tail of a shot's take")
+    g.add_argument("--out", metavar="SH",
+                   help="leave a shot out of the cut (it stays in the script, with its takes)")
+    g.add_argument("--in", dest="in_", metavar="SH", help="put a shot left out back in the cut")
     g.add_argument("--lock", metavar="SH", help="lock a shot (picks, moves and trims refuse)")
     g.add_argument("--unlock", metavar="SH")
     g.add_argument("--reset", choices=CUT_WHAT,
@@ -2237,6 +2251,8 @@ def cmd_cut(root: str, argv: list[str]) -> int:
         elif args.audio:
             spec = audio_from_args(ap, args.audio, pass_, args.at, args.from_s, args.gain)
             set_cut_entry(root, pass_, args.audio[0], force=args.force, audio=spec)
+        elif args.out or args.in_:
+            set_cut_entry(root, pass_, args.out or args.in_, force=args.force, out=bool(args.out))
         elif args.lock or args.unlock:
             set_cut_entry(root, pass_, args.lock or args.unlock, locked=bool(args.lock))
         elif args.reset:

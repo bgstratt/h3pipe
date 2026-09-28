@@ -179,11 +179,11 @@ describe("undo", () => {
     expect(move.fields).toEqual({});
     const trim = diffEdit("Trim b", before, withFields(before, "b", { trim_in: 4 }))!;
     expect(trim.order).toBeNull();
-    // Phase 9d added `audio` to the fields an edit carries
+    // Phase 9d added `audio` to the fields an edit carries, and leaving a shot out `out`
     expect(trim.fields).toEqual({
       b: {
-        before: { trim_in: 0, trim_out: 0, locked: false, audio: null },
-        after: { trim_in: 4, trim_out: 0, locked: false, audio: null },
+        before: { trim_in: 0, trim_out: 0, locked: false, audio: null, out: false },
+        after: { trim_in: 4, trim_out: 0, locked: false, audio: null, out: false },
       },
     });
   });

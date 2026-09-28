@@ -263,6 +263,19 @@ export function toggleLock(shot: string, locked?: boolean): Promise<boolean> {
   return editCut(on ? `Lock ${shot}` : `Unlock ${shot}`, (list) => withFields(list, shot, { locked: on }));
 }
 
+/** Leave a shot out of the cut (it stays in the script, with its takes and
+ * place), or put it back. A locked one refuses, as the server does. */
+export function toggleOut(shot: string, out?: boolean): Promise<boolean> {
+  const c = ctx();
+  if (!c) return Promise.resolve(false);
+  if (isLocked(c.st, shot)) {
+    refuseLocked(shot, "left out or put back");
+    return Promise.resolve(false);
+  }
+  const on = out ?? !c.st.shots.find((s) => s.shot === shot)?.cut?.out;
+  return editCut(on ? `Leave ${shot} out` : `Put ${shot} back`, (list) => withFields(list, shot, { out: on }));
+}
+
 /**
  * I / O: trim the clip under the Play all playhead so it starts (I) or ends
  * (O) at the frame on screen. The playhead stays on that frame.

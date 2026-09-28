@@ -27,6 +27,8 @@ import { audioBadgeOf } from "../lib/audioSource";
 import { WaveLane } from "./Waveform";
 
 const MIN_CLIP = 26;
+/** a shot left out of the cut: a stub, there to be put back */
+const OUT_CLIP = 16;
 /** the ruler band over each clip */
 const RULER_H = 12;
 /** the waveform lane under each clip */
@@ -169,10 +171,12 @@ const Clip = memo(function Clip({
   );
   const cls = [
     "h3-clip", selected && "h3-sel", s.cut.placeholder && "h3-placeholder", s.orphan && "h3-orphan", locked && "h3-locked",
+    s.cut.out && "h3-out",
     dragging && "h3-dragging",
   ].filter(Boolean).join(" ");
   const title = [
     `${s.shot} · ${fmtShotSeconds(s, secs)}${s.size ? ` · ${s.size}` : ""}${lengthEstimated(s) ? `\n≈ ${ESTIMATE_TITLE}` : ""}`,
+    s.cut.out ? "left out of the cut: Play all, assemble and Master skip it (right-click: Put back in the cut)" : "",
     take ? `${s.cut.placeholder ? `${s.cut.pass} ` : ""}${tn(take.take)} (${take.status})` : "no take in the cut",
     audioBadgeOf(s.cut, s.shot)?.title ?? "",
     trimIn || trimOut ? `trimmed: ${framesLabel(trimIn, fps)} off the head, ${framesLabel(trimOut, fps)} off the tail` : "",
@@ -291,6 +295,7 @@ export function Timeline() {
 
   /** a clip's width: its length in the cut (trims applied; the edge being dragged, previewed) */
   const widthOf = useCallback((s: ShotStatus): number => {
+    if (s.cut?.out) return OUT_CLIP;
     const it = itemBy.get(s.shot);
     let secs = it ? it.dur : shotSeconds(s, fps) ?? 1;
     if (trim && trim.shot === s.shot && it?.total != null) secs = Math.max(1, it.total - trim.trimIn - trim.trimOut) / fps;
@@ -548,7 +553,7 @@ export function Timeline() {
                             targets={targets}
                             seriesDefault={seriesDefault}
                             fps={fps}
-                            trimmable={!!it && it.total != null && !s.orphan}
+                            trimmable={!!it && it.total != null && !s.orphan && !s.cut.out}
                             dragging={dragged === s.shot}
                             recording={recording}
                             onBodyDown={onBodyDown}

@@ -29,6 +29,7 @@ cut.json (next to shotlist/) holds one ordered list per pass:
   status `ok` and the mp4 is there (takes from before sidecars count as ok).
   `--take N` forces N for every shot and beats the cut.
 - An entry whose shot is no longer in the script is an orphan: skipped, noted.
+- An entry marked `out` (left out of the cut) is skipped, noted.
 - `pass` naming the other pass makes a placeholder, e.g. a proxy take standing
   in for a final that isn't rendered yet. It is scaled to this cut's size.
 - `trim_in`/`trim_out` drop frames from the head/tail, after the dialogue-window
@@ -463,7 +464,7 @@ def main() -> int:
     # ---- resolve each cut entry to a file -------------------------------
     windows = [s["audio_in"] for s in shots if "audio_in" in s]
     base_in = min(windows) if windows else 0.0
-    plan, missing, orphans, bad = [], [], [], []
+    plan, missing, orphans, bad, left_out = [], [], [], [], []
     rows = []              # (kind, entry, plan item or reason), in cut order
     # clips at another frame rate are measured in seconds; the cut's clock
     # (acc_s, the exact running time; acc_f, the frames laid so far) rounds
@@ -473,6 +474,10 @@ def main() -> int:
         if e.orphan:
             orphans.append(e.shot)
             rows.append(("orphan", e, None))
+            continue
+        if e.out:
+            left_out.append(e.shot)
+            rows.append(("out", e, None))
             continue
         s = by_id[e.shot]
         if e.pass_ not in h3takes.PASSES:
@@ -574,6 +579,8 @@ def main() -> int:
     if orphans:
         print(f"  orphaned in cut.json, not in the script, skipped ({len(orphans)}): "
               f"{', '.join(orphans)}")
+    if left_out:
+        print(f"  left out of the cut ({len(left_out)}): {', '.join(left_out)}")
     if missing:
         ids = [m[0] for m in missing]
         print(f"  missing ({len(missing)}): "
@@ -659,6 +666,10 @@ def main() -> int:
             if kind == "orphan":
                 print(f"    {'--':>12}  {e.shot:10} {'--':4}  {'--':5}  {'--':>10}  "
                       f"{'--':11}  orphan: in cut.json, not in the script (skipped)")
+                continue
+            if kind == "out":
+                print(f"    {'--':>12}  {e.shot:10} {'--':4}  {'--':5}  {'--':>10}  "
+                      f"{'--':11}  left out of the cut (skipped)")
                 continue
             if kind == "missing":
                 n = args.take if args.take is not None else e.take

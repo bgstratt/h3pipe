@@ -211,7 +211,7 @@ disk alone. ComfyUI must be running for `targets`, `refs`, `keyframe --generate`
 | `h3.py upscale` | `h3upscale.py`: a take at 2x, either pass (`--proxy`) — re-sampled (H3, LTX-2, Wan), through a pixel upscale model (`--method pixel`) or SeedVR2 (`--method seedvr2`), the last two for any target; the cut's takes, or `--only`/`--take`; `--check`, `--prune-latents` |
 | `h3.py align` | `h3align.py`: times the script against a dialogue recording |
 | `h3.py takes` / `pick` / `override` | takes and why they're stale; the take the cut uses; per-shot tweaks and retargeting (`h3edit.py`) |
-| `h3.py cut` | edit the cut itself: `--show`, `--order`, `--move … --before`, `--trim SH IN OUT`, `--lock`/`--unlock`, `--reset`, `--copy-from final\|proxy`, `--audio` (a clip's sound from another take, a file, none or its own) |
+| `h3.py cut` | edit the cut itself: `--show`, `--order`, `--move … --before`, `--trim SH IN OUT`, `--lock`/`--unlock`, `--out`/`--in` (leave a shot out of the cut, or put it back), `--reset`, `--copy-from final\|proxy`, `--audio` (a clip's sound from another take, a file, none or its own) |
 | `h3.py discard` | move a take to `renders[_proxy]/_trash/<shot>/`; a cut pick of it goes back to `latest` |
 | `h3.py promote` | `h3promote.py`: which overrides can move into the script / series config, with the diffs; `--all` or `--item` moves them, drops those overrides and rebuilds |
 | `h3.py targets` | readiness and downloads per target |
@@ -517,6 +517,7 @@ python h3.py cut Shows\ep05 --proxy --show                     # the cut: order,
 python h3.py cut Shows\ep05 --proxy --move sh050 --before sh020
 python h3.py cut Shows\ep05 --proxy --trim sh020 4 0           # drop 4 frames off the head
 python h3.py cut Shows\ep05 --proxy --lock sh020               # reordering leaves it alone
+python h3.py cut Shows\ep05 --out sh040                         # leave it out (still in the script)
 python h3.py cut Shows\ep05 --copy-from proxy order            # take the proxy's order into the final
 python h3.py cut Shows\ep05 --proxy --audio sh020 take sh030:2 # sh020's picture, sh030 take 2's sound
 python h3.py cut Shows\ep05 --proxy --audio sh020 file audio\line_b.wav --at 0.4 --gain 1.2
