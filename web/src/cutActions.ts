@@ -5,7 +5,7 @@
 
 import { ApiError } from "./api";
 import {
-  currentPlaylist, openIssue, playAll, refreshEpisode, report, seekCut, setCutPlaying, setStatusHook,
+  currentPlaylist, openIssue, playAll, refreshEpisode, report, seekCut, select, setCutPlaying, setStatusHook,
 } from "./actions";
 import { api, host } from "./host";
 import { audioOf, audioWhy, normalizeAudio, sameAudio } from "./lib/audioSource";
@@ -399,6 +399,25 @@ export function seekCutAt(t: number) {
 const SPEEDS = [1, 2, 4];
 
 /** J / K / L: shuttle backwards, stop, forwards; pressing J or L again goes faster. */
+/**
+ * `n` while Play all is open: note the clip on screen, not the one last
+ * clicked. Play stops (so the note is typed over the frame in question), the
+ * clip is selected, and the note starts with where in the take it is. False
+ * when Play all isn't open (the caller notes the selected clip instead).
+ */
+export function noteAtPlayhead(): boolean {
+  const s = get();
+  if (s.viewer?.kind !== "cut") return false;
+  const items = currentPlaylist(s);
+  const { index, offset } = locate(items, s.cutPlay.pos);
+  const it = items[index];
+  if (!it) return false;
+  setCutPlaying(false);
+  select(it.shot, it.take);
+  openIssue(it.shot, s.pass, it.take, `at ${(it.inT + offset).toFixed(1)} s: `);
+  return true;
+}
+
 export function shuttle(key: "j" | "k" | "l") {
   const s = get();
   const open = s.viewer?.kind === "cut";
@@ -493,8 +512,10 @@ export function cutKey(e: KeyLike): boolean {
   // P10: `n` notes what is wrong with the selected clip. Not `i` — that is
   // trim-in at the playhead, which every NLE binds the same way.
   if (k === "n") {
+    if (e.repeat) return true;
+    if (noteAtPlayhead()) return true;
     const shot = get().shot;
-    if (shot && !e.repeat) openIssue(shot);
+    if (shot) openIssue(shot);
     return !!shot;
   }
   return false;
