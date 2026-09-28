@@ -434,9 +434,12 @@ mouth.
 The same small render, the same 2x re-sample, then an upscale model the rest of the way:
 `"then": "RealESRGAN_x2.pth"` with `"deliver": "4k"`. From 960×544 the model makes an
 exact 2x of the 1920×1088 re-sample (3840×2176, 16 rows cropped), so it runs at its own
-factor with no resize; from 1024×576 it takes 2048×1152 to exactly 3840×2160. Expect about
-2–3 minutes a shot (the 4K model pass and the master-quality encode are most of it;
-estimated, not yet measured at 4K).
+factor with no resize; from 1024×576 it takes 2048×1152 to exactly 3840×2160. Measured (RTX 5090, 3 s shots,
+master quality): **about 3 minutes a shot** on H3 (the re-sample ~30 s, the model's pass at
+4K ~2 minutes, the encode ~11 s), nearer 4 on LTX, about 2 for a Wan shot through
+RealESRGAN_x4, against well under a minute a shot for 1080p. For a 100-shot episode that's
+some 5 hours of upscaling at 4K against under an hour at 1080p: master 1080p as you go and
+4K when it's asked for.
 
 - Don't re-sample 4x in one go: a single refine step on a 4x latent is unmeasured and heavy
   on VRAM. Re-sample 2x, then a model.

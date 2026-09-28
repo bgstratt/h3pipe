@@ -2014,6 +2014,12 @@ Steps (in order; each ends with its exit check):
   queued nothing and wrote byte-identical masters (sha1 fa31df51…). `--conform` redid sh010
   by the recipe (2:57), after which the clips agree and are copied; a master without
   `--prores` now removes an earlier one's `.mov`. The route answered the same plan.
+  **4K, 2026-09-28**, the same three shots with AUTHORING's 4K recipe (`--conform`, 9:12 in
+  all): sh010 H3 re-sample 2x → RealESRGAN_x2 → 3840×2176 cropped, 177 s; sh330 LTX
+  1920×1024 → 4050×2160 cropped, 225 s (with the model switch from H3); sh760 Wan
+  RealESRGAN_x4 → 3928×2160 cropped, 131 s; the master-quality x264 encode 11–13 s of each.
+  The master: 3840×2160 High, 227 frames, decodes clean, stream-copied. Idea, not built:
+  queue a master's upscales grouped by target, so ComfyUI loads each model once.
 - **13e5 — many episodes.** `h3.py master <ep> <ep> ...` (or a folder of episodes): one
   plan across them, queued episode by episode, a summary at the end; episodes whose cut
   has gaps are listed and skipped, not half-mastered.
