@@ -69,7 +69,10 @@ export interface Api {
   /** Phase 13: POST /h3pipe/upscale: queue upscales of final takes (409: this ComfyUI can't). */
   upscale(req: UpscaleRequest): Promise<UpscaleResult>;
   /** Phase 13: GET /h3pipe/upscale/options: pixel models and each target's latent upscale. */
-  upscaleOptions(): Promise<UpscaleOptions>;
+  upscaleOptions(ep?: string | null): Promise<UpscaleOptions>;
+  /** Phase 13e: PUT /h3pipe/upscale/recipe: one shot's upscale recipe (the
+   * request's fields; null clears it) */
+  putUpscaleRecipe(ep: string, shot: string, recipe: Record<string, unknown> | null): Promise<{ shot: string; recipe: Record<string, unknown> | null; text: string | null }>;
   /** Phase 13: DELETE /h3pipe/upscale: remove a take's upscale (409 while it is queued). */
   deleteUpscale(ep: string, shot: string, take: number, pass?: Pass): Promise<{ shot: string; take: number; deleted: boolean }>;
   /** Folders on the ComfyUI machine; no path = the starting points. `files`
@@ -406,7 +409,8 @@ export function createHttpApi(t: Transport): Api {
       ...(opts?.size ? { size: opts.size } : {}),
     }),
     upscale: (req) => call("POST", "/h3pipe/upscale", req),
-    upscaleOptions: () => get("/h3pipe/upscale/options"),
+    upscaleOptions: (ep) => get(`/h3pipe/upscale/options${ep ? `?${qs({ ep })}` : ""}`),
+    putUpscaleRecipe: (ep, shot, recipe) => call("PUT", "/h3pipe/upscale/recipe", { ep, shot, recipe }),
     deleteUpscale: (ep, shot, take, pass) => call("DELETE", `/h3pipe/upscale?${qs({ ep, shot, take: String(take), pass })}`),
     browse: (path, files) => get(`/h3pipe/browse?${qs({ path: path || undefined, files: files || undefined })}`),
     refs: (ep) => get(`/h3pipe/refs?${qs({ ep })}`),

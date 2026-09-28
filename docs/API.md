@@ -414,6 +414,33 @@ returns at once:
 h3pipe node, the latent upscaler pack or its model file, the pack's "Plus" fork, which
 has no temporal chunking, or the pixel method's model); 502 when ComfyUI doesn't answer.
 
+**The master recipe (Phase 13e).** `recipe: true` upscales each take by the series
+config's `upscale.master` instead of the body's choices (only `pass`, `shots` / `takes`
+and `redo` still apply): the take's target's section (its id, else the longest matching
+glob, else `"*"`), the shot's own recipe over it, the recipe's `finish`, and the master's
+`deliver` / `fit` / `encoder`. A take whose target no section covers is that take's error;
+no recipe at all is 409.
+
+```json
+"upscale": {"master": {"deliver": "4k", "fit": "crop", "quality": "master",
+  "finish": {"frequency_split": true, "keep_soft": 0, "grain": 0},
+  "targets": {"minimax_h3_*": {"method": "latent", "then": "RealESRGAN_x2.pth"},
+              "wan22_*": {"method": "seedvr2", "seedvr2_model": "7b"},
+              "*": {"method": "pixel", "pixel_model": "RealESRGAN_x2.pth"}}}}
+```
+
+A section's fields: `method`, `scale`, `detail`, `start_step`, `vae`, `pixel_model`,
+`seedvr2_model`, `then` (an upscale model file, or `"seedvr2"`), `then_scale`, `precision`,
+`frequency_split`, `keep_soft`, `grain`. `quality` (`review` | `master`) is read by Phase
+13e3. The build warns about anything else (h3upscale.check_recipe).
+
+### `PUT /h3pipe/upscale/recipe`
+Body `{"ep", "shot", "recipe": {…} | null}`: one shot's own recipe, kept in the episode's
+overrides.json under a top-level `"upscale": {"sh020": {…}}` (not in the shot's override
+block, whose objects are per-target). `recipe` takes the upscale request's fields as the
+dialog sends them (`then_pixel_model` / `then_method` become `then`); null clears it. 400
+on a field or value a recipe doesn't take. Answers `{shot, recipe, text}`.
+
 ### `GET /h3pipe/upscale/options`
 What the editor's Upscale dialog offers on this ComfyUI:
 ```json
@@ -428,7 +455,10 @@ is `"7b"` (the default), `"3b"` or a file name; it takes `scale`, `from_upscale`
 finish like the pixel method, and options lists it as `seedvr2: {status, missing, models,
 default}`. `latent[target]` is null for a target with no latent upscale; otherwise it also has `mode`
 (`resample` | `second_stage`), `align` and `fixed_scale` (second_stage's only scale), and
-the answer has `max_scale`, `delivers` (`[{id, width, height}]`: 1080p, 1440p, 4k) and
+the answer has `max_scale`, `recipe` (with `?ep=`: the episode's master recipe, null
+without one: `deliver`, `fit`, `quality`, `encoder`, `targets` (each video target's matching
+section as `{key, fields, text}`, null when none covers it), `shots` (the shots' own, as
+`{fields, text}`) and `problems`), `delivers` (`[{id, width, height}]`: 1080p, 1440p, 4k) and
 `fits` (`["crop", "pad"]`). Each take in `GET /h3pipe/episode` has its `width` and `height`,
 so the dialog can show what every scale makes before anything is queued.
 

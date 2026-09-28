@@ -1204,6 +1204,11 @@ export function createMockApi(emit: Emit, opts: MockOptions = {}): Api & { outsi
       }
       return out;
     },
+    async putUpscaleRecipe(ep, shot, recipe) {
+      await wait();
+      need(ep);
+      return { shot, recipe, text: recipe ? "mock recipe" : null };
+    },
     async upscaleOptions() {
       await wait();
       return {

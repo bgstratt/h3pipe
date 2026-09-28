@@ -406,6 +406,215 @@ def upscale_readiness(target: "TG.Target", object_info: dict | None) -> dict | N
     return {"status": "not_ready" if missing else "ready", "missing": missing}
 
 
+# ---------------------------------------------------------------------------
+# The master recipe (Phase 13e): series.json `upscale.master`
+# ---------------------------------------------------------------------------
+#
+# "upscale": {"master": {
+#     "deliver": "4k", "fit": "crop", "quality": "master", "encoder": "auto",
+#     "finish": {"frequency_split": true, "keep_soft": 0, "grain": 0},
+#     "targets": {"minimax_h3_*": {"method": "latent", "then": "RealESRGAN_x2.pth"},
+#                 "wan22_*": {"method": "seedvr2"},
+#                 "*": {"method": "pixel"}}}}
+#
+# and per shot, overrides.json's top-level "upscale": {"sh020": {"detail": 1}}
+# (merged over its target's section). A target key is an id or a glob; the
+# exact id wins, then the longest matching glob.
+
+# the whole master's (one size, one encoding)
+RECIPE_GLOBAL = ("deliver", "fit", "quality", "encoder")
+# a target section's, or a shot's
+RECIPE_FIELDS = ("method", "scale", "detail", "start_step", "vae", "pixel_model",
+                 "seedvr2_model", "then", "then_scale", "precision",
+                 "frequency_split", "keep_soft", "grain")
+QUALITIES = ("review", "master")
+
+
+def master_recipe(root: str) -> dict | None:
+    """The series config's `upscale.master` (None: it has none)."""
+    m = ((J.series_config(root) or {}).get("upscale") or {}).get("master")
+    return m if isinstance(m, dict) else None
+
+
+def recipe_section(recipe: dict, target_id: str) -> tuple[str | None, dict]:
+    """(the key that matched, its section) of `recipe.targets` for a target:
+    the exact id, else the longest matching glob; (None, {}) when none."""
+    import fnmatch
+    targets = recipe.get("targets") or {}
+    if isinstance(targets.get(target_id), dict):
+        return target_id, targets[target_id]
+    hits = [k for k, v in targets.items()
+            if isinstance(v, dict) and k != target_id and fnmatch.fnmatchcase(target_id, k)]
+    if not hits:
+        return None, {}
+    best = max(hits, key=lambda k: (len(k.replace("*", "")), len(k)))
+    return best, targets[best]
+
+
+def shot_recipes(root: str) -> dict:
+    """overrides.json's per-shot upscale recipes: {shot: {field: value}}."""
+    data = T.load_overrides(root).get("upscale")
+    return {k: v for k, v in data.items() if isinstance(v, dict)} if isinstance(data, dict) else {}
+
+
+def set_shot_recipe(root: str, shot: str, fields: dict | None) -> dict:
+    """Set (a dict of RECIPE_FIELDS) or clear (None / {}) one shot's upscale
+    recipe in overrides.json. Returns what the shot has now."""
+    bad = sorted(set(fields or {}) - set(RECIPE_FIELDS))
+    if bad:
+        raise UpscaleError(f"not a per-shot upscale field: {', '.join(bad)}")
+    data = T.load_overrides(root)
+    ups = data.get("upscale") if isinstance(data.get("upscale"), dict) else {}
+    if fields:
+        ups[shot] = dict(fields)
+    else:
+        ups.pop(shot, None)
+    if ups:
+        data["upscale"] = ups
+    else:
+        data.pop("upscale", None)
+    T.save_overrides(root, data)
+    return ups.get(shot) or {}
+
+
+def recipe_for(root: str, take: T.Take, recipe: dict | None = None,
+               shots: dict | None = None) -> dict:
+    """The plan_upscale keyword arguments the master recipe gives a take: its
+    target's section, the shot's override over it, the finish and the master's
+    size and encoding. UpscaleError when the series has no recipe, or none for
+    this take's target."""
+    recipe = master_recipe(root) if recipe is None else recipe
+    if not recipe:
+        raise UpscaleError("the series config has no upscale.master recipe")
+    target_id = (take.sidecar or {}).get("target") or T.DEFAULT_TARGET
+    key, section = recipe_section(recipe, target_id)
+    if key is None:
+        raise UpscaleError(f"upscale.master has no section for {target_id} (add it, or \"*\")")
+    fields = {**(recipe.get("finish") or {}), **section,
+              **((shot_recipes(root) if shots is None else shots).get(take.shot) or {})}
+    return recipe_kwargs(fields, recipe)
+
+
+def recipe_kwargs(fields: dict, recipe: dict | None = None) -> dict:
+    """RECIPE_FIELDS (and the master's RECIPE_GLOBAL) as plan_upscale's kwargs."""
+    g = recipe or {}
+    kw = {k: fields[k] for k in ("method", "scale", "detail", "start_step", "pixel_model",
+                                 "seedvr2_model", "then_scale", "precision",
+                                 "frequency_split", "keep_soft", "grain") if k in fields}
+    if fields.get("vae"):
+        kw["route"] = "vae"
+    then = fields.get("then")
+    if then == "seedvr2":
+        kw["then_method"] = "seedvr2"
+    elif then:
+        kw["then_model"] = then
+    for k in ("deliver", "fit", "encoder"):
+        if g.get(k) is not None:
+            kw[k] = g[k]
+    return kw
+
+
+def recipe_from_request(body: dict) -> dict:
+    """The upscale request's choices (POST /h3pipe/upscale's fields) as a
+    per-shot recipe (RECIPE_FIELDS): what the dialog saves for one shot."""
+    out = {}
+    for k in ("method", "scale", "detail", "start_step", "pixel_model", "seedvr2_model",
+              "then_scale", "precision", "frequency_split", "keep_soft", "grain"):
+        if body.get(k) is not None:
+            out[k] = body[k]
+    if body.get("vae"):
+        out["vae"] = True
+    if body.get("then_method") == "seedvr2":
+        out["then"] = "seedvr2"
+    elif body.get("then_pixel_model"):
+        out["then"] = body["then_pixel_model"]
+    return out
+
+
+def describe_recipe(fields: dict, recipe: dict | None = None) -> str:
+    """A recipe section in words, for the dialog and the master's report."""
+    m = fields.get("method") or "latent"
+    if m == "latent":
+        s = f"re-sample {fields.get('scale', 2):g}x"
+        if fields.get("detail"):
+            s += f" (detail {fields['detail']})"
+        then = fields.get("then")
+        if then:
+            s += f", then {'SeedVR2 ' + str(fields.get('seedvr2_model') or SEEDVR2_DEFAULT) if then == 'seedvr2' else then}"
+    elif m == "seedvr2":
+        s = f"SeedVR2 {fields.get('seedvr2_model') or SEEDVR2_DEFAULT}"
+    else:
+        s = f"pixel {fields.get('pixel_model') or DEFAULT_PIXEL_MODEL}"
+    g = recipe or {}
+    if g.get("deliver"):
+        s += f" → {g['deliver']} ({g.get('fit') or 'crop'})"
+    return s
+
+
+def check_recipe(recipe) -> list[str]:
+    """What's wrong with a series config's `upscale.master` ([]: nothing), for
+    the build's warnings. Model files aren't checked here: readiness does that
+    against the running ComfyUI when an upscale is queued."""
+    if recipe is None:
+        return []
+    if not isinstance(recipe, dict):
+        return ["series.json upscale.master is not an object"]
+    out = []
+    known = set(RECIPE_GLOBAL) | {"targets", "finish", "_note"}
+    for k in sorted(set(recipe) - known):
+        out.append(f"series.json upscale.master.{k}: not a recipe field "
+                   f"({', '.join(sorted(known - {'_note'}))})")
+    try:
+        parse_deliver(recipe.get("deliver"))
+    except UpscaleError as e:
+        out.append(f"series.json upscale.master: {e}")
+    if recipe.get("fit", "crop") not in FITS:
+        out.append(f"series.json upscale.master.fit {recipe['fit']!r}: it's crop or pad")
+    if recipe.get("quality", "review") not in QUALITIES:
+        out.append(f"series.json upscale.master.quality {recipe['quality']!r}: it's review or master")
+    if recipe.get("encoder", "auto") not in ENCODERS:
+        out.append(f"series.json upscale.master.encoder {recipe['encoder']!r}: it's "
+                   f"{', '.join(ENCODERS)}")
+    targets = recipe.get("targets")
+    if not isinstance(targets, dict) or not targets:
+        out.append("series.json upscale.master.targets: give at least one target section "
+                   "(an id or a glob such as \"minimax_h3_*\", or \"*\")")
+        targets = {}
+    sections = [(f"targets.{k}", v) for k, v in targets.items()]
+    if "finish" in recipe:
+        sections.append(("finish", recipe["finish"]))
+    for where, sec in sections:
+        if not isinstance(sec, dict):
+            out.append(f"series.json upscale.master.{where} is not an object")
+            continue
+        out += [f"series.json upscale.master.{where}: {m}" for m in check_fields(sec)]
+    return out
+
+
+def check_fields(sec: dict) -> list[str]:
+    """What's wrong with one recipe section or per-shot recipe."""
+    out = []
+    for k in sorted(set(sec) - set(RECIPE_FIELDS) - {"_note"}):
+        out.append(f"{k} is not a recipe field")
+    if sec.get("method", "latent") not in METHODS:
+        out.append(f"method {sec['method']!r}: it's {', '.join(METHODS)}")
+    for k, lo, hi in (("scale", 1, MAX_SCALE), ("then_scale", 1, MAX_SCALE)):
+        v = sec.get(k)
+        if v is not None and (isinstance(v, bool) or not isinstance(v, (int, float)) or not lo < v <= hi):
+            out.append(f"{k} {v!r}: more than {lo:g}, up to {hi:g}")
+    if sec.get("detail") not in (None, *DETAILS):
+        out.append(f"detail {sec['detail']!r}: it's 0, 1 or 2")
+    if sec.get("precision", "fp16") not in PRECISIONS:
+        out.append(f"precision {sec['precision']!r}: it's fp16 or fp32")
+    for k, hi in (("keep_soft", 1.0), ("grain", 0.2)):
+        v = sec.get(k)
+        if v is not None and (isinstance(v, bool) or not isinstance(v, (int, float)) or not 0 <= v <= hi):
+            out.append(f"{k} {v!r}: 0 to {hi:g}")
+    if sec.get("then") and sec.get("method", "latent") != "latent":
+        out.append("then: only after a re-sample (method latent)")
+    return out
+
+
 def plan_upscale(root: str, take: T.Take, *, encoder: str = "auto", precision: str = "fp16",
                  frequency_split: bool = True, keep_soft: float = 0.0, grain: float = 0.0,
                  deliver=None, fit: str = "crop", **kw) -> UpscaleJob:
@@ -1157,6 +1366,9 @@ def main(argv=None) -> int:
                     help="latent: start 0-2 steps earlier than the default (more detail, more change)")
     ap.add_argument("--vae", action="store_true",
                     help="encode the take's frames even if it kept a latent")
+    ap.add_argument("--recipe", action="store_true",
+                    help="each take by the series config's upscale.master recipe (its target's "
+                         "section, its shot's override); the method and size flags are ignored")
     ap.add_argument("--check", action="store_true", help="list the jobs, queue nothing")
     ap.add_argument("--prune-latents", action="store_true",
                     help="delete the latents of the pass's takes its cut doesn't use, and of takes "
@@ -1178,19 +1390,30 @@ def main(argv=None) -> int:
               + (" would be deleted" if args.check else " deleted"))
         return 0
     jobs = []
+    recipe = master_recipe(root) if args.recipe else None
+    if args.recipe and not recipe:
+        print("  !! the series config has no upscale.master recipe")
+        return 2
     for shot, take, why in cut_takes(root, only, args.take, pass_=pass_):
         if take is None:
             print(f"  -  {shot}: {why}")
             continue
-        up = plan_upscale(root, take, scale=args.scale, start_step=args.start_step,
-                          route="vae" if args.vae else None, redo=args.redo,
-                          method=args.method, pixel_model=args.pixel_model, detail=args.detail,
-                          then_model=args.then_pixel, then_scale=args.then_scale,
-                          then_method="seedvr2" if args.then_seedvr2 else None,
-                          from_upscale=args.from_upscale, encoder=args.encoder,
-                          precision=args.precision, frequency_split=args.frequency_split,
-                          keep_soft=args.keep_soft, grain=args.grain,
-                          seedvr2_model=args.seedvr2_model, deliver=args.deliver, fit=args.fit)
+        if recipe:
+            try:
+                up = plan_upscale(root, take, redo=args.redo, **recipe_for(root, take, recipe))
+            except UpscaleError as e:
+                print(f"  !! {shot} t{take.take:02d}: {e}")
+                continue
+        else:
+            up = plan_upscale(root, take, scale=args.scale, start_step=args.start_step,
+                              route="vae" if args.vae else None, redo=args.redo,
+                              method=args.method, pixel_model=args.pixel_model, detail=args.detail,
+                              then_model=args.then_pixel, then_scale=args.then_scale,
+                              then_method="seedvr2" if args.then_seedvr2 else None,
+                              from_upscale=args.from_upscale, encoder=args.encoder,
+                              precision=args.precision, frequency_split=args.frequency_split,
+                              keep_soft=args.keep_soft, grain=args.grain,
+                              seedvr2_model=args.seedvr2_model, deliver=args.deliver, fit=args.fit)
         mark = {"upscale": "..", "skip": "= ", "error": "!!"}[up.action]
         what = describe(up) if up.action == "upscale" else up.why
         print(f"  {mark} {up.label}: {what}")

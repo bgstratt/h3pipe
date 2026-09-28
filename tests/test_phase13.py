@@ -904,5 +904,116 @@ class PixelUpscaleTest(UpscaleRouteTest):
         self.assertEqual(U.pixel_readiness({})["status"], "not_ready")      # no nodes, no models
 
 
+RECIPE = {"deliver": "4k", "fit": "crop", "quality": "master",
+          "finish": {"frequency_split": True, "grain": 0.02},
+          "targets": {"minimax_h3_*": {"method": "latent", "then": "RealESRGAN_x2.pth"},
+                      "minimax_h3_fl2va": {"method": "pixel"},
+                      "wan22_*": {"method": "seedvr2", "seedvr2_model": "3b"},
+                      "*": {"method": "pixel", "pixel_model": "4x-UltraSharp.pth"}}}
+
+
+class RecipeTest(ApiTest):
+    """13e1: the master recipe (series.json upscale.master) and per-shot overrides."""
+
+    final_take = UpscaleTest.final_take
+    as_target = PixelUpscaleTest.as_target
+
+    def setUp(self):
+        super().setUp()
+        self.comfy.nodes |= set(U.UPSCALE_NODES) | set(U.PIXEL_NODES)
+        self.comfy.info["MinimaxH3LatentUpscaler3D"] = UPSCALER
+        self.comfy.info["UpscaleModelLoader"] = {"input": {"required": {
+            "model_name": [["4x-UltraSharp.pth", "RealESRGAN_x2.pth", "RealESRGAN_x4.pth"], {}]}}}
+
+    def set_recipe(self, recipe):
+        p = os.path.join(self.ep, "series.json")
+        cfg = json.load(open(p, encoding="utf-8"))
+        cfg.setdefault("upscale", {})["master"] = recipe
+        with open(p, "w", encoding="utf-8") as fh:
+            json.dump(cfg, fh)
+
+    def test_sections_and_resolution(self):
+        self.assertEqual(U.recipe_section(RECIPE, "minimax_h3_fl2va")[0], "minimax_h3_fl2va")   # exact
+        self.assertEqual(U.recipe_section(RECIPE, "minimax_h3_ref2va")[0], "minimax_h3_*")     # glob
+        self.assertEqual(U.recipe_section(RECIPE, "ltx2")[0], "*")                             # the rest
+        self.assertEqual(U.recipe_section({"targets": {"wan*": {}}}, "ltx2"), (None, {}))
+        t = self.final_take()
+        with self.assertRaises(U.UpscaleError):
+            U.recipe_for(self.ep, t)                                        # no recipe yet
+        self.set_recipe(RECIPE)
+        kw = U.recipe_for(self.ep, t)
+        self.assertEqual(kw, {"method": "latent", "then_model": "RealESRGAN_x2.pth",
+                              "frequency_split": True, "grain": 0.02,
+                              "deliver": "4k", "fit": "crop"})
+        # a shot's override merges over its target's section
+        U.set_shot_recipe(self.ep, "sh010", {"detail": 1, "then": "seedvr2"})
+        kw = U.recipe_for(self.ep, t)
+        self.assertEqual((kw["detail"], kw["then_method"], "then_model" in kw), (1, "seedvr2", False))
+        self.assertEqual(U.shot_recipes(self.ep), {"sh010": {"detail": 1, "then": "seedvr2"}})
+        U.set_shot_recipe(self.ep, "sh010", None)
+        self.assertNotIn("upscale", T.load_overrides(self.ep))
+        with self.assertRaises(U.UpscaleError):
+            U.set_shot_recipe(self.ep, "sh010", {"colour": "warm"})
+        # the Wan section
+        wan = self.as_target(t, "wan22_vace")
+        up = U.plan_upscale(self.ep, wan, **U.recipe_for(self.ep, wan))
+        self.assertEqual((up.method, up.seedvr2_model, up.out_size),
+                         ("seedvr2", "seedvr2_3b_int8_convrot.safetensors", (3840, 2160)))
+        self.assertEqual(U.describe_recipe(RECIPE["targets"]["minimax_h3_*"], RECIPE),
+                         "re-sample 2x, then RealESRGAN_x2.pth → 4k (crop)")
+
+    def test_check(self):
+        self.assertEqual(U.check_recipe(RECIPE), [])
+        bad = U.check_recipe({"deliver": "huge", "fit": "zoom", "size": 1,
+                              "targets": {"*": {"method": "magic", "detail": 5, "scale": 9,
+                                                "then": "x.pth"}}})
+        text = "\n".join(bad)
+        for want in ("size: not a recipe field", "deliver 'huge'", "fit 'zoom'", "method 'magic'",
+                     "detail 5", "scale 9", "then: only after a re-sample"):
+            self.assertIn(want, text)
+        self.assertTrue(U.check_recipe({"deliver": "4k"}))                   # no targets
+        # the build says so too
+        cfg = load_series_config(os.path.join(KITCHEN, "series.json"))
+        with open(os.path.join(KITCHEN, "script.md"), encoding="utf-8") as fh:
+            story = parse_story(fh.read(), subject_ids(cfg), character_ids(cfg),
+                                series_info(cfg), variant_of(cfg))
+        cfg["upscale"] = {"master": RECIPE}
+        self.assertFalse([w for w in h3build.story_warnings(story, cfg) if "upscale.master" in w])
+        cfg["upscale"] = {"master": {"targets": {"*": {"method": "magic"}}}}
+        self.assertTrue([w for w in h3build.story_warnings(story, cfg) if "method 'magic'" in w])
+
+    def test_routes(self):
+        t = self.final_take()
+        opts = self.ok(A.get_upscale_options(self.ctx, {"ep": self.ep}))
+        self.assertIsNone(opts["recipe"])
+        self.err(A.post_upscale(self.ctx, {"ep": self.ep, "shots": ["sh010"], "recipe": True}), 409)
+        self.set_recipe(RECIPE)
+        opts = self.ok(A.get_upscale_options(self.ctx, {"ep": self.ep}))
+        r = opts["recipe"]
+        self.assertEqual((r["deliver"], r["fit"], r["quality"], r["problems"]), ("4k", "crop", "master", []))
+        self.assertEqual(r["targets"]["minimax_h3_ref2va"]["key"], "minimax_h3_*")
+        self.assertIn("SeedVR2 3b", r["targets"]["wan22_i2v"]["text"])
+        # a shot's recipe from the dialog's fields
+        res = self.ok(A.put_upscale_recipe(self.ctx, {"ep": self.ep, "shot": "sh010", "recipe": {
+            "method": "latent", "detail": 1, "then_pixel_model": "4x-UltraSharp.pth", "grain": 0}}))
+        self.assertEqual(res["recipe"], {"method": "latent", "detail": 1, "grain": 0, "then": "4x-UltraSharp.pth"})
+        self.assertEqual(self.ok(A.get_upscale_options(self.ctx, {"ep": self.ep}))["recipe"]["shots"]["sh010"]["fields"]["detail"], 1)
+        self.err(A.put_upscale_recipe(self.ctx, {"ep": self.ep, "shot": "sh010", "recipe": {"detail": 7}}), 400)
+        # queued by the recipe: the shot's override over its target's section, the master's size
+        res = self.ok(A.post_upscale(self.ctx, {"ep": self.ep, "shots": ["sh010"], "recipe": True,
+                                                "method": "pixel", "scale": 3}))   # ignored
+        q = res["queued"][0]
+        self.assertEqual((q["method"], q["then_pixel_model"], q["width"], q["height"]),
+                         ("latent", "4x-UltraSharp.pth", 3840, 2160))
+        rec = T.upscale_of(T.get_take(self.ep, "final", "sh010", 1))
+        self.assertEqual(rec["deliver"]["width"], 3840)
+        self.ok(A.put_upscale_recipe(self.ctx, {"ep": self.ep, "shot": "sh010", "recipe": None}))
+        self.assertEqual(U.shot_recipes(self.ep), {})
+        # a target the recipe doesn't cover: that take's error, the rest go on
+        self.set_recipe({"targets": {"wan22_*": {"method": "pixel"}}})
+        res = self.ok(A.post_upscale(self.ctx, {"ep": self.ep, "shots": ["sh010"], "recipe": True, "redo": True}))
+        self.assertIn("no section for minimax_h3_ref2va", res["errors"][0]["error"])
+
+
 if __name__ == "__main__":
     unittest.main()

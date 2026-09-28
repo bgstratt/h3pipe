@@ -68,13 +68,22 @@ function UpscaleBody() {
   const [customSize, setCustomSize] = useState(false);
   const set = (p: Partial<UpscaleForm>) => setF((x) => ({ ...x, ...p }));
 
+  // Phase 13e: the series recipe (per target, per shot) or this run's own choices
+  const [useRecipe, setUseRecipe] = useState<boolean | null>(null);
+  const [saved, setSaved] = useState<string | null>(null);
+  const [reload, setReload] = useState(0);
   useEffect(() => {
     let live = true;
-    api().upscaleOptions()
-      .then((o: UpscaleOptions) => { if (live) { setOpts(o); setF((x) => ({ ...x, pixelModel: x.pixelModel ?? o.pixel.default })); } })
+    api().upscaleOptions(ep)
+      .then((o: UpscaleOptions) => {
+        if (!live) return;
+        setOpts(o);
+        setF((x) => ({ ...x, pixelModel: x.pixelModel ?? o.pixel.default }));
+        setUseRecipe((u) => u ?? !!o.recipe);
+      })
       .catch((e: unknown) => { if (live) setErr(errText(e)); });
     return () => { live = false; };
-  }, []);
+  }, [ep, reload]);
 
   // the targets of the takes this would upscale
   const shots = st?.shots ?? [];
@@ -155,17 +164,36 @@ function UpscaleBody() {
       : `Can't: ${one.out.why}`)
     : bad.length ? `${bad.length} of ${real.length} can't at these settings (${bad[0].out.why})` : "";
 
+  const recipe = opts?.recipe ?? null;
+  const byRecipe = !!recipe && !!useRecipe;
   const submit = () => {
-    void upscale(upscaleRequestOf(f, ask, refineModel && f.method !== "pixel"), ask.takes ? ask.takes.map((t) => `${t.shot}|${t.take}`).join(",") : "cut");
+    const key = ask.takes ? ask.takes.map((t) => `${t.shot}|${t.take}`).join(",") : "cut";
+    const req = byRecipe
+      ? { ...(ask.takes ? { pass: ask.pass, takes: ask.takes } : { pass: ask.pass, shots: null }), recipe: true, ...(f.redo ? { redo: true } : {}) }
+      : upscaleRequestOf(f, ask, refineModel && f.method !== "pixel");
+    void upscale(req, key);
     closeUpscale();
   };
-  const canQueue = !!ep && !!opts && count > 0 && bad.length < real.length && parsed !== "bad"
+  // one take: its choices can be saved as that shot's recipe
+  const oneShot = ask.takes?.length === 1 ? ask.takes[0].shot : null;
+  const saveShot = (clear: boolean) => {
+    if (!ep || !oneShot) return;
+    const fields = clear ? null : upscaleRequestOf(f, ask, refineModel && f.method !== "pixel") as Record<string, unknown>;
+    api().putUpscaleRecipe(ep, oneShot, fields)
+      .then((r) => { setSaved(r.recipe ? `${oneShot}'s recipe: ${r.text}` : `${oneShot} follows its target's recipe again`); setReload((n) => n + 1); })
+      .catch((e: unknown) => setSaved(`Couldn't save: ${errText(e)}`));
+  };
+  const recipeTargets = recipe ? targets.map((id) => [id, recipe.targets[id]] as const) : [];
+  const shotIds = ask.takes ? ask.takes.map((t) => t.shot) : shots.filter((s) => s.cut.usable && !s.cut.placeholder).map((s) => s.shot);
+  const recipeShots = recipe ? shotIds.map((id) => [id, recipe.shots[id]] as const).filter(([, v]) => !!v) : [];
+  const canQueue = byRecipe ? !!ep && count > 0 && recipeTargets.some(([, v]) => !!v)
+    : !!ep && !!opts && count > 0 && bad.length < real.length && parsed !== "bad"
     && (f.method === "latent" ? latentSome : f.method === "pixel" ? pixelReady && !!f.pixelModel
       : f.method === "seedvr2" ? sv2Ready : latentSome || pixelReady);
 
   return (
     <Dialog
-      title={<>{ask.title} <span className="h3-muted h3-small">{ask.pass} · {D && pixelish ? "" : `${f.scale}x`}{f.method !== "pixel" && f.method !== "seedvr2" && f.thenModel ? (D ? " then a model" : ` then ${f.thenScale}x`) : ""}{D ? ` → ${D.w}×${D.h}` : ""}</span></>}
+      title={<>{ask.title} <span className="h3-muted h3-small">{ask.pass} · {byRecipe ? "series recipe" : <>{D && pixelish ? "" : `${f.scale}x`}{f.method !== "pixel" && f.method !== "seedvr2" && f.thenModel ? (D ? " then a model" : ` then ${f.thenScale}x`) : ""}{D ? ` → ${D.w}×${D.h}` : ""}</>}</span></>}
       onClose={closeUpscale}
       footer={
         <>
@@ -179,7 +207,38 @@ function UpscaleBody() {
     >
       {err && <div className="h3-error h3-small">Couldn't read this ComfyUI's upscale options: {err}</div>}
       {!opts && !err && <div className="h3-muted h3-small"><i className="pi pi-spin pi-spinner" /> Reading what this ComfyUI can do…</div>}
-      {opts && (
+      {opts && recipe && (
+        <div className="h3-col" style={{ gap: 3, marginBottom: 8 }}>
+          <label className="h3-check" title="Each take as the series config's upscale.master says: its target's section, its shot's own recipe over it, the master's output size">
+            <input type="radio" name="up-recipe" checked={byRecipe} onChange={() => setUseRecipe(true)} />
+            Series recipe{recipe.deliver ? ` (→ ${recipe.deliver}, ${recipe.fit})` : ""}
+          </label>
+          <label className="h3-check" title="Choose the method, size and finish for this run only; the series recipe is left as it is">
+            <input type="radio" name="up-recipe" checked={!byRecipe} onChange={() => setUseRecipe(false)} />
+            Choose for this run
+          </label>
+        </div>
+      )}
+      {opts && byRecipe && recipe && (
+        <div className="h3-col" style={{ gap: 6 }}>
+          <div className="h3-col" style={{ gap: 2 }}>
+            {recipeTargets.map(([id, v]) => (
+              <div key={id} className={`h3-small ${v ? "" : "h3-error"}`}>
+                <b>{id}</b>: {v ? v.text : "no section in upscale.master covers it: these takes won't upscale"}
+              </div>
+            ))}
+            {recipeShots.map(([shot, v]) => (
+              <div key={shot} className="h3-small h3-muted">{shot}, its own: {v!.text}</div>
+            ))}
+            {recipe.problems.map((p) => <div key={p} className="h3-small h3-error">{p}</div>)}
+          </div>
+          <label className="h3-check" title="Upscale again even where the take already has a fresh upscale (it is replaced)">
+            <input type="checkbox" checked={f.redo} onChange={(e) => set({ redo: e.target.checked })} />
+            Again, where already upscaled
+          </label>
+        </div>
+      )}
+      {opts && !byRecipe && (
         <div className="h3-col" style={{ gap: 8 }}>
           <div className="h3-col" style={{ gap: 3 }}>
             <span className="h3-h">Method</span>
@@ -365,6 +424,20 @@ function UpscaleBody() {
               From the video, not the saved latent
             </label>
           )}
+          {oneShot && recipe && (
+            <div className="h3-row" style={{ gap: 6, flexWrap: "wrap" }}>
+              <button className="h3-btn" disabled={!canQueue} onClick={() => saveShot(false)}
+                      title={`Save these choices as ${oneShot}'s own recipe: the series recipe and Master use them for this shot (its size stays the master's)`}>
+                Save as {oneShot}'s recipe
+              </button>
+              {recipe.shots[oneShot] && (
+                <button className="h3-btn" onClick={() => saveShot(true)} title={`${oneShot} goes back to its target's section of the series recipe`}>
+                  Clear {oneShot}'s recipe
+                </button>
+              )}
+            </div>
+          )}
+          {saved && <div className="h3-small h3-muted">{saved}</div>}
         </div>
       )}
     </Dialog>

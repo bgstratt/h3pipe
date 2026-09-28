@@ -722,6 +722,9 @@ export interface UpscaleRequest {
   then_scale?: number | null;
   /** latent: the then step is SeedVR2 (`seedvr2_model`) instead of an upscale model */
   then_method?: "pixel" | "seedvr2";
+  /** Phase 13e: each take by the series config's upscale.master recipe (the
+   * other choices are ignored) */
+  recipe?: boolean;
   /** an exact size: "1080p", "1440p", "4k" or "WxH"; the last pixel step is sized to it
    * and the result cropped (`fit` crop, the default) or padded to it */
   deliver?: string | null;
@@ -757,6 +760,21 @@ export interface UpscaleOptions {
   precisions?: string[];
   delivers?: { id: string; width: number; height: number }[];
   fits?: string[];
+  /** Phase 13e: the episode's master recipe (asked with `ep`; null: none) */
+  recipe?: RecipeView | null;
+}
+
+/** The series config's upscale.master, as the Upscale dialog shows it. */
+export interface RecipeView {
+  deliver: string | null;
+  fit: "crop" | "pad";
+  quality: "review" | "master";
+  encoder: string;
+  /** each video target's section (null: none covers it) */
+  targets: Record<string, { key: string; fields: Record<string, unknown>; text: string } | null>;
+  /** shots with their own recipe (overrides.json) */
+  shots: Record<string, { fields: Record<string, unknown>; text: string }>;
+  problems: string[];
 }
 
 export interface UpscaleResult {

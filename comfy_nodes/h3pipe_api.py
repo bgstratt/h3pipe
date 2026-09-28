@@ -762,7 +762,10 @@ def post_upscale(ctx: Context, body):
     """Queue upscales of a pass's takes (h3upscale; `pass`, default final):
     `shots` (their cut takes; null
     for the whole final cut) or `takes` ([{shot, take}]), with optional `redo`,
-    `scale`, `start_step` and `vae`. 409 when this ComfyUI can't upscale."""
+    `scale`, `start_step` and `vae`. `recipe: true` upscales each take by the
+    series config's `upscale.master` recipe (its target's section, its shot's
+    override) instead of the body's choices. 409 when this ComfyUI can't
+    upscale, or there is no recipe."""
     body = body_dict(body)
     ep = check_ep(ctx, body.get("ep"))
     pass_ = check_pass(body.get("pass"), "final")
@@ -818,6 +821,15 @@ def post_upscale(ctx: Context, body):
     then_method = body.get("then_method")
     if then_method not in (None, "pixel", "seedvr2"):
         raise ApiError(400, "then_method must be pixel, seedvr2 or null")
+    use_recipe = body.get("recipe", False)
+    if not isinstance(use_recipe, bool):
+        raise ApiError(400, "recipe must be true or false")
+    recipe = shot_rs = None
+    if use_recipe:
+        recipe = U.master_recipe(ep)
+        if not recipe:
+            raise ApiError(409, "the series config has no upscale.master recipe")
+        shot_rs = U.shot_recipes(ep)
     deliver, fit = body.get("deliver"), body.get("fit") or "crop"
     try:
         U.parse_deliver(deliver)
@@ -838,14 +850,22 @@ def post_upscale(ctx: Context, body):
         if t is None:
             skipped.append({"shot": shot, "reason": why})
             continue
-        up = U.plan_upscale(ep, t, scale=scale, start_step=start_step,
-                            route="vae" if vae else None, redo=redo, method=method,
-                            pixel_model=pixel_model, detail=detail,
-                            then_model=then_model, then_scale=then_scale,
-                            then_method=then_method,
-                            from_upscale=from_upscale, encoder=encoder, precision=precision,
-                            frequency_split=frequency_split, keep_soft=keep_soft, grain=grain,
-                            seedvr2_model=seedvr2_model, deliver=deliver, fit=fit)
+        if use_recipe:
+            try:
+                kw = U.recipe_for(ep, t, recipe, shot_rs)
+            except U.UpscaleError as e:
+                errors.append({"shot": shot, "take": t.take, "error": str(e)})
+                continue
+            up = U.plan_upscale(ep, t, redo=redo, **kw)
+        else:
+            up = U.plan_upscale(ep, t, scale=scale, start_step=start_step,
+                                route="vae" if vae else None, redo=redo, method=method,
+                                pixel_model=pixel_model, detail=detail,
+                                then_model=then_model, then_scale=then_scale,
+                                then_method=then_method,
+                                from_upscale=from_upscale, encoder=encoder, precision=precision,
+                                frequency_split=frequency_split, keep_soft=keep_soft, grain=grain,
+                                seedvr2_model=seedvr2_model, deliver=deliver, fit=fit)
         if up.action == "skip":
             skipped.append({"shot": shot, "take": t.take, "reason": up.why})
         elif up.action == "error":
@@ -883,6 +903,45 @@ def post_upscale(ctx: Context, body):
     return 200, {"queued": queued, "skipped": skipped, "errors": errors}
 
 
+def recipe_view(ep: str) -> dict | None:
+    """The episode's master recipe for the dialog (None: the series config has
+    none): the master's size and encoding, each video target's section in words
+    (null: none covers it), each shot's override, and what's wrong with it."""
+    r = U.master_recipe(ep)
+    if not r:
+        return None
+    targets = {}
+    for t in TG.list_targets("video"):
+        key, sec = U.recipe_section(r, t.id)
+        targets[t.id] = None if key is None else {
+            "key": key, "fields": sec, "text": U.describe_recipe({**(r.get("finish") or {}), **sec}, r)}
+    return {"deliver": r.get("deliver"), "fit": r.get("fit") or "crop",
+            "quality": r.get("quality") or "review", "encoder": r.get("encoder") or "auto",
+            "targets": targets,
+            "shots": {s: {"fields": f, "text": U.describe_recipe(f)} for s, f in U.shot_recipes(ep).items()},
+            "problems": U.check_recipe(r)}
+
+
+@handler
+def put_upscale_recipe(ctx: Context, body):
+    """One shot's upscale recipe (overrides.json's "upscale"): `recipe` is the
+    upscale request's fields (method, scale, detail, pixel_model, then_pixel_model
+    or then_method, the finish...) as the dialog sends them; null clears it."""
+    body = body_dict(body)
+    ep = check_ep(ctx, body.get("ep"))
+    shot = check_shot(body.get("shot"))
+    rec = body.get("recipe")
+    if rec is not None and not isinstance(rec, dict):
+        raise ApiError(400, "recipe must be an object or null")
+    fields = U.recipe_from_request(rec) if rec else None
+    problems = U.check_fields(fields or {})
+    if problems:
+        raise ApiError(400, "; ".join(problems))
+    now = U.set_shot_recipe(ep, shot, fields)
+    return 200, {"shot": shot, "recipe": now or None,
+                 "text": U.describe_recipe(now) if now else None}
+
+
 @handler
 def get_upscale_options(ctx: Context, query: dict):
     """What the Upscale dialog offers: the pixel method's models (this ComfyUI's
@@ -904,7 +963,9 @@ def get_upscale_options(ctx: Context, query: dict):
             r = dict(r, mode=spec.get("mode", U.RESAMPLE), align=U.align_of(spec),
                      fixed_scale=U.fixed_scale(spec))
         latent[t.id] = r
+    ep = check_ep(ctx, query["ep"]) if query.get("ep") else None
     return 200, {"pixel": px, "seedvr2": sv2, "latent": latent, "details": list(U.DETAILS),
+                 "recipe": recipe_view(ep) if ep else None,
                  "max_scale": U.MAX_SCALE, "encoders": list(U.ENCODERS),
                  "precisions": list(U.PRECISIONS),
                  "delivers": [{"id": k, "width": w, "height": h} for k, (w, h) in U.DELIVER.items()],
@@ -2448,6 +2509,7 @@ ROUTES = [
     ("POST", "/h3pipe/discard", post_discard, "body"),
     ("POST", "/h3pipe/upscale", post_upscale, "body"),
     ("GET", "/h3pipe/upscale/options", get_upscale_options, "query"),
+    ("PUT", "/h3pipe/upscale/recipe", put_upscale_recipe, "body"),
     ("DELETE", "/h3pipe/upscale", delete_upscale, "query"),
     ("PUT", "/h3pipe/pick", put_pick, "body"),
     ("PUT", "/h3pipe/cut", put_cut, "body"),

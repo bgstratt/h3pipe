@@ -1934,6 +1934,16 @@ Steps (in order; each ends with its exit check):
   recipe" with a "Change for this run" that leaves it alone).
   Exit: the kitchen-sink fixture's recipe resolves per target and per override; `check`
   reports a bad one; the dialog defaults to it (vitest).
+  **Built 2026-09-27.** h3upscale: `master_recipe`, `recipe_section`, `recipe_for`,
+  `recipe_kwargs`, `shot_recipes` / `set_shot_recipe`, `describe_recipe`, `check_recipe`
+  (in the build's warnings). A shot's own recipe sits in overrides.json's top-level
+  `"upscale"`, not in its override block: h3promote reads every object there as a
+  per-target block. `POST /h3pipe/upscale` `recipe: true`, `PUT /h3pipe/upscale/recipe`,
+  the options' `recipe` (with `?ep=`), `h3.py upscale --recipe`. The dialog opens on
+  "Series recipe" when there is one (each target's section in words, the shots' own, the
+  problems), "Choose for this run" otherwise, and a single take's choices can be saved as
+  its shot's recipe. Tested in RecipeTest (the dialog's default is a one-line component
+  state, left to the live check).
 - **13e2 — upscales remember their recipe.** `queued_record` writes `recipe` (the resolved
   settings, normalised: model files, sizes, finish) and `recipe_hash`; `upscale_of` adds
   `recipe_match` (against the recipe the take would get now: `same`, `different`, `unknown`
