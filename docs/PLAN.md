@@ -1882,6 +1882,102 @@ text is kept under each "built" note.
   Wan and custom targets an upscale without per-target graphs. To measure: VRAM and time
   at 1080p, and whether it flickers across a 3–8 s clip.
 
+**13e — masters: one recipe, the whole cut, one action** (planned 2026-09-27, on the
+`upscale` branch)
+
+Why: 13a–13d made upscaling possible for every target, but every run is picked by hand in
+the dialog (method, then-step, size, fit, finish), nothing records which settings made an
+upscale, "fresh" only means "made from the current take", and `assemble --upscaled` quietly
+scales up any clip without one. That suits trying things; a master wants the same treatment
+on every shot, a clear list of what's missing, and nothing redone by accident. The goal:
+lock the cut, press **Master**, get `<ep>_master.mp4` and a report.
+
+Decisions (the user's, 2026-09-27):
+- **A recipe per target, one size per master.** There is one latent upscaler per model family
+  (H3: LBH-123-AI's; LTX: each version's own spatial x2, matched to its VAE; Wan: none, a
+  pixel model first), and a re-sample always runs on the take's own model: an H3 take can't
+  go through LTX. What differs is everything around it (start/detail, the then-step, the
+  pixel model, the finish). So the recipe has per-target sections (H3, LTX and Wan shots in
+  one cut each get theirs) and one `deliver`, `fit` and encoding for the whole master.
+- **Per-shot overrides.** A dialogue close-up wants the lightest re-sample (the mouth), a wide
+  without dialogue can take `detail`, a shot where SeedVR2 or a re-sample went wrong falls back
+  to the pixel method. Overrides sit with the episode's other overrides (h3edit), as render
+  overrides do.
+- **Never redo what's kept.** `master` upscales only a pick with no upscale, or one made from
+  an older take. An upscale made with a different recipe (or before recipes, with none on
+  record) is **kept and listed** ("different recipe"), not redone; `--conform` redoes those,
+  except any marked **Keep** (the editor's "Keep this upscale", `h3.py upscale --keep`), which
+  nothing redoes but an explicit per-shot redo.
+- **The cut is the cut.** `master` works from the pass's cut as locked (the picks); it never
+  changes a pick. A shot with no usable pick, or whose upscale failed, is reported and the
+  master isn't assembled (`--allow-gaps` makes it anyway, the review-cut way, and says so).
+
+Steps (in order; each ends with its exit check):
+
+- **13e1 — the recipe.** `upscale.master` in the series config:
+  ```json
+  "upscale": { "save_latents": "final",
+    "master": { "deliver": "4k", "fit": "crop", "quality": "master",
+      "targets": {
+        "minimax_h3_*": { "method": "latent", "scale": 2, "then": "RealESRGAN_x2.pth" },
+        "ltx2*":        { "method": "latent" },
+        "wan22_*":      { "method": "seedvr2", "seedvr2_model": "7b" },
+        "*":            { "method": "pixel", "pixel_model": "RealESRGAN_x2.pth" } },
+      "finish": { "frequency_split": true, "keep_soft": 0, "grain": 0 } } }
+  ```
+  Target keys are ids or globs, most specific wins; `then` is an upscale model file or
+  `"seedvr2"`; any field of the upscale request (`detail`, `start_step`, `then_scale`...) may
+  appear. `h3.py check` validates it (unknown target keys, methods, models it can see, a
+  `deliver` that parses); a per-shot `upscale` override (h3edit, the editor's shot menu)
+  merges over the target's section. `h3upscale.recipe_for(root, take)` resolves it into the
+  kwargs `plan_upscale` takes. The dialog opens on the recipe when there is one ("Series
+  recipe" with a "Change for this run" that leaves it alone).
+  Exit: the kitchen-sink fixture's recipe resolves per target and per override; `check`
+  reports a bad one; the dialog defaults to it (vitest).
+- **13e2 — upscales remember their recipe.** `queued_record` writes `recipe` (the resolved
+  settings, normalised: model files, sizes, finish) and `recipe_hash`; `upscale_of` adds
+  `recipe_match` (against the recipe the take would get now: `same`, `different`, `unknown`
+  for an upscale from before 13e) and `keep`. The editor's badge says which (a 2x badge with
+  a mark for "different", a pin for "keep"); `keep` is set and cleared from the take menu and
+  `h3.py upscale --keep / --unkeep`.
+  Exit: changing the series recipe turns existing upscales "different" but not stale; `keep`
+  survives a redo attempt; goldens unchanged (records only).
+- **13e3 — master quality.** An encoder quality `master` (x264, CRF ~14, preset slow, 8-bit
+  4:2:0 so the editor's browser still plays it; NVENC's constqp equivalent when asked) beside
+  today's `review` (CQ 19 NVENC). Assemble's master copies the clips' streams (concat, no
+  second encode) when every clip matches in codec, size and fps, which a master's always do;
+  the audio mixed as assemble already does. A ProRes 422 HQ `.mov` export from assemble
+  (`--intermediate prores`) for an editor downstream, not for the browser.
+  Exit: a master of the scratch episode is stream-copied (ffprobe: the clips' bitrate, no
+  re-encode in assemble's log); the ProRes export opens in ffprobe as prores_ks HQ.
+- **13e4 — `h3.py master <ep>` and the editor's Master.** Plans every shot of the cut:
+  `upscale` (missing, or from an older take), `ok` (fresh, same recipe), `kept` (different
+  recipe or keep), `gap` (no usable pick, a failed upscale). Queues the `upscale` ones with
+  their resolved recipes (one ComfyUI queue, in cut order); `--wait` follows the queue, else
+  a later `master` (or the editor, when the last one lands) assembles. Assembly is strict:
+  every clip at the master size, no scaling, no gaps unless `--allow-gaps`. Writes
+  `<ep>/master/<ep>_master_<WxH>.mp4` and `<ep>_master.json` / `.md` (each shot: take,
+  target, recipe, upscale time, and anything kept or missing). `--check` plans only.
+  Route `POST /h3pipe/master` (plan / queue / assemble) and a **Master…** item in the cut
+  menu with the plan as a table before anything is queued.
+  Exit: on the scratch episode with an H3, an LTX and a Wan shot, one `master --wait`
+  upscales each through its own target's recipe, keeps a pre-existing upscale, and
+  assembles; a re-run queues nothing and re-assembles byte-identically.
+- **13e5 — many episodes.** `h3.py master <ep> <ep> ...` (or a folder of episodes): one
+  plan across them, queued episode by episode, a summary at the end; episodes whose cut
+  has gaps are listed and skipped, not half-mastered.
+  Exit: two scratch episodes master in one command.
+- **13e6 — docs and the skill.** AUTHORING: a **Masters** section (the recipe, overrides,
+  keep, what `master` does and doesn't redo), and the series-config guidance: when writing
+  a new series config, propose an `upscale.master` block from the chosen setup (render
+  small → re-sample then a model to 1080p/4K; render at size → a model or SeedVR2; Wan
+  shots → SeedVR2). README's commands, API.md's routes, INSTALL unchanged.
+  Exit: `tools/make_prompts.py` regenerated; `tests/test_docs.py` green.
+
+Not in 13e: automatic per-shot choice (dialogue detection for `detail`; the user: selecting
+and re-rendering is enough), a colour grade (the conform's job), and cross-shot processing
+(shots meet at hard cuts: one at a time is right).
+
 **Phase 13 risks**
 - **Lip sync.** Held audio fixes timing, and at step 7 the mouth matched the take on the one
   dialogue shot measured (sh330). Earlier start steps re-draw it: more detail, and a mouth
