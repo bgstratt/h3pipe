@@ -948,6 +948,9 @@ def post_master(ctx: Context, body):
     flags = {k: body.get(k, False) for k in ("conform", "allow_gaps", "prores")}
     if not all(isinstance(v, bool) for v in flags.values()):
         raise ApiError(400, "conform, allow_gaps and prores must be true or false")
+    order = body.get("order") or "cut"
+    if order not in M.ORDERS:
+        raise ApiError(400, "order must be cut or target")
     try:
         plan = M.plan_master(ep, pass_, flags["conform"])
     except M.MasterError as e:
@@ -955,7 +958,7 @@ def post_master(ctx: Context, body):
     out: dict = {}
     if action == "queue":
         try:
-            queued, errors = M.queue_master(plan, ctx.comfy, ctx.comfy_url)
+            queued, errors = M.queue_master(plan, ctx.comfy, ctx.comfy_url, order)
         except M.MasterError as e:
             raise ApiError(409, str(e))
         for r in queued:

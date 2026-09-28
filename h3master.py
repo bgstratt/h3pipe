@@ -166,10 +166,38 @@ def plan_master(root: str, pass_: str = "final", conform: bool = False) -> Plan:
     return plan
 
 
-def queue_master(plan: Plan, comfy, comfy_url: str) -> tuple[list, list]:
-    """Queue the plan's `upscale` rows (in cut order) on ComfyUI. Returns
-    (queued rows, [(row, error)]). MasterError when this ComfyUI can't run them."""
-    rows = plan.of("upscale")
+ORDERS = ("cut", "target")
+
+
+def load_key(job: U.UpscaleJob) -> tuple:
+    """What ComfyUI loads to run an upscale: its target's model for a re-sample,
+    else the upscale model or SeedVR2 model (whatever the take's target)."""
+    if job.method == "latent":
+        return ("latent", job.target.id, job.then_method, job.then_model)
+    return (job.method, job.seedvr2_model if job.method == "seedvr2" else job.pixel_model)
+
+
+def in_order(rows: list, order: str = "cut") -> list:
+    """The `upscale` rows in the order they're queued. `cut`: the cut's, so what's
+    finished is the cut up to a point (stop at the first shot that's off and
+    everything before it is good). `target`: grouped by what ComfyUI loads
+    (load_key), each group where its first shot is in the cut and in cut order
+    within it, so each model loads once: for a batch left to run."""
+    if order not in ORDERS:
+        raise MasterError(f"order {order!r}: it's cut or target")
+    if order == "cut":
+        return list(rows)
+    first: dict = {}
+    for i, r in enumerate(rows):
+        first.setdefault(load_key(r.job), i)
+    return sorted(rows, key=lambda r: first[load_key(r.job)])
+
+
+def queue_master(plan: Plan, comfy, comfy_url: str, order: str = "cut") -> tuple[list, list]:
+    """Queue the plan's `upscale` rows on ComfyUI, in cut order or grouped by
+    what they load (in_order). Returns (queued rows, [(row, error)]).
+    MasterError when this ComfyUI can't run them."""
+    rows = in_order(plan.of("upscale"), order)
     if not rows:
         return [], []
     try:
@@ -336,11 +364,13 @@ def master_episode(root: str, args, comfy) -> int:
         return 1
     if plan.of("upscale"):
         try:
-            queued, errors = queue_master(plan, comfy, args.comfy)
+            queued, errors = queue_master(plan, comfy, args.comfy, args.order)
         except MasterError as e:
             print(f"  !! {e}")
             return 1
-        print(f"  queued {len(queued)} upscale(s)")
+        print(f"  queued {len(queued)} upscale(s)"
+              + (" grouped by target: " + ", ".join(r.shot for r in queued)
+                 if args.order == "target" and len(queued) > 1 else ""))
         for r, e in errors:
             print(f"  !! {r.shot}: {e}")
         if errors:
@@ -382,6 +412,11 @@ def main(argv=None) -> int:
     ap.add_argument("--allow-gaps", action="store_true",
                     help="master a cut with gaps: their clips scaled up from their takes")
     ap.add_argument("--prores", action="store_true", help="also a ProRes 422 HQ .mov")
+    ap.add_argument("--order", choices=ORDERS, default="cut",
+                    help="how the upscales are queued: cut (the default: in the cut's order, so "
+                         "you can stop at the first bad one and keep everything before it) or "
+                         "target (grouped by the model each loads, so each loads once: faster "
+                         "for a batch left to run)")
     ap.add_argument("--comfy", default="http://127.0.0.1:8188")
     ap.add_argument("--timeout", type=int, default=3600)
     args = ap.parse_args(argv)

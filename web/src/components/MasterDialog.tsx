@@ -32,12 +32,21 @@ function MasterBody() {
   const [busy, setBusy] = useState<string | null>(null);
   const [done, setDone] = useState<MasterResult | null>(null);
   const [opt, setOpt] = useState({ conform: false, allow_gaps: false, prores: false });
+  // how the upscales are queued: in cut order (watching: stop at the first bad one) or
+  // grouped by target (a batch: each model loads once). Remembered.
+  const [order, setOrderState] = useState<"cut" | "target">(() => {
+    try { return localStorage.getItem("h3pipe.masterOrder") === "target" ? "target" : "cut"; } catch { return "cut"; }
+  });
+  const setOrder = (o: "cut" | "target") => {
+    setOrderState(o);
+    try { localStorage.setItem("h3pipe.masterOrder", o); } catch { /* not kept */ }
+  };
 
   const run = async (action: "plan" | "queue" | "assemble") => {
     if (!ep) return;
     setBusy(action);
     try {
-      const r = await api().master({ ep, pass: ask.pass, action, ...opt });
+      const r = await api().master({ ep, pass: ask.pass, action, ...opt, ...(action === "queue" ? { order } : {}) });
       setPlan(r.plan);
       setErr(null);
       if (action === "assemble") setDone(r);
@@ -86,6 +95,13 @@ function MasterBody() {
             <label className="h3-check" title="Master a cut with gaps: their clips are scaled up from their takes, and the report says so">
               <input type="checkbox" checked={opt.allow_gaps} onChange={(e) => setOpt({ ...opt, allow_gaps: e.target.checked })} />
               Allow gaps
+            </label>
+            <label className="h3-col" style={{ gap: 2 }} title="In cut order: what's finished is the cut up to a point, so you can stop at the first shot that's off and keep everything before it. Grouped by target: each model loads once, faster for a batch left to run">
+              <span className="h3-small h3-muted">Queue</span>
+              <select value={order} onChange={(e) => setOrder(e.target.value as "cut" | "target")}>
+                <option value="cut">In cut order</option>
+                <option value="target">Grouped by target</option>
+              </select>
             </label>
             <label className="h3-check" title="Also write a ProRes 422 HQ .mov beside the master, for an editor downstream">
               <input type="checkbox" checked={opt.prores} onChange={(e) => setOpt({ ...opt, prores: e.target.checked })} />
