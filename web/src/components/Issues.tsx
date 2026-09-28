@@ -12,7 +12,7 @@
 import { useEffect, useRef } from "react";
 import {
   clearIssues, closeIssue, copyIssueExport, issuesOf, loadIssues, openIssues, openViewer,
-  resolveIssue, saveIssue, select, setIssueText,
+  requestRender, resolveIssue, saveIssue, select, setIssueText,
 } from "../actions";
 import { fmtWhen, tn } from "../lib/format";
 import { useApp } from "../store";
@@ -22,8 +22,26 @@ import { Dialog } from "./Dialogs";
 export function IssueDialog() {
   const d = useApp((s) => s.issueDraft);
   const box = useRef<HTMLTextAreaElement>(null);
+  // what had focus when the box opened (the Play all window, the timeline):
+  // it gets it back when the box closes, so space and J/K/L carry on there
+  const back = useRef<HTMLElement | null>(null);
+  const open = !!d;
   useEffect(() => {
-    if (d) box.current?.focus();
+    if (!open) return;
+    const prev = document.activeElement;
+    back.current = prev instanceof HTMLElement && prev !== document.body ? prev : null;
+    return () => {
+      const el = back.current;
+      back.current = null;
+      if (el && el.isConnected) el.focus({ preventScroll: true });
+    };
+  }, [open]);
+  useEffect(() => {
+    const el = box.current;
+    if (!d || !el) return;
+    el.focus();
+    // a note that starts with where it is ("at 1.8 s: ") is typed after that
+    el.setSelectionRange(el.value.length, el.value.length);
   }, [d?.shot, d?.pass]);
   if (!d) return null;
   const save = () => void saveIssue();
@@ -82,6 +100,8 @@ export function IssuesWindow() {
   if (!open) return null;
   const live = items.filter((x) => !x.addressed);
   const done = items.filter((x) => x.addressed);
+  // the shots with open notes, once each, in the order they were noted
+  const noted = [...new Set(live.map((x) => x.shot))];
   return (
     <Dialog
       title={<>Issues <span className="h3-muted h3-small">{pass} pass</span></>}
@@ -94,6 +114,16 @@ export function IssuesWindow() {
               ? `${live.length} open${done.length ? ` · ${done.length} addressed` : ""}`
               : "Nothing noted"}
           </span>
+          <button
+            className="h3-btn"
+            disabled={!noted.length}
+            title={noted.length
+              ? `Re-render the ${noted.length} shot${noted.length === 1 ? "" : "s"} with open notes (${noted.join(", ")}): a shot you've changed keeps its seed, one you haven't gets a new one`
+              : "No open notes"}
+            onClick={() => requestRender(noted, true, `Re-render ${noted.length} noted shot${noted.length === 1 ? "" : "s"}`)}
+          >
+            <i className="pi pi-refresh" /> Re-render noted{noted.length ? ` (${noted.length})` : ""}
+          </button>
           <button
             className="h3-btn"
             disabled={!done.length}

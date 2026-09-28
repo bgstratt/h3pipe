@@ -2105,7 +2105,7 @@ export function issuesOf(ep: string | null, pass: Pass): Issue[] {
  * **Add issue…** both come here; the take defaults to the one the cut plays,
  * which is what the person is looking at.
  */
-export function openIssue(shot: string, pass = get().pass, take?: number | null) {
+export function openIssue(shot: string, pass = get().pass, take?: number | null, text = "") {
   const s = get();
   const st = s.ep ? s.status[statusKey(s.ep, pass)] : undefined;
   const sh = st?.shots.find((x) => x.shot === shot);
@@ -2114,7 +2114,7 @@ export function openIssue(shot: string, pass = get().pass, take?: number | null)
     issueDraft: {
       shot, pass,
       take: take ?? sh?.cut.take ?? null,
-      text: "", error: null,
+      text, error: null,
     },
   });
 }

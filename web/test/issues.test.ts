@@ -117,6 +117,26 @@ describe("the n key", () => {
     expect(store.get().issueDraft).toMatchObject({ shot });
   });
 
+  it("during Play all, notes the clip on screen, not the one last clicked", async () => {
+    const { shot } = await setup();
+    const { currentPlaylist } = await import("../src/actions");
+    const items = currentPlaylist(store.get());
+    const it2 = items.find((i) => i.shot !== shot && i.dur > 0.5)!;
+    store.set({
+      shot, issueDraft: null,
+      viewer: { kind: "cut", shot: items[0].shot, pass: "proxy", a: null, b: null, mode: "single", target: "a" },
+      cutPlay: { playing: true, pos: it2.start + 0.5, seek: null, rate: 1 },
+    });
+    expect(cutKey(key("n"))).toBe(true);
+    const d = store.get().issueDraft!;
+    expect(d.shot).toBe(it2.shot);
+    expect(d.take).toBe(it2.take);
+    expect(d.text).toBe(`at ${(it2.inT + 0.5).toFixed(1)} s: `);
+    expect(store.get().cutPlay.playing).toBe(false);                 // stopped on that frame
+    expect(store.get().shot).toBe(it2.shot);                         // and selected
+    store.set({ viewer: null, issueDraft: null });
+  });
+
   it("does nothing with no clip selected", async () => {
     await setup();
     store.set({ shot: null, issueDraft: null });
