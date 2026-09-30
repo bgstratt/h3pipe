@@ -12,7 +12,7 @@ its own (data only, proposed from a workflow by `h3inspect.py`).
 
 ## Layout
 
-- `h3.py` — one CLI for every stage (`new`, `build`, `check`, `refs`, `supply`, `render`, `issues`, `assemble`, `all`)
+- `h3.py` — one CLI for every stage (`new`, `build`, `check`, `refs`, `supply`, `render`, `issues`, `assemble`, `publish`, `all`)
 - `h3core/` — model-free core: script parser → story IR (`shotlist/shots.json`), series config loading, speech pacing
 - `h3build.py` — script + series config → story IR → H3 compile → `shotlist/*.json`, `refs_todo.*`
 - `h3render.py` — queues shots on ComfyUI through the shot's target (`targets/video/<id>/`: template, recipe,
@@ -36,7 +36,10 @@ its own (data only, proposed from a workflow by `h3inspect.py`).
   to hand to an assistant (`h3.py issues`). Meant to be emptied, not kept
 - `h3upscale.py` — a take's upscale (re-sample, pixel model, SeedVR2; output size) and the
   series' master recipe (`upscale.master`); `h3master.py` — the recipe on every shot of a
-  cut, then the master assembled into `<episode>/master/` (`h3.py master`)
+  cut, then the master assembled into `<episode>/master/` (`h3.py master`), titled by h3publish
+  when the show has `_titles/INTRO.mp4` / `OUTRO.mp4`
+- `h3publish.py` — the series intro + a cut + the outro, the episode title drawn under the
+  series title, the cut's picture copied (h3master's titles; `h3.py publish` on a review cut)
 - `h3align.py` — times the script against a dialogue recording
 - `h3assemble.py` — review cut (ffmpeg)
 - `h3peaks.py` — a media file's sound: has it any, duration, waveform peaks (the editor's

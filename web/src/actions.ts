@@ -1135,15 +1135,17 @@ export async function discardTake(ref: TakeRef, ask = true): Promise<boolean> {
 export async function assemble(partial = true, opts?: AssembleOptions) {
   const s = get();
   if (!s.ep) return;
-  set({ assemble: { busy: true, output: null, report: null, error: null } });
+  const pub = !!opts?.publish;
+  set({ assemble: { busy: true, output: null, report: null, error: null, publish: pub } });
   try {
     const r = await api().assemble(s.ep, s.pass, partial, opts);
     set({ assemble: { busy: false, output: r.output, report: r.report, error: r.ok ? null : r.report } });
-    if (r.ok) host().toast("success", "Assembled", absPath(s.ep, r.output));
+    if (r.ok) host().toast("success", pub ? "Published" : "Assembled", absPath(s.ep, r.output));
+    else if (pub && r.cut) host().toast("error", "Assembled, but publishing failed", r.error || r.report.slice(-400));
     else host().toast("error", "Assemble failed", r.report.slice(-400));
   } catch (e) {
     set({ assemble: { busy: false, output: null, report: null, error: errText(e) } });
-    report("Assemble failed", e);
+    report(pub ? "Publish failed" : "Assemble failed", e);
   }
 }
 
@@ -1214,6 +1216,9 @@ export interface RedoPlan {
   /** The prompt isn't the user's to set: the shot is retargeted, or this run is on
    * another target (its prompt is compiled at queue time). Sent as null, never saved. */
   lockPrompt?: boolean;
+  /** "WxH" for this run only (sent as `size`, never saved to the override); null/absent =
+   * the shot's own size */
+  size?: string | null;
 }
 
 /** What to send for a redo: the override to write first (if any) and the render. */
@@ -1227,6 +1232,8 @@ export function planRedo(p: RedoPlan, ep: string, d: ShotDetail): { override: Ov
   if (p.keepFrames) base.save_frames = true;
   // only when the user chose: the series config's rule applies otherwise
   if (p.keepLatent != null) base.save_latent = p.keepLatent;
+  // this run only: a bigger take is a choice for one take, not every later one
+  if (p.size) base.size = p.size;
   const prompt = p.lockPrompt ? null : p.prompt;
   // a one-off run on another target isn't saved: the override is the shot's own target's
   if (!p.saveAsOverride || target) {

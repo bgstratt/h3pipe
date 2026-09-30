@@ -816,6 +816,9 @@ function RefRow({ ep, r }: { ep: string; r: Ref }) {
           {kf ? (
             <div className="h3-row h3-small h3-muted h3-wrap">
               {method && <span title={methodTitle(r.method, kf.which)}>{method}</span>}
+              {r.continuity?.[pass]?.state === "stale" && (
+                <span className="h3-warn" title={`${r.continuity[pass]!.why}. The next render of ${kf.shot} cuts it again from that take.`}>· out of date</span>
+              )}
               {r.target && <span title={`${targetLabel(list, r.target)} reads this keyframe`}>· read by {targetShort(list, r.target)}</span>}
               <span>· {all.length} cand.</span>
               {live != null && <span>· live {tn(live)}</span>}

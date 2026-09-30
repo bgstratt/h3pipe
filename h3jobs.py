@@ -67,6 +67,7 @@ import copy
 import json
 import os
 import random
+import re
 import time
 import urllib.error
 import urllib.request
@@ -1111,6 +1112,10 @@ class RenderRequest:
     parent_take: int | None = None
     note: str = ""
     allow_missing_refs: bool = False   # render anyway: blank images / no audio ref
+    size: str | None = None            # "WxH": render at this size, this run only
+    # {shot: {"after", "pass"}}: continuity shots whose first frame is cut as the
+    # render starts (h3refs.refresh_continuity's `live`; H3ContinuityFrame)
+    continuity: dict | None = None
     target: str | None = None          # render on this video target, this run only
     allow_model_mismatch: bool = False  # render even if a model file is another family
     negative: str | None = None        # the negative prompt, this run only (negative_for)
@@ -1175,6 +1180,10 @@ class Job:
     values: dict = field(default_factory=dict)
     based: bool = False                # an accelerator is missing: the base preset renders
     steps_set: bool = False            # steps came from the request or overrides.json
+    # (width, height) from the request or overrides.json, when not the shotlist's
+    size: tuple | None = None
+    # {"after", "pass"}: a continuity shot's first frame is cut when it starts
+    continuity: dict | None = None
     target_source: str = ""            # request | override | script | episode | series | default
     # where the negative prompt comes from (negative_for): request | override |
     # negative.txt | series | preset, or "none" for a target without one
@@ -1207,10 +1216,14 @@ class Job:
 
     @property
     def width(self) -> int:
+        if self.size:
+            return int(self.size[0])
         return int(self.shot.get("width", self.doc.get("defaults", {}).get("width", 0)))
 
     @property
     def height(self) -> int:
+        if self.size:
+            return int(self.size[1])
         return int(self.shot.get("height", self.doc.get("defaults", {}).get("height", 0)))
 
     @property
@@ -1456,6 +1469,17 @@ def plan_job(root: str, pass_: str, doc: dict, index: int, req: RenderRequest,
         notes.append(f"steps {steps} is recorded but not used: {target.short} has no steps "
                      f"setting (its sampling schedule is fixed in the workflow)")
     prompt = pick("prompt", source.get("prompt", ""), req.prompt)
+    size = None
+    want_size = pick("size", None, req.size)
+    if want_size:
+        try:
+            size = run_size(target, want_size, notes)
+        except ValueError as e:
+            error = error or f"size {want_size}: {e}"
+        built_size = (int(source.get("width", dflt.get("width", 0))),
+                      int(source.get("height", dflt.get("height", 0))))
+        if size == built_size:
+            size = None
     values: dict = {}
     negative_source = "none"
     if target.binding.specs("negative"):
@@ -1515,7 +1539,34 @@ def plan_job(root: str, pass_: str, doc: dict, index: int, req: RenderRequest,
                built_target=built_target.id, notes=notes, error=error,
                length_source=length_source, allow_model_mismatch=req.allow_model_mismatch,
                steps_set="steps" in explicit, target_source=target_source,
-               values=values, negative_source=negative_source, save_latent=save_latent)
+               values=values, negative_source=negative_source, save_latent=save_latent,
+               size=size, continuity=(req.continuity or {}).get(sid))
+
+
+def parse_size(v) -> tuple[int, int]:
+    """(width, height) from "1344x768" or [1344, 768]; ValueError otherwise."""
+    if isinstance(v, (list, tuple)) and len(v) == 2:
+        w, h = v
+    else:
+        m = re.fullmatch(r"\s*(\d+)\s*[xX×]\s*(\d+)\s*", str(v or ""))
+        if not m:
+            raise ValueError(f"{v!r} is not a size like 1344x768")
+        w, h = m.groups()
+    w, h = int(w), int(h)
+    if not (64 <= w <= 8192 and 64 <= h <= 8192):
+        raise ValueError(f"{w}x{h}: each side 64 to 8192")
+    return w, h
+
+
+def run_size(target, v, notes: list | None = None) -> tuple[int, int]:
+    """A requested render size made legal for `target` (its template's grid and
+    maximum): a target that snaps says so in `notes`; one that doesn't raises
+    ValueError naming the nearest legal size."""
+    w, h = parse_size(v)
+    fw, fh = target.template.fit_size(w, h)
+    if (fw, fh) != (w, h) and notes is not None:
+        notes.append(f"size {w}x{h} snapped to {fw}x{fh} for {target.short}")
+    return fw, fh
 
 
 # ---------------------------------------------------------------------------
@@ -1678,6 +1729,8 @@ def frozen_shotlist(job: Job) -> dict:
     shot["seed"] = job.seed
     shot["steps"] = job.steps
     shot["prompt"] = copy.deepcopy(job.prompt)
+    if job.size:
+        shot["width"], shot["height"] = job.size
     if job.model:
         shot["model"] = job.model
     if job.loras is not None:
@@ -1738,8 +1791,8 @@ def sidecar_for(job: Job) -> dict:
         "comfy_prompt_id": None,
         "seed": job.seed, "seed_source": job.seed_source,
         "model": job.model, "loras": job.loras, "steps": job.steps,
-        "width": int(job.shot.get("width", d.get("width", 0))),
-        "height": int(job.shot.get("height", d.get("height", 0))),
+        "width": job.width,
+        "height": job.height,
         "length": job.frames,
         # the frame rate the take is rendered and saved at (the target's: Wan
         # 14B renders 16 fps in a 24 fps episode; assemble converts)
@@ -1758,6 +1811,8 @@ def sidecar_for(job: Job) -> dict:
         # only when there is something to say, likewise
         **({"built_target": job.built_target} if job.retargeted else {}),
         **({"inputs": dict(job.inputs)} if job.inputs else {}),
+        # its first frame is cut again when it starts (the node fills in `continuity`)
+        **({"continuity_after": dict(job.continuity)} if job.continuity else {}),
         **({"notes": notes} if notes else {}),
         # where the negative prompt came from (a target that takes one)
         **({"negative_source": job.negative_source} if job.negative_source != "none" else {}),
@@ -2138,6 +2193,8 @@ def graph_for(base: dict, job: Job, take: T.Take, *, panel_mode: str | None = No
             del g[k]
     if t.supports("patch_graph"):
         t.patch_graph(g, job, dict(job.inputs if inputs is None else inputs))
+    if job.continuity:
+        continuity_frame(g, job, take, dict(job.inputs if inputs is None else inputs))
     if job.duration_head:
         add_duration_predictor(g, t, job)
     if b.prune:
@@ -2146,6 +2203,24 @@ def graph_for(base: dict, job: Job, take: T.Take, *, panel_mode: str | None = No
         for v in g.values():
             v.pop("_meta", None)
     return g
+
+
+def continuity_frame(g: dict, job: Job, take: T.Take, inputs: dict) -> None:
+    """A continuity shot's first frame read when the job starts, not when it was
+    queued: the LoadImage the target wired for the `first` input becomes
+    H3ContinuityFrame (h3refs.continuity_at_start), which cuts it again from
+    the take the cut uses then (a take queued ahead of it in the same run has
+    rendered by then) and falls back to the queued copy (`image`)."""
+    name = inputs.get("first")
+    if not name:
+        return
+    for v in g.values():
+        if v["class_type"] == "LoadImage" and v["inputs"].get("image") == name:
+            v["class_type"] = "H3ContinuityFrame"
+            v["inputs"] = {"image": name, "project_root": job.root, "shot": job.shot["id"],
+                           "pass_": job.continuity.get("pass") or job.pass_,
+                           "sidecar": os.path.relpath(take.paths.sidecar, job.root)}
+            v.setdefault("_meta", {})["title"] = "Continuity first frame"
 
 
 def add_duration_predictor(g: dict, target: "TG.Target", job: Job) -> None:

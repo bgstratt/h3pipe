@@ -151,6 +151,42 @@ def sweep(comfy: Comfy, roots: list[str], pass_: str, folder: str | None) -> int
 
 # ---------------------------------------------------------------------------
 
+def cut_order(root: str, pass_: str) -> dict:
+    """{shot: its place in the pass's cut}: what a continuity chain is queued by."""
+    import h3edit as E
+    return {e.shot: n for n, e in enumerate(E.cut_entries(root, pass_))}
+
+
+def continuity_before_render(root: str, pass_: str, only, dry_run: bool = False,
+                             live: dict | None = None):
+    """Each `first: continuity` shot of the render made to start from the take
+    the cut uses now (h3refs.refresh_continuity: a missing or stale keyframe is
+    cut again), said on the console. Returns the shots to render (`only`, less
+    any with no frame to start from), None for all of them. `live` collects the shots whose first
+    frame is cut again as their render starts (RenderRequest.continuity)."""
+    live = {} if live is None else live
+    import h3refs as R
+    try:
+        s = R.load_series(root)
+    except Exception:
+        return only
+    res = R.refresh_continuity(s, pass_, only, dry_run=dry_run)
+    for c in res["cut"]:
+        print(f"  {'would cut' if dry_run else 'cut'} {c['shot']}'s first frame from {c['from']} "
+              f"({c['why']})")
+    for w in res["wait"]:
+        what = (f"{w['after']} t{w['take']:02d}, still rendering" if w.get("take")
+                else f"{w['after']}'s new take in this run")
+        print(f"  .. {w['shot']}: its first frame is cut from {what} when its render starts")
+    for e in res["errors"]:
+        print(f"  !! {e['shot']}: {e['error']}")
+    live.update(res["live"])
+    held = {e["shot"] for e in res["errors"]}
+    if not held:
+        return only
+    return {s_ for s_ in (only if only is not None else J.script_order(root)) if s_ not in held}
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -176,6 +212,8 @@ def main() -> int:
                          "Replaces the shotlist's and overrides.json's LoRAs")
     ap.add_argument("--model", help="H3 unet file name; overrides the shotlist")
     ap.add_argument("--steps", type=int, help="sampler steps; overrides the shotlist")
+    ap.add_argument("--size", metavar="WxH",
+                    help="render at this size for this run (e.g. 1344x768), not the shotlist's")
     ap.add_argument("--note", default="", help="free text stored in each take's sidecar")
     ap.add_argument("--target", metavar="TARGET",
                     help="render on this video target for this run (e.g. ltx2): the shot's "
@@ -243,7 +281,8 @@ def main() -> int:
         seed_mode="new" if args.new_seed else "same" if args.same_seed else "auto",
         model=args.model or None, loras=loras, steps=args.steps, note=args.note,
         allow_missing_refs=args.allow_missing_refs, target=args.target,
-        allow_model_mismatch=args.allow_model_mismatch, save_latent=args.save_latent)
+        allow_model_mismatch=args.allow_model_mismatch, save_latent=args.save_latent,
+        size=args.size)
     only = {s.strip() for s in args.only.split(",")} if args.only else None
 
     # Each job renders with its own target's workflow. --workflow replaces the
@@ -283,8 +322,17 @@ def main() -> int:
     # (/object_info). A dry run asks only with --check-nodes.
     listing = J.model_lister(comfy) if (args.check_nodes or not args.dry_run) else None
     for root in roots:
+        live: dict = {}
+        only_r = continuity_before_render(root, pass_, only, args.dry_run, live)
+        template.continuity = live or None
+        if only_r is not None and not only_r:
+            continue
         try:
-            jobs = plan_episode(root, pass_, default=template, folder=folder, only=only)
+            jobs = plan_episode(root, pass_, default=template, folder=folder, only=only_r)
+            if live:
+                # a chain queues in cut order: each shot behind the one it continues
+                order = cut_order(root, pass_)
+                jobs.sort(key=lambda j: order.get(j.shot["id"], len(order)))
             default_id = J.shotlist_target(load_shotlist(root, pass_)).id \
                 if root == roots[0] else default_id
         except FileNotFoundError as e:

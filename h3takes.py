@@ -445,11 +445,13 @@ def sweep_queued(takes: list[Take], alive: set[str], as_of: str | None = None,
 #  "shots": {"sh020": {"minimax_h3_ref2va": {
 #      "seed": null | int, "note": "",
 #      "final": {"base_hash": "…", "prompt": null | "text" | ["section", …],
-#                "model": null, "loras": null, "steps": null},
+#                "model": null, "loras": null, "steps": null, "size": null},
 #      "proxy": {…same…}}}}}
 #
 # null (or absent) means "use the built value". `loras` is a list of
 # {"name": str, "strength": float}; an empty list means "no LoRA at all".
+# `size` is "WxH": the pass renders the shot at that size instead of the
+# shotlist's (a dialogue medium at 1344x768 in a 960x544 episode).
 #
 # The prompt is per pass because the built prompt is: a proxy that generates
 # its audio has different audio sections from a final that clones voices. Each
@@ -463,7 +465,8 @@ def sweep_queued(takes: list[Take], alive: set[str], as_of: str | None = None,
 # shot_target / set_shot_target.
 
 OVERRIDES_FILE = "overrides.json"
-PASS_FIELDS = ("prompt", "model", "loras", "steps", "base_hash", "negative", "model_low")
+PASS_FIELDS = ("prompt", "model", "loras", "steps", "base_hash", "negative", "model_low",
+               "size")
 SHOT_FIELDS = ("seed", "note")
 
 

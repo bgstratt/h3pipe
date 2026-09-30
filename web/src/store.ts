@@ -334,7 +334,8 @@ export interface AppState {
   modelFiles: Record<string, ModelList>;
   zoom: number;
   build: { busy: boolean; result: BuildResult | null; error: string | null };
-  assemble: { busy: boolean; output: string | null; report: string | null; error: string | null };
+  /** `publish`: the running one is a Publish (assemble, then the titles) */
+  assemble: { busy: boolean; output: string | null; report: string | null; error: string | null; publish?: boolean };
   /** in-flight actions, by a caller-chosen key, to disable buttons */
   busy: Record<string, boolean>;
   /** Phase 9a: the Script / Series config windows are open */

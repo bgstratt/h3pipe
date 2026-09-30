@@ -402,6 +402,8 @@ export interface Override {
   negative?: string | null;
   /** Phase 8.5: a two-stage target's (Wan) low-noise model, per pass. */
   model_low?: string | null;
+  /** "WxH": the pass renders at this size, not the shotlist's (per pass). */
+  size?: string | null;
 }
 
 /**
@@ -543,6 +545,8 @@ export interface RenderRequest {
   target?: string | null;
   /** Queue shots whose model file is another family than the target needs. Only sent when set. */
   allow_model_mismatch?: boolean;
+  /** "WxH": render this run at that size, beating the override. Only sent when set. */
+  size?: string | null;
   /** Phase 13: keep the take's latent beside it for an upscale later. Absent: the
    * server's default (the series config's upscale.save_latents; final pass only). */
   save_latent?: boolean;
@@ -640,6 +644,8 @@ export interface OverrideFields {
   /** Phase 8.5: per pass; null clears */
   negative?: string | null;
   model_low?: string | null;
+  /** "WxH", per pass; null clears (back to the shotlist's size) */
+  size?: string | null;
 }
 
 export interface OverrideRequest {
@@ -662,13 +668,19 @@ export interface AssembleResult {
   ok: boolean;
   output: string;
   report: string;
+  error?: string;
+  /** with `publish`: the assembled cut, and the published file (null if publishing failed) */
+  cut?: string;
+  published?: string | null;
 }
 
 /** Phase 13: POST /h3pipe/assemble's extras. `upscaled` (final pass): each clip
- * from its fresh upscale, as <ep>_up.mp4; `size`: the cut's size ("1920x1080"). */
+ * from its fresh upscale, as <ep>_up.mp4; `size`: the cut's size ("1920x1080");
+ * `publish`: then the series intro and outro around it, titled (h3publish). */
 export interface AssembleOptions {
   upscaled?: boolean;
   size?: string | null;
+  publish?: boolean;
 }
 
 /** Phase 13: a final take's upscale (<stem>.up.mp4), as GET /h3pipe/episode says it. */
@@ -799,6 +811,8 @@ export interface MasterResult {
   output?: string;
   mov?: string | null;
   report?: string;
+  /** the intro / outro the master was made with (h3publish), null: none found */
+  titles?: { intro: string | null; outro: string | null } | null;
 }
 
 /** The series config's upscale.master, as the Upscale dialog shows it. */
@@ -1139,6 +1153,10 @@ export interface Ref {
   reads?: boolean | null;
   /** a path the script names (method "import") */
   import_path?: string;
+  /** a continuity first frame, per pass: whether the live keyframe still shows the
+   * take that pass's cut uses for the previous shot (a render cuts it again when
+   * "missing" or "stale"; "own" = imported or generated, left alone) */
+  continuity?: Partial<Record<Pass, { state: "ok" | "missing" | "stale" | "cleared" | "own" | "unknown"; why: string }>>;
   /** with an edit keyframe target: exactly the references a generate feeds it */
   edit_refs?: EditRef[];
 }
@@ -1414,7 +1432,7 @@ export interface Target {
     max_seconds?: number;
     [key: string]: unknown;
   };
-  template?: { fps?: number; frames?: { step?: number; base?: number; max?: number }; size_multiple?: number };
+  template?: { fps?: number; frames?: { step?: number; base?: number; max?: number }; size_multiple?: number; size_fit?: string };
   /** The family each model param must be (target.json `models`), by param. */
   models?: Record<string, { family: string; label?: string; patterns?: string[]; folder?: string | null; tier?: RequirementTier }>;
   /** Only with `?ready=1`: what's installed, what's missing and where to get it. */

@@ -12,6 +12,7 @@ export interface OverrideSource {
   built_prompt: string;
 }
 import { promptText } from "./format";
+import { parseSize } from "./size";
 
 export interface LoraRow {
   name: string;
@@ -34,6 +35,8 @@ export interface OverrideForm {
   negative: string;
   /** Phase 8.5: "" = the target's low-noise model (two-stage targets) */
   modelLow: string;
+  /** "" = the shotlist's size; else "WxH" */
+  size: string;
 }
 
 export function formFromDetail(d: Pick<OverrideSource, "override" | "effective">): OverrideForm {
@@ -48,6 +51,7 @@ export function formFromDetail(d: Pick<OverrideSource, "override" | "effective">
     note: o.note ?? "",
     negative: o.negative ?? "",
     modelLow: o.model_low ?? "",
+    size: o.size ?? "",
   };
 }
 
@@ -98,6 +102,7 @@ export function overrideFields(form: OverrideForm, initial: OverrideForm, d: Pic
   if (form.note !== initial.note) f.note = form.note.trim() === "" ? null : form.note;
   if (form.negative !== initial.negative) f.negative = form.negative.trim() === "" ? null : form.negative;
   if (form.modelLow !== initial.modelLow) f.model_low = form.modelLow === "" ? null : form.modelLow;
+  if (form.size !== initial.size) f.size = form.size === "" ? null : parseSize(form.size);
   return f;
 }
 

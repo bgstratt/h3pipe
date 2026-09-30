@@ -250,13 +250,17 @@ Queues takes on ComfyUI's own queue and returns without waiting.
  "redo": true,
  "seed_mode": "auto", "seed": null,
  "model": null, "loras": null, "steps": null, "prompt": null,
- "parent_take": 2, "note": "calmer kettle"}
+ "parent_take": 2, "note": "calmer kettle", "size": null}
 ```
 - These fields map to `h3jobs.RenderRequest`, with `seed` as a string.
   - `seed_mode` is one of `auto`, `new` or `same`.
   - `redo: false` skips shots that already have a usable or queued take, as the CLI does.
   - `null` means "not set in this request", so the built value and `overrides.json`
     apply.
+  - `size` (`"1344x768"`, or `[1344, 768]`) renders this run at that size instead of the
+    shotlist's; the take's sidecar records it, and a master re-samples it by its own size
+    (`scale: "auto"`). A size off the target's grid is that shot's error (H3: multiples of
+    32), or is snapped with a note on a target that snaps (LTX).
 - The workflow comes from `h3jobs.resolve_workflow(None, WORKFLOW_NAME, <this
   server>)`: the copy saved in ComfyUI, else the repo copy. (Phase 7: the shotlist's
   target's binding names it, `h3jobs.target_workflow`; for H3 that is still
@@ -267,6 +271,13 @@ Queues takes on ComfyUI's own queue and returns without waiting.
   of `h3pipe`, from an executor, and then calls `mark_queued`.
 - A failure while queueing marks that take failed (`mark_failed`) and is reported
   for that shot. The other shots still queue.
+- Continuity (`h3refs.refresh_continuity`): each `first: continuity` shot's first frame
+  is cut again when its render starts (H3ContinuityFrame replaces the LoadImage of its
+  `first` input; `h3refs.continuity_at_start`), from the take the cut uses then, so a chain
+  queues in one request, in cut order. Before queueing, a missing or stale keyframe is cut
+  from the current take (`continuity`: `[{shot, from, why}]`); the shots cut at start are in
+  `continuity_at_start` (`[{shot, after}]`). One with nothing to start from, now or coming,
+  is an error and isn't queued.
 ```json
 {"queued": [{"shot": "sh020", "take": 3, "prompt_id": "…", "seed": "…",
              "seed_source": "new"}],
@@ -303,11 +314,12 @@ Body:
 ```json
 {"ep": "…", "pass": "proxy", "shot": "sh020", "both": false,
  "fields": {"prompt": "…", "seed": "12345", "model": null, "loras": [...],
-            "steps": 10, "note": "…"}}
+            "steps": 10, "size": "1344x768", "note": "…"}}
 ```
 - Only the fields present are changed; `null` clears a field.
-- `prompt`, `model`, `loras` and `steps` are per pass (`both: true` sets both
-  passes); `seed` and `note` are shared.
+- `prompt`, `model`, `loras`, `steps` and `size` are per pass (`both: true` sets both
+  passes); `seed` and `note` are shared. `size` ("WxH") makes every later take of that
+  pass render at that size.
 - Pass fields are stamped with that pass's `base_hash` (`h3jobs.story_hash` of the
   shot as that pass builds it now), exactly as `h3.py override` does.
 - Returns `{"override": {"final": {...}, "proxy": {...}}}`, each the effective
@@ -329,6 +341,17 @@ fresh upscale, the cut is the upscales' size and is written as `<ep>_up.mp4`, an
 without one are scaled up (the report names them). `"size": "1920x1080"` sets the cut's
 size, letterboxing a clip whose aspect differs. `h3.py assemble <ep> --upscaled [--size WxH]`
 is the same.
+
+`"publish": true` then runs `h3publish` on the cut: the series intro and outro
+(`_titles/INTRO.mp4`, `OUTRO.mp4` in the show folder, or the series config's `publish`
+block) around it, the episode's title drawn on, into `<ep>/publish/`. `output` is then the
+published file, `cut` the assembled one and `published` the published one (null when
+publishing failed: `ok` false, the reason in `error`, the cut still written). The same
+as `h3.py assemble` followed by `h3.py publish <ep> --input <cut>`.
+```json
+{"ok": true, "output": "publish/ep05_up.mp4", "cut": "renders/ep05_up.mp4",
+ "published": "publish/ep05_up.mp4", "report": "…", "error": ""}
+```
 
 ## Upscale (Phase 13)
 
@@ -465,8 +488,12 @@ pick, the other pass's take, no recipe section for its target, or a kept upscale
 another size). `queue` queues the `upscale` rows (409 when this ComfyUI can't) and adds
 `queued` / `errors`; `assemble` (409 while any are to upscale or queued, or with gaps
 unless `allow_gaps`) writes `master/<ep>_master_<WxH>.mp4` (and `.mov` with `prores`) and
-`<ep>_master.json` / `.md`, and adds `output`, `mov`, `report`. 409 without a recipe, or
-one without `deliver`.
+`<ep>_master.json` / `.md`, and adds `output`, `mov`, `report`, `titles`. 409 without a recipe, or
+one without `deliver`. When the episode has an intro or outro (`_titles/INTRO.mp4`,
+`OUTRO.mp4` in the show folder, or the series config's `publish` block), the master is
+made with them, the episode's title drawn on (h3publish), and the `.mov` from that:
+`titles` is `{"intro", "outro"}` (the clips used, either null), else null. A master that
+assembled but couldn't be titled is a 500 saying so; the untitled master is left in place.
 
 ### `PUT /h3pipe/upscale/keep`
 Body `{"ep", "pass"?, "shot", "take", "keep": true | false}`: mark a take's finished upscale

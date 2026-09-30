@@ -29,7 +29,7 @@ with the reason):
                                       prompt with only that sentence changed (a
                                       character: all four views, agreeing)
 
-Prompts (compiled text), seeds, negatives, notes, model_low, and a ref's seed,
+Prompts (compiled text), seeds, negatives, notes, model_low, sizes, and a ref's seed,
 model, LoRAs, steps, note and image target have no faithful place in the
 script or the series config.
 
@@ -79,6 +79,7 @@ SHOT_LEFT = {
     "negative": "a negative prompt is per target and pass, not a script line",
     "note": "a note has no place in the script",
     "model_low": "the script has no line for a two-stage target's low-noise model",
+    "size": "the script has no per-shot size (the series config's is every shot's)",
 }
 REF_LEFT = {
     "seed": "a seed has no place in the series config: keep it by picking the take",
@@ -339,7 +340,7 @@ def shot_candidates(st: State, before: dict, only_shot: str | None) -> tuple[lis
                 if tb.get(f) is not None:
                     left.append(_left("shot", f, SHOT_LEFT[f], shot=sid))
             for ps in T.PASSES:
-                for f in ("prompt", "negative", "model_low"):
+                for f in ("prompt", "negative", "model_low", "size"):
                     if (tb.get(ps) or {}).get(f) is not None:
                         left.append(_left("shot", f, SHOT_LEFT[f], shot=sid, **{"pass": ps}))
             for f in PASS_PROMOTE:

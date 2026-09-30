@@ -204,6 +204,14 @@ describe("override form", () => {
     const f = { ...init, prompt: "built text", seed: "", steps: "", lorasMode: "built" as const, model: "" };
     expect(overrideFields(f, init, d)).toEqual({ prompt: null, seed: null, steps: null, loras: null, model: null });
   });
+  it("size: an override per pass, \"WxH\", cleared with null, checked", () => {
+    const d = detail({ override: { size: "1344x768" } });
+    const init = formFromDetail(d);
+    expect(init.size).toBe("1344x768");
+    expect(overrideFields({ ...init, size: "" }, init, d)).toEqual({ size: null });
+    expect(overrideFields({ ...init, size: "1024×576" }, init, d)).toEqual({ size: "1024x576" });
+    expect(() => overrideFields({ ...init, size: "big" }, init, d)).toThrow(/Size/);
+  });
   it("custom LoRAs parse with strength, and bad input throws readably", () => {
     const d = detail();
     const init = formFromDetail(d);
@@ -233,6 +241,15 @@ describe("planRedo", () => {
     const p = planRedo({ ...base, seed: { mode: "typed", seed: "77" }, steps: 10, prompt: "tweaked", saveAsOverride: true }, "E", detail());
     expect(p.override).toEqual({ prompt: "tweaked", steps: 10, seed: "77" });
     expect(p.render).toMatchObject({ prompt: null, model: null, loras: null, steps: null, seed: "77", parent_take: 2, redo: true });
+  });
+  it("a size is this run's only, sent in the render, never saved to the override", () => {
+    const none = planRedo({ ...base, seed: { mode: "new" }, saveAsOverride: false }, "E", detail());
+    expect("size" in none.render).toBe(false);
+    for (const save of [false, true]) {
+      const p = planRedo({ ...base, seed: { mode: "new" }, saveAsOverride: save, size: "1344x768" }, "E", detail());
+      expect(p.render.size).toBe("1344x768");
+      expect(p.override?.size).toBeUndefined();
+    }
   });
   it("keep the latent is only sent when chosen (Phase 13a)", () => {
     const dflt = planRedo({ ...base, seed: { mode: "new" }, saveAsOverride: false }, "E", detail());

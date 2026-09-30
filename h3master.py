@@ -299,12 +299,48 @@ def assemble_master(plan: Plan, allow_gaps: bool = False, prores: bool = False,
         if os.path.isfile(src):
             shutil.move(src, os.path.join(dst, name + ext))
             moved[ext] = os.path.join(dst, name + ext)
-    rep = write_report(plan, moved.get(".mp4"), moved.get(".mov"))
-    return {"ok": True, "output": moved[".mp4"], "mov": moved.get(".mov"), "report": out,
-            "report_md": rep, "error": ""}
+    mp4, mov = moved[".mp4"], moved.get(".mov")
+    titled, why = add_titles(plan, mp4, mov, timeout)
+    out += titled.get("report", "")
+    rep = write_report(plan, mp4, mov, titled)
+    if why:
+        return {"ok": False, "output": mp4, "mov": mov, "report": out, "report_md": rep,
+                "titles": None, "error": f"the master is assembled, but its titles failed: {why}"}
+    return {"ok": True, "output": mp4, "mov": mov, "report": out,
+            "report_md": rep, "titles": titled.get("titles"), "error": ""}
 
 
-def write_report(plan: Plan, mp4: str | None, mov: str | None) -> str:
+def add_titles(plan: Plan, mp4: str, mov: str | None, timeout: int = 3600) -> tuple[dict, str]:
+    """The series intro and outro around the master, in place (h3publish), when
+    the episode has them; the .mov made again from the titled master. Returns
+    ({"titles": {"intro", "outro"} or None, "report"}, why it failed or "")."""
+    import h3assemble
+    import h3edit
+    import h3publish
+    try:
+        intro, outro = h3publish.titles(plan.root)
+    except h3publish.PublishError as e:
+        return {}, str(e)
+    if not intro and not outro:
+        return {"titles": None, "report": "\n  no _titles/INTRO.mp4 or OUTRO.mp4: "
+                                          "the master has no intro or outro\n"}, ""
+    quality = "master" if plan.recipe.get("quality") == "master" else "review"
+    rc, out, err = h3edit.run_tool("h3publish.py", [plan.root, "--input", mp4, "--out", mp4,
+                                                    "--quality", quality], plan.root, timeout)
+    if rc != 0:
+        why = next((ln.strip()[3:] for ln in out.splitlines() if ln.strip().startswith("!! ")),
+                   err.strip()[-300:] or "h3publish failed")
+        return {"report": "\n" + out}, why
+    if mov:
+        why = h3assemble.prores_from(mp4, mov)
+        if why:
+            return {"report": "\n" + out}, f"the ProRes .mov couldn't be made again: {why}"
+    return {"titles": {"intro": fwd(plan.root, intro) if intro else None,
+                       "outro": fwd(plan.root, outro) if outro else None},
+            "report": "\n" + out}, ""
+
+
+def write_report(plan: Plan, mp4: str | None, mov: str | None, titled: dict | None = None) -> str:
     """<ep>_master.json and .md beside the master: each shot, its take, target,
     recipe and upscale, and anything kept or missing. Returns the .md's path."""
     root, dst = plan.root, master_dir(plan.root)
@@ -312,7 +348,7 @@ def write_report(plan: Plan, mp4: str | None, mov: str | None) -> str:
     stem = os.path.join(dst, os.path.basename(os.path.normpath(root)) + "_master")
     data = {"episode": os.path.basename(os.path.normpath(root)), "made": T.now(),
             "output": fwd(root, mp4) if mp4 else None, "prores": fwd(root, mov) if mov else None,
-            **plan.view()}
+            "titles": (titled or {}).get("titles"), **plan.view()}
     for row, r in zip(plan.rows, data["rows"]):
         rec = T.upscale_of(row.take) if row.take else None
         if rec:
@@ -325,6 +361,9 @@ def write_report(plan: Plan, mp4: str | None, mov: str | None) -> str:
              f"made {data['made']}", ""]
     if mp4:
         lines += [f"- `{fwd(root, mp4)}`"] + ([f"- `{fwd(root, mov)}` (ProRes 422 HQ)"] if mov else []) + [""]
+        t = data.get("titles")
+        lines += [("Titles: " + ", ".join(f"{k} `{v}`" for k, v in t.items() if v)
+                   + ", the episode's title drawn on") if t else "No intro or outro.", ""]
     lines += ["| shot | take | target | status | recipe | note |", "|---|---|---|---|---|---|"]
     for r in data["rows"]:
         lines.append(f"| {r['shot']} | {r['take'] or ''} | {r['target'] or ''} | {r['status']} | "
@@ -394,7 +433,11 @@ def master_episode(root: str, args, comfy) -> int:
     if not res["ok"]:
         print(f"  !! assembling failed: {res['error']}")
         return 1
+    t = res.get("titles")
     print(f"  -> {res['output']}" + (f"\n  -> {res['mov']}" if res["mov"] else "")
+          + ("\n  with the intro and outro" if t and t["intro"] and t["outro"]
+             else f"\n  with the {'intro' if t['intro'] else 'outro'} only" if t
+             else "\n  no intro or outro (no _titles/INTRO.mp4 or OUTRO.mp4)")
           + f"\n  report: {res['report_md']}")
     return 0
 

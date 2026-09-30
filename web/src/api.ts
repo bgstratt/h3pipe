@@ -412,6 +412,7 @@ export function createHttpApi(t: Transport): Api {
       // only when set: older servers don't know them
       ...(opts?.upscaled ? { upscaled: true } : {}),
       ...(opts?.size ? { size: opts.size } : {}),
+      ...(opts?.publish ? { publish: true } : {}),
     }),
     upscale: (req) => call("POST", "/h3pipe/upscale", req),
     upscaleOptions: (ep) => get(`/h3pipe/upscale/options${ep ? `?${qs({ ep })}` : ""}`),

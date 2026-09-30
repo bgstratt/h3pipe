@@ -23,8 +23,13 @@ your projects, with the pipeline scripts beside it (see the README).
     python h3.py master   Shows\\ep05 [Shows\\ep06 ...] --wait
                                                     # the series recipe (upscale.master) on every
                                                     # shot of the cut, then the master assembled
-                                                    # into ep05\\master\\ (--check: the plan only,
+                                                    # into ep05\\master\\, with the show's
+                                                    # _titles\\INTRO.mp4 / OUTRO.mp4 when there
+                                                    # (--check: the plan only,
                                                     #  --conform, --allow-gaps, --prores)
+    python h3.py publish  Shows\\ep05            # the same intro + outro around the review
+                                                    # cut, the episode title written under the
+                                                    # series title, into ep05\\publish\\
     python h3.py all      Shows\\ep05 --proxy    # build -> refs -> render -> assemble
     python h3.py all      Shows\\ep05 --proxy --skip-build
                                                     # refs -> render -> assemble, using the
@@ -212,6 +217,13 @@ def main() -> int:
         sys.path.insert(0, HERE)
         import h3master
         return h3master.main(argv[1:])
+    if argv and argv[0] == "publish":
+        if len(argv) < 2 or argv[1].startswith("-"):
+            sys.exit("  !! usage: python h3.py publish <episode> [--proxy] [--input FILE] "
+                     "[--out FILE] [--quality review|master] [--check]")
+        sys.path.insert(0, HERE)
+        import h3publish
+        return h3publish.main(argv[1:])
     if argv and argv[0] == "targets":
         # the episode is optional: it adds its series config (pass blocks,
         # model_families) and marks its target

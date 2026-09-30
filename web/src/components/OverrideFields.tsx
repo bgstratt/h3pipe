@@ -6,6 +6,8 @@ import type { OverrideForm } from "../lib/overrideForm";
 import { shortName } from "../lib/format";
 import type { Lora, ModelList } from "../types";
 import { DiffView, LoraEditor, ModelSelect } from "./Fields";
+import type { SizeRule } from "../lib/size";
+import { SizePicker } from "./SizePicker";
 
 export interface OverrideFieldsProps {
   form: OverrideForm;
@@ -40,6 +42,9 @@ export interface OverrideFieldsProps {
   negative?: { effective: string; source: string; note?: string | null } | null;
   /** Phase 8.5: a two-stage target's low-noise model picker; absent hides it */
   modelLow?: { placeholder: string; files?: ModelList; choices?: string[] } | null;
+  /** the render size picker (shots only): `built` is the shotlist's "WxH", `rule` the
+   * target's grid; absent hides it */
+  size?: { built: string; rule: SizeRule } | null;
 }
 
 export function OverrideFields(p: OverrideFieldsProps) {
@@ -132,6 +137,12 @@ export function OverrideFields(p: OverrideFieldsProps) {
         )}
         <label>Steps</label>
         <input className="h3-in" inputMode="numeric" placeholder={p.stepsPlaceholder} value={form.steps} onChange={(e) => set({ steps: e.target.value.replace(/[^\d]/g, "") })} />
+        {p.size && (
+          <>
+            <label title="The size every take of this pass renders at. A master re-samples each take by its own size.">Size</label>
+            <SizePicker value={form.size} onChange={(size) => set({ size })} own={p.size.built} ownLabel={built} rule={p.size.rule} width={170} />
+          </>
+        )}
         {p.negative && (
           <>
             <label title="What the model should avoid. Empty = the episode's negative.txt, else series.json's, else the target's">Negative</label>

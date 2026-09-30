@@ -1179,7 +1179,9 @@ export function createMockApi(emit: Emit, opts: MockOptions = {}): Api & { outsi
       need(ep);
       const n = st(pass).shots.filter((s) => s.cut.usable).length;
       const name = `ep05_${pass}${opts?.upscaled ? "_up" : ""}.mp4`;
-      return { ok: true, output: `${st(pass).folder}/${name}`, report: `  ${n} shots, partial cut\n  wrote ${st(pass).folder}/${name}\n` };
+      const cut = `${st(pass).folder}/${name}`;
+      if (opts?.publish) return { ok: true, output: `publish/${name}`, cut, published: `publish/${name}`, report: `  ${n} shots\n  -> publish/${name}\n` };
+      return { ok: true, output: cut, report: `  ${n} shots, partial cut\n  wrote ${cut}\n` };
     },
     async upscale(req) {
       await wait();
@@ -1218,7 +1220,7 @@ export function createMockApi(emit: Emit, opts: MockOptions = {}): Api & { outsi
                      counts: { upscale: count("upscale"), ok: count("ok"), kept: 0, queued: 0, gap: count("gap") },
                      ready: count("upscale") === 0 && count("gap") === 0, rows };
       return req.action === "assemble"
-        ? { plan, output: "master/ep01_master_1920x1080.mp4", mov: null, report: "master/ep01_master.md" }
+        ? { plan, output: "master/ep01_master_1920x1080.mp4", mov: null, report: "master/ep01_master.md", titles: { intro: "../_titles/INTRO.mp4", outro: "../_titles/OUTRO.mp4" } }
         : { plan, queued: [], errors: [] };
     },
     async putUpscaleKeep(ep, shot, take, keep, pass) {

@@ -5,6 +5,8 @@ import { absPath, shortName, tn } from "../lib/format";
 import { missingOf } from "../lib/missingRefs";
 import { loraRow, parseLoras, parseSteps, type LoraRow } from "../lib/overrideForm";
 import { findTarget, isModelMismatch, isRetargeted, MODEL_MISMATCH_LABEL, modelWarning, runSize, shotTarget, targetLabel } from "../lib/targets";
+import { parseSize, sizeCheck, sizeRule, sizeText } from "../lib/size";
+import { SizePicker } from "./SizePicker";
 import { useApp } from "../store";
 import type { Pass, ShotDetail, TakeDetail, TargetList } from "../types";
 import { DiffView, LoraEditor, ModelSelect } from "./Fields";
@@ -59,6 +61,15 @@ interface RedoForm {
   frames: boolean;
   /** keep this take's latent for an upscale; null = the server's default (final pass) */
   latent: boolean | null;
+  /** "WxH" for this run only; "" = the shot's own (its override, else the shotlist's) */
+  size: string;
+}
+
+/** A take's own size when it isn't what the shot renders at now: "New take like this
+ * one" of a 1344x768 take stays 1344x768. "" otherwise. */
+function takeSize(d: ShotDetail, sc: Record<string, unknown> | null): string {
+  const own = sc ? sizeText(sc.width as number, sc.height as number) : "";
+  return own && own !== sizeText(d.effective.width, d.effective.height) ? own : "";
 }
 
 /** The settings a run on another target starts from: that target's preset for the pass. */
@@ -96,6 +107,7 @@ function initForm(d: ShotDetail, parent: TakeDetail | undefined, pass: Pass, cur
     save: true,
     frames: false,
     latent: null,
+    size: takeSize(d, settings),
   };
 }
 
@@ -169,7 +181,7 @@ function RedoBody({ d, shot, openPass, parent }: { d: ShotDetail; shot: string; 
     set({
       parent: n, typedSeed: init.typedSeed,
       // on another target, keep that target's settings
-      ...(oneOff ? {} : { model: init.model, loras: init.loras, lorasOn: init.lorasOn, steps: init.steps }),
+      ...(oneOff ? {} : { model: init.model, loras: init.loras, lorasOn: init.lorasOn, steps: init.steps, size: init.size }),
       ...(f.source === "parent" ? { prompt: "" } : {}),
     });
     setParentPrompt(null);
@@ -196,6 +208,10 @@ function RedoBody({ d, shot, openPass, parent }: { d: ShotDetail; shot: string; 
         seed = { mode: "same", seed: parentSeed };
       } else seed = { mode: "typed", seed: parseSeed(f.typedSeed) };
       steps = parseSteps(f.steps);
+      if (f.size) {
+        const bad = sizeCheck(f.size, sizeRule(findTarget(list, runTarget)?.template));
+        if (bad?.level === "err") throw new Error(bad.text);
+      }
       loras = f.lorasOn && pickers.loras !== null ? parseLoras(f.loras) : null;
       if (!lockPrompt && !f.prompt.trim()) throw new Error("The prompt is empty.");
     } catch (e) {
@@ -209,6 +225,7 @@ function RedoBody({ d, shot, openPass, parent }: { d: ShotDetail; shot: string; 
         saveAsOverride: f.save && !oneOff, allowMissingRefs: allowMissing,
         allowModelMismatch: mismatch && allowMismatch,
         target: oneOff ? f.target : null, lockPrompt, keepFrames: f.frames, keepLatent: f.latent,
+        size: f.size ? parseSize(f.size) : null,
       });
       if (ok) closeRedo();
     } finally {
@@ -221,6 +238,8 @@ function RedoBody({ d, shot, openPass, parent }: { d: ShotDetail; shot: string; 
   const runModel = f.model || (oneOff ? "" : (targetD ?? d).effective.model);
   const mismatch = isModelMismatch(pickers.modelFiles, runModel);
   const size = runSize(targetD, runTarget, seriesDefault, list);
+  const effSize = oneOff ? "" : sizeText((targetD ?? d).effective.width, (targetD ?? d).effective.height);
+  const rule = sizeRule(findTarget(list, runTarget)?.template);
   const runLabel = targetLabel(list, runTarget);
   return (
     <>
@@ -287,6 +306,11 @@ function RedoBody({ d, shot, openPass, parent }: { d: ShotDetail; shot: string; 
         )}
         <label>Steps</label>
         <input className="h3-in" style={{ width: 80 }} inputMode="numeric" value={f.steps} onChange={(e) => set({ steps: e.target.value.replace(/[^\d]/g, "") })} />
+        <label title="The size this take renders at. For this run only: set it on the shot's override (inspector) to keep it. A master re-samples each take by its own size.">Size</label>
+        <div className="h3-col" style={{ gap: 2 }}>
+          <SizePicker value={f.size} onChange={(size) => set({ size })} own={effSize} ownLabel="the shot's" rule={rule} />
+          {f.size && <span className="h3-small h3-muted">this take only</span>}
+        </div>
         <label>Pass</label>
         <span className="h3-seg">
           {(["proxy", "final"] as Pass[]).map((p) => (

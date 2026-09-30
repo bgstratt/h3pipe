@@ -233,6 +233,30 @@ def fit_size(w: int, h: int, W: int, H: int, fit: str = "crop") -> tuple[int, in
     return (min(W, 2 * math.floor(w * s / 2 + 1e-9)), min(H, 2 * math.floor(h * s / 2 + 1e-9)))
 
 
+AUTO = "auto"                           # a recipe's `scale`: the smallest that covers `deliver`
+
+
+def auto_scale(w: int, h: int, deliver: tuple | None, fit: str = "crop", align: int = 32,
+               default: float = 2.0) -> float:
+    """The re-sample scale "auto" means: the smallest in eighths (above 1, up to
+    MAX_SCALE) whose size lands on `align` and is at least the frame `deliver`
+    needs (fit_size), so the saver only scales down and crops, never stretches.
+    960x544 to 1080p is 2 (1920x1088); 1344x768 is 1.5 (2016x1152, scaled to
+    1920x1098 and cropped). No delivery size: `default`. UpscaleError when no
+    scale up to MAX_SCALE covers it."""
+    if not deliver:
+        return default
+    nw, nh = fit_size(w, h, *deliver, fit)
+    for k in range(9, int(MAX_SCALE * 8) + 1):
+        s = k / 8
+        sw, sh = w * s, h * s
+        if (sw == int(sw) and sh == int(sh) and not int(sw) % align and not int(sh) % align
+                and sw >= nw and sh >= nh):
+            return s
+    raise UpscaleError(f"no re-sample scale up to {MAX_SCALE:g}x takes {w}x{h} onto the {align} grid "
+                       f"at {nw}x{nh} or more: give the recipe a scale")
+
+
 def align_of(spec: dict) -> int:
     return int(spec.get("align") or (spec.get("upscaler") or {}).get("align") or 32)
 
@@ -538,7 +562,9 @@ def describe_recipe(fields: dict, recipe: dict | None = None) -> str:
     """A recipe section in words, for the dialog and the master's report."""
     m = fields.get("method") or "latent"
     if m == "latent":
-        s = f"re-sample {fields.get('scale', 2):g}x"
+        sc = fields.get('scale', 2)
+        s = ("re-sample at the smallest scale that covers the size" if sc == AUTO
+             else f"re-sample {sc:g}x")
         if fields.get("detail"):
             s += f" (detail {fields['detail']})"
         then = fields.get("then")
@@ -601,8 +627,12 @@ def check_fields(sec: dict) -> list[str]:
         out.append(f"{k} is not a recipe field")
     if sec.get("method", "latent") not in METHODS:
         out.append(f"method {sec['method']!r}: it's {', '.join(METHODS)}")
-    for k, lo, hi in (("scale", 1, MAX_SCALE), ("then_scale", 1, MAX_SCALE)):
+    if sec.get("scale") == AUTO and (sec.get("method", "latent") != "latent" or sec.get("then")):
+        out.append('scale "auto": only for a re-sample alone (method latent, no then)')
+    for k, lo, hi in (("scale", 1, MAX_SCALE), ("then_scale", 1, MAX_SCALE)):  # "auto" above
         v = sec.get(k)
+        if k == "scale" and v == AUTO:
+            continue
         if v is not None and (isinstance(v, bool) or not isinstance(v, (int, float)) or not lo < v <= hi):
             out.append(f"{k} {v!r}: more than {lo:g}, up to {hi:g}")
     if sec.get("detail") not in (None, *DETAILS):
@@ -624,7 +654,14 @@ def plan_upscale(root: str, take: T.Take, *, encoder: str = "auto", precision: s
                  quality: str = "review", **kw) -> UpscaleJob:
     """_plan (below), with how the result is encoded (`encoder`) and the upscale
     model run (`precision`), both checked, and sized to `deliver` (see
-    deliver_to)."""
+    deliver_to). A `scale` of "auto" is worked out here, per take (auto_scale)."""
+    if kw.get("scale") == AUTO:
+        try:
+            kw["scale"] = resolve_auto_scale(root, take, deliver, fit or "crop", kw)
+        except UpscaleError as e:
+            job = _plan(root, take, **{**kw, "scale": None})
+            job.action, job.why = "error", str(e)
+            return job
     job = _plan(root, take, **kw)
     if respect_keep and job.action == "upscale" and kept(take):
         job.action, job.why = "skip", "kept (its upscale is marked Keep)"
@@ -648,6 +685,27 @@ def plan_upscale(root: str, take: T.Take, *, encoder: str = "auto", precision: s
     if job.action != "error" and job.quality not in QUALITIES:
         job.action, job.why = "error", f"quality {quality!r}: it's review or master"
     return job
+
+
+def resolve_auto_scale(root: str, take: T.Take, deliver, fit: str, kw: dict) -> float | None:
+    """What "auto" is for this take: auto_scale from its size, the delivery and
+    its target's grid, for a re-sample alone. A target whose upsampler is fixed
+    keeps its scale; with a `then` step after the re-sample (it makes the
+    delivery size), and for the pixel and SeedVR2 methods (deliver_to sizes
+    those), "auto" is the target's default."""
+    sc = take.sidecar or {}
+    target = TG.load_target(sc.get("target") or T.DEFAULT_TARGET, "video", root=root)
+    spec = upscale_spec(target) or {}
+    m = kw.get("method") or ("pixel" if kw.get("from_upscale") or not spec else "latent")
+    if m != "latent" or kw.get("then_model") or kw.get("then_method"):
+        return None
+    if fixed_scale(spec) is not None:
+        return fixed_scale(spec)
+    w, h = int(sc.get("width") or 0), int(sc.get("height") or 0)
+    if not w or not h:
+        return None                                     # _plan says what's wrong
+    return auto_scale(w, h, parse_deliver(deliver), fit, align_of(spec),
+                      float(spec.get("scale", 2)))
 
 
 def _plan(root: str, take: T.Take, *, scale: float | None = None,

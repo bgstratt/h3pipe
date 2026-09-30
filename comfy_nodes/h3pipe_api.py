@@ -583,6 +583,18 @@ def _opt_steps(v) -> int | None:
     return v
 
 
+def _opt_size(v) -> str | None:
+    """A render size ("1344x768" or [1344, 768]) as "WxH", or None (the shotlist's).
+    Whether the target takes it is checked when the take is planned."""
+    if v is None or v == "":
+        return None
+    try:
+        w, h = J.parse_size(v)
+    except ValueError as e:
+        raise ApiError(400, f"size: {e}")
+    return f"{w}x{h}"
+
+
 def _opt_prompt(v):
     if v is None or isinstance(v, str):
         return v
@@ -669,7 +681,8 @@ def post_render(ctx: Context, body):
         parent_take=check_take(body.get("parent_take"), "parent_take", nullable=True),
         note=_opt_str(body, "note") or "", allow_missing_refs=allow_missing,
         target=_opt_target(body.get("target")), allow_model_mismatch=allow_mismatch,
-        negative=_opt_negative(body.get("negative")), save_latent=save_latent)
+        negative=_opt_negative(body.get("negative")), save_latent=save_latent,
+        size=_opt_size(body.get("size")))
     J.load_shotlist(ep, pass_)                           # 404 before anything else
     workflows: dict = {}
 
@@ -694,10 +707,33 @@ def post_render(ctx: Context, body):
             raise got
         return got
 
-    result = E.queue_shots(ep, pass_, shots, template, ctx.comfy, base_for,
-                           model_resolve=ctx.model_resolve, model_cache=ctx.model_cache,
-                           model_list=ctx.model_choices, review_copy=review_copy(ctx),
-                           save_frames=save_frames)
+    # continuity: each `first: continuity` shot's first frame is cut again as its
+    # render starts, from the take the cut uses then (a take queued ahead of it in
+    # this run has rendered by then), so a whole chain queues at once; one with
+    # nothing to start from isn't queued (it would render without its first frame)
+    cont = continuity_before_render(ep, pass_, shots)
+    template.continuity = cont["live"] or None
+    held = {e["shot"] for e in cont["errors"]}
+    todo = shots
+    if held or cont["live"]:
+        todo = [s for s in (shots if shots is not None else J.script_order(ep)) if s not in held]
+    if cont["live"]:
+        # a chain queues in cut order: each shot behind the one it continues
+        order = {e.shot: n for n, e in enumerate(E.cut_entries(ep, pass_))}
+        todo.sort(key=lambda s: order.get(s, len(order)))
+    if todo == []:
+        result = {"queued": [], "skipped": [], "errors": []}
+    else:
+        result = E.queue_shots(ep, pass_, todo, template, ctx.comfy, base_for,
+                               model_resolve=ctx.model_resolve, model_cache=ctx.model_cache,
+                               model_list=ctx.model_choices, review_copy=review_copy(ctx),
+                               save_frames=save_frames)
+    result["errors"] += [{"shot": e["shot"], "error": e["error"]} for e in cont["errors"]]
+    result["continuity"] = cont["cut"]
+    result["continuity_at_start"] = [{"shot": w["shot"], "after": wait_reason(w)}
+                                     for w in cont["wait"]]
+    for c in cont["cut"]:
+        ref_event(ctx, ep, f"shot:{c['shot']}:first", None, None, "ok")
     for q in result["queued"]:
         # "queued" even if the job has already finished: the saver sends its own event
         take_event(ctx, ep, T.get_take(ep, pass_, q["shot"], q["take"]), "queued")
@@ -707,6 +743,23 @@ def post_render(ctx: Context, body):
     if result["queued"] or any(e.get("take") for e in result["errors"]):
         episode_event(ctx, ep)
     return 200, seeds_out(result)
+
+
+def wait_reason(w: dict) -> str:
+    """Where a chained continuity shot's first frame will come from (refresh_continuity's `wait`)."""
+    what = (f"{w['after']} t{w['take']:02d}, still rendering" if w.get("take")
+            else f"{w['after']}'s new take in this run")
+    return f"its first frame is cut from {what} when its render starts"
+
+
+def continuity_before_render(ep: str, pass_: str, shots) -> dict:
+    """h3refs.refresh_continuity for a render's shots ({"cut", "wait", "errors"});
+    nothing to do for an episode whose series config can't be read."""
+    try:
+        s = R.load_series(ep)
+    except Exception:
+        return {"live": {}, "cut": [], "wait": [], "errors": []}
+    return R.refresh_continuity(s, pass_, shots)
 
 
 @handler
@@ -971,9 +1024,10 @@ def post_master(ctx: Context, body):
         except M.MasterError as e:
             raise ApiError(409, str(e))
         if not res["ok"]:
-            raise ApiError(500, f"assembling the master failed: {res['error']}")
+            raise ApiError(500, res["error"] if res["output"]
+                           else f"assembling the master failed: {res['error']}")
         out = {"output": E.rel(ep, res["output"]), "mov": E.rel(ep, res["mov"]) if res["mov"] else None,
-               "report": E.rel(ep, res["report_md"])}
+               "report": E.rel(ep, res["report_md"]), "titles": res.get("titles")}
     return 200, {"plan": plan.view(), **out}
 
 
@@ -1256,7 +1310,7 @@ def get_peaks(ctx: Context, query: dict):
 
 
 OVERRIDE_FIELDS = ("prompt", "seed", "model", "loras", "steps", "note", "target", "negative",
-                   "model_low")
+                   "model_low", "size")
 
 
 @handler
@@ -1293,6 +1347,8 @@ def put_override(ctx: Context, body):
         pass_fields["loras"] = _opt_loras(fields["loras"])
     if "steps" in fields:
         pass_fields["steps"] = _opt_steps(fields["steps"])
+    if "size" in fields:
+        pass_fields["size"] = _opt_size(fields["size"])
     if "negative" in fields:
         # "" is an explicit empty negative; null clears the override
         n = fields["negative"]
@@ -1725,9 +1781,18 @@ def post_assemble(ctx: Context, body):
     size = body.get("size")
     if size is not None and (not isinstance(size, str) or not re.fullmatch(r"\d+x\d+", size)):
         raise ApiError(400, "size must look like 1920x1080, or be null")
+    # the cut with the series intro and outro around it (h3publish)
+    publish = body.get("publish", False)
+    if not isinstance(publish, bool):
+        raise ApiError(400, "publish must be true or false")
     J.load_shotlist(ep, pass_)
-    return 200, E.assemble_episode(ep, pass_, partial, upscaled=upscaled, size=size)
-
+    res = E.assemble_episode(ep, pass_, partial, upscaled=upscaled, size=size)
+    if not publish or not res["ok"]:
+        return 200, res
+    pub = E.publish_episode(ep, res["output"])
+    return 200, {"ok": pub["ok"], "output": pub["output"] if pub["ok"] else res["output"],
+                 "cut": res["output"], "published": pub["output"],
+                 "report": res["report"] + "\n" + pub["report"], "error": pub["error"]}
 
 # ---------------------------------------------------------------------------
 # references (Phase 5)
@@ -2603,8 +2668,7 @@ ROUTES = [
     ("PUT", "/h3pipe/override", put_override, "body"),
     ("DELETE", "/h3pipe/override", delete_override, "query"),
     ("PUT", "/h3pipe/episode-target", put_episode_target, "body"),
-    ("POST", "/h3pipe/assemble", post_assemble, "body"),
-    ("GET", "/h3pipe/targets", get_targets, "query"),
+    ("POST", "/h3pipe/assemble", post_assemble, "body"),    ("GET", "/h3pipe/targets", get_targets, "query"),
     ("GET", "/h3pipe/models", get_models, "query"),
     ("GET", "/h3pipe/workflows", get_workflows, "query"),
     ("POST", "/h3pipe/targets/inspect", post_targets_inspect, "body"),

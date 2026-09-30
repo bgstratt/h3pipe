@@ -247,6 +247,14 @@ QUALITY_ARGS = {"review": ["-crf", "16", "-preset", "medium"],
                 "master": ["-crf", "12", "-preset", "slow", "-profile:v", "high"]}
 
 
+def prores_from(src: str, mov: str) -> str | None:
+    """A ProRes 422 HQ .mov of `src` (24-bit PCM sound). None, or why it failed."""
+    p = run(["ffmpeg", "-y", "-v", "error", "-i", src, "-map", "0:v:0", "-map", "0:a?",
+             "-c:v", "prores_ks", "-profile:v", "3", "-vendor", "apl0",
+             "-pix_fmt", "yuv422p10le", "-c:a", "pcm_s24le", mov], timeout=3600)
+    return None if p.returncode == 0 else p.stderr.decode("utf-8", "replace")[-300:]
+
+
 def conform(src: str, dst: str, audio: str | None, fps: float, frames: int,
             start: int = 0, size: tuple[int, int] | None = None,
             src_fps: float | None = None, ready: bool = False,
@@ -797,11 +805,9 @@ def main() -> int:
                     shutil.move(tmp_out, out_path)
         if r.returncode == 0 and args.intermediate == "prores":
             mov = os.path.splitext(out_path)[0] + ".mov"
-            p = run(["ffmpeg", "-y", "-v", "error", "-i", out_path, "-map", "0:v:0", "-map", "0:a?",
-                     "-c:v", "prores_ks", "-profile:v", "3", "-vendor", "apl0",
-                     "-pix_fmt", "yuv422p10le", "-c:a", "pcm_s24le", mov], timeout=3600)
-            print(f"  ProRes 422 HQ: {os.path.relpath(mov, root)}" if p.returncode == 0 else
-                  f"  ! the ProRes export failed: {p.stderr.decode('utf-8', 'replace')[-300:]}")
+            why = prores_from(out_path, mov)
+            print(f"  ProRes 422 HQ: {os.path.relpath(mov, root)}" if not why else
+                  f"  ! the ProRes export failed: {why}")
         if r.returncode != 0:
             print(f"\n  concat failed: "
                   f"{r.stderr.decode('utf-8', 'replace')[-400:]}\n", file=sys.stderr)

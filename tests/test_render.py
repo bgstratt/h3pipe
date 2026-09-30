@@ -149,6 +149,33 @@ class PlanTest(unittest.TestCase):
         T.set_override(ov, "sh010", "final", base_hash=J.story_hash(self.doc["shots"][0]))
         self.assertFalse(self.plan(ov=ov).override_stale)
 
+    def test_size_request_override_and_take(self):
+        built = (self.doc["defaults"]["width"], self.doc["defaults"]["height"])
+        self.assertNotIn(built, ((1024, 576), (960, 544)))
+        self.assertIsNone(self.plan().size)
+        # an override renders every take of the pass at its size; a request beats it
+        ov = T.set_override({}, "sh010", "final", size="1024x576")
+        j = self.plan(ov=ov)
+        self.assertEqual((j.size, j.width, j.height), ((1024, 576), 1024, 576))
+        self.assertIn("size", j.overridden)
+        self.assertEqual(self.plan(ov=ov, size="960x544").size, (960, 544))
+        # the shotlist's own size is no override at all
+        self.assertIsNone(self.plan(size=f"{built[0]}x{built[1]}").size)
+        # off H3's 32 grid: that shot's error, naming the nearest legal sizes
+        bad = self.plan(size="1350x768")
+        self.assertEqual(bad.action, "error")
+        self.assertIn("1344", bad.error)
+        # the take renders and records it; a size is how it renders, not what the shot is
+        take = J.start_job(j)
+        s = T.read_json(take.paths.shotlist)["shots"][0]
+        sc = T.read_json(take.paths.sidecar)
+        self.assertEqual((s["width"], s["height"], sc["width"], sc["height"]), (1024, 576, 1024, 576))
+        self.assertEqual(sc["shot_hash"], J.story_hash(self.doc["shots"][0]))
+        self.assertEqual(sc["preset_hash"], J.preset_hash(self.doc, self.doc["shots"][0]))
+        self.assertEqual(J.parse_size([960, 544]), (960, 544))
+        with self.assertRaises(ValueError):
+            J.parse_size("big")
+
     def test_lora_from_shotlist(self):
         # kitchen_sink sh040 has `lora: none`; others inherit the series LoRA
         idx = {s["id"]: i for i, s in enumerate(self.doc["shots"])}

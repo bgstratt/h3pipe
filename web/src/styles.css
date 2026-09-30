@@ -81,6 +81,12 @@
   min-height: 20px; cursor: pointer;
 }
 .h3-seg button + button { border-left: 1px solid var(--h3-border); }
+.h3-seg button:hover:not(:disabled) { background: var(--h3-hover); }
+.h3-seg button:disabled { opacity: 0.5; cursor: default; }
+/* a split action button (Export | 2x): reads like an .h3-btn beside it */
+.h3-seg.h3-seg-act button {
+  color: var(--h3-fg); display: inline-flex; align-items: center; gap: 4px; white-space: nowrap;
+}
 .h3-seg button.h3-on { background: var(--h3-accent); color: var(--h3-accent-fg); }
 
 .h3-root input.h3-in, .h3-root select.h3-in, .h3-root textarea.h3-in {

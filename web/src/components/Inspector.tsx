@@ -26,6 +26,7 @@ import { PassToggle } from "./ShotsTab";
 import { TargetSelect, useTargetPickers, useTargets } from "./Targets";
 import { Badges } from "./Thumb";
 import { CutSection } from "./CutSection";
+import { sizeRule, sizeText } from "../lib/size";
 import { DropSlot, UploadButton } from "./Upload";
 
 /** The shot's video target: a picker over the video targets (the default
@@ -385,6 +386,7 @@ function OverrideEditor({ d, shot }: { d: ShotDetail; shot: string }) {
         seedTitle="Pinned seed for this shot (both passes). Empty = the built seed; a redo still picks a new one unless you choose same/typed."
         modelPlaceholder={`(${whose}) ${ov.model == null ? shortName(eff.model, 40) : ""}`}
         stepsPlaceholder={`${ov.steps == null ? eff.steps : ""} (${whose})`}
+        size={{ built: sizeText(d.built_values?.width ?? (ov.size == null ? eff.width : null), d.built_values?.height ?? (ov.size == null ? eff.height : null)), rule: sizeRule(tgt?.template) }}
         effLoras={eff.loras}
         lorasOverridden={ov.loras != null}
         modelChoices={pickers.models}

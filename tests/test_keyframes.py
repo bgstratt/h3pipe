@@ -135,6 +135,77 @@ class KeyframeTest(unittest.TestCase):
         self.assertEqual((res.source["shot"], res.source["take"], res.source["frame"]),
                          ("sh010", 1, 0))
 
+    # -- a render keeps continuity current -----------------------------------
+
+    def test_refresh_continuity_before_a_render(self):
+        # sh020 (LTX) reads a first frame; with a previous shot its method is continuity
+        live = os.path.join(self.root, "refs", "shots", "sh020", "first.png")
+        make_take(self.root, "proxy", "sh010")
+        fresh = lambda: R.keyframe_freshness(self.s, "sh020", "first", "proxy")  # noqa: E731
+        self.assertEqual(fresh()["state"], "missing")
+        res = R.refresh_continuity(self.s, "proxy", ["sh020"])
+        self.assertEqual([(c["shot"], c["from"]) for c in res["cut"]], [("sh020", "sh010 proxy t01")])
+        self.assertEqual(fresh()["state"], "ok")
+        self.assertEqual(R.refresh_continuity(self.s, "proxy", ["sh020"])["cut"], [])
+        # a new take of sh010 is what the cut uses now: the keyframe is out of date,
+        # the editor says so, and the next render cuts it again from that take
+        b = make_take(self.root, "proxy", "sh010", source="testsrc2")
+        self.assertEqual(fresh()["state"], "stale")
+        self.assertIn("t02", fresh()["why"])
+        listed = {r["id"]: r for r in R.list_refs(self.root)}["shot:sh020:first"]
+        self.assertEqual(listed["continuity"]["proxy"]["state"], "stale")
+        self.assertEqual(R.refresh_continuity(self.s, "proxy", ["sh020"], dry_run=True)["cut"][0]["from"],
+                         "sh010 proxy t02")
+        self.assertEqual(fresh()["state"], "stale")              # a dry run cuts nothing
+        R.refresh_continuity(self.s, "proxy", ["sh020"])
+        self.assertEqual(self.pixels(live), rgb_frames(b.paths.mp4)[-1])
+        # the same take rendered again (another video) is out of date too
+        make_mp4(b.paths.mp4, source="testsrc")
+        self.assertEqual(fresh()["state"], "stale")
+        # a whole chain queued at once: sh020 is live, its frame cut when it starts
+        res = R.refresh_continuity(self.s, "proxy", ["sh010", "sh020"])
+        self.assertEqual((res["cut"], res["wait"]), ([], [{"shot": "sh020", "after": "sh010"}]))
+        self.assertEqual(res["live"], {"sh020": {"after": "sh010", "pass": "proxy"}})
+        # likewise while a take of sh010 is still rendering
+        busy = T.reserve_take(self.root, "proxy", "sh010", {"status": "queued"})
+        res = R.refresh_continuity(self.s, "proxy", ["sh020"])
+        self.assertEqual(res["wait"], [{"shot": "sh020", "after": "sh010", "take": busy.take}])
+        # ... and when it lands, the render starting now cuts from it and says so
+        make_mp4(busy.paths.mp4, source="testsrc2", frames=9)
+        T.update_sidecar(busy.paths.sidecar, status="ok")
+        take = T.reserve_take(self.root, "proxy", "sh020", {"status": "queued", "refs": [
+            {"slot": "first frame", "path": "refs/shots/sh020/first.png", "sha1": "old"}]})
+        got = R.continuity_at_start(self.root, "sh020", "proxy",
+                                    os.path.relpath(take.paths.sidecar, self.root))
+        self.assertTrue(got["cut"])
+        self.assertEqual(got["from"], {"shot": "sh010", "take": busy.take, "pass": "proxy"})
+        self.assertEqual(self.pixels(live), rgb_frames(busy.paths.mp4)[-1])
+        sc = T.read_json(take.paths.sidecar)
+        self.assertEqual(sc["continuity"], got["from"])
+        self.assertEqual(sc["refs"][0]["sha1"], T.file_sha1(live))
+        self.assertFalse(R.continuity_at_start(self.root, "sh020", "proxy")["cut"])    # current now
+        # an imported or generated keyframe is the user's: left alone
+        img = os.path.join(self._t.name, "mine.png")
+        shutil.copyfile(live, img)
+        t = R.import_take(self.s, R.find_ref(self.s, "shot:sh020:first"), None, img)
+        R.pick_take(self.s, R.find_ref(self.s, "shot:sh020:first"), None, t.take)
+        self.assertEqual(fresh()["state"], "own")
+        self.assertEqual(R.refresh_continuity(self.s, "proxy", ["sh020"])["cut"], [])
+
+    def test_graph_reads_the_continuity_frame_at_start(self):
+        from types import SimpleNamespace as NS
+        g = {"1": {"class_type": "LoadImage", "inputs": {"image": "h3pipe/abc.png"}},
+             "2": {"class_type": "LoadImage", "inputs": {"image": "h3pipe/other.png"}}}
+        take = NS(paths=NS(sidecar=os.path.join(self.root, "renders", "sh020", "sh020_t01.json")))
+        job = NS(root=self.root, shot={"id": "sh020"}, pass_="final",
+                 continuity={"after": "sh010", "pass": "final"})
+        J.continuity_frame(g, job, take, {"first": "h3pipe/abc.png", "last": "h3pipe/other.png"})
+        self.assertEqual(g["1"]["class_type"], "H3ContinuityFrame")
+        self.assertEqual(g["1"]["inputs"], {"image": "h3pipe/abc.png", "project_root": self.root,
+                                            "shot": "sh020", "pass_": "final",
+                                            "sidecar": os.path.join("renders", "sh020", "sh020_t01.json")})
+        self.assertEqual(g["2"]["class_type"], "LoadImage")          # the last frame stays as it was
+
     # -- which take: cut order and the cut's take --------------------------
 
     def test_source_follows_the_cut(self):

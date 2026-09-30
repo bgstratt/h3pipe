@@ -129,6 +129,11 @@ function MasterBody() {
           {done?.output && (
             <div className="h3-small">
               Master: <code>{done.output}</code>{done.mov ? <> and <code>{done.mov}</code></> : null}; report <code>{done.report}</code>
+              <div className="h3-muted">
+                {done.titles
+                  ? `With ${done.titles.intro && done.titles.outro ? "the intro and outro" : done.titles.intro ? "the intro" : "the outro"}, the episode's title drawn on`
+                  : "No intro or outro: put INTRO.mp4 / OUTRO.mp4 in the show's _titles folder to have them added"}
+              </div>
             </div>
           )}
         </div>

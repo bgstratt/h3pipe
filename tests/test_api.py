@@ -866,6 +866,18 @@ class OverrideTest(ApiTest):
         self.assertNotEqual(self.block()["final"]["base_hash"],
                             self.block()["proxy"]["base_hash"])
 
+    def test_size_override_same_as_the_cli(self):
+        self.assertEqual(self.put({"size": "1344x768"})["override"]["proxy"]["size"], "1344x768")
+        self.err(A.put_override(self.ctx, {"ep": self.ep, "pass": "proxy", "shot": "sh020",
+                                           "fields": {"size": "huge"}}), 400)
+        via_api = T.read_json(os.path.join(self.ep, "overrides.json"))
+        os.remove(os.path.join(self.ep, "overrides.json"))
+        r = subprocess.run([sys.executable, os.path.join(ROOT, "h3.py"), "override", self.ep,
+                            "sh020", "--proxy", "--size", "1344x768"], capture_output=True, env=ENV)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual(T.read_json(os.path.join(self.ep, "overrides.json")), via_api)
+        self.assertIsNone(self.put({"size": None})["override"]["proxy"].get("size"))
+
     def test_same_file_as_the_cli(self):
         self.put({"steps": 10, "seed": "5", "loras": ["b.safetensors:0.4"]})
         via_api = T.read_json(os.path.join(self.ep, "overrides.json"))
@@ -910,6 +922,12 @@ class AssembleTest(ApiTest):
         self.assertFalse(data["ok"])
         self.assertTrue(data["error"])
         self.err(A.post_assemble(self.ctx, {"ep": self.ep, "partial": "yes"}), 400)
+        self.err(A.post_assemble(self.ctx, {"ep": self.ep, "publish": "yes"}), 400)
+        # publishing waits for a cut: a failed assemble is returned as it is
+        data = self.ok(A.post_assemble(self.ctx, {"ep": self.ep, "pass": "proxy",
+                                                  "publish": True}))
+        self.assertFalse(data["ok"])
+        self.assertNotIn("published", data)
 
 
 class SeedTest(unittest.TestCase):

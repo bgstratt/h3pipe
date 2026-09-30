@@ -1868,6 +1868,154 @@ def keyframe_from_take(s: Series, shot: str, which: str = "first",
     return KeyframeResult(ref, t, picked, source)
 
 
+def keyframe_freshness(s: Series, shot: str, which: str, pass_: str) -> dict:
+    """Whether a keyframe cut from a video take (continuity) still shows the take
+    the pass's cut uses now: {"state", "why", "cut_from", "wants"}. state:
+    "ok" (the same take, the same video), "missing" (no live file), "stale"
+    (cut from another take, or from a take re-rendered since), "cleared"
+    (taken away on purpose: nothing puts it back), "own" (the live keyframe
+    wasn't cut from a take: imported or generated, the user's choice), or
+    "unknown" (the neighbour has no usable take to compare with: `why`)."""
+    ref = keyframe_ref(s.ep, shot, which)
+    picks = load_picks(ref.home)
+    if is_cleared(picks, ref.id):
+        return {"state": "cleared", "why": "cleared", "cut_from": None, "wants": None}
+    try:
+        src, src_pass = keyframe_source(s, shot, which, pass_)
+        wants = {"shot": src.shot, "take": src.take, "pass": src_pass}
+    except (NotUsable, RefError, UnknownRef) as e:
+        src, wants = None, None
+        why = str(e)
+    if not os.path.isfile(ref.file):
+        return {"state": "missing", "why": "no keyframe yet", "cut_from": None, "wants": wants}
+    n = picked_take(picks, ref.id)
+    t = next((x for x in list_takes(ref) if x.take == n), None) if n else None
+    sc = (t.sidecar or {}) if t else {}
+    if sc.get("source") != "frame":
+        return {"state": "own", "why": "imported or generated, not cut from a take",
+                "cut_from": None, "wants": wants}
+    cut_from = {"shot": sc.get("source_shot"), "take": sc.get("source_take"),
+                "pass": sc.get("source_pass")}
+    if src is None:
+        return {"state": "unknown", "why": why, "cut_from": cut_from, "wants": None}
+    if cut_from != wants:
+        return {"state": "stale", "cut_from": cut_from, "wants": wants,
+                "why": f"cut from {cut_from['shot']} {cut_from['pass']} t{cut_from['take']:02d}; "
+                       f"the cut uses {src.shot} {src_pass} t{src.take:02d} now"}
+    if sc.get("source_sha1") and sc["source_sha1"] != T.file_sha1(src.paths.mp4):
+        return {"state": "stale", "cut_from": cut_from, "wants": wants,
+                "why": f"{src.shot} {src_pass} t{src.take:02d} was rendered again since"}
+    return {"state": "ok", "why": "", "cut_from": cut_from, "wants": wants}
+
+
+def refresh_continuity(s: Series, pass_: str, shots=None, dry_run: bool = False) -> dict:
+    """Before a render: every `first: continuity` keyframe of `shots` (None: all)
+    that a target reads. Each such shot is `live`: its render cuts its first
+    frame again as it starts (continuity_at_start, the H3ContinuityFrame node),
+    from the take the cut uses then, so a whole chain can be queued at once and
+    each shot starts on the take queued ahead of it. Here, before queueing, a
+    missing or stale keyframe is cut now from the take the cut uses now (the
+    graph needs a frame to wire, and the prompt says it has one); a shot whose
+    previous shot is in the same batch or has a take rendering is `wait`: cut
+    at start. An error only when there is nothing to start from, now or coming.
+    Returns {"live": {shot: {after, pass}}, "cut": [{shot, from, why}], "wait":
+    [{shot, after, take?}], "errors": [{shot, error}]}; a dry run cuts nothing."""
+    out = {"live": {}, "cut": [], "wait": [], "errors": []}
+    batch = set(shots) if shots else None
+    for (shot, which), need in keyframe_needs(s.ep).items():
+        if which != "first" or need["method"] != "continuity" or not need["reads"]:
+            continue
+        if batch is not None and shot not in batch:
+            continue
+        try:
+            prev = E.cut_neighbour(s.ep, pass_, shot, -1)
+        except KeyError:
+            continue                                    # not in this pass's cut
+        if prev is None:
+            continue
+        out["live"][shot] = {"after": prev.shot, "pass": pass_}
+        f = keyframe_freshness(s, shot, which, pass_)
+        pending = None
+        if batch is not None and prev.shot in batch:
+            pending = {"shot": shot, "after": prev.shot}
+        else:
+            busy = [t for t in T.list_takes(s.ep, prev.pass_, prev.shot) if t.status == "queued"]
+            if busy:
+                pending = {"shot": shot, "after": prev.shot, "take": busy[-1].take}
+        if pending and f["state"] != "missing":
+            out["wait"].append(pending)                 # the node cuts it when it starts
+            continue
+        if f["state"] not in ("missing", "stale"):
+            continue
+        if f["wants"] is None:
+            if pending:
+                # nothing to stand in until the take ahead lands: the graph needs a frame
+                out["live"].pop(shot, None)
+                out["errors"].append({"shot": shot, "error": f"no first frame yet: {prev.shot} "
+                                      f"has no take to start from (render it once, then queue "
+                                      f"the chain)"})
+            else:
+                out["live"].pop(shot, None)
+                out["errors"].append({"shot": shot, "error": f"no continuity frame: {f['why']}"})
+            continue
+        w = f["wants"]
+        if pending:
+            out["wait"].append(pending)
+        if dry_run:
+            out["cut"].append({"shot": shot, "from": f"{w['shot']} {w['pass']} t{w['take']:02d}",
+                               "why": f["why"]})
+            continue
+        try:
+            keyframe_from_take(s, shot, which, pass_=pass_, pick=True,
+                               note="continuity: refreshed for a render")
+            out["cut"].append({"shot": shot, "from": f"{w['shot']} {w['pass']} t{w['take']:02d}",
+                               "why": f["why"]})
+        except (NotUsable, RefError, UnknownRef, FfmpegMissing, OSError) as e:
+            out["live"].pop(shot, None)
+            out["errors"].append({"shot": shot, "error": str(e)})
+    return out
+
+
+def continuity_at_start(ep: str, shot: str, pass_: str, sidecar: str = "") -> dict:
+    """When a queued continuity shot starts rendering (H3ContinuityFrame): its
+    first frame made current against the take the cut uses NOW for the shot
+    before it, which a take queued ahead of this one in the same run has just
+    become. Cut again when missing or stale (keyframe_freshness); an imported
+    or generated keyframe is left alone. `sidecar` (the take's, relative to the
+    episode) records what it started from: `continuity` {shot, take, pass} and
+    the first frame's sha1 in its `refs`. Returns {"path": the live keyframe
+    or None, "cut": bool, "from": {...} or None, "note": str}."""
+    s = load_series(ep)
+    f = keyframe_freshness(s, shot, "first", pass_)
+    cut, note = False, ""
+    if f["state"] in ("missing", "stale") and f["wants"]:
+        keyframe_from_take(s, shot, "first", pass_=pass_, pick=True,
+                           note="continuity: cut when the render started")
+        cut = True
+        w = f["wants"]
+        note = f"first frame cut from {w['shot']} {w['pass']} t{w['take']:02d} as the render started"
+    elif f["state"] in ("missing", "stale"):
+        note = f"first frame not refreshed: {f['why']}"
+    ref = keyframe_ref(ep, shot, "first")
+    path = ref.file if os.path.isfile(ref.file) else None
+    fresh = keyframe_freshness(s, shot, "first", pass_) if cut else f
+    src = fresh.get("cut_from")
+    if sidecar and path:
+        full = sidecar if os.path.isabs(sidecar) else os.path.join(ep, sidecar)
+        if os.path.isfile(full):
+            sc = T.read_json(full)
+            sha = T.file_sha1(path)
+            rel = os.path.relpath(path, ep).replace(os.sep, "/")
+            refs = []
+            for r in sc.get("refs") or []:
+                if (r.get("path") or "").replace("\\", "/") == rel:
+                    r = dict(r, sha1=sha)
+                refs.append(r)
+            T.update_sidecar(full, refs=refs, continuity=src,
+                             **({"continuity_note": note} if note else {}))
+    return {"path": path, "cut": cut, "from": src, "note": note}
+
+
 # ---------------------------------------------------------------------------
 # generating
 # ---------------------------------------------------------------------------
@@ -3121,6 +3269,9 @@ def ref_json(s: Series, ref: Ref, usage: dict | None = None,
                    reads=need["reads"] if need else None)
         if need and need.get("import_path"):
             out["import_path"] = need["import_path"]
+        if need and need["method"] == "continuity" and which == "first":
+            # per pass: each pass's cut picks its own takes
+            out["continuity"] = {ps: keyframe_freshness(s, shot, which, ps) for ps in T.PASSES}
         tid = (out["effective"] or {}).get("target")
         if tid:
             t = TG.load_target(tid, "image")

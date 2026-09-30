@@ -257,8 +257,12 @@ their own grid (LTX-2's is 64: a 512×288 proxy renders there at 512×256, a lit
   they re-sample, a pixel model then their own sampler, but slowly: minutes a shot), when
   the upscaler isn't installed, or when 1344×768 is the delivery. Upscaling a 1344×768 take to 2688×1536 works
   but adds little: that frame already holds most of what the model can draw.
-- The two don't mix within a pass: pick one per series. Switching later only changes the
-  takes rendered after the switch.
+- Pick one per series. A single take can still render at another size: the New take
+  dialog's **Size** (that take only; `h3.py render --size 1344x768`), or the shot's override
+  (the inspector's **Size**, `h3.py override --size 1344x768`: every later take of that pass).
+  A master with `"scale": "auto"` re-samples each take by its own size, so a cut that mixes
+  960×544 and 1344×768 takes delivers one 1080p master. Switching the series size later only
+  changes the takes rendered after the switch.
 
 **Writing a new series config for someone**, ask once which setup they want, unless they
 already said (a delivery size, "upscale", "fast iterations", "4K"): render at size
@@ -358,7 +362,10 @@ The series config says how, once, in `upscale.master` (the **recipe**):
   shot re-samples with H3, an LTX shot with LTX. A section takes `method` (latent, pixel,
   seedvr2), `scale`, `detail`, `pixel_model`, `seedvr2_model`, `then` (an upscale model
   file, or `"seedvr2"`, after a re-sample), `then_scale`, and the finish (`keep_soft`,
-  `grain`); `finish` sets those for every section.
+  `grain`); `finish` sets those for every section. `"scale": "auto"` (a re-sample alone)
+  picks, per take, the smallest scale on the target's grid that covers `deliver`: 2x for a
+  960×544 take, 1.5x for a 1344×768 one (2016×1152, scaled down to 1920 and cropped), so an
+  episode that renders some shots at 1344×768 masters with no wasted pixels.
 - A shot can have its own recipe over its target's (a dialogue close-up kept light, a wide
   given `detail: 1`, a shot SeedVR2 got wrong sent to the pixel method): the editor's
   Upscale dialog, **Choose for this run**, then **Save as sh020's recipe**.
@@ -410,6 +417,11 @@ episode before planning a season on it).
   1920×1080. About 15–25% more time a take and an upscale.
 - Wan shots: SeedVR2 7B (about a minute a shot), or a pixel model (about 40 s) when time
   matters more; Wan's own re-sample takes minutes and isn't worth it at 1080p.
+- Some shots at **1344×768** (dialogue-heavy mediums the small render doesn't hold): give
+  the H3 section `"scale": "auto"`. Those takes re-sample 1.5x to 2016×1152 (about the
+  pixels of a 960×544 take's 2x), scaled down to 1920 wide and cropped by 18 rows; the
+  960×544 takes still re-sample 2x. A fixed 2x would take them to 2688×1536 only to throw
+  most of it away.
 
 ```json
 "upscale": { "save_latents": "final",
@@ -466,6 +478,30 @@ scale it down for 1080p, rather than upscaling every shot twice (switching the r
 them).
 
 `fit: crop` unless they'd rather keep the whole frame with bars (`pad`).
+
+### Series intro and outro: the `publish` block
+
+The show's opening and closing are two clips made once for the whole series, not shots
+in each script: every episode then opens on the same picture, and a model never has to
+spell the episode's name. Put them in the show folder as `_titles\INTRO.mp4` and
+`_titles\OUTRO.mp4`, and every master (`h3.py master`, or Master in the editor) is made
+with them: the intro, the episode, the outro, with the episode's title from its `=` line
+written under the series title the clips carry, in one font, size and colour for every
+episode. Without the files a master is made plain. `python h3.py publish Shows\ep05` does
+the same to the review cut, into `ep05\publish\` (the editor's Publish button).
+
+The cut's picture is copied, not re-encoded: only the two title clips are encoded, to
+match it, and the result is checked frame by frame at each join (a cut that can't be
+matched is re-encoded whole, and publish says why). To use other clips, name them in the
+series config, relative to the episode folder:
+
+```json
+"publish": { "intro": "../_titles/INTRO.mp4", "outro": "../_titles/OUTRO.mp4" }
+```
+
+An optional `subtitle` object sets `font`,
+`size` and `y` (fractions of the frame height), `color`, `glow`, and the fades in seconds:
+`intro_in`, `outro_in`, `outro_out` (see `h3publish.py` for the defaults).
 
 ### Render profiles
 
@@ -1089,6 +1125,20 @@ first: refs/stills/sh030_open.png
 | `import` | you'll import one (the Refs tab) |
 | a path | this image is imported as the keyframe (relative to the episode) |
 | `none` | no keyframe, even where the target could use one (a required one stays required) |
+
+**A render keeps continuity current, and a whole chain queues at once.** A
+`first: continuity` shot's first frame is cut when its render **starts**, from the take
+the cut uses at that moment for the shot before it (the H3ContinuityFrame node in its
+graph). ComfyUI runs its queue in order, so queue sh080, sh090 and sh110 together and each
+starts on the new last frame of the one ahead of it; the model swaps between targets on the
+way. The take's sidecar records what it started from (`continuity`). A chain is queued in
+cut order whatever order it was asked for. Before queueing, a keyframe that doesn't exist
+yet is cut from the previous shot's current take so the graph has a frame to wire; a
+continuity shot whose previous shot has no take at all and none coming is an error. The
+Refs tab marks a keyframe **out of date** when the previous shot's take has changed since
+it was cut; a keyframe you imported or generated is left alone. "Before" is the cut's
+order, not the script's: move a shot on the timeline and its continuity comes from its new
+neighbour.
 
 **Continuity is for a shot that picks up the previous one's picture**: the same framing
 carrying on, or a match on action. After a real cut (a new subject, a new angle, a

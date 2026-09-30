@@ -2031,6 +2031,23 @@ def assemble_episode(root: str, pass_: str, partial: bool = True,
             "error": "" if ok else (err.strip() or "h3assemble wrote no cut")}
 
 
+def publish_episode(root: str, cut: str, timeout: int = 3600) -> dict:
+    """h3publish on `cut` (relative to the episode): the series intro and outro
+    around it, the episode's title drawn on, into <episode>/publish/. `output`
+    as assemble_episode's; a failure's reason is in `error`."""
+    rc, out, err = run_tool("h3publish.py", [root, "--input", os.path.join(root, cut)],
+                            root, timeout)
+    output = None
+    for line in out.splitlines():
+        line = line.strip()
+        if line.startswith("-> ") and line.lower().endswith(".mp4"):
+            output = rel(root, line[3:].strip())
+    ok = rc == 0 and output is not None
+    why = next((ln.strip()[3:] for ln in out.splitlines() if ln.strip().startswith("!! ")), "")
+    return {"ok": ok, "output": output, "report": out,
+            "error": "" if ok else (why or err.strip() or "h3publish wrote nothing")}
+
+
 # ---------------------------------------------------------------------------
 # commands
 # ---------------------------------------------------------------------------
@@ -2311,6 +2328,8 @@ def cmd_override(root: str, argv: list[str]) -> int:
     p.add_argument("--both", action="store_true", help="model/LoRA/steps for both passes")
     ap.add_argument("--seed", type=int)
     ap.add_argument("--steps", type=int)
+    ap.add_argument("--size", metavar="WxH",
+                    help="render this pass at this size (e.g. 1344x768); --clear size undoes it")
     ap.add_argument("--model")
     ap.add_argument("--lora", action="append", metavar="NAME[:STRENGTH]",
                     help="repeat to stack; 'none' for no LoRA")
@@ -2417,6 +2436,13 @@ def cmd_override(root: str, argv: list[str]) -> int:
             pass_fields["prompt"] = fh.read().strip()
     if args.steps is not None:
         pass_fields["steps"] = args.steps
+    if args.size:
+        try:
+            w, h = J.parse_size(args.size)
+        except ValueError as e:
+            print(f"  !! --size {e}")
+            return 2
+        pass_fields["size"] = f"{w}x{h}"
     if args.model:
         pass_fields["model"] = args.model
     if args.lora:
@@ -2442,7 +2468,7 @@ def cmd_override(root: str, argv: list[str]) -> int:
                                           if stale else ""))
         if not {k for k in eff if k != "base_hash"}:
             print("      no override")
-        for k in ("seed", "steps", "model", "loras", "note", "prompt"):
+        for k in ("seed", "steps", "size", "model", "loras", "note", "prompt"):
             if k not in eff:
                 continue
             v = eff[k]

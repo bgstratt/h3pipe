@@ -3,7 +3,7 @@ import {
   type KeyboardEvent as RKeyboardEvent, type PointerEvent as RPointerEvent, type RefObject,
 } from "react";
 import {
-  assemble, currentPlaylist, openInspector, openMenu, openViewer, playAll, refreshEpisode, seekCut, seekToShot, select,
+  assemble, currentPlaylist, masterCut, openInspector, openMenu, openViewer, playAll, refreshEpisode, seekCut, seekToShot, select,
   setZoom, showMissingRefs, toggleCutPlay,
 } from "../actions";
 import { cutKey, moveClip, redoCut, seekCutAt, setTrims, toggleWaves, undoCut } from "../cutActions";
@@ -510,11 +510,24 @@ export function Timeline() {
           <i className="pi pi-search-plus h3-muted" />
         </span>
         <span className="h3-grow" />
-        <button className="h3-btn" disabled={!ep || asm.busy} title={`Export: assemble the ${pass} review cut into one mp4 with ffmpeg (missing shots are skipped). Not needed to watch the cut: use Play all.`} onClick={() => void assemble(true)}>
-          <i className={asm.busy ? "pi pi-spin pi-spinner" : "pi pi-download"} /> {asm.busy ? "Assembling…" : "Export"}
-        </button>
-        <button className="h3-btn" disabled={!ep || asm.busy} title={`Export the ${pass} cut from its upscales (2x): clips without a fresh upscale are scaled up. Writes <cut>_up.mp4 beside the plain cut`} onClick={() => void assemble(true, { upscaled: true })}>
-          <i className="pi pi-arrow-up-right" /> Export 2x
+        <span className="h3-seg h3-seg-act">
+          <button disabled={!ep || asm.busy} title={`Export: assemble the ${pass} review cut into one mp4 with ffmpeg (missing shots are skipped). Not needed to watch the cut: use Play all.`} onClick={() => void assemble(true)}>
+            <i className={asm.busy && !asm.publish ? "pi pi-spin pi-spinner" : "pi pi-download"} /> {asm.busy && !asm.publish ? "Assembling…" : "Export"}
+          </button>
+          <button disabled={!ep || asm.busy} title={`Export the ${pass} cut from its upscales (2x): clips without a fresh upscale are scaled up. Writes <cut>_up.mp4 beside the plain cut`} onClick={() => void assemble(true, { upscaled: true })}>
+            2x
+          </button>
+        </span>
+        <span className="h3-seg h3-seg-act">
+          <button disabled={!ep || asm.busy} title={`Add Titles: assemble the whole ${pass} cut (fails if a shot is missing), then put the series intro and outro around it with the episode's title (_titles/INTRO.mp4 and OUTRO.mp4 in the show folder). Writes <episode>/publish/`} onClick={() => void assemble(false, { publish: true })}>
+            <i className={asm.busy && asm.publish ? "pi pi-spin pi-spinner" : "pi pi-bookmark"} /> {asm.busy && asm.publish ? "Adding titles…" : "Add Titles"}
+          </button>
+          <button disabled={!ep || asm.busy} title={`Add Titles to the cut from its upscales (2x), as Export 2x assembles it`} onClick={() => void assemble(false, { upscaled: true, publish: true })}>
+            2x
+          </button>
+        </span>
+        <button className="h3-btn" disabled={!ep} title={`Master: the series recipe (upscale.master) on every shot of the ${pass} cut, then the master assembled into the episode's master folder, with the intro and outro when the show's _titles has them`} onClick={() => masterCut()}>
+          <i className="pi pi-video" /> Master
         </button>
         <button className="h3-btn h3-icon" title="Inspect the selected shot" onClick={() => openInspector()}><i className="pi pi-sliders-h" /></button>
         <button className="h3-btn h3-icon" title="Open the Shots tab" onClick={() => host().show("shots")}><i className="pi pi-list" /></button>
