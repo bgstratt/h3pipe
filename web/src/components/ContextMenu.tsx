@@ -5,7 +5,7 @@ import {
   keepUpscale, openInspector, openRedo, openSidecar, openViewer, pickTake, playAll, removeUpscale, requestRender, showInScript, showMissingRefs,
   upscaleTake,
 } from "../actions";
-import { clearClipAudio, nudgeClip, setTrims, toggleLock, toggleOut } from "../cutActions";
+import { clearClipAudio, nudgeClip, setTrims, toggleFlag, toggleLock, toggleOut } from "../cutActions";
 import { audioOf, audioWhy } from "../lib/audioSource";
 import { absPath, tn } from "../lib/format";
 import { cutNeighbour, keyframeNote, keyframeRefId } from "../lib/keyframes";
@@ -147,6 +147,13 @@ export function ContextMenu() {
       <div className="h3-menu-sep" />
       <button
         disabled={!cutShot}
+        title={cutShot?.cut.flag ? `Clear ${menu.shot}'s flag (M)` : `Flag ${menu.shot} to come back to: re-render it, change its prompt (M; Shift+M goes to the next flagged clip)`}
+        onClick={run(() => void toggleFlag(menu.shot))}
+      >
+        <i className={cutShot?.cut.flag ? "pi pi-flag" : "pi pi-flag-fill"} /> {cutShot?.cut.flag ? "Unflag" : "Flag to come back to"}
+      </button>
+      <button
+        disabled={!cutShot}
         title={locked ? `Let ${menu.shot} be moved, trimmed and re-picked again in the ${curPass} cut` : `Keep ${menu.shot} where it is in the ${curPass} cut: no moves, trims or re-picks until unlocked`}
         onClick={run(() => void toggleLock(menu.shot))}
       >
@@ -170,7 +177,7 @@ export function ContextMenu() {
         title={`Note what is wrong with ${menu.shot} as it rendered (n on the selected clip)`}
         onClick={run(() => openIssue(menu.shot, curPass, menu.take))}
       >
-        <i className="pi pi-flag" /> Add issue…
+        <i className="pi pi-comment" /> Add issue…
       </button>
       <button
         disabled={!cutShot}

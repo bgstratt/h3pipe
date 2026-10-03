@@ -276,6 +276,54 @@ export function toggleOut(shot: string, out?: boolean): Promise<boolean> {
   return editCut(on ? `Leave ${shot} out` : `Put ${shot} back`, (list) => withFields(list, shot, { out: on }));
 }
 
+/** Flag a clip to come back to (re-render it, change its prompt), or clear
+ * the flag. A bookmark: nothing played changes, so a locked clip takes one too. */
+export function toggleFlag(shot: string, flag?: boolean): Promise<boolean> {
+  const c = ctx();
+  if (!c) return Promise.resolve(false);
+  const on = flag ?? !c.st.shots.find((s) => s.shot === shot)?.cut?.flag;
+  return editCut(on ? `Flag ${shot}` : `Unflag ${shot}`, (list) => withFields(list, shot, { flag: on }));
+}
+
+/** The flagged clips, in cut order (orphans and clips left out included: a flag is a reminder). */
+export function flaggedShots(st: EpisodeStatus | undefined): string[] {
+  return (st?.shots ?? []).filter((s) => s.cut?.flag).map((s) => s.shot);
+}
+
+/**
+ * Shift+M / the timeline's flag count: the next flagged clip after the one
+ * in hand (under the Play all playhead, else the selected one), wrapping
+ * round; `dir` -1 goes back. With Play all open it seeks there (only clips it
+ * plays); otherwise the clip is selected. False when nothing is flagged.
+ */
+export function gotoFlagged(dir: 1 | -1 = 1): boolean {
+  const c = ctx();
+  if (!c) return false;
+  const s = get();
+  if (s.viewer?.kind === "cut") {
+    const items = currentPlaylist(s);
+    const flagged = new Set(flaggedShots(c.st));
+    const hits = items.filter((it) => flagged.has(it.shot));
+    if (!hits.length) return false;
+    const { index } = locate(items, s.cutPlay.pos);
+    const next = dir > 0
+      ? hits.find((it) => it.index > index) ?? hits[0]
+      : [...hits].reverse().find((it) => it.index < index) ?? hits[hits.length - 1];
+    seekCut(next.start);
+    return true;
+  }
+  const order = c.st.shots.map((x) => x.shot);
+  const hits = flaggedShots(c.st);
+  if (!hits.length) return false;
+  const at = s.shot ? order.indexOf(s.shot) : -1;
+  const pos = (sh: string) => order.indexOf(sh);
+  const next = dir > 0
+    ? hits.find((sh) => pos(sh) > at) ?? hits[0]
+    : [...hits].reverse().find((sh) => at < 0 || pos(sh) < at) ?? hits[hits.length - 1];
+  select(next);
+  return true;
+}
+
 /**
  * I / O: trim the clip under the Play all playhead so it starts (I) or ends
  * (O) at the frame on screen. The playhead stays on that frame.
@@ -418,6 +466,25 @@ export function noteAtPlayhead(): boolean {
   return true;
 }
 
+/**
+ * `m` while Play all is open: flag (or unflag) the clip on screen. Play keeps
+ * going, so a run through the cut can flag as it goes; a toast says which
+ * clip, since the timeline may be under the window. False when Play all isn't
+ * open (the caller flags the selected clip instead).
+ */
+export function flagAtPlayhead(): boolean {
+  const s = get();
+  if (s.viewer?.kind !== "cut") return false;
+  const items = currentPlaylist(s);
+  const it = items[locate(items, s.cutPlay.pos).index];
+  if (!it) return false;
+  const on = !ctx()?.st.shots.find((x) => x.shot === it.shot)?.cut?.flag;
+  void toggleFlag(it.shot, on).then((ok) => {
+    if (ok) host().toast("info", on ? `Flagged ${it.shot}` : `Unflagged ${it.shot}`, on ? "Shift+M jumps to the next flagged clip." : undefined);
+  });
+  return true;
+}
+
 export function shuttle(key: "j" | "k" | "l") {
   const s = get();
   const open = s.viewer?.kind === "cut";
@@ -508,6 +575,19 @@ export function cutKey(e: KeyLike): boolean {
   if (k === "i" || k === "o") {
     if (!e.repeat) void trimAtPlayhead(k === "i" ? "in" : "out");
     return true;
+  }
+  // `m` flags the clip to come back to (a marker, as in every NLE); Shift+M
+  // goes to the next flagged one
+  if (k === "m") {
+    if (e.repeat) return true;
+    if (e.shiftKey) {
+      if (!gotoFlagged(1)) host().toast("info", "No flagged clips", "M flags the clip on screen (or the selected one).");
+      return true;
+    }
+    if (flagAtPlayhead()) return true;
+    const shot = get().shot;
+    if (shot) void toggleFlag(shot);
+    return !!shot;
   }
   // P10: `n` notes what is wrong with the selected clip. Not `i` — that is
   // trim-in at the playhead, which every NLE binds the same way.

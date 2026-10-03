@@ -20,6 +20,7 @@
   --h3-stale: #e07b2b;
   --h3-override: #9b6bdf;
   --h3-target: #1fa5a0;
+  --h3-flag: #ec4899;
   --h3-mono: ui-monospace, "Cascadia Mono", Consolas, "SF Mono", Menlo, monospace;
 
   color: var(--h3-fg);
@@ -200,6 +201,16 @@
 .h3-clip.h3-orphan { opacity: 0.55; border-style: dashed; }
 .h3-clip.h3-out { opacity: 0.4; border-style: dashed; }
 .h3-clip.h3-out > * { visibility: hidden; }
+/* flagged to come back to: a marker in the corner, shown at any size (a stub's too) */
+.h3-clip.h3-flagged { border-top: 2px solid var(--h3-flag); }
+.h3-clip .h3-flag-mark {
+  position: absolute; top: 1px; right: 2px; z-index: 1; font-size: 11px; color: var(--h3-flag);
+  filter: drop-shadow(0 0 1px rgba(0, 0, 0, 0.9)); pointer-events: none;
+}
+.h3-clip.h3-out > .h3-flag-mark { visibility: visible; right: 1px; }
+.h3-b-flag { color: var(--h3-flag); border-color: color-mix(in srgb, var(--h3-flag) 60%, transparent); }
+.h3-b-flag .pi { font-size: 9px; }
+.h3-clip-bottom .pi-comment { font-size: 9px; line-height: 13px; }
 
 /* floating layers: menu, viewer, dialogs, toasts */
 .h3-overlay { position: fixed; inset: 0; pointer-events: none; z-index: 2000; }

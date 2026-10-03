@@ -84,7 +84,7 @@ queued takes whose ComfyUI job is gone (`h3takes.sweep_queued`, with `as_of` tak
    "seconds": 4.458, "size": "medium", "subjects": ["dean"], "audio_policy": "generate",
    "cut": {"take": 1, "picked": true, "pass": "proxy", "placeholder": false,
            "usable": true, "trim_in": 0, "trim_out": 0, "locked": false, "note": "",
-           "in_cut_file": true, "frames": 107, "out": false},
+           "in_cut_file": true, "frames": 107, "out": false, "flag": false},
    "override": {"fields": ["prompt", "seed"], "stale": false},
    "takes": [{"take": 1, "status": "ok", "has_video": true,
               "seed": "6430499148929255544", "seed_source": "stable", "frames": 107, "note": "",
@@ -300,7 +300,7 @@ Uses `h3takes.pick`. A take that isn't usable answers 409 unless `"force": true`
 
 ### `PUT /h3pipe/cut`
 Body `{"ep", "pass", "entries": [{"shot", "take"?, "pass"?, "trim_in"?, "trim_out"?,
-"locked"?, "note"?, "audio"?, "out"?}, …]}`. Replaces that pass's list, for reordering and trims.
+"locked"?, "note"?, "audio"?, "out"?, "flag"?}, …]}`. Replaces that pass's list, for reordering and trims.
 Unknown shots are allowed; they become orphans. Returns `{"cut": …}`.
 `"out": true` leaves the shot out of the cut: it stays in the script with its takes, its
 place and its pick, and the status's `cut.out` says so; assemble, Play all, the cut's
@@ -308,6 +308,9 @@ upscales (`shots: null`), Master and the cut's neighbours (keyframes from the pr
 shot) skip it, and the timeline shows it as a stub. A shot named outright (an upscale's
 `shots` / `takes`) is still done. Latent pruning keeps its pick's latent. Reset keeps it
 (as it keeps picks and locks); copying the other pass's order copies it.
+`"flag": true` is a bookmark, "come back to this one" (re-render it, change its prompt): it
+changes nothing played or assembled, a locked entry takes one, and reset and copying keep each
+pass's own. The status's `cut.flag` says so; the timeline shows a marker and a count.
 
 ### `PUT /h3pipe/override`
 Body:
@@ -2022,7 +2025,7 @@ waveforms, and play-through polish. Backend and UI build in parallel; the backen
 - **`locked`** entries: `PUT /h3pipe/pick` answers 409 for a locked shot unless `force`;
   the UI also refuses to move, trim, leave out or put back them.
 - **CLI:** `h3.py cut <ep> [--proxy] (--show | --order sh010,sh030,... | --move SH (--before|
-  --after) SH | --trim SH IN OUT | --lock SH | --unlock SH | --out SH | --in SH |
+  --after) SH | --trim SH IN OUT | --lock SH | --unlock SH | --out SH | --in SH | --flag SH | --unflag SH |
   --reset order|trims|all |
   --copy-from final|proxy [order|trims|all])`.
 
@@ -2050,6 +2053,9 @@ waveforms, and play-through polish. Backend and UI build in parallel; the backen
 - **Undo/redo** (Ctrl+Z / Ctrl+Shift+Z) of cut edits for the session; each edit is one
   `PUT /h3pipe/cut`.
 - **Locked** clips show a lock and refuse moves, trims and re-picks (unlock from the menu).
+- **Flags:** M flags (or unflags) the clip on screen in Play all, which keeps playing, or the
+  selected clip; Shift+M, or the timeline's "N flagged" count, goes to the next one. A clip
+  with open issue notes shows a note icon.
 - **Play-through:** click or drag in the ruler to seek (starts Play all paused there if it
   isn't open); Space play/pause; J / K / L; the playhead follows. With a `track`, an
   "Audio: clips | recording" toggle plays the recording under the cut instead (the clip

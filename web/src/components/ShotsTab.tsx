@@ -410,7 +410,7 @@ function IssuesButton() {
         : "Issues: what is wrong with this pass (select a clip and press n while you watch)"}
       onClick={() => openIssues(true)}
     >
-      <i className="pi pi-flag" />{n ? <span className="h3-small">&nbsp;{n}</span> : null}
+      <i className="pi pi-comment" />{n ? <span className="h3-small">&nbsp;{n}</span> : null}
     </button>
   );
 }

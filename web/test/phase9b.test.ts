@@ -182,8 +182,8 @@ describe("undo", () => {
     // Phase 9d added `audio` to the fields an edit carries, and leaving a shot out `out`
     expect(trim.fields).toEqual({
       b: {
-        before: { trim_in: 0, trim_out: 0, locked: false, audio: null, out: false },
-        after: { trim_in: 4, trim_out: 0, locked: false, audio: null, out: false },
+        before: { trim_in: 0, trim_out: 0, locked: false, audio: null, out: false, flag: false },
+        after: { trim_in: 4, trim_out: 0, locked: false, audio: null, out: false, flag: false },
       },
     });
   });

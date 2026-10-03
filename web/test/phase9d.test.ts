@@ -355,7 +355,7 @@ describe("audio travels with the cut entries", () => {
   });
   it("fieldsOf / withFields carry it beside the trims and the lock", () => {
     const list: CutEntry[] = [{ shot: "a" }, { shot: "b", trim_in: 3 }];
-    expect(fieldsOf(list[1])).toEqual({ trim_in: 3, trim_out: 0, locked: false, audio: null, out: false });
+    expect(fieldsOf(list[1])).toEqual({ trim_in: 3, trim_out: 0, locked: false, audio: null, out: false, flag: false });
     const out = withFields(list, "b", { audio: TAKE });
     expect(out[1]).toEqual({ shot: "b", trim_in: 3, audio: TAKE });
     // and the trims survive a later audio change, and the other way round

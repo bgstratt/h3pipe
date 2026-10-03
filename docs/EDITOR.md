@@ -199,14 +199,17 @@ A proxy pass exists to show you structure: what happens where, and what is wrong
 that review a notepad — `<episode>/_issues.json`, filled while you watch and emptied when the
 problems are fixed.
 
-**While you watch:** select a clip and press **n**, or right-click it and choose **Add issue…**.
+**While you watch:** press **n** (in Play all it notes the clip on screen and pauses; otherwise
+the selected clip), or right-click a clip and choose **Add issue…**.
 A small box opens with the shot and the take it is about; type a sentence and press **Enter**
 (Shift+Enter for a second line). `i` and `o` are still trim-in and trim-out at the playhead, as
 in any NLE, which is why the note key is `n`.
 
-**The flag button** in the h3 Shots toolbar shows how many are open and opens the list, where
+**The note button** (a speech bubble) in the h3 Shots toolbar shows how many are open and opens
+the list, where
 **Copy export** puts the whole document on the clipboard for an assistant, **✕** resolves one,
-and **Clear addressed** empties the ones whose shots you have already fixed.
+and **Clear addressed** empties the ones whose shots you have already fixed. A clip with open
+notes shows the same speech bubble in the timeline.
 
 The same thing from the command line:
 
@@ -227,6 +230,24 @@ have started editing. Editing the script later never rewrites a note.
 A shot that has since been rebuilt or re-rendered reads **(addressed)**. Nothing is deleted for
 you: `--clear --addressed` empties those when you are satisfied, and an episode with no issues
 has no issue file at all.
+
+### Flagging clips to come back to
+
+A note is for an assistant: it snapshots the script and the prompt so the script or series
+config can be rewritten. When you only want to remember a clip, to re-render it or change its
+prompt yourself, **flag** it instead. In Play all, press **M** to flag the clip on screen.
+Playback keeps going, so you can flag clips in one pass through the cut. Press **M** again on a
+flagged clip to clear its flag. Outside Play all, M flags the selected clip; the clip's menu has
+**Flag to come back to** too.
+
+A flagged clip has a pink flag in its corner, and the timeline's header counts them. Click the
+count, or press **Shift+M**, to go to the next one. A flag changes nothing that is played or
+exported. A locked clip can still be flagged. Each pass's cut keeps its own flags (in
+`cut.json`), and Ctrl+Z undoes a flag like any cut edit.
+
+```
+python h3.py cut Shows\ep05 --proxy --flag sh0140      # --unflag to clear; --show lists them
+```
 
 ### Keeping a take's frames
 
@@ -450,17 +471,21 @@ next shot starts where this one ended.
 
 ### Keyboard
 
-These work while the timeline has focus, and never while you are typing in a field:
+These work while the timeline or Play all has focus, and never while you are typing in a field:
 
 | Key | What |
 |---|---|
 | `Space` | Play / pause the cut |
 | `J` `K` `L` | Shuttle back / pause / forward |
 | `I` `O` | Trim the head or tail at the playhead |
+| `N` | Note what is wrong with the clip (the one on screen in Play all) |
+| `M` | Flag or unflag the clip to come back to (the one on screen in Play all) |
+| `Shift+M` | Go to the next flagged clip |
 | `Alt+←` `Alt+→` | Move the selected clip in the cut |
 | `Ctrl+Z` / `Ctrl+Y`, `Ctrl+Shift+Z` | Undo / redo the cut |
 | `Ctrl + wheel` | Zoom the track |
 | `←` `→` | Step candidates, in the Viewer |
+| `,` `.` | Step a frame back / forward, in the Viewer |
 | `Escape` | Close a menu, or cancel a drag |
 | `Ctrl+S` | Save, in the Script and Series config windows |
 
@@ -468,6 +493,6 @@ These work while the timeline has focus, and never while you are typing in a fie
 
 Everything the editor does is a file in the episode folder, and the command line does the
 same things to the same files: `overrides.json` (prompts, seeds, models, targets),
-`cut.json` (order, trims, locks, per-clip audio), take sidecars beside each render, and
+`cut.json` (order, trims, locks, flags, per-clip audio), take sidecars beside each render, and
 `_history/` copies of the script and series config each time you save. Nothing is hidden in
 a database, and nothing is lost — a discarded take moves to `_trash/`.

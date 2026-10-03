@@ -77,6 +77,9 @@ export interface CutInfo {
   /** left out of the cut: still in the script, with its takes and place; assemble,
    * Play all and Master skip it. Absent from older servers. */
   out?: boolean;
+  /** flagged to come back to (re-render it, change its prompt); changes nothing
+   * played. Absent from older servers. */
+  flag?: boolean;
   /** The cut take's real frame count (its sidecar's), or null. The shot's
    * `seconds` is the build's (for `dur: model`, an estimate); the timeline and
    * Play all use this when present. Absent from older servers. */
@@ -623,6 +626,8 @@ export interface CutEntry {
   audio?: CutAudioSource | null;
   /** left out of the cut (still in the script) */
   out?: boolean;
+  /** flagged to come back to */
+  flag?: boolean;
 }
 
 export interface CutFile {

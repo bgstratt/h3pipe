@@ -6,7 +6,7 @@ import {
   assemble, currentPlaylist, masterCut, openInspector, openMenu, openViewer, playAll, refreshEpisode, seekCut, seekToShot, select,
   setZoom, showMissingRefs, toggleCutPlay,
 } from "../actions";
-import { cutKey, moveClip, redoCut, seekCutAt, setTrims, toggleWaves, undoCut } from "../cutActions";
+import { cutKey, flaggedShots, gotoFlagged, moveClip, redoCut, seekCutAt, setTrims, toggleWaves, undoCut } from "../cutActions";
 import { api, host } from "../host";
 import { clampTrim, dropIndex, framesLabel, pxToFrames } from "../lib/cutEdit";
 import {
@@ -145,13 +145,15 @@ function TrimGhost({ ep, take, item, preview, zoom, fps, height }: {
 
 const Clip = memo(function Clip({
   ep, pass, s, other, width, height, aspect, selected, rendering, progress, targets, seriesDefault, fps, trimmable, dragging,
-  recording, onBodyDown, onEdgeDown, suppress,
+  recording, noted, onBodyDown, onEdgeDown, suppress,
 }: {
   ep: string; pass: Pass; s: ShotStatus; other: EpisodeStatus | undefined; width: number; height: number;
   aspect: number; selected: boolean; rendering: Set<number>; progress?: { value: number; max: number };
   targets: TargetList | null; seriesDefault: string; fps: number; trimmable: boolean; dragging: boolean;
   /** Phase 9d: Play all is on the recording, so per-clip audio is ignored */
   recording: boolean;
+  /** open issue notes on this shot (this pass) */
+  noted: number;
   onBodyDown: (e: RPointerEvent<HTMLDivElement>, s: ShotStatus) => void;
   onEdgeDown: (e: RPointerEvent<HTMLDivElement>, s: ShotStatus, side: "in" | "out") => void;
   suppress: RefObject<boolean>;
@@ -162,6 +164,7 @@ const Clip = memo(function Clip({
   const secs = shotSeconds(s, fps);
   const mediaW = Math.min(width, Math.round(height * aspect));
   const locked = !!s.cut.locked;
+  const flagged = !!s.cut.flag;
   const trimIn = s.cut.trim_in || 0;
   const trimOut = s.cut.trim_out || 0;
   // a placeholder's take is the other pass's: its target is compared all the same
@@ -171,11 +174,13 @@ const Clip = memo(function Clip({
   );
   const cls = [
     "h3-clip", selected && "h3-sel", s.cut.placeholder && "h3-placeholder", s.orphan && "h3-orphan", locked && "h3-locked",
-    s.cut.out && "h3-out",
+    s.cut.out && "h3-out", flagged && "h3-flagged",
     dragging && "h3-dragging",
   ].filter(Boolean).join(" ");
   const title = [
     `${s.shot} · ${fmtShotSeconds(s, secs)}${s.size ? ` · ${s.size}` : ""}${lengthEstimated(s) ? `\n≈ ${ESTIMATE_TITLE}` : ""}`,
+    flagged ? "flagged to come back to (M: unflag · Shift+M: the next flagged clip)" : "",
+    noted ? `${noted} open note${noted > 1 ? "s" : ""} (the Shots tab's Issues list)` : "",
     s.cut.out ? "left out of the cut: Play all, assemble and Master skip it (right-click: Put back in the cut)" : "",
     take ? `${s.cut.placeholder ? `${s.cut.pass} ` : ""}${tn(take.take)} (${take.status})` : "no take in the cut",
     audioBadgeOf(s.cut, s.shot)?.title ?? "",
@@ -217,8 +222,10 @@ const Clip = memo(function Clip({
           <Badges badges={badges} max={width < 90 ? 1 : 3} />
         </div>
       )}
+      {flagged && <i className="pi pi-flag-fill h3-flag-mark" />}
       <div className="h3-clip-bottom">
         {locked && <i className="pi pi-lock" title="Locked in the cut" />}
+        {noted > 0 && <i className="pi pi-comment" />}
         <b>{s.shot}</b>
         {lengthEstimated(s) && <span className="h3-est" title={ESTIMATE_TITLE}>≈</span>}
         {take && width > 60 && <span>{tn(take.take)}</span>}
@@ -291,6 +298,13 @@ export function Timeline() {
   const total = items.length ? totalDuration(items) : st?.shots.reduce((n, s) => n + (shotSeconds(s, st.fps) ?? 0), 0) ?? 0;
   const prog = useMemo(() => passProgress(st?.shots), [st]);
   const missing = useMemo(() => missingRefsSummary(st?.shots ?? []), [st]);
+  const flagged = useMemo(() => flaggedShots(st), [st]);
+  const issues = useApp((s) => (s.ep ? s.issues[statusKey(s.ep, s.pass)] : undefined));
+  const noted = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const x of issues ?? []) if (!x.addressed) m.set(x.shot, (m.get(x.shot) ?? 0) + 1);
+    return m;
+  }, [issues]);
   const moved = useMemo(() => (st?.shots ?? []).filter((s) => s.cut?.out_of_order && !s.orphan).length, [st]);
 
   /** a clip's width: its length in the cut (trims applied; the edge being dragged, previewed) */
@@ -494,6 +508,15 @@ export function Timeline() {
         <button className={`h3-btn h3-icon${waves ? " h3-on" : ""}`} title={waves ? "Hide the waveforms" : "Show each clip's waveform (or the recording's, with Play all's audio on the recording)"} onClick={() => toggleWaves()}>
           <i className="pi pi-wave-pulse" />
         </button>
+        {flagged.length > 0 && (
+          <button
+            className="h3-badge h3-b-flag h3-badge-btn"
+            title={`Flagged to come back to: ${flagged.join(", ")}\nClick (or Shift+M): the next one · M flags or unflags the clip on screen (or the selected one)`}
+            onClick={() => gotoFlagged(1)}
+          >
+            <i className="pi pi-flag-fill" /> {flagged.length} flagged
+          </button>
+        )}
         {moved > 0 && (
           <span className="h3-badge h3-b-moved" title={`${moved} shot${moved > 1 ? "s are" : " is"} out of script order (Cut ▸ Reset order puts them back)`}>
             {moved} moved
@@ -569,6 +592,7 @@ export function Timeline() {
                             trimmable={!!it && it.total != null && !s.orphan && !s.cut.out}
                             dragging={dragged === s.shot}
                             recording={recording}
+                            noted={noted.get(s.shot) ?? 0}
                             onBodyDown={onBodyDown}
                             onEdgeDown={onEdgeDown}
                             suppress={suppress}

@@ -627,6 +627,12 @@ def set_override(data: dict, shot_id: str, pass_: str | None = None,
 # stub (the editor's "Leave out of the cut", `h3.py cut --out SH`; `--in SH`
 # puts it back). Each pass's cut has its own.
 #
+# An entry may be `"flag": true`: a bookmark, "come back to this one" (to
+# re-render it, or change its prompt). It changes nothing the cut plays or
+# assembles; the timeline shows a badge (the editor's M key, `h3.py cut --flag
+# SH`; `--unflag SH`). A locked entry can be flagged. Each pass's cut has its
+# own; resetting or copying the cut keeps a pass's flags as they are.
+#
 # `start` is seconds into the source, `offset` seconds the sound is shifted
 # against the picture (positive = later), `gain` a linear multiplier. The
 # audio is cut or padded with silence to the clip's length, so a clip's
@@ -634,7 +640,8 @@ def set_override(data: dict, shot_id: str, pass_: str | None = None,
 # file it plays) and audio_label (the editor's badge).
 
 CUT_FILE = "cut.json"
-ENTRY_FIELDS = ("shot", "take", "pass", "trim_in", "trim_out", "locked", "note", "audio", "out")
+ENTRY_FIELDS = ("shot", "take", "pass", "trim_in", "trim_out", "locked", "note", "audio", "out",
+                "flag")
 
 AUDIO_SOURCES = ("take", "file", "none")
 AUDIO_FIELDS = ("source", "shot", "take", "pass", "path", "start", "offset", "gain")
@@ -773,6 +780,7 @@ class CutEntry:
     note: str = ""
     audio: dict | None = None       # where the clip's sound comes from (audio_spec)
     out: bool = False               # left out of the cut (still in the script)
+    flag: bool = False              # bookmarked: come back to it (changes nothing played)
     in_cut_file: bool = True        # False: not listed, placed by script order
     orphan: bool = False            # listed, but no longer in the script
     placeholder: bool = False       # take comes from the other pass
@@ -804,7 +812,7 @@ def resolve_cut(data: dict, pass_: str, script_order: list[str]) -> list[CutEntr
             shot=sid, pass_=src, take=raw.get("take"),
             trim_in=int(raw.get("trim_in") or 0), trim_out=int(raw.get("trim_out") or 0),
             locked=bool(raw.get("locked")), note=raw.get("note") or "", audio=audio,
-            out=bool(raw.get("out")),
+            out=bool(raw.get("out")), flag=bool(raw.get("flag")),
             orphan=sid not in in_script, placeholder=src != pass_,
             extra={k: v for k, v in raw.items() if k not in ENTRY_FIELDS}))
     for i, sid in enumerate(script_order):
@@ -839,6 +847,8 @@ def cut_entry_to_json(e: CutEntry, list_pass: str) -> dict:
         out["audio"] = e.audio
     if e.out:
         out["out"] = True
+    if e.flag:
+        out["flag"] = True
     out.update(e.extra)
     return out
 
