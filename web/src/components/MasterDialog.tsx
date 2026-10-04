@@ -3,14 +3,23 @@
 // then queue its upscales, then assemble the master into <episode>/master/.
 // The plan is read again whenever the episode's status changes (an upscale
 // landing), so the buttons follow the queue.
+//
+// Assembling takes a while (half an hour for a long episode), so it's a job
+// the server keeps: the dialog asks for it on opening (GET /h3pipe/master/job)
+// and follows its `h3pipe.master` events, so closing and reopening it, or
+// reloading the page, shows the run still going rather than offering to start
+// another one. A run `h3.py master` started is shown too, without progress,
+// and asked about again every few seconds until it ends.
 
 import { useEffect, useState } from "react";
 import { errText } from "../api";
 import { api } from "../host";
-import { closeMaster } from "../actions";
+import { closeMaster, loadMasterJob } from "../actions";
+import { clock, masterFraction, masterStageText, pictureText } from "../lib/master";
 import { statusKey, useApp } from "../store";
 import type { MasterPlan, MasterResult } from "../types";
 import { Dialog } from "./Dialogs";
+import { Progress } from "./Thumb";
 
 const STATUS_LABEL: Record<string, string> = {
   upscale: "to upscale", ok: "ok", kept: "kept", queued: "upscaling", gap: "gap",
@@ -31,6 +40,8 @@ function MasterBody() {
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [done, setDone] = useState<MasterResult | null>(null);
+  const job = useApp((s) => s.masterJob);
+  const running = job?.state === "running";
   const [opt, setOpt] = useState({ conform: false, allow_gaps: false, prores: false });
   // how the upscales are queued: in cut order (watching: stop at the first bad one) or
   // grouped by target (a batch: each model loads once). Remembered.
@@ -53,15 +64,29 @@ function MasterBody() {
       if (action === "queue" && r.errors?.length) setErr(r.errors.map((e) => `${e.shot}: ${e.error}`).join("; "));
     } catch (e) {
       setErr(errText(e));
+      // refused because one is already going (409 with the job): show that one
+      if (action === "assemble") void loadMasterJob();
     } finally {
       setBusy(null);
     }
   };
   useEffect(() => { void run("plan"); }, [ep, st, opt.conform]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { void loadMasterJob(); }, [ep]);
+  // a run this editor didn't start sends no events: ask again until it ends
+  useEffect(() => {
+    if (!(running && job?.elsewhere)) return;
+    const t = setInterval(() => void loadMasterJob(), 5000);
+    return () => clearInterval(t);
+  }, [running, job?.elsewhere]);
 
   const c = plan?.counts;
   const canQueue = !!c && c.upscale > 0 && !busy;
-  const canAssemble = !!c && c.upscale === 0 && c.queued === 0 && (c.gap === 0 || opt.allow_gaps) && !busy;
+  const canAssemble = !!c && c.upscale === 0 && c.queued === 0 && (c.gap === 0 || opt.allow_gaps) && !busy && !running;
+  // what was made: this dialog's answer, else the job's (made before it was opened)
+  const made = done?.output ? done
+    : job?.state === "done" && job.output ? { output: job.output, mov: job.mov, report: job.report ?? undefined, titles: job.titles }
+    : null;
+  const pct = job ? masterFraction(job) : null;
   return (
     <Dialog
       title={<>Master the {ask.pass} cut{plan ? <span className="h3-muted h3-small"> · {plan.size[0]}×{plan.size[1]}, {plan.fit}, {plan.quality}</span> : null}</>}
@@ -77,13 +102,28 @@ function MasterBody() {
             <i className="pi pi-arrow-up-right" /> Queue {c?.upscale ?? 0} upscale{c?.upscale === 1 ? "" : "s"}
           </button>
           <button className="h3-btn h3-primary" disabled={!canAssemble} onClick={() => void run("assemble")}
-                  title="Assemble the master from the upscales into the episode's master folder, with a report">
-            {busy === "assemble" ? <i className="pi pi-spin pi-spinner" /> : <i className="pi pi-video" />} Assemble master
+                  title={running ? "A master of this episode is being assembled; wait for it to finish"
+                    : "Assemble the master from the upscales into the episode's master folder, with a report"}>
+            {busy === "assemble" || running ? <i className="pi pi-spin pi-spinner" /> : <i className="pi pi-video" />}
+            {running ? " Assembling…" : " Assemble master"}
           </button>
         </>
       }
     >
       {err && <div className="h3-error h3-small">{err}</div>}
+      {running && job && (
+        <div className="h3-col" style={{ gap: 2, marginBottom: 8 }}>
+          <span className="h3-small">
+            {masterStageText(job)}
+            {!job.elsewhere && clock(job.started) ? <span className="h3-muted"> · started {clock(job.started)}</span> : null}
+          </span>
+          {pct != null && <Progress value={Math.round(pct * 1000)} max={1000} />}
+          {job.elsewhere && <span className="h3-muted h3-small">No progress from here: this updates when it ends.</span>}
+        </div>
+      )}
+      {!running && !err && job?.state === "failed" && job.error && (
+        <div className="h3-error h3-small">The last master wasn't assembled: {job.error}</div>
+      )}
       {!plan && !err && <div className="h3-muted h3-small"><i className="pi pi-spin pi-spinner" /> Planning…</div>}
       {plan && (
         <div className="h3-col" style={{ gap: 8 }}>
@@ -126,14 +166,16 @@ function MasterBody() {
               </tbody>
             </table>
           </div>
-          {done?.output && (
+          {made && !running && (
             <div className="h3-small">
-              Master: <code>{done.output}</code>{done.mov ? <> and <code>{done.mov}</code></> : null}; report <code>{done.report}</code>
+              Master: <code>{made.output}</code>{made.mov ? <> and <code>{made.mov}</code></> : null}; report <code>{made.report}</code>
+              {!done && job?.finished ? <span className="h3-muted"> (made {clock(job.finished)})</span> : null}
               <div className="h3-muted">
-                {done.titles
-                  ? `With ${done.titles.intro && done.titles.outro ? "the intro and outro" : done.titles.intro ? "the intro" : "the outro"}, the episode's title drawn on`
+                {made.titles
+                  ? `With ${made.titles.intro && made.titles.outro ? "the intro and outro" : made.titles.intro ? "the intro" : "the outro"}, the episode's title drawn on`
                   : "No intro or outro: put INTRO.mp4 / OUTRO.mp4 in the show's _titles folder to have them added"}
               </div>
+              {pictureText(made.titles) && <div className="h3-muted">{pictureText(made.titles)}</div>}
             </div>
           )}
         </div>

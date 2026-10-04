@@ -495,8 +495,38 @@ unless `allow_gaps`) writes `master/<ep>_master_<WxH>.mp4` (and `.mov` with `pro
 one without `deliver`. When the episode has an intro or outro (`_titles/INTRO.mp4`,
 `OUTRO.mp4` in the show folder, or the series config's `publish` block), the master is
 made with them, the episode's title drawn on (h3publish), and the `.mov` from that:
-`titles` is `{"intro", "outro"}` (the clips used, either null), else null. A master that
-assembled but couldn't be titled is a 500 saying so; the untitled master is left in place.
+`titles` is `{"intro", "outro", "picture", "why"}` (the clips used, either null), else null.
+`picture` is how h3publish laid the cut in between them: `"copied"` (only the title clips
+encoded) or `"re-encoded"` (the whole cut again, `why` says what stopped the copy: a check
+at a join, a cut h3assemble didn't encode); the report's `Picture:` line says the same. A
+master that assembled but couldn't be titled is a 500 saying so; the untitled master is
+left in place.
+
+`assemble` answers when the master is made, which takes a while (h3assemble re-encodes
+every clip; half an hour for a 300-shot episode), so it is also a **job**: `job` in the
+answer, `GET /h3pipe/master/job`, and the `h3pipe.master` events. Only one master of an
+episode is assembled at a time: `<episode>/master/.assembling.json` (`{pid, host, by,
+started}`) is held while one runs, whoever started it, the editor or `h3.py master`, and a
+second `assemble` is a 409 `{"error": "a master of this episode is already being
+assembled by …", "job"}`. A lock whose process has gone (or another machine's, a day old)
+is stale and taken over.
+
+### `GET /h3pipe/master/job?ep=…`
+`{"job": {...} | null}`: the master this ComfyUI is assembling for the episode, or the last
+one it assembled (kept until ComfyUI restarts):
+```json
+{"ep": "C:\\Shows\\MyShow\\ep01", "pass": "final", "state": "running", "elsewhere": false,
+ "by": "the editor", "started": "2026-10-04T08:13:32-05:00", "finished": null,
+ "step": "assemble", "stage": "clips", "done": 212, "total": 323, "text": "sh2590",
+ "output": null, "mov": null, "report": null, "titles": null, "error": ""}
+```
+`state`: `running`, `done` (`output`, `mov`, `report`, `titles` as `assemble` answers them)
+or `failed` (`error`). `step` is `assemble` (h3assemble's stages: `probe` reading each clip,
+`clips` writing each, `join`, `prores`, `verify` counting the master's frames) or `titles`
+(h3publish's: `titles` with `text` intro / outro, `join`, `verify` checking the joins,
+`reencode` with a frame count, `prores`); `done` / `total` count what has a count. A run
+this ComfyUI didn't start (`h3.py master`, read from the lock) is `{"state": "running",
+"elsewhere": true, "by", "started"}` with nothing else; it sends no events, so ask again.
 
 ### `PUT /h3pipe/upscale/keep`
 Body `{"ep", "pass"?, "shot", "take", "keep": true | false}`: mark a take's finished upscale
@@ -560,6 +590,9 @@ knows from `/h3pipe/render`. Two custom events come from the node pack:
 - **`h3pipe.upscale`** (Phase 13), `{"ep", "shot", "take", "status"}`: "queued" from
   `POST /h3pipe/upscale`, "ok" or "failed" from `H3SaveUpscale` when it closes the
   `.up.json`, "deleted" from `DELETE /h3pipe/upscale`.
+- **`h3pipe.master`**, the whole job as `GET /h3pipe/master/job` has it: once when an
+  `assemble` starts, at every step (each clip written, each title encoded), and once
+  more when it is `done` or `failed`.
 
 ## Models
 

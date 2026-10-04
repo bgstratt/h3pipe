@@ -16,7 +16,7 @@ import type {
   PeaksResult, PickRequest, Ref, RefDefaults, RefDiscardRequest, RefGenerateMissingRequest, RefGenerateMissingResult, RefGenerateRequest,
   RefGenerateResult, RefImportRequest, RefKeyframeRequest, RefList, RefMatchResult, RefOverrideInfo, RefOverrideRequest, RefPickRequest, RefPickResult,
   RefTake, RefUploadRequest, RenderRequest, RenderResult, Seed, ShotDetail, TakeRef, TargetKind, TargetList, TrackResult,
-  MasterResult, UpscaleOptions, UpscaleRequest, UpscaleResult,
+  MasterJob, MasterResult, UpscaleOptions, UpscaleRequest, UpscaleResult,
   CustomTargetResult, TargetProposal, VoiceFromTakeRequest, VoiceFromTakeResult,
   WorkflowFile, WorkflowInstallResult,
   PromoteHashes, PromotePlan, PromoteResult, SourceCheck, SourceDoc, SourceFile, SourceHash, SourceSaveRequest, SourceSaveResult,
@@ -75,6 +75,8 @@ export interface Api {
   /** Phase 13e: POST /h3pipe/master: plan, queue the upscales, or assemble the master */
   master(req: { ep: string; pass?: Pass; action: "plan" | "queue" | "assemble"; conform?: boolean;
                 allow_gaps?: boolean; prores?: boolean; order?: "cut" | "target" }): Promise<MasterResult>;
+  /** GET /h3pipe/master/job: the master being assembled (or the last one), null: none */
+  masterJob(ep: string): Promise<{ job: MasterJob | null }>;
   /** Phase 13e: PUT /h3pipe/upscale/keep: mark a take's upscale Keep, or clear it */
   putUpscaleKeep(ep: string, shot: string, take: number, keep: boolean, pass?: Pass): Promise<{ shot: string; take: number; keep: boolean }>;
   putUpscaleRecipe(ep: string, shot: string, recipe: Record<string, unknown> | null): Promise<{ shot: string; recipe: Record<string, unknown> | null; text: string | null }>;
@@ -417,6 +419,7 @@ export function createHttpApi(t: Transport): Api {
     upscale: (req) => call("POST", "/h3pipe/upscale", req),
     upscaleOptions: (ep) => get(`/h3pipe/upscale/options${ep ? `?${qs({ ep })}` : ""}`),
     master: (req) => call("POST", "/h3pipe/master", req),
+    masterJob: (ep) => get(`/h3pipe/master/job?${qs({ ep })}`),
     putUpscaleKeep: (ep, shot, take, keep, pass) => call("PUT", "/h3pipe/upscale/keep", { ep, shot, take, keep, ...(pass ? { pass } : {}) }),
     putUpscaleRecipe: (ep, shot, recipe) => call("PUT", "/h3pipe/upscale/recipe", { ep, shot, recipe }),
     deleteUpscale: (ep, shot, take, pass) => call("DELETE", `/h3pipe/upscale?${qs({ ep, shot, take: String(take), pass })}`),

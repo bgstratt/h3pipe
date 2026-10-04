@@ -72,10 +72,22 @@ import h3peaks  # noqa: E402
 import h3takes  # noqa: E402
 
 NOT_RENDERED = "not rendered"
+# --progress: one line per step for whoever runs this (h3master, through
+# h3edit.run_tool): `##h3assemble {"stage", "done", "total", "text"}`. Stages:
+# probe (reading each clip), clips (writing each), join, prores, verify.
+PROGRESS = "##h3assemble "
 
 
 def run(cmd: list[str], timeout: int = 900) -> subprocess.CompletedProcess:
     return subprocess.run(cmd, capture_output=True, timeout=timeout)
+
+
+def say(on: bool, stage: str, done: int | None = None, total: int | None = None,
+        text: str = "") -> None:
+    """A progress line, when --progress asked for them."""
+    if on:
+        print(PROGRESS + json.dumps({"stage": stage, "done": done, "total": total,
+                                     "text": text}), flush=True)
 
 
 def have(tool: str) -> bool:
@@ -395,6 +407,8 @@ def main() -> int:
     ap.add_argument("--partial", action="store_true",
                     help="assemble the shots that exist instead of refusing")
     ap.add_argument("--check", action="store_true", help="report only")
+    ap.add_argument("--progress", action="store_true",
+                    help="print a ##h3assemble progress line per step (for h3master)")
     ap.add_argument("--upscaled", action="store_true",
                     help="each clip from its fresh upscale (h3upscale), the "
                          "cut at the upscale size; clips without one are scaled up")
@@ -479,7 +493,8 @@ def main() -> int:
     # (acc_s, the exact running time; acc_f, the frames laid so far) rounds
     # each one so the total never drifts more than half a frame
     acc_s, acc_f = 0.0, 0
-    for e in entries:
+    for i, e in enumerate(entries):
+        say(args.progress, "probe", i, len(entries), e.shot)
         if e.orphan:
             orphans.append(e.shot)
             rows.append(("orphan", e, None))
@@ -763,6 +778,7 @@ def main() -> int:
     with tempfile.TemporaryDirectory(prefix="h3asm_") as tmp:
         listing = os.path.join(tmp, "concat.txt")
         with open(listing, "w", encoding="utf-8") as fh:
+            say(args.progress, "clips", 0, len(plan))
             for i, p in enumerate(plan):
                 src, sound = p["path"], p["sound"]
                 if p["sourced"]:
@@ -781,7 +797,9 @@ def main() -> int:
                 else:
                     shutil.copy(src, norm)
                 fh.write(f"file '{norm.replace(os.sep, '/')}'\n")
+                say(args.progress, "clips", i + 1, len(plan), p["id"])
 
+        say(args.progress, "join", text=os.path.basename(out_path))
         r = run(["ffmpeg", "-y", "-v", "error", "-f", "concat", "-safe", "0",
                  "-i", listing, "-c", "copy", out_path], timeout=1800)
         if r.returncode == 0 and args.audio == "master":
@@ -806,6 +824,7 @@ def main() -> int:
                     shutil.move(tmp_out, out_path)
         if r.returncode == 0 and args.intermediate == "prores":
             mov = os.path.splitext(out_path)[0] + ".mov"
+            say(args.progress, "prores", text=os.path.basename(mov))
             why = prores_from(out_path, mov)
             print(f"  ProRes 422 HQ: {os.path.relpath(mov, root)}" if not why else
                   f"  ! the ProRes export failed: {why}")
@@ -831,6 +850,7 @@ def main() -> int:
                         if p["audio_spec"] else "")
                      + "\n")
 
+    say(args.progress, "verify", text="counting the output's frames")
     got = frame_count(out_path)
     print(f"\n  -> {out_path}")
     print(f"  -> {edl}")

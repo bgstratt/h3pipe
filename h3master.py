@@ -25,6 +25,11 @@ What it does with each shot of the cut (`plan_master`):
   take), the recipe covers no section for its target, or a kept upscale at
   another size than the master's.
 
+Assembling takes a while (every clip re-encoded at the master quality, then the
+titles), so it says where it is as it goes, and only one run assembles an
+episode's master at a time: <episode>/master/.assembling.json is held while one
+does, and a second (another `h3.py master`, or the editor's Master) is refused.
+
 The cut is never changed: `master` works from the picks as they are. Without
 --wait, a run queues what needs it and a later run (or the editor) assembles
 once they've landed. The assembly is strict: every clip from an upscale at the
@@ -53,6 +58,14 @@ STATUSES = ("upscale", "ok", "kept", "queued", "gap")
 
 class MasterError(ValueError):
     pass
+
+
+class MasterBusy(MasterError):
+    """A master of the episode is already being assembled (`lock`: who, since when)."""
+
+    def __init__(self, message: str, lock: dict):
+        super().__init__(message)
+        self.lock = lock
 
 
 @dataclass
@@ -258,11 +271,125 @@ def master_name(root: str, size: tuple) -> str:
     return f"{os.path.basename(os.path.normpath(root))}_master_{size[0]}x{size[1]}"
 
 
+# While a master is being assembled, <episode>/master/.assembling.json says who
+# by and since when, so a second run (the editor's button pressed again, or
+# `h3.py master` beside the editor) is refused instead of redoing the same
+# half hour of ffmpeg over the same files. A lock whose process is gone is stale.
+LOCK_FILE = ".assembling.json"
+LOCK_FOREIGN_HOURS = 24      # another machine's lock can't be checked: this old, it's stale
+
+
+def pid_alive(pid: int) -> bool:
+    """Whether process `pid` is still running (stdlib only)."""
+    if pid == os.getpid():
+        return True
+    if pid <= 0:
+        return False
+    if os.name == "nt":
+        import ctypes
+        k = ctypes.WinDLL("kernel32", use_last_error=True)
+        h = k.OpenProcess(0x1000, False, pid)        # PROCESS_QUERY_LIMITED_INFORMATION
+        if not h:
+            return ctypes.get_last_error() == 5      # access denied: it's there
+        code = ctypes.c_ulong()
+        ok = k.GetExitCodeProcess(h, ctypes.byref(code))
+        k.CloseHandle(h)
+        return bool(ok) and code.value == 259        # STILL_ACTIVE
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def lock_path(root: str) -> str:
+    return os.path.join(master_dir(root), LOCK_FILE)
+
+
+def assembling(root: str) -> dict | None:
+    """The lock of a master of this episode being assembled right now
+    ({"pid", "host", "by", "started"}), or None (no lock, or a stale one)."""
+    import socket
+    try:
+        with open(lock_path(root), encoding="utf-8") as fh:
+            lock = json.load(fh)
+    except (OSError, ValueError):
+        return None
+    if not isinstance(lock, dict):
+        return None
+    if lock.get("host") and lock["host"] != socket.gethostname():
+        try:
+            age = time.time() - os.path.getmtime(lock_path(root))
+        except OSError:
+            return None
+        return lock if age < LOCK_FOREIGN_HOURS * 3600 else None
+    pid = lock.get("pid")
+    return lock if isinstance(pid, int) and pid_alive(pid) else None
+
+
+def busy_message(lock: dict) -> str:
+    started = str(lock.get("started") or "")
+    at = started[11:16] if len(started) >= 16 else started or "a while ago"
+    return (f"a master of this episode is already being assembled by {lock.get('by') or 'another run'} "
+            f"(since {at}); wait for it to finish")
+
+
+def take_lock(root: str, by: str) -> str:
+    """Claim the episode's master lock for this process; MasterBusy when a live
+    run holds it. A stale one is taken over. Returns the lock's path."""
+    import socket
+    os.makedirs(master_dir(root), exist_ok=True)
+    path = lock_path(root)
+    body = json.dumps({"pid": os.getpid(), "host": socket.gethostname(), "by": by,
+                       "started": T.now()})
+    for _ in range(2):
+        try:
+            fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        except FileExistsError:
+            held = assembling(root)
+            if held:
+                raise MasterBusy(busy_message(held), held)
+            try:
+                os.remove(path)                      # stale: its run is gone
+            except OSError:
+                pass
+            continue
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(body)
+        return path
+    held = assembling(root) or {}
+    raise MasterBusy(busy_message(held), held)
+
+
+def release_lock(path: str) -> None:
+    try:
+        os.remove(path)
+    except OSError:
+        pass
+
+
 def assemble_master(plan: Plan, allow_gaps: bool = False, prores: bool = False,
-                    timeout: int = 3600) -> dict:
+                    timeout: int = 3600, progress=None, by: str = "h3.py master") -> dict:
     """The cut from its upscales at the master size into <episode>/master/, and
     the report beside it. Refused while anything is still to upscale or on its
-    way, and with gaps unless `allow_gaps`. {"ok", "output", "mov", "report", "error"}."""
+    way, and with gaps unless `allow_gaps`; MasterBusy while another run is
+    assembling this episode's master. `progress(event)` hears each step:
+    {"step": "assemble" | "titles", "stage", "done", "total", "text"} (the
+    stages are h3assemble's and h3publish's progress lines).
+    {"ok", "output", "mov", "report", "error"}."""
+    check_assemble(plan, allow_gaps)
+    lock = take_lock(plan.root, by)
+    try:
+        return _assemble(plan, plan.of("gap"), prores, timeout, progress)
+    finally:
+        release_lock(lock)
+
+
+def check_assemble(plan: Plan, allow_gaps: bool = False) -> None:
+    """MasterError when the plan can't be assembled yet: shots still to upscale
+    or on their way, or gaps without `allow_gaps`."""
     waiting = plan.of("upscale") + plan.of("queued")
     if waiting:
         raise MasterError(f"{len(waiting)} shot(s) still to upscale: "
@@ -271,19 +398,33 @@ def assemble_master(plan: Plan, allow_gaps: bool = False, prores: bool = False,
     if gaps and not allow_gaps:
         raise MasterError(f"{len(gaps)} gap(s): " + "; ".join(f"{r.shot}: {r.why}" for r in gaps[:5])
                           + " (--allow-gaps masters them scaled up from their takes)")
+
+
+def _tell(progress, step: str):
+    """A run_tool progress listener that hands the tool's events on as `step`'s."""
+    def hear(tool: str, ev: dict) -> None:
+        if progress is not None:
+            progress({"step": step, "stage": str(ev.get("stage") or ""),
+                      "done": ev.get("done"), "total": ev.get("total"),
+                      "text": str(ev.get("text") or "")})
+    return hear
+
+
+def _assemble(plan: Plan, gaps: list, prores: bool, timeout: int, progress) -> dict:
     import h3edit
     name = master_name(plan.root, plan.size)
     sub = "renders_proxy" if plan.pass_ == "proxy" else "renders"
     args = ["-o", plan.root, "--upscaled", "--size", f"{plan.size[0]}x{plan.size[1]}",
             "--quality", "master" if (plan.recipe.get("quality") == "master") else "review",
-            "--name", name + ".mp4"]
+            "--name", name + ".mp4", "--progress"]
     if plan.pass_ == "proxy":
         args += ["--shotlist", "shotlist/shotlist_proxy.json", "--subfolder", sub]
     if gaps:
         args.append("--partial")
     if prores:
         args += ["--intermediate", "prores"]
-    rc, out, err = h3edit.run_tool("h3assemble.py", args, plan.root, timeout)
+    rc, out, err = h3edit.run_tool("h3assemble.py", args, plan.root, timeout,
+                                   progress=_tell(progress, "assemble"))
     made = os.path.join(plan.root, sub, name + ".mp4")
     if rc != 0 or not os.path.isfile(made):
         return {"ok": False, "output": None, "mov": None, "report": out,
@@ -300,7 +441,7 @@ def assemble_master(plan: Plan, allow_gaps: bool = False, prores: bool = False,
             shutil.move(src, os.path.join(dst, name + ext))
             moved[ext] = os.path.join(dst, name + ext)
     mp4, mov = moved[".mp4"], moved.get(".mov")
-    titled, why = add_titles(plan, mp4, mov, timeout)
+    titled, why = add_titles(plan, mp4, mov, timeout, progress)
     out += titled.get("report", "")
     rep = write_report(plan, mp4, mov, titled)
     if why:
@@ -310,10 +451,14 @@ def assemble_master(plan: Plan, allow_gaps: bool = False, prores: bool = False,
             "report_md": rep, "titles": titled.get("titles"), "error": ""}
 
 
-def add_titles(plan: Plan, mp4: str, mov: str | None, timeout: int = 3600) -> tuple[dict, str]:
+def add_titles(plan: Plan, mp4: str, mov: str | None, timeout: int = 3600,
+               progress=None) -> tuple[dict, str]:
     """The series intro and outro around the master, in place (h3publish), when
     the episode has them; the .mov made again from the titled master. Returns
-    ({"titles": {"intro", "outro"} or None, "report"}, why it failed or "")."""
+    ({"titles": {"intro", "outro", "picture", "why"} or None, "report"}, why it
+    failed or ""). `picture` is how h3publish laid the cut in: "copied" (only
+    the title clips encoded), "re-encoded" (the whole cut, `why` says why) or
+    None when it didn't say."""
     import h3assemble
     import h3edit
     import h3publish
@@ -325,19 +470,39 @@ def add_titles(plan: Plan, mp4: str, mov: str | None, timeout: int = 3600) -> tu
         return {"titles": None, "report": "\n  no _titles/INTRO.mp4 or OUTRO.mp4: "
                                           "the master has no intro or outro\n"}, ""
     quality = "master" if plan.recipe.get("quality") == "master" else "review"
+    tell = _tell(progress, "titles")
+    result: dict = {}
+
+    def hear(tool: str, ev: dict) -> None:
+        if ev.get("stage") == "done":
+            result.update(picture=ev.get("picture"), why=ev.get("why") or "")
+        else:
+            tell(tool, ev)
+
     rc, out, err = h3edit.run_tool("h3publish.py", [plan.root, "--input", mp4, "--out", mp4,
-                                                    "--quality", quality], plan.root, timeout)
+                                                    "--quality", quality, "--progress"],
+                                   plan.root, timeout, progress=hear)
     if rc != 0:
         why = next((ln.strip()[3:] for ln in out.splitlines() if ln.strip().startswith("!! ")),
                    err.strip()[-300:] or "h3publish failed")
         return {"report": "\n" + out}, why
     if mov:
+        tell("h3master", {"stage": "prores", "text": os.path.basename(mov)})
         why = h3assemble.prores_from(mp4, mov)
         if why:
             return {"report": "\n" + out}, f"the ProRes .mov couldn't be made again: {why}"
     return {"titles": {"intro": fwd(plan.root, intro) if intro else None,
-                       "outro": fwd(plan.root, outro) if outro else None},
+                       "outro": fwd(plan.root, outro) if outro else None,
+                       "picture": result.get("picture"), "why": result.get("why", "")},
             "report": "\n" + out}, ""
+
+
+def picture_line(titles: dict) -> str:
+    """How the titles step laid the cut in, in words."""
+    if titles.get("picture") == "copied":
+        return "Picture: the cut copied as assembled; only the title clips were encoded."
+    why = titles.get("why") or "h3publish didn't say why"
+    return f"Picture: the whole cut re-encoded when the titles went on, because {why}."
 
 
 def write_report(plan: Plan, mp4: str | None, mov: str | None, titled: dict | None = None) -> str:
@@ -362,8 +527,10 @@ def write_report(plan: Plan, mp4: str | None, mov: str | None, titled: dict | No
     if mp4:
         lines += [f"- `{fwd(root, mp4)}`"] + ([f"- `{fwd(root, mov)}` (ProRes 422 HQ)"] if mov else []) + [""]
         t = data.get("titles")
-        lines += [("Titles: " + ", ".join(f"{k} `{v}`" for k, v in t.items() if v)
+        lines += [("Titles: " + ", ".join(f"{k} `{t[k]}`" for k in ("intro", "outro") if t.get(k))
                    + ", the episode's title drawn on") if t else "No intro or outro.", ""]
+        if t and t.get("picture"):
+            lines += [picture_line(t), ""]
     lines += ["| shot | take | target | status | recipe | note |", "|---|---|---|---|---|---|"]
     for r in data["rows"]:
         lines.append(f"| {r['shot']} | {r['take'] or ''} | {r['target'] or ''} | {r['status']} | "
@@ -425,11 +592,15 @@ def master_episode(root: str, args, comfy) -> int:
         if bad:
             return 1
         plan = plan_master(root, args.pass_, args.conform)
+    printer = Printer()
     try:
-        res = assemble_master(plan, args.allow_gaps, args.prores, args.timeout)
+        res = assemble_master(plan, args.allow_gaps, args.prores, args.timeout,
+                              progress=printer)
     except MasterError as e:
+        printer.finish()
         print(f"  !! {e}")
         return 1
+    printer.finish()
     if not res["ok"]:
         print(f"  !! assembling failed: {res['error']}")
         return 1
@@ -438,8 +609,55 @@ def master_episode(root: str, args, comfy) -> int:
           + ("\n  with the intro and outro" if t and t["intro"] and t["outro"]
              else f"\n  with the {'intro' if t['intro'] else 'outro'} only" if t
              else "\n  no intro or outro (no _titles/INTRO.mp4 or OUTRO.mp4)")
+          + (f"\n  {picture_line(t)}" if t and t.get("picture") else "")
           + f"\n  report: {res['report_md']}")
     return 0
+
+
+STAGE_WORDS = {"probe": "reading the clips", "clips": "writing the clips", "join": "joining",
+               "prores": "the ProRes .mov", "verify": "checking", "titles": "encoding the",
+               "reencode": "re-encoding the whole cut"}
+
+
+def stage_words(ev: dict) -> str:
+    """A progress event in words: "writing the clips 212/323 sh2590"."""
+    words = STAGE_WORDS.get(ev.get("stage"), ev.get("stage") or "")
+    if ev.get("stage") == "titles":
+        return f"{words} {ev.get('text') or 'titles'}"
+    n, total = ev.get("done"), ev.get("total")
+    count = f" {n}/{total}" if isinstance(n, int) and isinstance(total, int) and total else \
+        (f" {n}" if isinstance(n, int) and n else "")
+    text = ev.get("text") if ev.get("stage") in ("probe", "clips") else ""
+    return f"{words}{count}" + (f" {text}" if text else "")
+
+
+class Printer:
+    """`h3.py master`'s progress: one line per stage, the counts written over
+    in place on a terminal."""
+
+    def __init__(self, out=None):
+        self.out = out or sys.stdout
+        self.tty = hasattr(self.out, "isatty") and self.out.isatty()
+        self.last = None
+        self.t0 = time.time()
+
+    def __call__(self, ev: dict) -> None:
+        key = (ev.get("step"), ev.get("stage"))
+        line = f"  [{int(time.time() - self.t0) // 60:>3}m] {ev.get('step')}: {stage_words(ev)}"
+        if self.tty:
+            end = "" if key == self.last or self.last is None else "\n"
+            self.out.write(end + "\r" + line.ljust(78))
+        elif key != self.last:
+            self.out.write(line + "\n")
+        self.out.flush()
+        self.last = key
+
+    def finish(self) -> None:
+        """End the line a terminal's counts were being written over."""
+        if self.tty and self.last is not None:
+            self.out.write("\n")
+            self.out.flush()
+        self.last = None
 
 
 def main(argv=None) -> int:

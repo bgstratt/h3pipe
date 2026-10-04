@@ -77,6 +77,11 @@ SUBTITLE = {
 }
 AUDIO = ["-c:a", "aac", "-b:a", "256k"]
 JOIN_FRAMES = 12      # frames checked on each side of a join
+# --progress: `##h3publish {"stage", "done", "total", "text"}` per step (titles,
+# join, verify, reencode with a frame count), then one `done` line saying how the
+# picture got there: {"stage": "done", "picture": "copied" | "re-encoded", "why"}.
+# h3master reads it into the master's report.
+PROGRESS = "##h3publish "
 # what has to agree for the cut's picture to be copied next to the title clips
 MATCH = ("codec_name", "profile", "pix_fmt", "width", "height", "r_frame_rate",
          "field_order", "color_range", "color_space", "color_primaries", "color_transfer")
@@ -88,6 +93,50 @@ class PublishError(Exception):
 
 def run(cmd: list[str], cwd: str | None = None, timeout: int = 3600) -> subprocess.CompletedProcess:
     return subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=timeout)
+
+
+_progress = False
+
+
+def say(stage: str, done: int | None = None, total: int | None = None, text: str = "",
+        **more) -> None:
+    """A progress line, when --progress asked for them."""
+    if _progress:
+        h3edit.progress_line(PROGRESS, {"stage": stage, "done": done, "total": total,
+                                        "text": text, **more})
+
+
+def run_counted(cmd: list[str], total: int, stage: str, cwd: str | None = None,
+                timeout: int = 3600) -> subprocess.CompletedProcess:
+    """`run`, with ffmpeg's frame count sent as progress lines as it goes (only
+    when --progress asked for them; otherwise it is `run`)."""
+    if not _progress:
+        return run(cmd, cwd, timeout)
+    import threading
+    cmd = cmd[:1] + ["-progress", "pipe:1", "-nostats"] + cmd[1:]
+    p = subprocess.Popen(cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    err: list[str] = []
+    drain = threading.Thread(target=lambda: err.append(p.stderr.read()), daemon=True)
+    drain.start()
+    killer = threading.Timer(timeout, p.kill)
+    killer.start()
+    last = -1
+    try:
+        for line in p.stdout:
+            if line.startswith("frame="):
+                try:
+                    n = int(line[6:].strip())
+                except ValueError:
+                    continue
+                if n // 240 != last // 240:            # every 10 s of picture or so
+                    say(stage, n, total)
+                last = n
+    finally:
+        p.stdout.close()
+        rc = p.wait()
+        killer.cancel()
+        drain.join(5)
+    return subprocess.CompletedProcess(cmd, rc, "", "".join(err))
 
 
 # ---------------------------------------------------------------------------
@@ -336,6 +385,7 @@ def publish_copy(src: str, cut: dict, intro: str | None, outro: str | None, sub:
         for clip, kind, alpha in titles:
             if clip:
                 made[kind] = os.path.join(tmp, f"{kind}.mp4")
+                say("titles", text=kind)
                 encode_title(clip, made[kind], tmp, cut, sub, alpha, quality)
         if all(probe(p)["extradata"] == cut["extradata"] for p in made.values()):
             used = quality
@@ -370,9 +420,11 @@ def publish_copy(src: str, cut: dict, intro: str | None, outro: str | None, sub:
             "-/filter_complex", "sound_graph.txt", "-map", "0:v:0", "-map", "[a]",
             "-c:v", "copy", *AUDIO, "-video_track_timescale", str(cut["timescale"]),
             "-movflags", "+faststart", joined]
+    say("join")
     r = run(cmd, cwd=tmp)
     if r.returncode != 0:
         return f"joining failed: {r.stderr.strip()[-300:]}"
+    say("verify", text="checking the joins")
     try:
         why = check_joins(joined, [(p, infos[p]) for p in order])
     except PublishError as e:
@@ -398,7 +450,8 @@ def publish_reencode(src: str, cut: dict, intro: str | None, outro: str | None, 
             "-/filter_complex", "graph.txt", "-map", "[v]", "-map", "[a]",
             "-c:v", "libx264", "-pix_fmt", "yuv420p", *h3assemble.QUALITY_ARGS[quality],
             *AUDIO, "-movflags", "+faststart", os.path.join(tmp, "out.mp4")]
-    r = run(cmd, cwd=tmp)
+    total = sum((i["frames"] or round(i["duration"] * cut["fps"])) for i in (pi, cut, po) if i)
+    r = run_counted(cmd, total, "reencode", cwd=tmp)
     if r.returncode != 0:
         raise PublishError(f"ffmpeg failed:\n{r.stderr.strip()}")
     shutil.move(os.path.join(tmp, "out.mp4"), out)
@@ -488,10 +541,12 @@ def publish(root: str, src: str | None = None, pass_: str = "final", out: str | 
         why = "--reencode" if reencode else publish_copy(src, cut, intro, outro, sub, out, tmp)
         if why:
             print(f"  ! re-encoding the whole cut: {why}")
+            say("reencode", 0, None, why)
             publish_reencode(src, cut, intro, outro, sub, out, tmp, quality)
     got = probe(out)
     print(f"    {got['duration']:.1f}s, {got['frames']} frames")
     print(f"  -> {out}")
+    say("done", picture="re-encoded" if why else "copied", why=why or "")
     return out
 
 
@@ -509,7 +564,11 @@ def main(argv=None) -> int:
                     help="x264 settings when re-encoding (default: master for a master, "
                          "else review)")
     ap.add_argument("--check", action="store_true", help="report only")
+    ap.add_argument("--progress", action="store_true",
+                    help="print a ##h3publish progress line per step (for h3master)")
     a = ap.parse_args(argv)
+    global _progress
+    _progress = a.progress
     try:
         publish(a.episode, a.input, a.pass_, a.out, a.quality, a.check, a.reencode)
     except PublishError as e:

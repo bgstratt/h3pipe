@@ -19,6 +19,7 @@ import json
 import os
 import re
 import sys
+import threading
 
 # ---------------------------------------------------------------------------
 # the pipeline
@@ -1019,16 +1020,104 @@ def post_master(ctx: Context, body):
         out = {"queued": [r.shot for r in queued],
                "errors": [{"shot": r.shot, "error": e} for r, e in errors]}
     elif action == "assemble":
-        try:
-            res = M.assemble_master(plan, flags["allow_gaps"], flags["prores"])
-        except M.MasterError as e:
-            raise ApiError(409, str(e))
-        if not res["ok"]:
-            raise ApiError(500, res["error"] if res["output"]
-                           else f"assembling the master failed: {res['error']}")
-        out = {"output": E.rel(ep, res["output"]), "mov": E.rel(ep, res["mov"]) if res["mov"] else None,
-               "report": E.rel(ep, res["report_md"]), "titles": res.get("titles")}
+        out = assemble_job(ctx, M, ep, pass_, plan, flags)
     return 200, {"plan": plan.view(), **out}
+
+
+# The master being assembled, per episode: what the Master dialog shows when it
+# is opened again (or the page is reloaded) while the request that started it
+# is still running, and once it has finished. Lives as long as this ComfyUI.
+_MASTER_JOBS: dict = {}
+_MASTER_GUARD = threading.Lock()     # checking for a running job and claiming it, one at a time
+
+
+def _master_key(ep: str) -> str:
+    return os.path.normcase(os.path.abspath(ep))
+
+
+def master_job(M, ep: str) -> dict | None:
+    """The episode's master job: this process's (running, done or failed), or
+    {"state": "running", "elsewhere": true, ...} for a run this process didn't
+    start (`h3.py master`), from the episode's master lock; None for neither."""
+    job = _MASTER_JOBS.get(_master_key(ep))
+    if job and job["state"] == "running":
+        return dict(job)
+    held = M.assembling(ep)
+    if held:
+        return {"ep": ep, "pass": None, "state": "running", "elsewhere": True,
+                "by": held.get("by"), "started": held.get("started"), "step": None,
+                "stage": None, "done": None, "total": None, "text": "", "finished": None,
+                "output": None, "mov": None, "report": None, "titles": None, "error": ""}
+    return dict(job) if job else None
+
+
+def assemble_job(ctx: Context, M, ep: str, pass_: str, plan, flags: dict) -> dict:
+    """Assemble the master as a job others can see (master_job, the
+    `h3pipe.master` events), and answer with what it made. 409 while another
+    run is assembling this episode's master, from this editor or not."""
+    key = _master_key(ep)
+    try:
+        M.check_assemble(plan, flags["allow_gaps"])
+    except M.MasterError as e:
+        raise ApiError(409, str(e))
+    with _MASTER_GUARD:
+        current = master_job(M, ep)
+        if current and current["state"] == "running":
+            msg = M.busy_message({"by": current.get("by") or "the editor",
+                                  "started": current["started"]})
+            raise ApiError(409, msg, job=current)
+        before = _MASTER_JOBS.get(key)
+        job = {"ep": ep, "pass": pass_, "state": "running", "elsewhere": False, "by": "the editor",
+               "started": T.now(), "step": "assemble", "stage": "start", "done": None,
+               "total": None, "text": "", "finished": None, "output": None, "mov": None,
+               "report": None, "titles": None, "error": ""}
+        _MASTER_JOBS[key] = job
+
+    def tell():
+        ctx.emit("h3pipe.master", dict(job))
+
+    def progress(ev: dict) -> None:
+        job.update(step=ev.get("step"), stage=ev.get("stage"), done=ev.get("done"),
+                   total=ev.get("total"), text=ev.get("text") or "")
+        tell()
+
+    tell()
+    try:
+        res = M.assemble_master(plan, flags["allow_gaps"], flags["prores"], progress=progress,
+                                by="the editor")
+    except M.MasterBusy as e:
+        # `h3.py master` got there first: this job never started
+        if before is None:
+            _MASTER_JOBS.pop(key, None)
+        else:
+            _MASTER_JOBS[key] = before
+        ctx.emit("h3pipe.master", dict(job, state="failed", error=str(e), finished=T.now()))
+        raise ApiError(409, str(e), job=master_job(M, ep))
+    except Exception as e:
+        job.update(state="failed", error=f"assembling the master failed: {e}", finished=T.now())
+        tell()
+        raise
+    rel = (lambda p: E.rel(ep, p) if p else None)
+    job.update(output=rel(res.get("output")), mov=rel(res.get("mov")),
+               report=rel(res.get("report_md")), titles=res.get("titles"), finished=T.now())
+    if not res["ok"]:
+        job.update(state="failed", error=res["error"] if res["output"]
+                   else f"assembling the master failed: {res['error']}")
+        tell()
+        raise ApiError(500, job["error"], job=dict(job))
+    job.update(state="done", stage="done")
+    tell()
+    return {"output": job["output"], "mov": job["mov"], "report": job["report"],
+            "titles": job["titles"], "job": dict(job)}
+
+
+@handler
+def get_master_job(ctx: Context, query: dict):
+    """The episode's master job (master_job): running with its step and counts,
+    done with what it made, failed with why; null when there is none."""
+    import h3master as M
+    ep = check_ep(ctx, query.get("ep"))
+    return 200, {"job": master_job(M, ep)}
 
 
 @handler
@@ -2664,6 +2753,7 @@ ROUTES = [
     ("PUT", "/h3pipe/upscale/recipe", put_upscale_recipe, "body"),
     ("PUT", "/h3pipe/upscale/keep", put_upscale_keep, "body"),
     ("POST", "/h3pipe/master", post_master, "body"),
+    ("GET", "/h3pipe/master/job", get_master_job, "query"),
     ("DELETE", "/h3pipe/upscale", delete_upscale, "query"),
     ("PUT", "/h3pipe/pick", put_pick, "body"),
     ("PUT", "/h3pipe/cut", put_cut, "body"),

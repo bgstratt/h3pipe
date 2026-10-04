@@ -135,6 +135,28 @@ class AssembleTest(unittest.TestCase):
         self.assertEqual(self.order(), [("sh010", 2), ("sh020", 1)])
         self.assertEqual(probe_frames(self.out()), 61)
 
+    def test_progress_lines(self):
+        # --progress, read as h3master reads it (h3edit.run_tool): every step in
+        # order, none of it in the log
+        import h3edit
+        self.shotlist([("sh010", 22), ("sh020", 39)])
+        self.take("sh010", 22)
+        self.take("sh020", 39)
+        heard = []
+        rc, out, err = h3edit.run_tool("h3assemble.py", ["-o", self.root, "--progress"], self.root,
+                                       120, progress=lambda tool, ev: heard.append((tool, ev)))
+        self.assertEqual(rc, 0, out + err)
+        self.assertNotIn("##h3assemble", out)
+        self.assertIn("-> ", out)
+        self.assertEqual({tool for tool, _ in heard}, {"h3assemble"})
+        steps = [(ev["stage"], ev["done"], ev["total"], ev["text"]) for _, ev in heard]
+        self.assertEqual(steps[:5], [("probe", 0, 2, "sh010"), ("probe", 1, 2, "sh020"),
+                                     ("clips", 0, 2, ""), ("clips", 1, 2, "sh010"),
+                                     ("clips", 2, 2, "sh020")])
+        self.assertEqual([s[0] for s in steps[5:]], ["join", "verify"])
+        # without --progress, nothing of the sort
+        self.assertNotIn("##h3assemble", self.assemble().stdout)
+
     def test_explicit_take_pick(self):
         self.shotlist([("sh010", 22), ("sh020", 39)])
         self.take("sh010", 22)

@@ -26,7 +26,7 @@ import {
 import type {
   AlignEvent, AlignMissing, AlignRequest, AssembleOptions, BuildResult, CutAudioSource, EpisodeStatus, Lora, NewEpisodeResult, SourceFile, OverrideFields, Pass,
   ProgressEvent, PromptEvent, Ref, RefEvent, RefGenerateRequest, RefTake, RenderRequest, RenderResult, RenderSkip, Seed,
-  Issue, SeedMode, ShotDetail, TakeEvent, TakeRef, TargetProposal, TrackResult,
+  Issue, MasterJob, SeedMode, ShotDetail, TakeEvent, TakeRef, TargetProposal, TrackResult,
   UpscaleEvent, UpscaleRequest, VoiceFromTakeRequest, WorkflowFile,
 } from "./types";
 
@@ -434,7 +434,7 @@ export async function loadEpisodes() {
 
 export function selectEpisode(ep: string | null) {
   set((s) => ({
-    ep, shot: null, take: null, viewer: null, menu: null, redo: null, renderAsk: null, upscaleAsk: null, masterAsk: null, refSel: null,
+    ep, shot: null, take: null, viewer: null, menu: null, redo: null, renderAsk: null, upscaleAsk: null, masterAsk: null, masterJob: null, refSel: null,
     cutPlay: { ...s.cutPlay, playing: false, pos: 0 },
     build: { busy: false, result: null, error: null },
     // Phase 9c: the Recording and voice-clip windows belong to one episode
@@ -990,6 +990,19 @@ export function closeMaster() {
   set({ masterAsk: null });
 }
 
+/** GET /h3pipe/master/job: the episode's master as it is now (the Master
+ * dialog asks on opening, so a run started before it was closed shows). */
+export async function loadMasterJob(): Promise<void> {
+  const ep = get().ep;
+  if (!ep) return;
+  try {
+    const { job } = await api().masterJob(ep);
+    if (sameEp(get().ep, ep)) set({ masterJob: job });
+  } catch {
+    /* an older ComfyUI pack without the route: the dialog works as before */
+  }
+}
+
 /** The Upscale dialog's choices. `method` "auto" leaves each take's default. */
 export interface UpscaleForm {
   method: "auto" | "latent" | "pixel" | "seedvr2";
@@ -1394,6 +1407,13 @@ export function wireEvents() {
     if (!sameEp(ep, get().ep)) return;
     scheduleRefresh();
     if (get().ep && get().refs[get().ep!]) scheduleRefsRefresh();
+  });
+  h.on("h3pipe.master", (d) => {
+    const j = (d ?? null) as MasterJob | null;
+    if (!j || !sameEp(j.ep, get().ep)) return;
+    set({ masterJob: j });
+    if (j.state === "done") host().toast("success", "Master assembled", j.output ?? undefined);
+    if (j.state === "failed" && j.error) host().toast("error", "The master wasn't assembled", j.error);
   });
   h.on("h3pipe.align", (d) => {
     const a = (d ?? {}) as AlignEvent;

@@ -6,7 +6,8 @@ import type { ToastAction } from "./host";
 import type { RefFilter } from "./lib/refs";
 import type {
   AlignReady, AlignResult, BuildResult, Config, CutAudioSource, EpisodeStatus, EpisodeSummary, ModelList, Pass, Ref,
-  Issue, RefDefaults, RefGenerateMissingResult, RefMatchResult, SeedMode, ShotDetail, SourceFile, TakeRef, TargetList,
+  Issue, MasterJob, RefDefaults, RefGenerateMissingResult, RefMatchResult, SeedMode, ShotDetail, SourceFile, TakeRef,
+  TargetList,
 } from "./types";
 
 // ---------------------------------------------------------------------------
@@ -293,6 +294,8 @@ export interface AppState {
   renderAsk: RenderAsk | null;
   upscaleAsk: UpscaleAsk | null;
   masterAsk: MasterAsk | null;
+  /** the episode's master job: being assembled, or the last one (null: none known) */
+  masterJob: MasterJob | null;
   /** refs by episode (GET /h3pipe/refs) */
   refs: Record<string, Ref[]>;
   refsError: Record<string, string>;
@@ -417,6 +420,7 @@ export function initialState(prefs: Prefs = {}): AppState {
     renderAsk: null,
     upscaleAsk: null,
     masterAsk: null,
+    masterJob: null,
     refs: {},
     refsError: {},
     refsLoading: {},
