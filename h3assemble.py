@@ -44,8 +44,12 @@ Shots timed against recorded dialogue (`audio_in`/`audio_out` in the
 shotlist, written by h3align) are trimmed to their exact window, because H3
 renders them rounded up to its frame grid. The trimmed cut lines up with the
 recording end to end; `--audio master` lays the recording under it to check
-sync. Trimming re-encodes every clip (x264, CRF 16) so they concat cleanly;
-so do cut.json trims and placeholders.
+sync. A trimmed clip is re-encoded (x264, CRF 16; CRF 12 at --quality
+master), and so are cut.json trims, placeholders and clips at another rate or
+size. The other clips are copied as they are when they are all encoded alike
+and a re-encoded clip comes out with their H.264 headers (a master's upscales
+do); otherwise every clip is re-encoded, so the concat demuxer sees one set of
+stream parameters (`--reencode-all` asks for that).
 
 This is a review cut, not a conform. It exists so you can watch the episode as
 one file the moment enough shots exist — the real edit happens in an NLE against
@@ -72,10 +76,22 @@ import h3peaks  # noqa: E402
 import h3takes  # noqa: E402
 
 NOT_RENDERED = "not rendered"
+# --progress: one line per step for whoever runs this (h3master, through
+# h3edit.run_tool): `##h3assemble {"stage", "done", "total", "text"}`. Stages:
+# probe (reading each clip), clips (writing each), join, prores, verify.
+PROGRESS = "##h3assemble "
 
 
 def run(cmd: list[str], timeout: int = 900) -> subprocess.CompletedProcess:
     return subprocess.run(cmd, capture_output=True, timeout=timeout)
+
+
+def say(on: bool, stage: str, done: int | None = None, total: int | None = None,
+        text: str = "") -> None:
+    """A progress line, when --progress asked for them."""
+    if on:
+        print(PROGRESS + json.dumps({"stage": stage, "done": done, "total": total,
+                                     "text": text}), flush=True)
 
 
 def have(tool: str) -> bool:
@@ -83,6 +99,18 @@ def have(tool: str) -> bool:
 
 
 def frame_count(path: str) -> int:
+    """The clip's video frames. An mp4 header records its sample count, which is
+    read without decoding anything; `-count_frames` decodes the whole stream
+    (minutes on a master) and is only the fallback, for a file whose header
+    has no count."""
+    r = run(["ffprobe", "-v", "error", "-select_streams", "v:0",
+             "-show_entries", "stream=nb_frames", "-of", "csv=p=0", path], timeout=60)
+    try:
+        n = int(r.stdout.decode().strip())
+        if n > 0:
+            return n
+    except (ValueError, AttributeError):
+        pass
     r = run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-count_frames",
              "-show_entries", "stream=nb_read_frames", "-of", "csv=p=0", path],
             timeout=300)
@@ -123,19 +151,132 @@ def episode_fps(root: str, doc: dict) -> float:
     return float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) and v > 0 else 24.0
 
 
-def video_codec(path: str) -> str | None:
-    """The first video stream's codec, profile and pixel format ("h264 High
-    yuv420p"), or None. The concat demuxer can only copy clips that agree on all
-    three: an MP4 track keeps one set of H.264 headers, so an NVENC Main clip
-    copied beside x264 High ones plays in ffmpeg but can break a browser or a
-    hardware decoder at the join."""
+SIG_KEYS = ("codec_name", "profile", "level", "pix_fmt", "width", "height",
+            "r_frame_rate", "time_base", "sample_aspect_ratio")
+
+
+def stream_sig(path: str) -> tuple[tuple | None, tuple[int, int] | None, float]:
+    """(the first video stream's parameters and H.264 headers, the first audio
+    stream's (sample rate, channels), how many seconds the sound runs past the
+    picture), the first two None when absent. Clips the concat demuxer copies
+    side by side must agree on the first: an MP4 track keeps one set of headers
+    for every clip in it. The third must be nothing: the demuxer starts the next
+    clip where the longer stream ends, so sound that overruns leaves a hole in
+    the picture's timing (sh1360's upscale, 2026-10-04: 22 ms)."""
+    r = run(["ffprobe", "-v", "error", "-show_data", "-show_entries",
+             "stream=codec_type,sample_rate,channels,duration,extradata," + ",".join(SIG_KEYS),
+             "-of", "default", path], timeout=60)
+    video = audio = None
+    vdur = adur = None
+    for block in r.stdout.decode("utf-8", "replace").split("[STREAM]")[1:]:
+        block = block.split("[/STREAM]")[0]
+        head, _, data = block.partition("extradata=")
+        f = dict(ln.split("=", 1) for ln in head.splitlines() if "=" in ln)
+        if f.get("codec_type") == "video" and video is None:
+            video = tuple(f.get(k) for k in SIG_KEYS) + (data.strip(),)
+            vdur = _float(f.get("duration"))
+        elif f.get("codec_type") == "audio" and audio is None:
+            try:
+                audio = (int(f["sample_rate"]), int(f["channels"]))
+            except (KeyError, ValueError):
+                pass
+            adur = _float(f.get("duration"))
+    over = adur - vdur if vdur is not None and adur is not None else 0.0
+    return video, audio, over
+
+
+def _float(v) -> float | None:
     try:
-        r = run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries",
-                 "stream=codec_name,profile,pix_fmt", "-of", "csv=p=0:s=|", path], timeout=60)
-        out = r.stdout.decode("utf-8", "replace").strip()
-        return " ".join(out.split("|")) if out else None
-    except Exception:
+        return float(v)
+    except (TypeError, ValueError):
         return None
+
+
+# sound running past the picture by more than this is cut to it (an AAC
+# frame's rounding is a third of a millisecond)
+OVERRUN_S = 0.001
+
+
+def video_duration(path: str) -> float | None:
+    """The first video stream's duration from the file's header."""
+    r = run(["ffprobe", "-v", "error", "-select_streams", "v:0",
+             "-show_entries", "stream=duration", "-of", "csv=p=0", path], timeout=60)
+    return _float(r.stdout.decode().strip())
+
+
+def standard_sig(p: dict, fps: float, quality: str) -> tuple | None:
+    """The video signature conform gives a clip of this cut: a few frames of
+    `p` (a clip at the cut's size and rate) written the way every re-encoded
+    clip is. None if that can't be made."""
+    with tempfile.TemporaryDirectory(prefix="h3std_") as d:
+        trial = os.path.join(d, "standard.mp4")
+        try:
+            conform(p["path"], trial, None, fps, max(1, min(12, p["used"])), quality=quality)
+        except RuntimeError:
+            return None
+        return stream_sig(trial)[0]
+
+
+JOIN_FRAMES = 6
+
+
+def picture_offset(path: str) -> float:
+    """Where the picture starts, counted as ffmpeg's input `-ss` counts: from
+    the file's start, which is its earliest stream's. A concat's picture starts
+    a little after its sound (the B-frame delay), and a file of picture alone
+    starts with it: seeking by the picture's own start time, or by none, lands a
+    frame off in one case or the other."""
+    r = run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries",
+             "stream=start_time:format=start_time", "-of", "json", path], timeout=60)
+    try:
+        d = json.loads(r.stdout.decode())
+        return (float(d["streams"][0].get("start_time") or 0)
+                - float(d.get("format", {}).get("start_time") or 0))
+    except (ValueError, KeyError, IndexError):
+        return 0.0
+
+
+def frame_md5s(path: str, first: int, count: int, fps: float) -> list[str]:
+    """framemd5 of `count` decoded frames from frame `first` on, or [] when they
+    don't decode cleanly."""
+    at = max(0.0, picture_offset(path) + (first - 0.5) / fps)
+    r = run(["ffmpeg", "-v", "error", "-ss", f"{at:.6f}", "-i", path, "-map", "0:v:0",
+             "-frames:v", str(count), "-f", "framemd5", "-"], timeout=600)
+    if r.returncode != 0 or r.stderr.strip():
+        return []
+    return [ln.rsplit(",", 1)[1].strip() for ln in r.stdout.decode().splitlines()
+            if ln and not ln.startswith("#")]
+
+
+def joins_ok(out: str, clips: list[tuple[str, int]], around: set[int],
+             fps: float) -> str | None:
+    """None when the frames either side of each join next to a clip in `around`
+    (indexes into `clips`, (path, frames) as concatenated) decode in `out` to the
+    frames that went in; else which join doesn't."""
+    starts, at = [], 0
+    for _, n in clips:
+        starts.append(at)
+        at += n
+    joins = sorted({j for i in around for j in (i, i + 1) if 0 < j < len(clips)})
+    for j in joins:
+        (a, na), (b, nb) = clips[j - 1], clips[j]
+        k = min(JOIN_FRAMES, na, nb)
+        expect = frame_md5s(a, na - k, k, fps) + frame_md5s(b, 0, k, fps)
+        seen = frame_md5s(out, starts[j] - k, 2 * k, fps)
+        if len(expect) != 2 * k or seen != expect:
+            return f"the join at frame {starts[j]} doesn't decode to the frames that went in"
+    return None
+
+
+def timing_gap(out: str, frames: int, fps: float) -> str | None:
+    """None when the joined picture lasts exactly its frames (within half a
+    frame); else how much longer it runs: a hole in its timing, every frame after
+    it late (a clip's sound overran its picture)."""
+    d = video_duration(out)
+    if d is None or abs(d - frames / fps) <= 0.5 / fps:
+        return None
+    return (f"the picture runs {d - frames / fps:+.3f}s from its {frames} frames: "
+            f"a gap in its timing")
 
 
 def video_size(path: str) -> tuple[int, int] | None:
@@ -234,6 +375,9 @@ def normalise(src: str, dst: str, audio_wav: str | None, fps: float,
                       f":sample_rate={rate}"]
     cmd += ["-map", "0:v:0", "-map", "1:a:0",
             "-c:v", "copy", "-c:a", "aac", "-b:a", "192k"]
+    if frames > 0:
+        # never past the picture: the next clip would start late (stream_sig)
+        cmd += ["-af", f"atrim=end={frames / fps:.6f}"]
     if layout:
         cmd += ["-ar", str(rate), "-ac", str(ch)]
     cmd += ["-fps_mode", "passthrough", dst]
@@ -259,7 +403,7 @@ def prores_from(src: str, mov: str) -> str | None:
 def conform(src: str, dst: str, audio: str | None, fps: float, frames: int,
             start: int = 0, size: tuple[int, int] | None = None,
             src_fps: float | None = None, ready: bool = False,
-            quality: str = "review") -> None:
+            quality: str = "review", layout: tuple[int, int] | None = None) -> None:
     """Re-encode one clip to exactly `frames` frames with a matching audio track.
 
     `audio` is the clip itself (use its own sound), a wav path, or None for
@@ -284,7 +428,11 @@ def conform(src: str, dst: str, audio: str | None, fps: float, frames: int,
     or dropped on the clip's own clock, so nothing speeds up or slows down;
     the last frame is held if the conversion comes up a frame short. `start`
     and `frames` then count frames at `fps`.
+
+    `layout` (sample rate, channels) writes the sound to match clips that are
+    copied beside this one (see `selective`); None is 44.1 kHz stereo.
     """
+    rate, ch = layout or (44100, 2)
     dur = f"{frames / fps:.6f}"
     cmd = ["ffmpeg", "-y", "-v", "error", "-i", src]
     silent = False
@@ -313,13 +461,16 @@ def conform(src: str, dst: str, audio: str | None, fps: float, frames: int,
     if size:
         w, h = size
         vf += [f"scale={w}:{h}:force_original_aspect_ratio=decrease",
-               f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2", "setsar=1"]
+               f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2"]
+    # every clip written alike: pixels untagged (square), as a render saves its
+    # takes, so a scaled clip's H.264 headers are a plain one's (`standard`)
+    vf.append("setsar=0")
     cmd += ["-map", "0:v:0", "-map", amap]
     if vf:
         cmd += ["-vf", ",".join(vf)]
     cmd += ["-frames:v", str(frames),
             "-c:v", "libx264", *QUALITY_ARGS[quality], "-pix_fmt", "yuv420p",
-            "-r", f"{fps:g}", "-c:a", "aac", "-b:a", "192k", "-ar", "44100", "-ac", "2",
+            "-r", f"{fps:g}", "-c:a", "aac", "-b:a", "192k", "-ar", str(rate), "-ac", str(ch),
             "-af", ",".join(af), "-t", dur, dst]
     r = run(cmd)
     if r.returncode != 0:
@@ -395,12 +546,17 @@ def main() -> int:
     ap.add_argument("--partial", action="store_true",
                     help="assemble the shots that exist instead of refusing")
     ap.add_argument("--check", action="store_true", help="report only")
+    ap.add_argument("--progress", action="store_true",
+                    help="print a ##h3assemble progress line per step (for h3master)")
     ap.add_argument("--upscaled", action="store_true",
                     help="each clip from its fresh upscale (h3upscale), the "
                          "cut at the upscale size; clips without one are scaled up")
     ap.add_argument("--quality", choices=sorted(QUALITY_ARGS), default="review",
                     help="how clips that must be re-encoded are written: review (x264 CRF 16) or "
                          "master (CRF 12, slow); clips that needn't be are copied either way")
+    ap.add_argument("--reencode-all", action="store_true",
+                    help="when any clip needs re-encoding, re-encode every clip (by default "
+                         "only those clips are, the rest copied, when their encodings agree)")
     ap.add_argument("--intermediate", choices=["prores"], default=None,
                     help="also write the cut as a ProRes 422 HQ .mov (10-bit, PCM audio) beside "
                          "it, for an editor downstream")
@@ -479,7 +635,8 @@ def main() -> int:
     # (acc_s, the exact running time; acc_f, the frames laid so far) rounds
     # each one so the total never drifts more than half a frame
     acc_s, acc_f = 0.0, 0
-    for e in entries:
+    for i, e in enumerate(entries):
+        say(args.progress, "probe", i, len(entries), e.shot)
         if e.orphan:
             orphans.append(e.shot)
             rows.append(("orphan", e, None))
@@ -718,17 +875,12 @@ def main() -> int:
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
 
     # Dialogue windows, cut.json trims and placeholders all need a re-encode;
-    # once one clip is re-encoded every clip is, so the concat demuxer sees one
-    # set of stream parameters.
-    # So do clips at another frame rate or size (a mixed-target cut).
-    # an NVENC HEVC upscale beside H.264 clips, or an NVENC Main one beside x264
-    # High ones: concat can't copy streams that don't agree (video_codec)
-    codecs = {video_codec(p["path"]) for p in plan}
-    mixed = len(codecs) > 1
-    if mixed:
-        print(f"  clips in more than one encoding ({', '.join(sorted(c or '?' for c in codecs))}): "
-              f"re-encoding them all")
-    reencode = bool(windowed or trimmed or placeholders or converted or resized or mixed)
+    # so do clips at another frame rate or size (a mixed-target cut), and clips
+    # not encoded the way the cut is (an NVENC upscale beside x264 ones, a
+    # derived take's pixel-aspect tag), found by their headers below. The rest
+    # are copied beside them when that is safe (`selective`), else every clip is
+    # re-encoded, so the concat demuxer sees one set of stream parameters.
+    reencode = bool(windowed or trimmed or placeholders or converted or resized)
     size = None
     if placeholders or resized:
         if width and height:
@@ -753,37 +905,116 @@ def main() -> int:
             # the mp4's own sound, else its _h3.wav, else silence
             # (h3peaks.clip_audio: the editor's take `audio` is the same rule)
             p["sound"], p["sourced"] = h3peaks.clip_audio(p["path"], p["wav"]), False
+    # Only the clips that need it are re-encoded, the rest copied, when the
+    # copies agree on their encoding and the re-encoded clips come out with the
+    # same headers (conform at the quality the copies were saved with: a master's
+    # upscales are x264 CRF 12 slow, as conform's `master` is). Checked twice:
+    # the first re-encoded clip's headers before the rest are written, and the
+    # frames either side of each join after the concat; either failing re-encodes
+    # every clip, as a cut always was before (--reencode-all asks for that).
+    needs = {id(p) for p in windowed + trimmed + placeholders + converted + resized}
+    sigs: dict[int, tuple] = {}
+    selective = None                    # the cut's standard: its video signature
+    if len(needs) < len(plan):
+        say(args.progress, "probe", text="comparing the clips' encodings")
+        for p in plan:
+            if id(p) not in needs:
+                sigs[id(p)] = stream_sig(p["path"])
+        kinds = {sig[0] for sig in sigs.values()}
+        if needs or len(kinds) > 1 or None in kinds:
+            # Something is re-encoded, or the copies don't agree: the standard is
+            # how conform writes a clip of this cut (its size, rate and quality),
+            # and a clip already written that way is copied, every other one
+            # conformed to it. Nothing copied matches: every clip is re-encoded.
+            reencode = True
+            ref = None if args.reencode_all else standard_sig(
+                next(p for p in plan if id(p) not in needs), fps, args.quality)
+            odd = [p for p in plan if id(p) in sigs and sigs[id(p)][0] != ref]
+            if ref is not None and odd and len(odd) < len(sigs):
+                print(f"  {len(odd)} clip(s) not encoded the way this cut is, conformed: "
+                      + ", ".join(p["id"] for p in odd[:8]) + (" ..." if len(odd) > 8 else ""))
+            needs |= {id(p) for p in odd}
+            if ref is not None and len(needs) < len(plan):
+                selective = ref
+            elif not args.reencode_all:
+                print("  re-encoding every clip: none is encoded the way this cut is")
+
     # the clips that keep their own sound are copied whole; a track made up
     # for any other clip is written in their sample rate and channel layout,
     # so the concat demuxer still sees one set of stream parameters
-    copied = next((p for p in plan if not reencode and p["sound"] == p["path"]), None)
-    layout = audio_format(copied["path"]) if copied else None
-    lay = layout or (44100, 1)
+    def copies(sel) -> bool:
+        return not reencode or sel is not None
+
+    def pick_layout(sel):
+        copied = next((p for p in plan if copies(sel) and id(p) not in (needs if reencode else ())
+                       and p["sound"] == p["path"]), None)
+        if not copied:
+            # nothing copied keeps its sound: one layout for the re-encoded and
+            # the remuxed clips alike (conform's own, 44.1 kHz stereo)
+            return (44100, 2) if reencode and sel is not None else None
+        return sigs[id(copied)][1] if id(copied) in sigs else audio_format(copied["path"])
+
+    def make(i: int, p: dict, sel, layout, tmp: str) -> str:
+        src, sound = p["path"], p["sound"]
+        lay = layout or (44100, 1)
+        if p["sourced"]:
+            # cut or padded to the clip, so its length never changes
+            sound = os.path.join(tmp, f"{i:04d}.wav")
+            clip_track(p["audio_src"], sound, p["audio_spec"], p["used"] / fps, *lay)
+        norm = os.path.join(tmp, f"{i:04d}.mp4")
+        if reencode and (sel is None or id(p) in needs):
+            conform(src, norm, sound,
+                    fps, p["used"], start=p["trim_in"],
+                    size=size if (p["placeholder"] or p in resized) else None,
+                    src_fps=p["src_fps"], ready=p["sourced"], quality=args.quality,
+                    layout=layout if sel is not None else None)
+        elif sound != src:
+            normalise(src, norm, sound, fps, p.get("frames", 0), layout=layout)
+        elif id(p) in sigs and (sigs[id(p)][1] != layout or sigs[id(p)][2] > OVERRUN_S):
+            # its own sound, in another rate or layout than the copies', or
+            # running past the picture: remuxed, the picture still copied
+            normalise(src, norm, src, fps, p["used"], layout=layout)
+        else:
+            shutil.copy(src, norm)
+        return norm
+
+    def write(sel, tmp: str, made: dict[int, str]) -> tuple[subprocess.CompletedProcess, list]:
+        layout = pick_layout(sel)
+        listing = os.path.join(tmp, "concat.txt")
+        clips = []
+        with open(listing, "w", encoding="utf-8") as fh:
+            say(args.progress, "clips", 0, len(plan))
+            for i, p in enumerate(plan):
+                norm = made.pop(i, None) or make(i, p, sel, layout, tmp)
+                clips.append((norm, p["used"]))
+                fh.write(f"file '{norm.replace(os.sep, '/')}'\n")
+                say(args.progress, "clips", i + 1, len(plan), p["id"])
+        say(args.progress, "join", text=os.path.basename(out_path))
+        return run(["ffmpeg", "-y", "-v", "error", "-f", "concat", "-safe", "0",
+                    "-i", listing, "-c", "copy", out_path], timeout=1800), clips
 
     with tempfile.TemporaryDirectory(prefix="h3asm_") as tmp:
-        listing = os.path.join(tmp, "concat.txt")
-        with open(listing, "w", encoding="utf-8") as fh:
-            for i, p in enumerate(plan):
-                src, sound = p["path"], p["sound"]
-                if p["sourced"]:
-                    # cut or padded to the clip, so its length never changes
-                    sound = os.path.join(tmp, f"{i:04d}.wav")
-                    clip_track(p["audio_src"], sound, p["audio_spec"],
-                               p["used"] / fps, *lay)
-                norm = os.path.join(tmp, f"{i:04d}.mp4")
-                if reencode:
-                    conform(src, norm, sound,
-                            fps, p["used"], start=p["trim_in"],
-                            size=size if (p["placeholder"] or p in resized) else None,
-                            src_fps=p["src_fps"], ready=p["sourced"], quality=args.quality)
-                elif sound != src:
-                    normalise(src, norm, sound, fps, p.get("frames", 0), layout=layout)
-                else:
-                    shutil.copy(src, norm)
-                fh.write(f"file '{norm.replace(os.sep, '/')}'\n")
-
-        r = run(["ffmpeg", "-y", "-v", "error", "-f", "concat", "-safe", "0",
-                 "-i", listing, "-c", "copy", out_path], timeout=1800)
+        r, clips = write(selective, tmp, {})
+        if r.returncode == 0 and selective is not None:
+            say(args.progress, "verify", text="checking the joins")
+            redone = [i for i, p in enumerate(plan) if id(p) in needs]
+            off = next((plan[i]["id"] for i in redone
+                        if stream_sig(clips[i][0])[0] != selective), None)
+            why = ((f"{off} doesn't come out with the cut's H.264 headers" if off else None)
+                   or timing_gap(out_path, total, fps)
+                   or joins_ok(out_path, clips, set(redone), fps))
+            if why:
+                print(f"  re-encoding every clip: {why}")
+                selective = None
+                r, clips = write(None, tmp, {})
+        if r.returncode == 0 and not reencode:
+            gap = timing_gap(out_path, total, fps)
+            if gap:
+                print(f"  ! {gap}")
+        if reencode:
+            n = len(needs) if selective is not None else len(plan)
+            print(f"  re-encoded {n} clip(s)"
+                  + (f", copied {len(plan) - n}" if selective is not None else ""))
         if r.returncode == 0 and args.audio == "master":
             track = doc.get("defaults", {}).get("master_track", "")
             track = track if os.path.isabs(track) else os.path.join(root, track)
@@ -806,6 +1037,7 @@ def main() -> int:
                     shutil.move(tmp_out, out_path)
         if r.returncode == 0 and args.intermediate == "prores":
             mov = os.path.splitext(out_path)[0] + ".mov"
+            say(args.progress, "prores", text=os.path.basename(mov))
             why = prores_from(out_path, mov)
             print(f"  ProRes 422 HQ: {os.path.relpath(mov, root)}" if not why else
                   f"  ! the ProRes export failed: {why}")
@@ -831,6 +1063,7 @@ def main() -> int:
                         if p["audio_spec"] else "")
                      + "\n")
 
+    say(args.progress, "verify", text="counting the output's frames")
     got = frame_count(out_path)
     print(f"\n  -> {out_path}")
     print(f"  -> {edl}")

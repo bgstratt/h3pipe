@@ -162,6 +162,35 @@ class EndToEnd(unittest.TestCase):
             _, said = self.publish(self.episode(show, assembled=False))
             self.assertIn("re-encoding the whole cut: the title clips can't be encoded", said)
 
+    def run_with_progress(self, ep: str) -> tuple[int, list, str]:
+        """h3publish as h3master runs it: through h3edit.run_tool, --progress."""
+        events = []
+        rc, out, err = h3edit.run_tool("h3publish.py", [ep, "--progress"], ep, 600,
+                                       progress=lambda tool, ev: events.append((tool, ev)))
+        self.assertEqual(rc, 0, out + err)
+        self.assertNotIn("##h3publish", out)            # progress lines don't reach the log
+        return rc, events, out
+
+    def test_progress_says_the_picture_was_copied(self):
+        with tempfile.TemporaryDirectory() as show:
+            _, events, _ = self.run_with_progress(self.episode(show, assembled=True))
+            self.assertTrue(all(tool == "h3publish" for tool, _ in events))
+            stages = [ev["stage"] for _, ev in events]
+            for want in ("titles", "join", "verify"):
+                self.assertIn(want, stages)
+            self.assertEqual(events[-1][1]["stage"], "done")
+            self.assertEqual((events[-1][1]["picture"], events[-1][1]["why"]), ("copied", ""))
+
+    def test_progress_says_the_picture_was_reencoded(self):
+        with tempfile.TemporaryDirectory() as show:
+            _, events, _ = self.run_with_progress(self.episode(show, assembled=False))
+            done = events[-1][1]
+            self.assertEqual(done["picture"], "re-encoded")
+            self.assertIn("the title clips can't be encoded", done["why"])
+            counted = [ev for _, ev in events if ev["stage"] == "reencode" and ev["total"]]
+            self.assertTrue(counted)                     # ffmpeg's frame count, as it went
+            self.assertEqual(counted[0]["total"], 48 + 72 + 48)
+
     def test_missing_clip(self):
         with tempfile.TemporaryDirectory() as ep:
             make_clip(os.path.join(ep, "cut.mp4"), 1, "320x176", 24)

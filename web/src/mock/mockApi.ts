@@ -103,6 +103,8 @@ export function createMockApi(emit: Emit, opts: MockOptions = {}): Api & { outsi
   const alias = new Map<string, string>();
   let nextPrompt = 1;
   let chain: Promise<void> = Promise.resolve();
+  /** the episode's master job (GET /h3pipe/master/job) */
+  let masterJob: import("../types").MasterJob | null = null;
 
   const wait = (ms = opts.latency ?? 120) => (ms > 0 ? new Promise<void>((r) => setTimeout(r, ms)) : Promise.resolve());
 
@@ -1219,9 +1221,39 @@ export function createMockApi(emit: Emit, opts: MockOptions = {}): Api & { outsi
       const plan = { pass: req.pass ?? "final", size: [1920, 1080] as [number, number], fit: "crop" as const, quality: "master" as const,
                      counts: { upscale: count("upscale"), ok: count("ok"), kept: 0, queued: 0, gap: count("gap") },
                      ready: count("upscale") === 0 && count("gap") === 0, rows };
-      return req.action === "assemble"
-        ? { plan, output: "master/ep01_master_1920x1080.mp4", mov: null, report: "master/ep01_master.md", titles: { intro: "../_titles/INTRO.mp4", outro: "../_titles/OUTRO.mp4" } }
-        : { plan, queued: [], errors: [] };
+      if (req.action !== "assemble") return { plan, queued: [], errors: [] };
+      if (masterJob?.state === "running") {
+        throw new MockError("a master of this episode is already being assembled by the editor", 409, { job: masterJob });
+      }
+      // the job, step by step, as h3master reports it
+      const job: import("../types").MasterJob = {
+        ep: EP, pass: req.pass ?? "final", state: "running", elsewhere: false, by: "the editor",
+        started: "2026-10-04T08:13:32-05:00", finished: null, step: "assemble", stage: "start",
+        done: null, total: null, text: "", output: null, mov: null, report: null, titles: null, error: "",
+      };
+      const step = async (fields: Partial<typeof job>) => {
+        Object.assign(job, fields);
+        masterJob = { ...job };
+        emit("h3pipe.master", { ...job });
+        await wait();
+      };
+      const n = rows.length;
+      await step({});
+      await step({ stage: "probe", done: 0, total: n, text: rows[0]?.shot ?? "" });
+      for (let i = 1; i <= n; i++) await step({ stage: "clips", done: i, total: n, text: rows[i - 1].shot });
+      await step({ stage: "verify", done: null, total: null, text: "counting the output's frames" });
+      await step({ step: "titles", stage: "titles", text: "intro" });
+      await step({ stage: "titles", text: "outro" });
+      await step({ stage: "verify", text: "checking the joins" });
+      const titles = { intro: "../_titles/INTRO.mp4", outro: "../_titles/OUTRO.mp4", picture: "copied" as const, why: "" };
+      await step({ state: "done", stage: "done", finished: "2026-10-04T08:42:48-05:00",
+                   output: "master/ep01_master_1920x1080.mp4", mov: null, report: "master/ep01_master.md", titles });
+      return { plan, output: job.output!, mov: null, report: job.report!, titles, job: { ...job } };
+    },
+    async masterJob(ep) {
+      await wait();
+      need(ep);
+      return { job: masterJob ? { ...masterJob } : null };
     },
     async putUpscaleKeep(ep, shot, take, keep, pass) {
       await wait();

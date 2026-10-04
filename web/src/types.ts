@@ -817,7 +817,43 @@ export interface MasterResult {
   mov?: string | null;
   report?: string;
   /** the intro / outro the master was made with (h3publish), null: none found */
-  titles?: { intro: string | null; outro: string | null } | null;
+  titles?: MasterTitles | null;
+  /** assemble: the job as it ended (GET /h3pipe/master/job has the same) */
+  job?: MasterJob;
+}
+
+/** The titles h3publish put on a master, and how it laid the cut in between:
+ * `copied` (only the title clips encoded) or `re-encoded` (the whole cut; `why`). */
+export interface MasterTitles {
+  intro: string | null;
+  outro: string | null;
+  picture?: "copied" | "re-encoded" | null;
+  why?: string;
+}
+
+/** A master being assembled, or the last one this ComfyUI assembled
+ * (GET /h3pipe/master/job, and every `h3pipe.master` event). */
+export interface MasterJob {
+  ep: string;
+  pass: Pass | null;
+  state: "running" | "done" | "failed";
+  /** started by something other than this editor (`h3.py master`): no progress to show */
+  elsewhere: boolean;
+  by: string | null;
+  started: string | null;
+  finished: string | null;
+  /** where it is: assemble (h3assemble) or titles (h3publish) */
+  step: "assemble" | "titles" | null;
+  /** probe, clips, join, prores, verify (assemble); titles, join, verify, reencode, prores (titles) */
+  stage: string | null;
+  done: number | null;
+  total: number | null;
+  text: string;
+  output: string | null;
+  mov: string | null;
+  report: string | null;
+  titles: MasterTitles | null;
+  error: string;
 }
 
 /** The series config's upscale.master, as the Upscale dialog shows it. */

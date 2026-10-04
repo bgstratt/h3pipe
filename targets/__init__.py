@@ -77,6 +77,7 @@ import math
 import os
 import re
 import threading
+import time
 from dataclasses import dataclass, field
 
 from . import modelid
@@ -842,10 +843,33 @@ def custom_folders(root: str) -> list[tuple[str, str, str]]:
     return out
 
 
+# (root, thread roots) -> (monotonic time, folders). load_target is called per
+# take, several times, on every episode status: rescanning every kind folder
+# and re-reading each custom target.json each time was seconds per request.
+# A listing is reused for FOLDERS_TTL seconds; a target saved or deleted in this
+# process clears it at once (forget_targets), one written by another process
+# (h3inspect on the command line) shows up within the TTL.
+_FOLDERS: dict[tuple, tuple[float, list]] = {}
+FOLDERS_TTL = 2.0
+
+
 def _folders(root: str | None = None) -> list[tuple[str, str, str]]:
     """(kind, id, folder) of every target on disk: the repo's, then the custom
     ones of `root`'s show and of any show this thread has open (use_roots).
     A custom target may not take a repo target's id; load_target says so."""
+    key = (root, thread_roots())
+    hit = _FOLDERS.get(key)
+    now = time.monotonic()
+    if hit and now - hit[0] < FOLDERS_TTL:
+        return list(hit[1])
+    out = _scan_folders(root)
+    if len(_FOLDERS) > 64:
+        _FOLDERS.clear()
+    _FOLDERS[key] = (now, out)
+    return list(out)
+
+
+def _scan_folders(root: str | None) -> list[tuple[str, str, str]]:
     out = []
     for kind in KINDS:
         d = os.path.join(HERE, kind)
@@ -936,6 +960,7 @@ def shadowed_custom(root: str) -> list[str]:
 def forget_targets() -> None:
     """Drop the cache (a custom target.json was written or deleted)."""
     _CACHE.clear()
+    _FOLDERS.clear()
 
 
 def video_target(series_cfg: dict | None = None) -> Target:

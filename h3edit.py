@@ -1977,10 +1977,27 @@ RUN_SCRIPT = ("import os, runpy, sys; s = sys.argv[1]; sys.argv = sys.argv[1:]; 
               "runpy.run_path(s, run_name='__main__')")
 
 
-def run_tool(script: str, args: list[str], cwd: str, timeout: int) -> tuple[int, str, str]:
+# A progress line a script prints for whoever runs it: `##<tool> {json}`
+# (h3assemble, h3publish; h3align has its own reader in h3track).
+PROGRESS_LINE = re.compile(r"^##(h3\w+) (\{.*\})\s*$")
+
+
+def progress_line(prefix: str, event: dict) -> None:
+    """Print one progress line (`prefix` is "##h3assemble " and the like)."""
+    import json
+    print(prefix + json.dumps(event), flush=True)
+
+
+def run_tool(script: str, args: list[str], cwd: str, timeout: int,
+             progress=None) -> tuple[int, str, str]:
     """Run a pipeline script beside this file with this Python: (exit code,
-    stdout, stderr)."""
+    stdout, stderr). With `progress`, stdout is read as it comes and every
+    progress line (PROGRESS_LINE) goes to progress(tool, event) instead of
+    into stdout."""
     env = dict(os.environ, **TOOL_ENV)
+    if progress is not None:
+        return _stream_tool([sys.executable, "-c", RUN_SCRIPT, os.path.join(HERE, script), *args],
+                            script, cwd, env, timeout, progress)
     try:
         r = subprocess.run([sys.executable, "-c", RUN_SCRIPT, os.path.join(HERE, script), *args],
                            capture_output=True, cwd=cwd, env=env, timeout=timeout)
@@ -1989,6 +2006,52 @@ def run_tool(script: str, args: list[str], cwd: str, timeout: int) -> tuple[int,
     out, err = (b.decode("utf-8", "replace").replace("\r\n", "\n")
                 for b in (r.stdout, r.stderr))
     return r.returncode, out, err
+
+
+def _stream_tool(cmd: list[str], script: str, cwd: str, env: dict, timeout: int,
+                 progress) -> tuple[int, str, str]:
+    """run_tool with stdout read line by line (stderr drained beside it, so
+    neither pipe fills and stalls the script)."""
+    import json
+    import threading
+    p = subprocess.Popen(cmd, cwd=cwd, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    err_chunks: list[bytes] = []
+    drain = threading.Thread(target=lambda: err_chunks.append(p.stderr.read()), daemon=True)
+    drain.start()
+    stopped: list[bool] = []
+
+    def kill():
+        stopped.append(True)
+        p.kill()
+
+    killer = threading.Timer(timeout, kill)
+    killer.start()
+    lines: list[str] = []
+    try:
+        for raw in p.stdout:
+            line = raw.decode("utf-8", "replace").rstrip("\r\n")
+            m = PROGRESS_LINE.match(line)
+            if m:
+                try:
+                    ev = json.loads(m.group(2))
+                except ValueError:
+                    ev = None
+                if isinstance(ev, dict):
+                    try:
+                        progress(m.group(1), ev)
+                    except Exception:
+                        pass                    # a listener's trouble isn't the script's
+                    continue
+            lines.append(line)
+    finally:
+        p.stdout.close()
+        rc = p.wait()
+        killer.cancel()
+        drain.join(5)
+    err = b"".join(err_chunks).decode("utf-8", "replace").replace("\r\n", "\n")
+    if stopped:
+        return 1, "\n".join(lines), f"{script} took longer than {timeout}s and was stopped"
+    return rc, "\n".join(lines) + ("\n" if lines else ""), err
 
 
 def build_episode(root: str, timeout: int = 600) -> dict:

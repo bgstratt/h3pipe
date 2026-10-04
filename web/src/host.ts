@@ -19,7 +19,9 @@ export type HostEvent =
   /** P10: a pass's notepad changed (a note added, resolved or cleared) */
   | "h3pipe.issues"
   /** Phase 13: a take's upscale was queued, finished, failed or deleted */
-  | "h3pipe.upscale";
+  | "h3pipe.upscale"
+  /** a master being assembled: each step, then done or failed (a MasterJob) */
+  | "h3pipe.master";
 
 export type Severity = "success" | "info" | "warn" | "error";
 /** Docked surfaces (sidebar tabs and the bottom panel). The inspector and the

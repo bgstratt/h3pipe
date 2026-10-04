@@ -495,8 +495,41 @@ unless `allow_gaps`) writes `master/<ep>_master_<WxH>.mp4` (and `.mov` with `pro
 one without `deliver`. When the episode has an intro or outro (`_titles/INTRO.mp4`,
 `OUTRO.mp4` in the show folder, or the series config's `publish` block), the master is
 made with them, the episode's title drawn on (h3publish), and the `.mov` from that:
-`titles` is `{"intro", "outro"}` (the clips used, either null), else null. A master that
-assembled but couldn't be titled is a 500 saying so; the untitled master is left in place.
+`titles` is `{"intro", "outro", "picture", "why"}` (the clips used, either null), else null.
+`picture` is how h3publish laid the cut in between them: `"copied"` (only the title clips
+encoded) or `"re-encoded"` (the whole cut again, `why` says what stopped the copy: a check
+at a join, a cut h3assemble didn't encode); the report's `Picture:` line says the same. A
+master that assembled but couldn't be titled is a 500 saying so; the untitled master is
+left in place.
+
+`assemble` answers when the master is made, which can take a while (h3assemble re-encodes
+the clips that need it — trims, dialogue windows, gaps scaled up — and copies the upscales
+beside them when their H.264 headers agree, checking each join; when they don't, every clip
+is re-encoded, half an hour for a 300-shot episode), so it is also a **job**: `job` in the
+answer, `GET /h3pipe/master/job`, and the `h3pipe.master` events. Only one master of an
+episode is assembled at a time: `<episode>/master/.assembling.json` (`{pid, host, by,
+started}`) is held while one runs, whoever started it, the editor or `h3.py master`, and a
+second `assemble` is a 409 `{"error": "a master of this episode is already being
+assembled by …", "job"}`. A lock whose process has gone (or another machine's, a day old)
+is stale and taken over.
+
+### `GET /h3pipe/master/job?ep=…`
+`{"job": {...} | null}`: the master this ComfyUI is assembling for the episode, or the last
+one it assembled (kept until ComfyUI restarts):
+```json
+{"ep": "C:\\Shows\\MyShow\\ep01", "pass": "final", "state": "running", "elsewhere": false,
+ "by": "the editor", "started": "2026-10-04T08:13:32-05:00", "finished": null,
+ "step": "assemble", "stage": "clips", "done": 212, "total": 323, "text": "sh2590",
+ "output": null, "mov": null, "report": null, "titles": null, "error": ""}
+```
+`state`: `running`, `done` (`output`, `mov`, `report`, `titles` as `assemble` answers them)
+or `failed` (`error`). `step` is `assemble` (h3assemble's stages: `probe` reading each clip,
+`clips` writing each, `join`, `prores` when the master has no titles, `verify` counting the
+master's frames) or `titles` (h3publish's: `titles` with `text` intro / outro, `join`,
+`verify` checking the joins, `reencode` with a frame count, then `prores`: with titles the
+`.mov` is made once, from the titled master); `done` / `total` count what has a count. A run
+this ComfyUI didn't start (`h3.py master`, read from the lock) is `{"state": "running",
+"elsewhere": true, "by", "started"}` with nothing else; it sends no events, so ask again.
 
 ### `PUT /h3pipe/upscale/keep`
 Body `{"ep", "pass"?, "shot", "take", "keep": true | false}`: mark a take's finished upscale
@@ -560,6 +593,9 @@ knows from `/h3pipe/render`. Two custom events come from the node pack:
 - **`h3pipe.upscale`** (Phase 13), `{"ep", "shot", "take", "status"}`: "queued" from
   `POST /h3pipe/upscale`, "ok" or "failed" from `H3SaveUpscale` when it closes the
   `.up.json`, "deleted" from `DELETE /h3pipe/upscale`.
+- **`h3pipe.master`**, the whole job as `GET /h3pipe/master/job` has it: once when an
+  `assemble` starts, at every step (each clip written, each title encoded), and once
+  more when it is `done` or `failed`.
 
 ## Models
 
@@ -2680,6 +2716,29 @@ and the checks all call.
   concat demuxer still copies; it also fixes a latent mismatch that predates 9d.
 - **[settled] An audio source does not force a re-encode.** Only the 9b reasons do (dialogue
   windows, trims, placeholders, rate or size changes).
+- **[added 2026-10-04] Those reasons re-encode only their own clips.** The cut has a standard:
+  how conform writes a clip of it (its size, rate and quality), read from a few frames conformed
+  (`standard_sig`: codec, profile, level, pixel format, size, rate, time base, pixel aspect and
+  the H.264 headers). A clip already encoded that way is copied; every other one is conformed to
+  it — a derived take's 1:1 pixel tag, an NVENC upscale beside x264 ones. conform writes every
+  clip untagged (`setsar=0`), as a render saves its takes, so a scaled clip matches too. When
+  nothing needs re-encoding and the clips all agree, they are copied as they are, standard or
+  not. The re-encoded clips are written in the copies' audio layout, and a copy whose own sound
+  is in another layout is remuxed (`normalise`). Afterwards every re-encoded clip's headers must
+  be the standard's, the picture's length its frames', and the frames either side of each join
+  next to a re-encoded clip must decode to what went in. Any check failing re-encodes every
+  clip, as before; so does `--reencode-all`, and so does a cut where nothing matches. A master's upscales are
+  x264 CRF 12 slow, as conform's `master` is, so ep01 (18 trimmed clips of 323) re-encodes 18
+  (assembly 2 minutes instead of 12).
+- **[added 2026-10-04] Sound never runs past a copied clip's picture.** The concat demuxer starts
+  the next clip where the longer stream ends, so a clip whose sound overruns its picture (ep01's
+  sh1360 upscale: 22 ms) left a hole in the picture's timing and every later frame late. Such a
+  clip is remuxed with its sound cut to the picture (`normalise` bounds its sound with `atrim`),
+  in a copied cut too; the joined picture's length from its header must equal its frames
+  (`timing_gap`). h3publish joins a picture-only copy of the cut for the same reason, checks the
+  same length, and seeks by the picture's offset from the file's start (`picture_offset`): its
+  join check had double-counted the start time on a cut whose picture starts after its sound,
+  which is why every real master's titles fell back to re-encoding the whole cut.
 - **[added] A source whose file is gone or has no sound is a warning, not a failure**: the clip
   goes silent and assemble prints `sh010: line.wav is not there or has no sound`. The run also
   lists which clips take their sound from elsewhere.
