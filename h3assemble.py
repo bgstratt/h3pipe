@@ -206,9 +206,10 @@ def normalise(src: str, dst: str, audio_wav: str | None, fps: float,
     """Give every clip an audio track so the concat demuxer can copy streams.
 
     The concat demuxer refuses a mixed set where some inputs have audio and
-    some do not — and `dub`/`clone` shots write a deliberately mute mp4, so a
-    real episode is always mixed. Muxing in the shot's own `_h3.wav`, or
-    silence, makes the set uniform without re-encoding the video.
+    some do not — and `dub` shots (and clone takes saved before 2026-10-03)
+    write a deliberately mute mp4, so a real episode is always mixed. Muxing
+    in the shot's own `_h3.wav`, or silence, makes the set uniform without
+    re-encoding the video.
 
     `layout` is (sample rate, channels) of the clips that keep their own sound
     and are copied whole: the made-up track is written to match, so the set

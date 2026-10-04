@@ -263,6 +263,25 @@ class SaveNodeTest(unittest.TestCase):
         self.assertFalse(os.path.isdir(os.path.join(piped, "frames")))
         self.assertEqual(len(os.listdir(os.path.join(pngs, "frames"))), 24)
 
+    @needs_ffmpeg
+    def test_clone_keeps_its_sound_and_dub_is_mute(self):
+        """A clone take's mp4 carries H3's mix (the sampled voice is the shot's
+        real sound); a dub take's stays mute for the recording. Both keep _h3.wav."""
+        n = 24000
+        t = torch.arange(n, dtype=torch.float32) / 24000
+        audio = {"waveform": (torch.sin(2 * torch.pi * 220.0 * t) * 0.5).expand(1, 1, n).clone(),
+                 "sample_rate": 24000}
+        for shot, policy, want in (("sh060", "clone", True), ("sh070", "dub", False)):
+            N.H3SaveShot().save(clip(24), shot, policy, self.root, "renders",
+                                1, 24.0, False, audio=audio)
+            tp = T.take_paths(self.root, "final", shot, 1)
+            self.assertTrue(os.path.isfile(tp.h3_wav), policy)
+            out = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "a",
+                                  "-show_entries", "stream=codec_type", "-of", "csv=p=0", tp.mp4],
+                                 capture_output=True, text=True)
+            if out.returncode == 0:                        # ffprobe ships with ffmpeg
+                self.assertEqual(bool(out.stdout.strip()), want, policy)
+
     def test_mp4_failure(self):
         """A frame batch is piped to ffmpeg (no PNG round trip), so a failure
         comes back through Popen rather than subprocess.run."""

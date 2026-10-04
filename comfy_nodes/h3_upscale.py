@@ -113,7 +113,7 @@ class H3LoadTakeVideo:
         try:
             audio = load_audio(src)
         except Exception:
-            # a mute take (dub / clone, or a Wan target): silence of its length
+            # a mute take (dub, an older clone take, or a Wan target): silence of its length
             seconds = images.shape[0] / 24.0
             audio = {"waveform": torch.zeros(1, 1, max(1, int(44100 * seconds))),
                      "sample_rate": 44100}
