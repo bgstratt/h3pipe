@@ -101,7 +101,7 @@ class ListingTest(RefsTest):
         self.assertEqual(
             [i for i in refs],
             # ada_wet and ada_coat are variants of ada: a sheet each, and no
-            # voice of their own -- they share ada's (docs/PLAN.md, Phase 10)
+            # voice of their own -- they share ada's
             ["subject:ada", "subject:ada_wet", "subject:ada_coat", "subject:bo", "subject:cy",
              "subject:rex", "subject:narrator", "subject:kettle", "subject:van",
              "location:kitchen", "location:kitchen_window", "location:street",

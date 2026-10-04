@@ -613,7 +613,7 @@ def variant_reference_images(s: Series, ref: Ref, view: str | None,
                              target=None, limit: int | None = None) -> list[dict]:
     """The reference image an edit target reads to generate one view of a
     wardrobe variant: the SAME view of the subject it is a variant of
-    (docs/PLAN.md, Phase 10b). The towel's back panel edits the base's back
+    The towel's back panel edits the base's back
     panel; generating it cold is what makes the face drift.
 
     The base's picked take of that view, else that panel cut out of its live
@@ -858,7 +858,7 @@ def stable_seed(ref: Ref) -> int:
     across the two generations: same seed, same model, a prompt that differs
     only in the wardrobe sentence. With its own id it drew a different person
     who happened to be described similarly. It is not identity — an edit target
-    or the H3 still target is (docs/PLAN.md, Phase 10b) — but it is the
+    or the H3 still target is — but it is the
     difference between the same character in new clothes and a new character
     in the clothes."""
     if ref.kind == "character":

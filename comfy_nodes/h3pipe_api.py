@@ -467,7 +467,7 @@ def post_build(ctx: Context, body):
 @handler
 def post_episode_new(ctx: Context, body):
     """A new episode: `<parent>/<name>/` with a series config and a script that
-    build (h3source.new_episode, docs/polish_Plan.md "P5").
+    build (h3source.new_episode).
 
     `parent` is the folder the episodes live in — the show's folder, not the
     episode's — and must be inside a configured root. 400 for a name that isn't

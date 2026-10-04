@@ -84,7 +84,7 @@ def view_prompt(view: str, design: str, look: str, w: int, h: int) -> str:
 def view_edit_prompt(view: str, design: str, look: str, w: int, h: int,
                      base_name: str, word: str = "reference image") -> str:
     """One view of a wardrobe variant, generated as an EDIT of the same view of
-    the subject it is a variant of (docs/PLAN.md, Phase 10b).
+    the subject it is a variant of.
 
     The brief is what to CHANGE, not what to draw: everything the reference
     already settles — hair, build, proportions, line quality, the view itself,
@@ -113,7 +113,7 @@ def sheet_prompt(design: str, look: str, base: dict | None = None) -> str:
     what holds the face across a change of clothes. It is an instruction about
     where to start, never part of what the picture shows, so it goes last and
     only here: view_prompt feeds a text-to-image model, where naming a file on
-    disk is noise (docs/PLAN.md, Phase 10b wires the real edit path)."""
+    disk is noise (the real edit path is h3refs')."""
     out = (f"A character model sheet on a plain flat background: FOUR panels side "
            f"by side in a single horizontal strip, left to right — three-quarter "
            f"body, side profile full body, back view full body, and a "

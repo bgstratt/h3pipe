@@ -100,7 +100,7 @@
   },
 
   "upscale": {
-    "_note": "Phase 13d (docs/PLAN.md, h3upscale.py): `pixel_refine`, as wan22_i2v: the take's frames through an upscale model, encoded with the Wan 2.2 VAE, then its KSampler's tail (denoise 1 - `start`: 0.25 of 20 steps) at the new size; the prompt is size-free. 1.5x by default: 1280x704 at 2x is 2560x1408, heavy for the 5B.",
+    "_note": "h3upscale.py: `pixel_refine`, as wan22_i2v: the take's frames through an upscale model, encoded with the Wan 2.2 VAE, then its KSampler's tail (denoise 1 - `start`: 0.25 of 20 steps) at the new size; the prompt is size-free. 1.5x by default: 1280x704 at 2x is 2560x1408, heavy for the 5B.",
     "mode": "pixel_refine",
     "scale": 1.5,
     "start": 0.75,

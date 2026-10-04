@@ -51,7 +51,7 @@ def write_st(path: str, tensors: dict, metadata: dict | None = None) -> str:
     return path
 
 
-# minimal headers, shaped like the installed files (docs/PLAN.md "Model families")
+# minimal headers, shaped like the installed files
 def h3_tensors() -> dict:
     return {"adaln_t_table": [1025, 8], "video_patch_proj.weight": [5376, 64],
             "audio_patch_proj.weight": [5376, 32], "condition_proj.weight": [5376, 5120],

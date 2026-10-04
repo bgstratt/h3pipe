@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-h3upscale.py — Phase 13 (docs/PLAN.md): a take, refined at 2x (either pass).
+h3upscale.py — a take, refined at 2x (either pass).
 
 An upscale is a version of its take, not a new take: <stem>.up.mp4 beside it,
 with <stem>.up.json. It re-samples the take at twice the size from late in the
@@ -1127,7 +1127,7 @@ def seedvr2_graph(up: UpscaleJob) -> dict:
     size, pre-process, tiled encode, one step, tiled decode, LAB colour
     correction), with the clip split in time as VRAM needs (auto) and our finish
     after it: the frequency split halved its frame-to-frame shimmer and its colour
-    drift in the evaluation (docs/PLAN.md 13d). The take's audio copied on."""
+    drift in the evaluation. The take's audio copied on."""
     take, root = up.take, up.root
     g = {"up_video": {"class_type": "H3LoadTakeVideo", "inputs": {
         "project_root": root, "audio_file": "",

@@ -24,7 +24,6 @@ episode; **[docs/AUTHORING.md](docs/AUTHORING.md)** is the script and series con
 | **[docs/AUTHORING.md](docs/AUTHORING.md)** | The format, and the whole of it: a first episode to copy, every field of the script and the series config, framing, timing, camera and the reference rules | Writing or fixing an episode. Read once before the first one |
 | **[docs/SCRIPT_CONVERSION.md](docs/SCRIPT_CONVERSION.md)** | A spec-format screenplay scene worked all the way through to shots — what the series config absorbs, where the cuts fall and why, and what gets dropped | You have a screenplay and want it as an episode |
 | **[docs/API.md](docs/API.md)** | The editor's HTTP API and the on-disk contracts behind it (takes, overrides, the cut, references) | Changing the editor, or driving the pipeline from your own code |
-| **[docs/PLAN.md](docs/PLAN.md)** | The working plan: what is built, what was decided and why, what is open | Before changing the pipeline |
 | **[CONTRIBUTING.md](CONTRIBUTING.md)** | House rules: stdlib only, the golden tests, how the generated docs are regenerated | Sending a change |
 
 `prompts/SKILL.md` and `prompts/h3-script.instructions.md` are **generated** from
@@ -93,21 +92,31 @@ workflows, every model file with its folder and download link, and a first episo
 end. The short version:
 
 ```
-git clone https://github.com/<you>/h3pipe.git
+git clone https://github.com/bgstratt/h3pipe.git
 mklink /J C:\path\to\ComfyUI\custom_nodes\ComfyUI-H3-Shotlist C:\path\to\h3pipe\comfy_nodes
 ```
 
 (`ln -s` on Linux/macOS; if you copy the folder instead, set `H3PIPE_HOME` to the repo for
-ComfyUI.) Restart ComfyUI: the pack brings the loader and save nodes, the editor's routes
-(`docs/API.md`) and the editor itself (`comfy_nodes/web/h3pipe-editor.js`).
+ComfyUI.) Restart ComfyUI: the pack brings the shot-list loader and save nodes, the ref-take
+savers, the upscale and continuity nodes, the editor's routes (`docs/API.md`) and the editor
+itself (`comfy_nodes/web/h3pipe-editor.js`). The default MiniMax H3 targets also need the
+[ComfyUI-PlagueKind-Nodes](https://github.com/PlagueKind/ComfyUI-PlagueKind-Nodes) pack
+(its `H3SLAAttention` node); INSTALL.md lists every third-party pack and which target needs it.
 
-The pipeline itself needs nothing installed — Python 3.10+, standard library only — plus
-`ffmpeg` and `ffprobe` on PATH for `assemble`, the peaks and the audio work. `pip install
-faster-whisper numpy` adds `align`, `pip install demucs` the `dub_keep_foley` foley bed.
+**Requirements**, in short:
+
+- a recent local [ComfyUI](https://github.com/comfyanonymous/ComfyUI) (developed against 0.38)
+  and an NVIDIA GPU that can hold the models of the targets you use. h3pipe was developed
+  on a 32 GB card; smaller ones are untested
+- Python 3.10+ for the pipeline, standard library only: nothing to `pip install`
+- `ffmpeg` and `ffprobe` on PATH for `assemble`, the peaks and the audio work
+- optional: `pip install faster-whisper numpy` adds `align`; `demucs`, installed for the
+  `python` first on ComfyUI's PATH, adds the `dub_keep_foley` foley bed
 
 Run `python h3.py` from the repo (or by its path from anywhere; it finds the scripts beside
-it). Each episode lives in its own folder (`Shows\ep05`) holding its script and
-`series.json`.
+it). Each episode lives in its own folder holding its script and `series.json`;
+`Shows\ep05` below stands for any such folder. The examples use Windows paths: on
+Linux/macOS write forward slashes, and `python3` where `python` is missing.
 
 ## Models
 
@@ -119,8 +128,10 @@ grouped by model family with folders and links, generated from those records by
 See also **Which model? Readiness and downloads** in [docs/AUTHORING.md](docs/AUTHORING.md).
 
 The default target, H3 Ref2VA, from
-[Comfy-Org/MiniMax-H3](https://huggingface.co/Comfy-Org/MiniMax-H3) with the turbo LoRAs
-from [lightx2v/Minimax-h3-Turbo](https://huggingface.co/lightx2v/Minimax-h3-Turbo):
+[Comfy-Org/MiniMax-H3](https://huggingface.co/Comfy-Org/MiniMax-H3), with the proxy turbo
+LoRA from [Kijai/MiniMax-H3_comfy](https://huggingface.co/Kijai/MiniMax-H3_comfy). The final
+pass's 8-step turbo LoRA (lightx2v's) has no download link recorded yet; search Hugging Face
+for its name. Without it the final pass renders on the slower base preset:
 
 | Role | File used here |
 |---|---|
@@ -178,10 +189,12 @@ First time on this machine? [INSTALL.md](INSTALL.md) walks the same path from a 
 ComfyUI, with an episode you can paste in.
 
 ```
+python h3.py new      Shows\ep05             # a series config + script that build (from examples/starter/)
 python h3.py build    Shows\ep05             # story IR, shotlists, reference work orders
 python h3.py check    Shows\ep05             # validate and check dialogue pacing (writes nothing)
 python h3.py targets  Shows\ep05             # which targets this ComfyUI can render
-python h3.py refs     Shows\ep05             # character views, props, plates
+python h3.py supply   Shows\ep05 C:\sheets   # pictures you already have, into their ref slots
+python h3.py refs     Shows\ep05             # generate the views, props, plates still missing
 python h3.py keyframe Shows\ep05 --missing   # keyframes the shots' targets need
 python h3.py render   Shows\ep05 --proxy     # low-res animatic
 python h3.py assemble Shows\ep05 --proxy     # join it into one mp4
@@ -190,6 +203,7 @@ python h3.py assemble Shows\ep05
 python h3.py upscale  Shows\ep05             # optional: the cut's takes at 2x (--proxy too)
 python h3.py assemble Shows\ep05 --upscaled --size 1920x1080
 python h3.py master   Shows\ep05 --wait      # the series recipe on every shot, then the master
+python h3.py publish  Shows\ep05             # the review cut between the series intro and outro
 ```
 
 Several episodes at once: list the folders (`Shows\ep06 Shows\ep07`) or use `--each` with a
@@ -202,19 +216,26 @@ disk alone. ComfyUI must be running for `targets`, `refs`, `keyframe --generate`
 
 | Command | What it does |
 |---|---|
+| `h3.py new` | `h3source.py`: a new episode folder with a `series.json` and `epNN.md` that build, from the episode beside it (its cast, look and profiles), else `examples/starter/`; `--title` |
+| `h3.py supply` | `h3refs.py`: pictures you already have into their reference slots. A folder is matched by file name; `--dry-run` prints the table, `--ref id[:view]` names one, `--no-pick` |
 | `h3.py build` / `check` | `h3build.py`: script + series config → story IR → each target's shotlist, `refs_todo.md/.json`; `check` runs `--check` and `--pace` |
-| `h3.py refs` | `kreagen.py`: generates missing reference images as takes and picks them |
+| `h3.py refs` | `kreagen.py`: generates missing reference images as takes and picks them (the fallback when you have no pictures to `supply`) |
 | `h3.py keyframe` | a shot's first/last keyframe: from the previous shot's take (continuity), `--generate`, `--missing`, `--clear` |
 | `h3.py render` | `h3render.py`: queues shots through their targets, one take each |
 | `h3.py assemble` | `h3assemble.py`: the review cut, in `cut.json` order; `--upscaled` from the takes' upscales |
-| `h3.py master` | `h3master.py`: the series config's `upscale.master` recipe on every shot of the cut (keeping what's marked Keep or made otherwise, unless `--conform`), then the master assembled into `<episode>/master/` with a report; several episodes or a show folder at once; `--check`, `--wait`, `--allow-gaps`, `--prores` |
+| `h3.py master` | `h3master.py`: the series config's `upscale.master` recipe on every shot of the cut (keeping what's marked Keep or made otherwise, unless `--conform`), then the master assembled into `<episode>/master/` with a report, between the show's `_titles/INTRO.mp4` and `OUTRO.mp4` when it has them; several episodes or a show folder at once; `--check`, `--wait`, `--allow-gaps`, `--prores` |
 | `h3.py upscale` | `h3upscale.py`: a take at 2x, either pass (`--proxy`) — re-sampled (H3, LTX-2, Wan), through a pixel upscale model (`--method pixel`) or SeedVR2 (`--method seedvr2`), the last two for any target; the cut's takes, or `--only`/`--take`; `--check`, `--prune-latents` |
+| `h3.py publish` | `h3publish.py`: the series intro + the review cut + the outro, the episode title drawn under the series title, into `<episode>/publish/`; `--proxy`, `--check` |
+| `h3.py issues` | `h3issues.py`: the review notepad for a pass (`<episode>/_issues.json`): `--add SHOT "note"`, `--resolve`, `--export` (markdown to hand to an assistant), `--clear` |
 | `h3.py align` | `h3align.py`: times the script against a dialogue recording |
 | `h3.py takes` / `pick` / `override` | takes and why they're stale; the take the cut uses; per-shot tweaks and retargeting (`h3edit.py`) |
 | `h3.py cut` | edit the cut itself: `--show`, `--order`, `--move … --before`, `--trim SH IN OUT`, `--lock`/`--unlock`, `--out`/`--in` (leave a shot out of the cut, or put it back), `--flag`/`--unflag` (mark a shot to come back to; M in the editor), `--reset`, `--copy-from final\|proxy`, `--audio` (a clip's sound from another take, a file, none or its own) |
 | `h3.py discard` | move a take to `renders[_proxy]/_trash/<shot>/`; a cut pick of it goes back to `latest` |
 | `h3.py promote` | `h3promote.py`: which overrides can move into the script / series config, with the diffs; `--all` or `--item` moves them, drops those overrides and rebuilds |
-| `h3.py targets` | readiness and downloads per target |
+| `h3.py targets` | readiness and downloads per target; `--install-workflow <id>` copies a target's graph into ComfyUI to edit on the canvas, `--revert-workflow` undoes it |
+| `h3.py target-from-workflow` | `h3inspect.py`: reads a ComfyUI workflow and proposes the `target.json` that drives it, as one of the show's own targets (`<show>/targets/<id>/`); see [docs/EDITOR.md](docs/EDITOR.md) |
+
+`python h3.py` with no arguments prints every command with examples.
 
 ## The scripts
 
@@ -228,7 +249,11 @@ disk alone. ComfyUI must be running for `targets`, `refs`, `keyframe --generate`
 | `h3edit.py` | `takes`, `pick`, `override`, `keyframe`, `discard`, `cut`, `targets` (through `h3.py`) | the episode | `cut.json`, `overrides.json`, `refs/shots/` |
 | `h3promote.py` | Moves an override into the script or the series config where it belongs, and rebuilds | `overrides.json`, `epNN.md`, `series.json` | updated script and series config, `_history/` |
 | `h3align.py` | Times the script against a dialogue recording and writes the `audio:` windows | recording, `epNN.md`, `series.json` | updated script and series config, `align_report.md` |
-| `h3upscale.py` | Upscales takes 2x (either pass): the take's latent (or its frames, through the VAE) upscaled and re-sampled from late in its schedule under its frozen shotlist, its audio held and copied on | a take, its frozen shotlist and latent | `<stem>.up.mp4`, `<stem>.up.json` beside the take |
+| `h3upscale.py` | Upscales takes 2x (either pass): re-sampled from late in the take's schedule under its frozen shotlist (H3, LTX-2, Wan), through a pixel upscale model (`--method pixel`) or SeedVR2 (`--method seedvr2`); the audio held and copied on | a take, its frozen shotlist and latent | `<stem>.up.mp4`, `<stem>.up.json` beside the take |
+| `h3master.py` | The series' `upscale.master` recipe on every shot of the cut, then the master assembled and titled | the episode, its cut | `<episode>/master/` |
+| `h3publish.py` | The review cut between the series intro and outro, with the episode title | a cut, `_titles/` | `<episode>/publish/` |
+| `h3issues.py` | The pass's review notepad, each note snapshotting the shot's script lines and compiled prompt | the episode | `<episode>/_issues.json` |
+| `h3inspect.py` | Proposes a `target.json` from a ComfyUI workflow | a workflow | `<show>/targets/<id>/target.json` |
 | `h3assemble.py` | Joins the rendered shots in cut order (`cut.json`, else script order), trimming timed shots to their windows and using each clip's chosen audio | `shotlist*.json`, `cut.json`, renders | `renders/epNN.mp4`, `epNN_shots.txt` |
 
 `h3core/` (parser, story IR, series config, speech pacing), `h3jobs.py`, `h3takes.py`,
@@ -264,7 +289,7 @@ and `design` unless they are only ever a voice), and `locations` with a `descrip
 `plate` each. `--check` names whichever is missing.
 
 Drafting with an AI assistant: `python tools/make_prompts.py` packages the guide as a skill,
-`h3pipe-episode-script`. `build/skill/h3pipe-episode-script/` is the whole skill (the
+`h3pipe-episode-script`. `build/skill/h3pipe-episode-script/` (generated, not in the repo) is the whole skill (the
 guide, a worked screenplay conversion from `docs/SCRIPT_CONVERSION.md`, and a copy of `h3build` to
 validate with): copy the folder into `.claude/skills/` for Claude Code, or upload
 `build/skill/h3pipe-episode-script.zip` on claude.ai. `prompts/SKILL.md` is the skill's
@@ -307,7 +332,7 @@ target H3's model, LoRA or steps.
 
 A distilled LoRA is trained on a fixed set of timesteps, so it does its best work at its own
 step count: the 8-step v1.0 was distilled at 768p for 8 steps, and the proxy keeps the 4-step
-v0.1 both for speed and because its 544p training is closer to the animatic's size.
+v0.1 both for speed and because its 544p training is closer to the animatic's 512×288.
 
 Override per pass in the series config (`series` for the final, `proxy` for the animatic):
 
@@ -761,7 +786,7 @@ by speeding the delivery up, so an over-packed shot doesn't fail — it just
 comes back sounding like a chipmunk reading a contract.
 
 ```bash
-python3 h3build.py series.json ep01.md --pace     # every dialogue shot, measured
+python h3.py check Shows\ep01      # --check and --pace: every dialogue shot, measured
 ```
 
 The model counts syllables, adds a beat at each speaker change plus air at the
@@ -790,7 +815,7 @@ conform for true 16:9.
 Or render the final pass at `960×544` and upscale the picked takes to `1920×1088`
 (`h3.py upscale`, then `h3.py assemble --upscaled --size 1920x1080`): a take costs
 under half as much to try, and only the kept ones are upscaled. docs/AUTHORING.md,
-**Final resolution**, says which to choose; docs/PLAN.md Phase 13 how it works.
+**Final resolution**, says which to choose.
 
 ## What you get out
 

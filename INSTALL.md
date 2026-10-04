@@ -1,9 +1,11 @@
 # Installing h3pipe
 
 From a clean ComfyUI to a rendered proxy episode. Windows first (the development
-machine); the Linux/macOS differences are called out where they exist.
+machine); the Linux/macOS differences are called out where they exist. The commands are
+written with Windows paths: on Linux/macOS use forward slashes, and `python3` where
+`python` is missing.
 
-What you end up with: a `custom_nodes` pack that adds nine nodes and the editor to
+What you end up with: a `custom_nodes` pack that adds twelve nodes and the editor to
 ComfyUI, a `h3.py` command line, and one episode folder holding a series config, a
 script, and everything the pipeline generated from them.
 
@@ -36,11 +38,30 @@ Two different Pythons are in play, and it matters which one gets what:
   together; the waveform peaks, the audio import and `h3align` need them too. On Windows,
   `winget install Gyan.FFmpeg` (that is the hint the editor itself prints). On Linux/macOS,
   your package manager (`apt install ffmpeg`, `brew install ffmpeg`).
-- **A local [ComfyUI](https://github.com/comfyanonymous/ComfyUI)**, frontend **1.3 or
-  later** for the editor (an older frontend has no `extensionManager.registerSidebarTab`
-  and the editor logs that and gives up). h3pipe expects it at
-  `http://127.0.0.1:8188`; `--comfy URL` changes that per command.
+- **A recent local [ComfyUI](https://github.com/comfyanonymous/ComfyUI).** h3pipe is
+  developed against ComfyUI 0.38 (the MiniMax H3, Krea 2 and SeedVR2 nodes are recent
+  core additions), with frontend **1.3 or later** for the editor (an older frontend has no
+  `extensionManager.registerSidebarTab` and the editor logs that and gives up). h3pipe
+  expects it at `http://127.0.0.1:8188`; `--comfy URL` changes that per command.
+- **Third-party node packs** for some targets — see [the table below](#third-party-node-packs).
 - **The model files** of the targets you want to render on — see [Models](#4-models).
+- **A GPU that can hold them.** h3pipe has only been run on an NVIDIA RTX 5090 (32 GB) under
+  Windows. The default H3 stack (an int8 diffusion model and a 32B text encoder in nvfp4)
+  wants a recent NVIDIA card; smaller cards, AMD and Apple Silicon are untested. The
+  pipeline scripts themselves run anywhere Python does.
+
+### Third-party node packs
+
+Everything else the targets' workflows use ships with core ComfyUI or with h3pipe's own pack
+(section 2). `python h3.py targets` names a missing node class under the target that needs it.
+
+| Pack | Provides | Needed by |
+|---|---|---|
+| [ComfyUI-PlagueKind-Nodes](https://github.com/PlagueKind/ComfyUI-PlagueKind-Nodes) | `H3SLAAttention` (sparse attention the H3 turbo LoRAs were distilled against) | `minimax_h3_ref2va` (the default video target) and `minimax_h3_still` |
+| [ComfyUI-LTXVideo](https://github.com/Lightricks/ComfyUI-LTXVideo) | `LTXVAudioOnlyModel`, `LTXVAudioOnlyEmptyVideoLatent`; `LTXICLoRALoaderModelOnly`, `LTXAddVideoICLoRAGuide` | `ltx2_voice` (the default voice target); `ltx2` only for reference sheets |
+| [Comfyui_Minimax_h3_latent_Upscaler](https://github.com/LBH-123-AI/Comfyui_Minimax_h3_latent_Upscaler) | `MinimaxH3LatentUpscaler3D` | `h3.py upscale` on H3 takes only — see **The upscaler**, below |
+
+Install them with ComfyUI-Manager or by cloning into `custom_nodes`, then restart ComfyUI.
 
 ### Optional, and what each one unlocks
 
@@ -50,7 +71,7 @@ Two different Pythons are in play, and it matters which one gets what:
 | `pip install demucs` | the `dub_keep_foley` audio policy (H3's foley kept under your own vocal) |
 | `pip install pillow` | on the command line only, and only for the steps that cut pictures: picking the fourth view of a character sheet (it stitches), and generating a wardrobe variant's view as an edit of the character's (it crops that panel out of their sheet). The editor never needs it — ComfyUI's Python has PIL |
 | `pip install pytest` | `python -m pytest` for the test suite. Optional: `python -m unittest discover -s tests` runs the same tests with nothing installed |
-| Node.js 20+ and `npm install` in `web/` | rebuilding the editor UI. Only if you change `web/`; the built bundle is committed |
+| Node.js 20.19+ (or 22.12+) and `npm install` in `web/` | rebuilding the editor UI. Only if you change `web/`; the built bundle is committed |
 | The Comfyui_Minimax_h3_latent_Upscaler node pack and its model (**The upscaler**, below) | `h3.py upscale` and the editor's Upscale: a final H3 take at 2x, so the final pass can render at 960×544 |
 
 **Which Python runs what.** There is no global "try ComfyUI's, fall back to system". Each
@@ -92,10 +113,11 @@ interpreter's full path.
 ### Getting the repo
 
 ```
-git clone https://github.com/<you>/h3pipe.git C:\code\h3pipe
+git clone https://github.com/bgstratt/h3pipe.git C:\code\h3pipe
 ```
 
-Anywhere you like — it does not have to live near ComfyUI. `h3.py` finds the other
+Anywhere you like (`C:\code\h3pipe` and `C:\AI\ComfyUI` in this guide are only
+examples) — it does not have to live near ComfyUI. `h3.py` finds the other
 scripts beside itself, so you can run it by its full path from any folder.
 
 Two environment variables are worth setting for the command line (neither is required):
@@ -109,8 +131,10 @@ Two environment variables are worth setting for the command line (neither is req
 
 ## 2. The custom node pack
 
-`comfy_nodes/` is the ComfyUI side: the five nodes (`H3 Shot List Loader`, `H3 Shot
-Info`, `H3 Save Shot`, `H3 Save Ref Take`, `H3 Save Ref Audio`), the editor's HTTP routes
+`comfy_nodes/` is the ComfyUI side: twelve nodes — the shot list's (`H3 Shot List Loader`,
+`H3 Shot Info`, `H3 Save Shot`, `H3 Save Ref Take`, `H3 Save Ref Audio`), the upscale's
+(`H3 Load Take Latent`, `H3 Load Take Video`, `H3 Hold Audio`, `H3 Pixel Upscale`,
+`H3 Finish Upscale`, `H3 Save Upscale`) and `H3 Continuity Frame` — the editor's HTTP routes
 ([docs/API.md](docs/API.md)) and the editor's frontend bundle
 (`comfy_nodes/web/h3pipe-editor.js`).
 
@@ -152,8 +176,8 @@ set H3PIPE_HOME=C:\code\h3pipe
 without `H3PIPE_HOME` it is the editor that goes missing, and ComfyUI's log says
 `h3pipe: can't import the pipeline from … set H3PIPE_HOME to the repo`.
 
-With a copy you must also re-copy after every `git pull` — and restart ComfyUI whenever
-`comfy_nodes/h3_shotlist.py` changes, since ComfyUI imports the node classes once at
+With a copy you must also re-copy after every `git pull`. Either way, restart ComfyUI
+whenever a `comfy_nodes/*.py` file changes, since ComfyUI imports the node classes once at
 startup.
 
 ### Restart ComfyUI and check it loaded
@@ -171,7 +195,7 @@ Three checks, weakest to strongest:
    there, `custom_nodes` found the pack.
 2. **The routes.** `curl http://127.0.0.1:8188/h3pipe/config` should answer JSON:
    ```json
-   {"roots": [], "comfy": "http://127.0.0.1:8188", "version": 1}
+   {"roots": [], "comfy": "http://127.0.0.1:8188", "review_copy": false, "version": 1}
    ```
    Anything else (404, or ComfyUI's HTML) means the pipeline import failed — check the
    log for the `h3pipe:` line and set `H3PIPE_HOME`.
@@ -210,8 +234,8 @@ Manager installs them too. They load with core ComfyUI nodes; no pack is needed.
 3. Restart ComfyUI. `python h3.py targets` then prints `upscale  ready` under
    `minimax_h3_ref2va`, or names what's missing.
 
-The other nodes an upscale uses (H3 Load Take Latent, Load Take Video, Hold Audio, Save
-Upscale) are h3pipe's own and come with its node pack (section 2); after updating h3pipe,
+The other nodes an upscale uses (H3 Load Take Latent, Load Take Video, Hold Audio, Pixel
+Upscale, Finish Upscale, Save Upscale) are h3pipe's own and come with its node pack (section 2); after updating h3pipe,
 restart ComfyUI so it loads them.
 
 ---
@@ -219,7 +243,7 @@ restart ComfyUI so it loads them.
 ## 3. Workflows
 
 Every target names one ComfyUI workflow, by the name it expects among ComfyUI's **saved**
-workflows (`C:\AI\ComfyUI\ComfyUI\user\default\workflows\`):
+workflows (`<ComfyUI>/user/default/workflows/`):
 
 | Target | Saved workflow it looks for | Override with |
 |---|---|---|
@@ -235,6 +259,8 @@ workflows (`C:\AI\ComfyUI\ComfyUI\user\default\workflows\`):
 | `flux2_klein` | `h3pipe_flux2_klein_t2i.json` | `$H3_FLUX2_KLEIN_WORKFLOW` |
 | `flux2_klein_edit` | `h3pipe_flux2_klein_edit.json` | `$H3_FLUX2_KLEIN_EDIT_WORKFLOW` |
 | `flux_kontext` | `h3pipe_flux_kontext.json` | `$H3_FLUX_KONTEXT_WORKFLOW` |
+| `minimax_h3_still` | `h3pipe_minimax_h3_still.json` | `$H3_STILL_WORKFLOW` |
+| `qwen_image_21` | `h3pipe_qwen_image_21.json` | `$H3_QWEN_IMAGE_21_WORKFLOW` |
 | `ltx2_voice` | `h3pipe_ltx2_voice.json` | `$H3_LTX2_VOICE_WORKFLOW` |
 
 **You usually need to do nothing.** The lookup order is:
@@ -289,10 +315,11 @@ under another name usually still counts: h3pipe identifies models by family (nam
 then the safetensors header), so a re-quantized or renamed copy of the same model is
 accepted and the take's sidecar records what was actually used.
 
-**Nodes count too.** Some targets need node classes as well as files — the LTX-2.5 and
-Wan 2.2 graphs use nodes that ship with core ComfyUI, and MiniMax H3 FL2VA needs
-`MiniMaxH3AddGuide`. `h3.py targets` lists a missing one as `node <Class> (update ComfyUI,
-or install the node pack)`; the usual fix is updating ComfyUI.
+**Nodes count too.** Some targets need node classes as well as files. Most are core
+ComfyUI (MiniMax H3 FL2VA's `MiniMaxH3AddGuide`, the Wan 2.2 and LTX-2.5 video graphs);
+the rest come from the [third-party packs](#third-party-node-packs) in section 1.
+`h3.py targets` lists a missing one as `node <Class> (update ComfyUI, or install the node
+pack)`.
 
 The list below is generated from the targets themselves
 (`python tools/make_models_md.py`), so it cannot drift from what the code asks ComfyUI to
@@ -586,8 +613,8 @@ Every file any target names. `python h3.py targets` tells you which of these you
 
 Only to upscale takes (`python h3.py upscale`), never to render. H3's MinimaxH3LatentUpscaler3D comes from the Comfyui_Minimax_h3_latent_Upscaler pack (LBH-123-AI) — not its "Plus" fork, which has the same node without temporal chunking; LTX's LTXVLatentUpsampler is ComfyUI's own. `python h3.py targets` says whether this ComfyUI can upscale.
 
-- `ltx-2.3-spatial-upscaler-x2-1.1.safetensors` → `models/latent_upscale_models/` (LTXVLatentUpsampler, for `ltx2_ingredients`) — [download](https://huggingface.co/Lightricks/LTX-2.3/resolve/main/ltx-2.3-spatial-upscaler-x2-1.1.safetensors) (ComfyUI-Manager model list (model-list.json; ComfyUI's blueprint Image to Video (LTX-2.3).json has the same URL). Only needed to upscale (Phase 13), never to render.)
-- `minimax_h3_latent_upscaler_3d_fp16.safetensors` → `models/latent_upscale_models/` (MinimaxH3LatentUpscaler3D, for `minimax_h3_fl2va`, `minimax_h3_ref2va`) — no URL: no ComfyUI template, saved workflow or ComfyUI-Manager model list on this machine records this file. Search Hugging Face for its exact name: the Comfyui_Minimax_h3_latent_Upscaler pack's README points to the LBH-123-AI/Minimax_h3_latent_Upscaler repo. Only needed to upscale (Phase 13), never to render.
+- `ltx-2.3-spatial-upscaler-x2-1.1.safetensors` → `models/latent_upscale_models/` (LTXVLatentUpsampler, for `ltx2_ingredients`) — [download](https://huggingface.co/Lightricks/LTX-2.3/resolve/main/ltx-2.3-spatial-upscaler-x2-1.1.safetensors) (ComfyUI-Manager model list (model-list.json; ComfyUI's blueprint Image to Video (LTX-2.3).json has the same URL). Only needed to upscale, never to render.)
+- `minimax_h3_latent_upscaler_3d_fp16.safetensors` → `models/latent_upscale_models/` (MinimaxH3LatentUpscaler3D, for `minimax_h3_fl2va`, `minimax_h3_ref2va`) — no URL: no ComfyUI template, saved workflow or ComfyUI-Manager model list known to h3pipe records this file. Search Hugging Face for its exact name: the Comfyui_Minimax_h3_latent_Upscaler pack's README points to the LBH-123-AI/Minimax_h3_latent_Upscaler repo. Only needed to upscale, never to render.
 
 **SeedVR2** (any take; ComfyUI's own nodes, the models Apache 2.0): the VAE and at least one model.
 
@@ -604,11 +631,11 @@ Only to upscale takes (`python h3.py upscale`), never to render. H3's MinimaxH3L
 
 h3pipe only records a URL it can trace to a ComfyUI template, a saved workflow or ComfyUI-Manager's model list, so these are listed without one rather than with a guess:
 
-- `flux-2-klein-9b-kv.safetensors` → `models/diffusion_models/` — no URL: no ComfyUI template, saved workflow or ComfyUI-Manager model list on this machine records this file (the templates name BFL's fp8 file, below, which stands in for it by family). Search Hugging Face for its exact name (black-forest-labs FLUX.2 Klein 9B KV).
-- `minimax_h3_fl2v_lightx2v_turbo_4step_v0.1_comfy.safetensors` → `models/loras/` — no URL: no ComfyUI template, saved workflow or ComfyUI-Manager model list on this machine records this file. Search Hugging Face for its exact name (lightx2v's MiniMax H3 FL2V 4-step turbo LoRA v0.1, ComfyUI conversion).
-- `minimax_h3_ref2v_turbo_8step_v1.0_768p_comfyui_bf16.safetensors` → `models/loras/` — no URL: no ComfyUI template, saved workflow or ComfyUI-Manager model list on this machine records this file. Search Hugging Face for its exact name (lightx2v's MiniMax H3 Ref2V 8-step turbo LoRA v1.0, ComfyUI conversion).
-- `wan2.2_fun_vace_high_noise_14B_fp8_scaled.safetensors` → `models/diffusion_models/` — no URL: no ComfyUI template, saved workflow or ComfyUI-Manager model list on this machine records this file. Search Hugging Face for its exact name (Wan 2.2 Fun VACE A14B high-noise expert, fp8 scaled ComfyUI repack).
-- `wan2.2_fun_vace_low_noise_14B_fp8_scaled.safetensors` → `models/diffusion_models/` — no URL: no ComfyUI template, saved workflow or ComfyUI-Manager model list on this machine records this file. Search Hugging Face for its exact name (Wan 2.2 Fun VACE A14B low-noise expert, fp8 scaled ComfyUI repack).
+- `flux-2-klein-9b-kv.safetensors` → `models/diffusion_models/` — no URL: no ComfyUI template, saved workflow or ComfyUI-Manager model list known to h3pipe records this file (the templates name BFL's fp8 file, below, which stands in for it by family). Search Hugging Face for its exact name (black-forest-labs FLUX.2 Klein 9B KV).
+- `minimax_h3_fl2v_lightx2v_turbo_4step_v0.1_comfy.safetensors` → `models/loras/` — no URL: no ComfyUI template, saved workflow or ComfyUI-Manager model list known to h3pipe records this file. Search Hugging Face for its exact name (lightx2v's MiniMax H3 FL2V 4-step turbo LoRA v0.1, ComfyUI conversion).
+- `minimax_h3_ref2v_turbo_8step_v1.0_768p_comfyui_bf16.safetensors` → `models/loras/` — no URL: no ComfyUI template, saved workflow or ComfyUI-Manager model list known to h3pipe records this file. Search Hugging Face for its exact name (lightx2v's MiniMax H3 Ref2V 8-step turbo LoRA v1.0, ComfyUI conversion).
+- `wan2.2_fun_vace_high_noise_14B_fp8_scaled.safetensors` → `models/diffusion_models/` — no URL: no ComfyUI template, saved workflow or ComfyUI-Manager model list known to h3pipe records this file. Search Hugging Face for its exact name (Wan 2.2 Fun VACE A14B high-noise expert, fp8 scaled ComfyUI repack).
+- `wan2.2_fun_vace_low_noise_14B_fp8_scaled.safetensors` → `models/diffusion_models/` — no URL: no ComfyUI template, saved workflow or ComfyUI-Manager model list known to h3pipe records this file. Search Hugging Face for its exact name (Wan 2.2 Fun VACE A14B low-noise expert, fp8 scaled ComfyUI repack).
 
 <!-- END MODELS -->
 
@@ -621,7 +648,7 @@ is generated.
 
 ```
 Shows\
-  Porchlights\
+  MyShow\
     refs\            the pictures, shared by every episode (`../refs/...` in the configs)
     ep01\
       series.json    the series config: the look, the cast, the locations, the voices
@@ -635,10 +662,10 @@ Two rules that save an hour of confusion:
 
 - The script should be named after its folder — `ep01\ep01.md`. Any other single `.md` in
   the folder is accepted, but two of them and nothing can tell which is the script.
-- `series.json` goes **in the episode folder**. A config in the parent folder is used as a
-  fallback for episodes that have none of their own.
+- `series.json` goes **in the episode folder**. `h3.py build` and `check` insist on it;
+  the editor falls back to a config in the parent folder.
 
-You don't have to type either file: `python h3.py new Shows\Porchlights\ep02` writes both,
+You don't have to type either file: `python h3.py new Shows\MyShow\ep02` writes both,
 starting from the episode beside it (its cast, look and profiles) or from
 `examples/starter/` when the show is new. **New episode…** in the editor's project folders
 does the same.
@@ -706,6 +733,8 @@ python h3.py assemble Shows\ep01 --upscaled --size 1920x1080   # -> renders\ep01
 ```
 
 `python h3.py all Shows\ep01 --proxy` runs build → refs → render → assemble in one go.
+`python h3.py master` and `publish` make the finished episode, `issues` keeps review notes,
+and `python h3.py` on its own prints every command.
 
 What to expect along the way:
 
@@ -721,8 +750,8 @@ What to expect along the way:
   motion first.
 - `assemble --proxy --check` reports the cut (order, take, trims) and writes nothing.
 
-`--only sh020,sh030` narrows any of them to a few shots; `--redo` makes a new take instead
-of reusing the one on disk. Every flag after the episode goes straight through to the
+`--only sh020,sh030` narrows `render`, `refs` and `upscale` to a few shots; `--redo` makes
+a new take instead of reusing the one on disk. Every flag after the episode goes straight through to the
 underlying script, and each one has `--help`.
 
 ### The same thing in the editor
@@ -757,8 +786,9 @@ The episode folder has more than one candidate `.md`. Name the script after the 
 cannot resolve a script for simply never appears in the episode list.
 
 **`!! <folder>\series.json not found`**
-The series config has to be in the episode folder (the CLI also accepts the parent
-folder; the editor's episode list does not).
+`h3.py build` and `check` need the series config in the episode folder itself (the
+editor would fall back to the parent folder's). Copy it in, or run
+`python h3.py new` to make one.
 
 **The animatic renders at a size you did not ask for.**
 With no `proxy` block in the series config, the proxy pass falls back to the *target's*

@@ -122,7 +122,7 @@
   },
 
   "upscale": {
-    "_note": "Phase 13d (docs/PLAN.md, h3upscale.py): Wan has no latent upscaler, so `pixel_refine`: the take's frames through an upscale model (`pixel_model`), encoded with the Wan VAE, then the low-noise expert alone from `start` (0.75 of the take's 4 lightning steps: the last) at the new size, WanImageToVideo's first frame rebuilt at that size. Silent: nothing to hold.",
+    "_note": "h3upscale.py: Wan has no latent upscaler, so `pixel_refine`: the take's frames through an upscale model (`pixel_model`), encoded with the Wan VAE, then the low-noise expert alone from `start` (0.75 of the take's 4 lightning steps: the last) at the new size, WanImageToVideo's first frame rebuilt at that size. Silent: nothing to hold.",
     "mode": "pixel_refine",
     "scale": 2,
     "start": 0.75,

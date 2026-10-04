@@ -1,5 +1,5 @@
 """
-P10 (docs/polish_Plan.md): a pass's issues — the notepad you fill while watching
+A pass's issues — the notepad you fill while watching
 a proxy.
 
   - An issue snapshots what produced the take: the script's lines, the compiled

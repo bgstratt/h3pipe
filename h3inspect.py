@@ -4,7 +4,7 @@ h3inspect — read a ComfyUI workflow and propose the target.json that drives it
 A target is data: which node widget takes the prompt, the size, the length, the
 seed, the model and the LoRAs; what the legal frame counts are; which files it
 loads and what family they must be. Almost all of it is in the graph already,
-so this works it out and says what it could not (docs/PLAN.md Phase 12b).
+so this works it out and says what it could not.
 
     inspect_graph(graph, object_info=..., model_list=...) ->
         {"proposal": {...target.json...},   what to save (draft: true)

@@ -300,7 +300,7 @@
     "review_nodes": []
   },
   "upscale": {
-    "_note": "Phase 13d (docs/PLAN.md, h3upscale.py): as wan22_i2v's `pixel_refine`: the take's frames through an upscale model (`pixel_model`), encoded with the Wan VAE, then the low-noise expert alone from `start` (0.75 of the take's 4 lightning steps: the last) at the new size. VACE's latent starts with its reference picture's frame (`trim_latent` cuts it off after sampling), so the refine's does too (`reference`): the picture at the new size (bilinear, centre crop, as WanVaceToVideo sizes it), encoded, in front. Silent: nothing to hold.",
+    "_note": "h3upscale.py: as wan22_i2v's `pixel_refine`: the take's frames through an upscale model (`pixel_model`), encoded with the Wan VAE, then the low-noise expert alone from `start` (0.75 of the take's 4 lightning steps: the last) at the new size. VACE's latent starts with its reference picture's frame (`trim_latent` cuts it off after sampling), so the refine's does too (`reference`): the picture at the new size (bilinear, centre crop, as WanVaceToVideo sizes it), encoded, in front. Silent: nothing to hold.",
     "mode": "pixel_refine",
     "scale": 2,
     "start": 0.75,
@@ -396,12 +396,12 @@
     "wan2.2_fun_vace_high_noise_14B_fp8_scaled.safetensors": {
       "folder": "diffusion_models",
       "url": null,
-      "source": "no URL: no ComfyUI template, saved workflow or ComfyUI-Manager model list on this machine records this file. Search Hugging Face for its exact name (Wan 2.2 Fun VACE A14B high-noise expert, fp8 scaled ComfyUI repack)."
+      "source": "no URL: no ComfyUI template, saved workflow or ComfyUI-Manager model list known to h3pipe records this file. Search Hugging Face for its exact name (Wan 2.2 Fun VACE A14B high-noise expert, fp8 scaled ComfyUI repack)."
     },
     "wan2.2_fun_vace_low_noise_14B_fp8_scaled.safetensors": {
       "folder": "diffusion_models",
       "url": null,
-      "source": "no URL: no ComfyUI template, saved workflow or ComfyUI-Manager model list on this machine records this file. Search Hugging Face for its exact name (Wan 2.2 Fun VACE A14B low-noise expert, fp8 scaled ComfyUI repack)."
+      "source": "no URL: no ComfyUI template, saved workflow or ComfyUI-Manager model list known to h3pipe records this file. Search Hugging Face for its exact name (Wan 2.2 Fun VACE A14B low-noise expert, fp8 scaled ComfyUI repack)."
     },
     "umt5_xxl_fp8_e4m3fn_scaled.safetensors": {
       "folder": "text_encoders",

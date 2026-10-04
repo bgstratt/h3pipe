@@ -21,7 +21,7 @@ renders with apart without loading a single weight:
     unknown    no signature matches (or not a .safetensors file)
 
 The signatures below were built from the headers of the files installed on the
-dev machine (docs/PLAN.md "Model families"), nothing else. What a header can't
+dev machine, nothing else. What a header can't
 tell apart is said in the family's `detail` and settled by the name: `identify`
 narrows a family to one of its variants when exactly one variant's name
 patterns match the file (`names`: {family: [globs]}, from the targets, the

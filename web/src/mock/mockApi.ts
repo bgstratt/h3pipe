@@ -573,7 +573,7 @@ export function createMockApi(emit: Emit, opts: MockOptions = {}): Api & { outsi
 
   function randomSeed(): string {
 
-    // new seeds stay below 2^53 (PLAN.md)
+    // new seeds stay below 2^53
     return String(Math.floor(Math.random() * 2 ** 52));
   }
 

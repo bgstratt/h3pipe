@@ -1,5 +1,5 @@
 """
-Phase 12a (docs/PLAN.md): a target made of data alone. The builtin prose
+A target made of data alone. The builtin prose
 compile (`"code": "builtin:video_prose"`), a show's own targets in
 `<show>/targets/<id>/target.json`, and keyframes wired by `binding.inputs`
 instead of Python.

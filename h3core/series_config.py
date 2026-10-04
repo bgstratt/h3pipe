@@ -6,8 +6,8 @@ entries and are dropped, as are non-object values. Everything else is returned
 as the raw dict: targets read the parts they understand.
 
 A subject with `of: <another subject>` is a **variant** — the same character or
-object in a different wardrobe or state, with its own reference sheet
-(docs/PLAN.md, Phase 10). Loading resolves it into a complete ordinary subject
+object in a different wardrobe or state, with its own reference sheet.
+Loading resolves it into a complete ordinary subject
 entry, so nothing downstream has to know variants exist: a target compiling a
 shot whose cast names `gina_towel` reads the same shape of entry it reads for
 `gina`, and gets the towel's sheet and the towel's words.

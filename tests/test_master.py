@@ -1,5 +1,5 @@
 """
-Phase 13e4 (docs/PLAN.md): h3master — an episode's master in one action.
+h3master — an episode's master in one action.
 
 The plan (each shot of the cut: upscale / ok / kept / queued / gap, by the
 series recipe), queueing its upscales, what it keeps, the strict assembly into

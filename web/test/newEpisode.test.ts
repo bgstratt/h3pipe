@@ -1,4 +1,4 @@
-// P5 (docs/polish_Plan.md): naming a new episode, and whether the folder it
+// Naming a new episode, and whether the folder it
 // would go in is one the editor can write to and find again.
 import { describe, expect, it } from "vitest";
 import { insideRoot, nameError, suggestName, willBeListed } from "../src/lib/newEpisode";

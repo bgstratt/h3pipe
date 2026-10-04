@@ -1,4 +1,4 @@
-// A pass you can watch (docs/polish_Plan.md P1): how far through an episode a
+// A pass you can watch: how far through an episode a
 // render pass is, how fast it is going, and how much is left.
 //
 // Everything here comes from take sidecars the server already sends — each take

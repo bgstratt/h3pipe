@@ -502,7 +502,7 @@ def save_source(ep: str, file: str, text: str, base_hash: str | None) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# a new episode (docs/polish_Plan.md, "P5")
+# a new episode
 # ---------------------------------------------------------------------------
 
 STARTER = os.path.join(os.path.dirname(os.path.abspath(__file__)), "examples", "starter")

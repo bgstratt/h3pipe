@@ -1,4 +1,4 @@
-// P1 (docs/polish_Plan.md): a pass's progress, rate and estimate, from take
+// A pass's progress, rate and estimate, from take
 // sidecars. The rate is wall-clock throughput, so a run's queue waiting counts.
 import { describe, expect, it } from "vitest";
 import {

@@ -4,7 +4,7 @@ paragraph of prose: the story IR to shotlist entries, the ref slots, and the
 graph helpers. A target.json says `"code": "builtin:video_prose"` and ships no
 Python; the three Wan 2.2 targets bind it to their own wording and graph
 surgery through targets/video/wan/common.py, and a custom target made from a
-user's own workflow (docs/PLAN.md Phase 12) uses it as it is.
+user's own workflow uses it as it is.
 
 What a target brings to it:
 

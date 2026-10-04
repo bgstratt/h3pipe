@@ -16,7 +16,7 @@ h3jobs, h3refs, the routes) only talks to a target through this module:
     shot_targets(story, series_cfg)   -> {shot id: target id}
     episode_targets(story, series_cfg) -> [(Target, shot ids)]  (how a build splits)
 
-A Target has four parts, as docs/PLAN.md sketches them:
+A Target has four parts:
 
     template   legal lengths and sizes: snap(frames), frames(seconds, fps),
                validate_size(w, h), continuous_warning(shot, frames)

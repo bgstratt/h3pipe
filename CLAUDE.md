@@ -3,12 +3,11 @@
 Script-to-episode pipeline for AI video on a local ComfyUI. Authored inputs are
 `series.json` (the series config) and `epNN.md` (script); everything else is generated.
 
-**Current work: `docs/PLAN.md`** — a shot/take editor inside ComfyUI (takes,
-overrides, cut, then the UI), followed by making the pipeline model-agnostic (story
-IR + targets). Read it before changing `h3build.py`, `h3render.py`, `kreagen.py` or
-`comfy_nodes/`, and follow its phase order and exit checks. Phases 11 and 12 are in:
-a target's workflow can be handed to ComfyUI and back, and a show can have targets of
-its own (data only, proposed from a workflow by `h3inspect.py`).
+The pipeline is built: a shot/take editor inside ComfyUI (takes, overrides, the cut),
+a model-agnostic core (story IR + targets), targets a workflow can be handed to ComfyUI
+and back, and a show's own targets (data only, proposed from a workflow by
+`h3inspect.py`). The design record is the docs (`docs/API.md` for the contracts) and the
+docstrings; there is no separate plan file.
 
 ## Layout
 

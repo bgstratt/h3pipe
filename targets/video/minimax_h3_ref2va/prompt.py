@@ -3,7 +3,7 @@ The MiniMax H3 Ref2VA prompt: the six-section format from the H3 prompt-writing
 spec (subject_definitions, summary, retention_analysis, detailed_description,
 overall_soundscape, non_diegetic_music).
 
-This is code on purpose (docs/PLAN.md: prompt formats are code, everything else
+This is code on purpose (prompt formats are code, everything else
 about a target is data). It reads the parser-shaped shot dict compile.py
 prepares, with these compile-set keys:
 

@@ -1,6 +1,5 @@
 """
-minimax_h3_still: the video model used as an image target (docs/PLAN.md, Phase
-10b). It renders the shortest clip the H3 node allows and keeps frame 0, so a
+minimax_h3_still: the video model used as an image target. It renders the shortest clip the H3 node allows and keeps frame 0, so a
 variant's view can be edited out of the character's own sheet without a second
 model stack installed.
 

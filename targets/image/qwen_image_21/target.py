@@ -12,7 +12,7 @@ anything to edit from:
     none        -> the empty latent: text to image at the job's size
 
 That is what makes one target serve both a character's first sheet and a
-wardrobe variant edited out of it (docs/PLAN.md, Phase 10b), with no second
+wardrobe variant edited out of it, with no second
 entry in the refs target picker.
 
 Series refs and keyframes are worded as every image target words them

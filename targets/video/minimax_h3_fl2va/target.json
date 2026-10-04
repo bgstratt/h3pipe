@@ -98,7 +98,7 @@
   },
 
   "upscale": {
-    "_note": "Phase 13 (docs/PLAN.md, h3upscale.py): as minimax_h3_ref2va's, a final take re-sampled at `scale` from `start` (0.875: step 7 of 8), its latent's video through the LBH-123-AI latent upscaler, its audio held. No loader here: the new size goes to MiniMaxH3ImageToVideo's width/height (`size`: the binding's params), which stretches the keyframes to it, and the dialogue anchor's MiniMaxH3AddGuide reads its size from that node's latent. The keyframes and the anchor live in the conditioning, not the latent, so replacing the latent keeps them.",
+    "_note": "h3upscale.py: as minimax_h3_ref2va's, a final take re-sampled at `scale` from `start` (0.875: step 7 of 8), its latent's video through the LBH-123-AI latent upscaler, its audio held. No loader here: the new size goes to MiniMaxH3ImageToVideo's width/height (`size`: the binding's params), which stretches the keyframes to it, and the dialogue anchor's MiniMaxH3AddGuide reads its size from that node's latent. The keyframes and the anchor live in the conditioning, not the latent, so replacing the latent keeps them.",
     "scale": 2,
     "start": 0.875,
     "size": "params",
@@ -111,11 +111,11 @@
   "downloads": {
     "_note": "Where to get each file this target names (docs/API.md 'Downloads'). A url is only given when a trustworthy record has it: a ComfyUI template's or saved workflow's properties.models entry, or ComfyUI-Manager's model list; `source` says which. Otherwise url is null and source says what to search for. Never a guessed URL.",
     "minimax_h3_audio_vae_fp32.safetensors": {"folder": "vae", "url": "https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/vae/minimax_h3_audio_vae_fp32.safetensors", "source": "ComfyUI template video_minimax_h3_i2v.json (properties.models)"},
-    "minimax_h3_fl2v_lightx2v_turbo_4step_v0.1_comfy.safetensors": {"folder": "loras", "url": null, "source": "no URL: no ComfyUI template, saved workflow or ComfyUI-Manager model list on this machine records this file. Search Hugging Face for its exact name (lightx2v's MiniMax H3 FL2V 4-step turbo LoRA v0.1, ComfyUI conversion)."},
+    "minimax_h3_fl2v_lightx2v_turbo_4step_v0.1_comfy.safetensors": {"folder": "loras", "url": null, "source": "no URL: no ComfyUI template, saved workflow or ComfyUI-Manager model list known to h3pipe records this file. Search Hugging Face for its exact name (lightx2v's MiniMax H3 FL2V 4-step turbo LoRA v0.1, ComfyUI conversion)."},
     "minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors": {"folder": "loras", "url": "https://huggingface.co/lightx2v/Minimax-h3-Turbo/resolve/main/minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors", "source": "ComfyUI template video_minimax_h3_i2v.json (properties.models)"},
     "minimax_h3_fl2va_pruned_int8_convrot.safetensors": {"folder": "diffusion_models", "url": "https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/diffusion_models/minimax_h3_fl2va_pruned_int8_convrot.safetensors", "source": "ComfyUI template video_minimax_h3_i2v.json (properties.models)"},
     "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors": {"folder": "text_encoders", "url": "https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/text_encoders/qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors", "source": "ComfyUI template video_minimax_h3_i2v.json (properties.models)"},
     "minimax_h3_video_vae_fp16.safetensors": {"folder": "vae", "url": "https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/vae/minimax_h3_video_vae_fp16.safetensors", "source": "ComfyUI template video_minimax_h3_i2v.json (properties.models)"},
-    "minimax_h3_latent_upscaler_3d_fp16.safetensors": {"folder": "latent_upscale_models", "url": null, "source": "no URL: no ComfyUI template, saved workflow or ComfyUI-Manager model list on this machine records this file. Search Hugging Face for its exact name: the Comfyui_Minimax_h3_latent_Upscaler pack's README points to the LBH-123-AI/Minimax_h3_latent_Upscaler repo. Only needed to upscale (Phase 13), never to render."}
+    "minimax_h3_latent_upscaler_3d_fp16.safetensors": {"folder": "latent_upscale_models", "url": null, "source": "no URL: no ComfyUI template, saved workflow or ComfyUI-Manager model list known to h3pipe records this file. Search Hugging Face for its exact name: the Comfyui_Minimax_h3_latent_Upscaler pack's README points to the LBH-123-AI/Minimax_h3_latent_Upscaler repo. Only needed to upscale, never to render."}
   }
 }

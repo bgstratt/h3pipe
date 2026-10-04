@@ -1,5 +1,5 @@
 """
-Phase 13 (docs/PLAN.md): an optional 2x upscale of a picked final take.
+An optional 2x upscale of a picked final take.
 
 13a, a take's latent: whether a render keeps it (the request, else the series
 config's `upscale.save_latents`, else final-only), only on a target whose

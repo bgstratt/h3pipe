@@ -1,5 +1,5 @@
 """
-P5 (docs/polish_Plan.md): a new episode from a template.
+A new episode from a template.
 
   - `examples/starter/` is a real, correct pair: it passes h3build --check with
     no warnings, and it is honest about references (it lists them as missing).

@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """
-h3issues.py — a pass's issues: the notepad you fill while watching a proxy
-(docs/polish_Plan.md, "P10").
+h3issues.py — a pass's issues: the notepad you fill while watching a proxy.
 
 The loop it serves: render a cheap proxy to see structure, watch it, jot what is
 wrong with each bad shot, hand the lot to an assistant, fix the script or the

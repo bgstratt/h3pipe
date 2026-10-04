@@ -1,5 +1,5 @@
 """
-Phase 13b (docs/PLAN.md): the nodes an upscale of a take runs through.
+The nodes an upscale of a take runs through.
 
 An upscale re-samples a take's latent at twice the size, from late in the
 schedule, under the take's own frozen shotlist (prompt, references, seed), so

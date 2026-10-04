@@ -1,5 +1,5 @@
 """
-P8 (docs/polish_Plan.md): supplying references you already have.
+Supplying references you already have.
 
   - A ready-made 4-panel sheet is a take on the reserved `sheet` pseudo-view:
     imported, picked (copied, never stitched), compared, discarded. Nothing

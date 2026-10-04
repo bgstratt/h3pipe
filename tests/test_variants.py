@@ -1,5 +1,5 @@
 """
-Wardrobe variants (docs/PLAN.md, Phase 10): a subject with `of: <subject>` is
+Wardrobe variants: a subject with `of: <subject>` is
 the same character or object in a different state, with its own reference
 sheet.
 

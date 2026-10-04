@@ -34,7 +34,7 @@ Change it first when either side needs something new.
 
 ### `GET /h3pipe/config`
 ```json
-{"roots": ["C:/Users/bgstr/ComfyProjects"], "comfy": "http://127.0.0.1:8188",
+{"roots": ["C:/Shows"], "comfy": "http://127.0.0.1:8188",
  "review_copy": false, "version": 1}
 ```
 Stored in ComfyUI's user folder as `user/default/h3pipe/config.json`. If that file
@@ -359,7 +359,7 @@ as `h3.py assemble` followed by `h3.py publish <ep> --input <cut>`.
 ## Upscale (Phase 13)
 
 An upscale is a version of a take (either pass), not a take: `<stem>.up.mp4` and `<stem>.up.json`
-beside it (h3upscale.py; docs/PLAN.md Phase 13). It re-samples the take at 2x from late in
+beside it (h3upscale.py). It re-samples the take at 2x from late in
 its own schedule (the target's `start`, 0.875: step 7 of 8) under the take's frozen
 shotlist, from its kept latent (Phase 13a) or, without one, its frames and `_h3.wav`
 through the VAE. The take's audio is held while it samples and its audio stream is copied
@@ -622,7 +622,7 @@ A folder picker for choosing roots and episodes. It isn't limited to the roots,
 because this is how roots are chosen. It lists folder names only, never file
 contents.
 ```json
-{"path": "C:\Users\bgstr\ComfyProjects\DeanStories", "parent": "C:\Users\bgstr\ComfyProjects",
+{"path": "C:\Shows\MyShow", "parent": "C:\Shows",
  "episode": false, "truncated": false,
  "dirs": [{"name": "ep05", "path": "C:\…\ep05", "episode": true, "series_config": true}]}
 ```
@@ -676,7 +676,7 @@ you supply. Refs are the same thing whatever model consumes them. Each has a `sc
 - A **character** has views (`01_threequarter`, `02_side`, `03_back`, `04_face`, as
   in `kreagen.VIEWS`). Each view has its own takes and pick. Picking a view that
   completes the set stitches the sheet with `mksheet` into the series config's `sheet` path.
-- A **wardrobe variant** (a subject with `of:` — docs/PLAN.md, Phase 10) is listed like any
+- A **wardrobe variant** (a subject with `of:`) is listed like any
   other subject: its own sheet, its own views, its own takes. The listing carries `"of":
   "<the subject it is a variant of>"`, and it has **no `voice:` ref of its own** — it is the
   same character and shares theirs, so a voice picked for it would split one character's
@@ -2936,7 +2936,7 @@ sparsify harder (54% -> 64%). On a 229-shot episode (156 one-subject, 64 two-sub
 
 A target was code plus data in this repo. Now a show can have targets of its own — data
 only, in `<show>/targets/<id>/target.json` — and h3pipe can propose that file by reading a
-workflow. `docs/PLAN.md` has the phase and its decisions; this is the contract.
+workflow. This is the contract.
 
 ### 12a: the builtin prose compile, and a second target root
 

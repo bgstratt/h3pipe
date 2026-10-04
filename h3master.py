@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-h3master.py — Phase 13e (docs/PLAN.md): an episode's master, in one action.
+h3master.py — an episode's master, in one action.
 
     python h3.py master <episode> [<episode> ...] [--check] [--wait] [--conform]
                         [--allow-gaps] [--prores] [--proxy]

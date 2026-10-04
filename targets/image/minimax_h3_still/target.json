@@ -165,7 +165,7 @@
     "minimax_h3_ref2v_turbo_8step_v1.0_768p_comfyui_bf16.safetensors": {
       "folder": "loras",
       "url": null,
-      "source": "no URL: no ComfyUI template, saved workflow or ComfyUI-Manager model list on this machine records this file. Search Hugging Face for its exact name (lightx2v's MiniMax H3 Ref2V 8-step turbo LoRA v1.0, ComfyUI conversion)."
+      "source": "no URL: no ComfyUI template, saved workflow or ComfyUI-Manager model list known to h3pipe records this file. Search Hugging Face for its exact name (lightx2v's MiniMax H3 Ref2V 8-step turbo LoRA v1.0, ComfyUI conversion)."
     },
     "minimax_h3_ref2va_pruned_int8_convrot.safetensors": {
       "folder": "diffusion_models",

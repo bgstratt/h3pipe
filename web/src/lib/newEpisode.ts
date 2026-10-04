@@ -1,4 +1,4 @@
-// P5 (docs/polish_Plan.md): naming a new episode. The same rules the server
+// Naming a new episode. The same rules the server
 // applies (h3source.check_name), so the dialog can say why before asking, plus
 // whether the folder it would go in is somewhere the editor can find it again.
 
