@@ -502,8 +502,10 @@ at a join, a cut h3assemble didn't encode); the report's `Picture:` line says th
 master that assembled but couldn't be titled is a 500 saying so; the untitled master is
 left in place.
 
-`assemble` answers when the master is made, which takes a while (h3assemble re-encodes
-every clip; half an hour for a 300-shot episode), so it is also a **job**: `job` in the
+`assemble` answers when the master is made, which can take a while (h3assemble re-encodes
+the clips that need it — trims, dialogue windows, gaps scaled up — and copies the upscales
+beside them when their H.264 headers agree, checking each join; when they don't, every clip
+is re-encoded, half an hour for a 300-shot episode), so it is also a **job**: `job` in the
 answer, `GET /h3pipe/master/job`, and the `h3pipe.master` events. Only one master of an
 episode is assembled at a time: `<episode>/master/.assembling.json` (`{pid, host, by,
 started}`) is held while one runs, whoever started it, the editor or `h3.py master`, and a
@@ -2714,6 +2716,29 @@ and the checks all call.
   concat demuxer still copies; it also fixes a latent mismatch that predates 9d.
 - **[settled] An audio source does not force a re-encode.** Only the 9b reasons do (dialogue
   windows, trims, placeholders, rate or size changes).
+- **[added 2026-10-04] Those reasons re-encode only their own clips.** The cut has a standard:
+  how conform writes a clip of it (its size, rate and quality), read from a few frames conformed
+  (`standard_sig`: codec, profile, level, pixel format, size, rate, time base, pixel aspect and
+  the H.264 headers). A clip already encoded that way is copied; every other one is conformed to
+  it — a derived take's 1:1 pixel tag, an NVENC upscale beside x264 ones. conform writes every
+  clip untagged (`setsar=0`), as a render saves its takes, so a scaled clip matches too. When
+  nothing needs re-encoding and the clips all agree, they are copied as they are, standard or
+  not. The re-encoded clips are written in the copies' audio layout, and a copy whose own sound
+  is in another layout is remuxed (`normalise`). Afterwards every re-encoded clip's headers must
+  be the standard's, the picture's length its frames', and the frames either side of each join
+  next to a re-encoded clip must decode to what went in. Any check failing re-encodes every
+  clip, as before; so does `--reencode-all`, and so does a cut where nothing matches. A master's upscales are
+  x264 CRF 12 slow, as conform's `master` is, so ep01 (18 trimmed clips of 323) re-encodes 18
+  (assembly 2 minutes instead of 12).
+- **[added 2026-10-04] Sound never runs past a copied clip's picture.** The concat demuxer starts
+  the next clip where the longer stream ends, so a clip whose sound overruns its picture (ep01's
+  sh1360 upscale: 22 ms) left a hole in the picture's timing and every later frame late. Such a
+  clip is remuxed with its sound cut to the picture (`normalise` bounds its sound with `atrim`),
+  in a copied cut too; the joined picture's length from its header must equal its frames
+  (`timing_gap`). h3publish joins a picture-only copy of the cut for the same reason, checks the
+  same length, and seeks by the picture's offset from the file's start (`picture_offset`): its
+  join check had double-counted the start time on a cut whose picture starts after its sound,
+  which is why every real master's titles fell back to re-encoding the whole cut.
 - **[added] A source whose file is gone or has no sound is a warning, not a failure**: the clip
   goes silent and assemble prints `sh010: line.wav is not there or has no sound`. The run also
   lists which clips take their sound from elsewhere.

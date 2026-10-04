@@ -191,6 +191,7 @@ def probe(path: str) -> dict:
             "sar": v.get("sample_aspect_ratio") or "N/A",
             "extradata": (v.get("extradata") or "").strip(),
             "duration": float(d.get("format", {}).get("duration") or 0),
+            "picture_s": float(v.get("duration") or 0),
             "audio": any(s.get("codec_type") == "audio" for s in streams)}
 
 
@@ -341,7 +342,7 @@ def encode_title(clip: str, dst: str, tmp: str, cut: dict, sub: dict, alpha: str
 
 def frame_hashes(path: str, first: int, count: int, info: dict) -> list[str]:
     """framemd5 of `count` decoded frames from frame `first` on."""
-    at = info["start"] + (first - 0.5) / info["fps"]
+    at = h3assemble.picture_offset(path) + (first - 0.5) / info["fps"]
     r = run(["ffmpeg", "-v", "error", "-ss", f"{max(0.0, at):.6f}", "-i", path,
              "-map", "0:v:0", "-frames:v", str(count), "-f", "framemd5", "-"], timeout=600)
     if r.returncode != 0 or r.stderr.strip():
@@ -358,6 +359,11 @@ def check_joins(out: str, pieces: list[tuple[str, dict]]) -> str | None:
     want = sum(p["frames"] for _, p in pieces)
     if got["frames"] != want:
         return f"the output has {got['frames']} frames, the pieces {want}"
+    # every frame there, but a hole in their timing shows only in the length:
+    # each frame after it plays late, by less than a frame-content check sees
+    if got["picture_s"] and abs(got["picture_s"] - want / got["fps"]) > 0.5 / got["fps"]:
+        return (f"the picture runs {got['picture_s'] - want / got['fps']:+.3f}s from its "
+                f"{want} frames: a gap in its timing")
     n, at = JOIN_FRAMES, 0
     for (a, pa), (b, pb) in zip(pieces, pieces[1:]):
         at += pa["frames"]
@@ -399,9 +405,19 @@ def publish_copy(src: str, cut: dict, intro: str | None, outro: str | None, sub:
         if diff:
             return f"the {kind} doesn't match the cut: {', '.join(diff)}"
 
-    order = ([made["intro"]] if intro else []) + [src] + ([made["outro"]] if outro else [])
+    # the cut's picture alone goes into the join: the concat demuxer starts the
+    # next clip where a clip's longer stream ends, and a cut's sound runs a few
+    # milliseconds past its picture (its last clip's AAC), which pushed the outro
+    # late and failed check_joins on every real master (ep01, 2026-10-04). Its
+    # sound is laid separately below either way.
+    pic_only = os.path.join(tmp, "cut_picture.mp4")
+    r = run(["ffmpeg", "-y", "-v", "error", "-i", src, "-map", "0:v:0", "-c", "copy",
+             pic_only], cwd=tmp)
+    if r.returncode != 0:
+        return f"the cut's picture couldn't be copied out: {r.stderr.strip()[-300:]}"
+    order = ([made["intro"]] if intro else []) + [pic_only] + ([made["outro"]] if outro else [])
     sounds = ([intro] if intro else []) + [src] + ([outro] if outro else [])
-    infos = {p: (cut if p == src else probe(p)) for p in order}
+    infos = {p: (cut if p == pic_only else probe(p)) for p in order}
     with open(os.path.join(tmp, "join.txt"), "w", encoding="utf-8") as f:
         for p in order:
             f.write(f"file '{p.replace(os.sep, '/')}'\n")
