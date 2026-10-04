@@ -522,9 +522,10 @@ one it assembled (kept until ComfyUI restarts):
 ```
 `state`: `running`, `done` (`output`, `mov`, `report`, `titles` as `assemble` answers them)
 or `failed` (`error`). `step` is `assemble` (h3assemble's stages: `probe` reading each clip,
-`clips` writing each, `join`, `prores`, `verify` counting the master's frames) or `titles`
-(h3publish's: `titles` with `text` intro / outro, `join`, `verify` checking the joins,
-`reencode` with a frame count, `prores`); `done` / `total` count what has a count. A run
+`clips` writing each, `join`, `prores` when the master has no titles, `verify` counting the
+master's frames) or `titles` (h3publish's: `titles` with `text` intro / outro, `join`,
+`verify` checking the joins, `reencode` with a frame count, then `prores`: with titles the
+`.mov` is made once, from the titled master); `done` / `total` count what has a count. A run
 this ComfyUI didn't start (`h3.py master`, read from the lock) is `{"state": "running",
 "elsewhere": true, "by", "started"}` with nothing else; it sends no events, so ask again.
 

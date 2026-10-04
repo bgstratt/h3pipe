@@ -60,6 +60,7 @@ import json
 import os
 import re
 import tempfile
+import time
 from dataclasses import dataclass, field
 
 SIDECAR_VERSION = 1
@@ -224,15 +225,39 @@ def content_hash(obj) -> str:
     return hashlib.sha1(blob.encode("utf-8")).hexdigest()
 
 
+# path -> (size, mtime_ns, sha1). The episode status checks every take's refs
+# against the sha1s its sidecar recorded: thousands of hashes of the same few
+# hundred pictures per request, gigabytes read to learn nothing changed. A file
+# whose size and mtime are unchanged is not read again -- unless it was written
+# within the last RACY_S seconds, when a second write could share its mtime
+# (Windows stamps writes at timer resolution); those are hashed every time.
+_SHA1_CACHE: dict[str, tuple[int, int, str]] = {}
+_SHA1_CACHE_MAX = 20000
+RACY_S = 2.0
+
+
 def file_sha1(path: str) -> str | None:
+    try:
+        st = os.stat(path)
+    except FileNotFoundError:
+        return None
+    key = os.path.normcase(os.path.abspath(path))
+    hit = _SHA1_CACHE.get(key)
+    if hit and hit[0] == st.st_size and hit[1] == st.st_mtime_ns:
+        return hit[2]
     try:
         h = hashlib.sha1()
         with open(path, "rb") as fh:
             for chunk in iter(lambda: fh.read(1 << 20), b""):
                 h.update(chunk)
-        return h.hexdigest()
     except FileNotFoundError:
         return None
+    sha = h.hexdigest()
+    if time.time() - st.st_mtime_ns / 1e9 > RACY_S:
+        if len(_SHA1_CACHE) >= _SHA1_CACHE_MAX:
+            _SHA1_CACHE.clear()
+        _SHA1_CACHE[key] = (st.st_size, st.st_mtime_ns, sha)
+    return sha
 
 
 # ---------------------------------------------------------------------------

@@ -421,7 +421,11 @@ def _assemble(plan: Plan, gaps: list, prores: bool, timeout: int, progress) -> d
         args += ["--shotlist", "shotlist/shotlist_proxy.json", "--subfolder", sub]
     if gaps:
         args.append("--partial")
-    if prores:
+    # the .mov is made from the finished master: by h3assemble when nothing is
+    # laid around the cut, else once, after the titles (add_titles) -- not
+    # encoded from the untitled cut only to be made again
+    retitle = prores and _has_titles(plan.root)
+    if prores and not retitle:
         args += ["--intermediate", "prores"]
     rc, out, err = h3edit.run_tool("h3assemble.py", args, plan.root, timeout,
                                    progress=_tell(progress, "assemble"))
@@ -432,7 +436,7 @@ def _assemble(plan: Plan, gaps: list, prores: bool, timeout: int, progress) -> d
     dst = master_dir(plan.root)
     os.makedirs(dst, exist_ok=True)
     old_mov = os.path.join(dst, name + ".mov")
-    if not prores and os.path.isfile(old_mov):
+    if (not prores or retitle) and os.path.isfile(old_mov):
         os.remove(old_mov)                  # an earlier master's: not this one any more
     moved = {}
     for ext in (".mp4", "_shots.txt", ".mov"):
@@ -441,7 +445,11 @@ def _assemble(plan: Plan, gaps: list, prores: bool, timeout: int, progress) -> d
             shutil.move(src, os.path.join(dst, name + ext))
             moved[ext] = os.path.join(dst, name + ext)
     mp4, mov = moved[".mp4"], moved.get(".mov")
+    if retitle:
+        mov = old_mov                       # add_titles makes it from the titled master
     titled, why = add_titles(plan, mp4, mov, timeout, progress)
+    if mov and not os.path.isfile(mov):
+        mov = None                          # the titles failed before it was made
     out += titled.get("report", "")
     rep = write_report(plan, mp4, mov, titled)
     if why:
@@ -449,6 +457,16 @@ def _assemble(plan: Plan, gaps: list, prores: bool, timeout: int, progress) -> d
                 "titles": None, "error": f"the master is assembled, but its titles failed: {why}"}
     return {"ok": True, "output": mp4, "mov": mov, "report": out,
             "report_md": rep, "titles": titled.get("titles"), "error": ""}
+
+
+def _has_titles(root: str) -> bool:
+    """An intro or an outro will be laid around the master. A series config
+    h3publish can't read counts as none here; add_titles reports it."""
+    import h3publish
+    try:
+        return any(h3publish.titles(root))
+    except Exception:
+        return False
 
 
 def add_titles(plan: Plan, mp4: str, mov: str | None, timeout: int = 3600,

@@ -321,5 +321,49 @@ class AssembleTest(unittest.TestCase):
         self.assertEqual(probe_frames(self.out("renders_proxy", "ep01_proxy")), 22)
 
 
+@unittest.skipUnless(HAVE_FF, "ffmpeg/ffprobe not on PATH")
+class FrameCountTest(unittest.TestCase):
+    """frame_count reads an mp4's header count; decoding is the fallback."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.dir = self._tmp.name
+        sys.path.insert(0, ROOT)
+        import h3assemble
+        self.A = h3assemble
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def test_mp4_from_its_header(self):
+        p = os.path.join(self.dir, "c.mp4")
+        make_clip(p, 39, "32x32")
+        seen = []
+        real = self.A.run
+
+        def spy(cmd, *a, **k):
+            seen.append(cmd)
+            return real(cmd, *a, **k)
+
+        self.A.run = spy
+        try:
+            self.assertEqual(self.A.frame_count(p), 39)
+        finally:
+            self.A.run = real
+        self.assertEqual(len(seen), 1)
+        self.assertNotIn("-count_frames", seen[0])
+        self.assertEqual(probe_frames(p), 39)
+
+    def test_no_header_count_is_decoded(self):
+        p = os.path.join(self.dir, "c.h264")             # a raw stream: no container count
+        r = ff("ffmpeg", "-y", "-v", "error", "-f", "lavfi", "-i", "testsrc=size=32x32:rate=24",
+               "-frames:v", "22", "-c:v", "libx264", "-preset", "ultrafast", "-f", "h264", p)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.A.frame_count(p), 22)
+
+    def test_missing_file(self):
+        self.assertEqual(self.A.frame_count(os.path.join(self.dir, "nope.mp4")), -1)
+
+
 if __name__ == "__main__":
     unittest.main()

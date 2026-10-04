@@ -275,6 +275,56 @@ class MasterTest(ApiTest):
                       open(res["report_md"], encoding="utf-8").read())
         self.assertIsNone(M.assembling(self.ep))                 # the lock went with the run
 
+    def test_prores_is_made_once_from_the_finished_master(self):
+        import h3assemble
+        import h3edit
+        plan, name = self.ready_plan()
+        calls, made = [], []
+
+        def tool(script, args, cwd, timeout, progress=None):
+            calls.append((script, args))
+            return self.talking_tool(name, "copied", "")(script, args, cwd, timeout,
+                                                         progress or (lambda *a: None))
+
+        def prores(src, mov):
+            made.append((src, mov))
+            open(mov, "wb").close()
+
+        mov = os.path.join(self.ep, "master", name + ".mov")
+        # no titles: h3assemble makes the .mov beside the cut it assembled
+        with mock.patch.object(h3edit, "run_tool", tool), \
+                mock.patch.object(h3assemble, "prores_from", prores):
+            M.assemble_master(plan, allow_gaps=True, prores=True)
+        self.assertIn("--intermediate", calls[0][1])
+        self.assertEqual(made, [])
+        # titles: the untitled cut gets no .mov; one is made from the titled master
+        self.make_titles()
+        open(mov, "wb").close()                          # an earlier master's
+        calls.clear()
+        with mock.patch.object(h3edit, "run_tool", tool), \
+                mock.patch.object(h3assemble, "prores_from", prores):
+            res = M.assemble_master(plan, allow_gaps=True, prores=True)
+        self.assertTrue(res["ok"], res)
+        assemble = next(a for s, a in calls if s == "h3assemble.py")
+        self.assertNotIn("--intermediate", assemble)
+        self.assertEqual(made, [(os.path.join(self.ep, "master", name + ".mp4"), mov)])
+        self.assertEqual(res["mov"], mov)
+        # the titles failing: no .mov is claimed, and the earlier one is gone
+        made.clear()
+
+        def failing(script, args, cwd, timeout, progress=None):
+            if script == "h3publish.py":
+                return 1, "  !! no font\n", ""
+            return tool(script, args, cwd, timeout, progress)
+
+        with mock.patch.object(h3edit, "run_tool", failing), \
+                mock.patch.object(h3assemble, "prores_from", prores):
+            res = M.assemble_master(plan, allow_gaps=True, prores=True)
+        self.assertFalse(res["ok"])
+        self.assertIsNone(res["mov"])
+        self.assertFalse(os.path.isfile(mov))
+        self.assertEqual(made, [])
+
     def test_one_run_at_a_time(self):
         import h3edit
         import subprocess

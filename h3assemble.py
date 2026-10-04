@@ -95,6 +95,18 @@ def have(tool: str) -> bool:
 
 
 def frame_count(path: str) -> int:
+    """The clip's video frames. An mp4 header records its sample count, which is
+    read without decoding anything; `-count_frames` decodes the whole stream
+    (minutes on a master) and is only the fallback, for a file whose header
+    has no count."""
+    r = run(["ffprobe", "-v", "error", "-select_streams", "v:0",
+             "-show_entries", "stream=nb_frames", "-of", "csv=p=0", path], timeout=60)
+    try:
+        n = int(r.stdout.decode().strip())
+        if n > 0:
+            return n
+    except (ValueError, AttributeError):
+        pass
     r = run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-count_frames",
              "-show_entries", "stream=nb_read_frames", "-of", "csv=p=0", path],
             timeout=300)

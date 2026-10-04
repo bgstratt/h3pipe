@@ -463,6 +463,14 @@ export function setZoom(zoom: number) {
 // ---------------------------------------------------------------------------
 
 const inflight = new Map<string, Promise<EpisodeStatus | undefined>>();
+/** A refresh asked for while one is running: that one may have been read before
+ * the change the caller just made (a pick, a queued take), so one more runs when
+ * it ends. Every caller in the meantime shares it. */
+const followUp = new Map<string, Promise<EpisodeStatus | undefined>>();
+/** Picks shown before the server's status has them (showPick), per status key:
+ * a status read before the pick would put the old take back, so each is laid
+ * over every status whose request started before it was made. */
+const shownPicks = new Map<string, { shot: string; take: number; at: number }[]>();
 
 /** Phase 9b: a status fetched while cut edits are still being saved would undo
  * them on screen (and the next edit, written from it, would drop them): the
@@ -478,9 +486,21 @@ export function refreshEpisode(ep = get().ep, pass = get().pass): Promise<Episod
   if (!ep) return Promise.resolve(undefined);
   const key = statusKey(ep, pass);
   const running = inflight.get(key);
-  if (running) return running;
+  if (running) {
+    let next = followUp.get(key);
+    if (!next) {
+      // the running one's finally has cleared `inflight` by the time this runs
+      next = running.then(() => {
+        followUp.delete(key);
+        return refreshEpisode(ep, pass);
+      });
+      followUp.set(key, next);
+    }
+    return next;
+  }
   const p = (async () => {
     set((s) => ({ statusLoading: { ...s.statusLoading, [key]: true } }));
+    const started = Date.now();
     try {
       const raw = await api().episode(ep, pass);
       // Phase 9b: cut edits still on their way to the server stay applied
@@ -490,6 +510,10 @@ export function refreshEpisode(ep = get().ep, pass = get().pass): Promise<Episod
         delete statusError[key];
         return { status: { ...s.status, [key]: st }, statusError };
       });
+      const picks = (shownPicks.get(key) ?? []).filter((p) => p.at > started);
+      if (picks.length) shownPicks.set(key, picks);
+      else shownPicks.delete(key);
+      for (const p of picks) layPick(key, pass, p.shot, p.take);
       void afterStatus(ep, pass, st);
       return st;
     } catch (e) {
@@ -723,7 +747,38 @@ export async function pickTake(shot: string, take: number | null, fromPass: Pass
       }
     }
     host().toast("success", take != null ? `${shot}: the ${pass} cut now uses ${tn(take)}` : `${shot}: back to the latest usable take`);
-    await refreshEpisode(ep, pass);
+    // show the pick at once; the status that follows (this refresh, and the
+    // server's h3pipe.episode event) fills in everything else
+    if (take != null && (!fromPass || fromPass === pass)) showPick(ep, pass, shot, take);
+    void refreshEpisode(ep, pass);
+  });
+}
+
+/** Lay a pick over the loaded status, from the take's own summary, so the cut
+ * shows it before the episode status comes back. */
+function showPick(ep: string, pass: Pass, shot: string, take: number) {
+  const key = statusKey(ep, pass);
+  const list = (shownPicks.get(key) ?? []).filter((p) => p.shot !== shot);
+  shownPicks.set(key, [...list, { shot, take, at: Date.now() }]);
+  layPick(key, pass, shot, take);
+}
+
+function layPick(key: string, pass: Pass, shot: string, take: number) {
+  set((s) => {
+    const st = s.status[key];
+    const row = st?.shots.find((x) => x.shot === shot);
+    const t = row?.takes.find((x) => x.take === take);
+    if (!st || !row || !t) return {};
+    const usable = t.status === "ok" && t.has_video;
+    const own = row.cut.audio == null;
+    const cut = {
+      ...row.cut, take, picked: true, pass, placeholder: false, usable,
+      frames: usable ? t.frames ?? null : null,
+      fps: (usable ? t.fps : null) ?? row.cut.fps,
+      ...(own ? { audio_file: t.audio ?? null, audio_why: null } : {}),
+    };
+    const shots = st.shots.map((x) => (x === row ? { ...row, cut } : x));
+    return { status: { ...s.status, [key]: { ...st, shots } } };
   });
 }
 
