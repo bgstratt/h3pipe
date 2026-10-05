@@ -51,18 +51,20 @@ class LoaderMissingRefsTest(unittest.TestCase):
         with self.assertRaises(FileNotFoundError):
             self.load(self.frozen("sh020", blank=False))
 
-    def test_unused_subject_sockets_are_empty(self):
-        """A shot with fewer than three subjects sends nothing on the sockets it
-        doesn't use: the plate stays <Picture 4> (the node doesn't renumber), and
-        it used to be sent up to three times over. Measured 2026-09-22 on a
-        one-subject shot: two fewer latent frames, 3.6 s off the take."""
+    def test_unused_subject_sockets_hold_a_tiny_placeholder(self):
+        """A shot with fewer than three subjects sends a 32x32 grey picture on
+        the sockets it doesn't use. H3 numbers only the pictures it is given, so
+        an empty (None) socket made a one-subject shot's plate <Picture 2> under
+        a prompt naming <Picture 4>; the placeholder keeps it 4, at a 2x2 latent
+        apiece rather than the plate sent again."""
         out = self.load(self.frozen("sh010", blank=True))   # ada only
         refs, ref_bg, info = out[2:5], out[5], out[15]
-        self.assertIsNotNone(refs[0])                       # the one subject
-        self.assertIsNone(refs[1])
-        self.assertIsNone(refs[2])
-        self.assertIsNotNone(ref_bg)                        # the plate, still socket 4
-        self.assertIn("slots 2-3 empty", info)
+        self.assertGreater(refs[0].shape[1], N.PLACEHOLDER_SIZE)   # the one subject
+        for r in refs[1:]:
+            self.assertEqual(tuple(r.shape), (1, N.PLACEHOLDER_SIZE, N.PLACEHOLDER_SIZE, 3))
+            self.assertAlmostEqual(float(r.mean()), 0.5, places=3)
+        self.assertIsNotNone(ref_bg)                        # the plate, socket 4
+        self.assertIn("slots 2-3 placeholders", info)
         self.assertIn("Picture 4", info)
 
     def test_render_anyway_substitutes_grey(self):

@@ -88,6 +88,11 @@ def _blank(h: int = 64, w: int = 64) -> torch.Tensor:
     return torch.zeros((1, h, w, 3), dtype=torch.float32)
 
 
+# An unused subject socket's picture (H3's smallest canvas): it holds the
+# socket's number so the plate stays <Picture 4> (see H3ShotListLoader.load).
+PLACEHOLDER_SIZE = 32
+
+
 def _neutral(h: int, w: int) -> torch.Tensor:
     """Flat mid-grey: the stand-in for a missing reference picture when the
     shot is rendered anyway (`missing_refs: blank`). It carries no layout,
@@ -471,7 +476,7 @@ class H3ShotListLoader:
         if not refs:
             # Plate-only shot: an establishing view with voiceover over it. The
             # prompt makes the location <Subject 1>, sourced from <Picture 4>,
-            # and names no other picture — so the subject sockets stay empty.
+            # and names no other picture — so the subject sockets get placeholders.
             ref_notes.append("no subjects — the background is the whole reference")
         if len(subject_ids) > 3:
             raise ValueError(
@@ -479,19 +484,21 @@ class H3ShotListLoader:
                 f"-- slot 4 is the background. Drop {len(subject_ids) - 3}."
             )
 
-        # A shot with fewer than three subjects leaves those sockets EMPTY (None),
-        # which MiniMaxH3ReferenceToVideo takes as "no such picture": it does not
-        # renumber the rest, so the plate stays <Picture 4> whatever comes before
-        # it. Until 2026-09-22 they were padded with the plate, which sent the
-        # same image up to three times -- measured on a one-subject shot at
-        # 864x480: S 12,942 -> 11,306, pinned blocks 63 -> 38, 17.6 s -> 14.0 s,
-        # with the clip unchanged to the eye.
+        # A shot with fewer than three subjects fills those sockets with a 32x32
+        # grey placeholder, so the plate stays <Picture 4> as the prompt says.
+        # MiniMaxH3ReferenceToVideo skips a None socket and the text encoder
+        # numbers only the pictures it is given (comfy/text_encoders/minimax.py),
+        # so empty sockets (2026-09-22 to 2026-10-05) sent a one-subject shot's
+        # plate as <Picture 2> under a prompt naming <Picture 4>. 32x32 is the
+        # node's smallest canvas and it never enlarges a reference, so each
+        # placeholder costs a 2x2 latent and a few vision tokens, not the plate's
+        # thousands (padding with the plate itself, before 2026-09-22, did).
         n_sub = len(refs)
         while len(refs) < 3:
-            refs.append(None)
+            refs.append(_neutral(PLACEHOLDER_SIZE, PLACEHOLDER_SIZE))
         ref_notes.append(f"background {os.path.basename(bg_path or '') or '(none)'}"
                          f"{' MISSING -> flat grey' if 'Picture 4' in blanked else ''} -> <Picture 4>"
-                         + (f" (slots {n_sub + 1}-3 empty)" if n_sub < 3 else ""))
+                         + (f" (slots {n_sub + 1}-3 placeholders)" if n_sub < 3 else ""))
 
         # ---- audio -------------------------------------------------------
         policy = (shot.get("audio_policy") or defaults.get("audio_policy") or "generate")
