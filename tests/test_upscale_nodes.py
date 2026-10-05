@@ -101,6 +101,25 @@ class UpscaleNodesTest(unittest.TestCase):
         self.assertGreater(audio["waveform"].shape[-1], 0)
 
     @needs_ffmpeg
+    def test_load_video_from_a_path(self):
+        src = self.take_mp4()
+        quoted = f'"{src}"'                                     # Explorer's "Copy as path"
+        self.assertIs(UN.H3LoadVideo.VALIDATE_INPUTS("", quoted), True)
+        self.assertIn("no such video", UN.H3LoadVideo.VALIDATE_INPUTS("", src + ".nope"))
+        images, audio, fps, frames, source, out = UN.H3LoadVideo().load("", quoted)
+        self.assertEqual(tuple(images.shape), (24, 48, 96, 3))
+        self.assertEqual((fps, frames, source), (24.0, 24, src))
+        self.assertEqual(out, self.p("sh010_t01.up.mp4"))         # beside the source
+        self.assertGreater(audio["waveform"].shape[-1], 0)
+
+    @needs_ffmpeg
+    def test_load_video_of_a_mute_clip_is_silence_of_its_length(self):
+        src = self.take_mp4(audio=False)
+        _, audio, fps, frames, _, _ = UN.H3LoadVideo().load("", src)
+        self.assertEqual(audio["waveform"].shape[-1], int(44100 * frames / fps))
+        self.assertEqual(float(audio["waveform"].abs().max()), 0.0)
+
+    @needs_ffmpeg
     def test_save_upscale_copies_the_takes_audio(self):
         src = self.take_mp4()
         with open(self.p("sh010_t01.up.json"), "w", encoding="utf-8") as fh:

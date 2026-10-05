@@ -16,6 +16,8 @@ from the target's render graph; these are the pieces that graph doesn't have:
                        to the finished line
     H3SaveUpscale      <stem>.up.mp4: the picture, with the take's own audio
                        stream copied on unchanged, and <stem>.up.json closed
+    H3LoadVideo        any video (picked, dropped, or a path) for a standalone
+                       upscale: frames, audio, fps, and where its upscale goes
     H3PixelUpscale     the pixel method (any target): an upscale model
                        (RealESRGAN, UltraSharp, ...) over the frames a few at a
                        time, each batch resized straight to the target size
@@ -118,6 +120,101 @@ class H3LoadTakeVideo:
             audio = {"waveform": torch.zeros(1, 1, max(1, int(44100 * seconds))),
                      "sample_rate": 44100}
         return (images, audio)
+
+
+# ---------------------------------------------------------------------------
+# H3LoadVideo
+# ---------------------------------------------------------------------------
+
+def probe_fps(path: str) -> float:
+    """The video stream's frame rate (24 when ffprobe can't say)."""
+    out = subprocess.run(
+        ["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries",
+         "stream=r_frame_rate", "-of", "csv=p=0", path],
+        capture_output=True, text=True, timeout=60).stdout.strip()
+    try:
+        num, _, den = out.partition("/")
+        fps = float(num) / float(den or 1)
+    except ValueError:
+        return 24.0
+    return fps if fps > 0 else 24.0
+
+
+def _input_videos() -> list[str]:
+    try:
+        import folder_paths
+    except ImportError:                                  # outside ComfyUI (tests)
+        return []
+    d = folder_paths.get_input_directory()
+    files = [f for f in os.listdir(d) if os.path.isfile(os.path.join(d, f))]
+    return sorted(folder_paths.filter_files_content_types(files, ["video"]))
+
+
+def load_video_paths(video: str, path: str = "") -> tuple[str, str]:
+    """(the source, where its upscale goes). A `path` wins over the picked
+    `video` and its upscale goes beside it, <stem>.up.mp4; a picked (uploaded)
+    video's goes to ComfyUI's output folder, h3_upscale/<stem>.up.mp4."""
+    path = (path or "").strip().strip('"').strip()
+    if path:
+        return path, os.path.splitext(path)[0] + ".up.mp4"
+    import folder_paths
+    src = folder_paths.get_annotated_filepath(video)
+    stem = os.path.splitext(os.path.basename(video))[0]
+    return src, os.path.join(folder_paths.get_output_directory(), "h3_upscale", stem + ".up.mp4")
+
+
+class H3LoadVideo:
+    """Any video, for a standalone upscale: pick or drop one (it goes to
+    ComfyUI's input folder), or give a `path` anywhere on disk, which wins.
+    Its frames, audio (silence when it has none), frame rate, its path, and
+    where its upscale goes (`out_path`, for H3SaveUpscale)."""
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        files = _input_videos()
+        return {"required": {
+            "video": (files or [""], {"video_upload": True}),
+        }, "optional": {
+            "path": ("STRING", {"default": "", "tooltip": "A video anywhere on disk (quotes are "
+                                "fine); wins over the picked one. Its upscale goes beside it."}),
+        }}
+
+    RETURN_TYPES = ("IMAGE", "AUDIO", "FLOAT", "INT", "STRING", "STRING")
+    RETURN_NAMES = ("images", "audio", "fps", "frames", "source_path", "out_path")
+    FUNCTION = "load"
+    CATEGORY = "H3/upscale"
+
+    @classmethod
+    def VALIDATE_INPUTS(cls, video, path=""):
+        src = (path or "").strip().strip('"').strip()
+        if src:
+            return True if os.path.isfile(src) else f"no such video: {src}"
+        if not video:
+            return "pick or drop a video, or give a path"
+        import folder_paths
+        return True if folder_paths.exists_annotated_filepath(video) else f"no such video: {video}"
+
+    @classmethod
+    def IS_CHANGED(cls, video, path=""):
+        try:
+            src = load_video_paths(video, path)[0]
+            st = os.stat(src)
+            return f"{src}:{st.st_size}:{st.st_mtime_ns}"
+        except Exception:
+            return float("nan")
+
+    def load(self, video, path=""):
+        src, out = load_video_paths(video, path)
+        images = read_frames(src)
+        fps = probe_fps(src)
+        try:
+            audio = load_audio(src)
+        except Exception:
+            # a mute video: silence of its length
+            audio = {"waveform": torch.zeros(1, 1, max(1, int(44100 * images.shape[0] / fps))),
+                     "sample_rate": 44100}
+        os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
+        return (images, audio, fps, int(images.shape[0]), src, out)
 
 
 # ---------------------------------------------------------------------------
@@ -620,6 +717,7 @@ class H3SaveUpscale:
 NODE_CLASS_MAPPINGS = {
     "H3LoadTakeLatent": H3LoadTakeLatent,
     "H3LoadTakeVideo": H3LoadTakeVideo,
+    "H3LoadVideo": H3LoadVideo,
     "H3HoldAudio": H3HoldAudio,
     "H3SaveUpscale": H3SaveUpscale,
     "H3PixelUpscale": H3PixelUpscale,
@@ -629,6 +727,7 @@ NODE_CLASS_MAPPINGS = {
 NODE_DISPLAY_NAME_MAPPINGS = {
     "H3LoadTakeLatent": "H3 Load Take Latent",
     "H3LoadTakeVideo": "H3 Load Take Video",
+    "H3LoadVideo": "H3 Load Video",
     "H3HoldAudio": "H3 Hold Audio",
     "H3SaveUpscale": "H3 Save Upscale",
     "H3PixelUpscale": "H3 Pixel Upscale",
