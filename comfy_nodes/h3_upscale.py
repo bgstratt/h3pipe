@@ -155,17 +155,25 @@ def _input_videos() -> list[str]:
     return sorted(folder_paths.filter_files_content_types(files, ["video"]))
 
 
-def load_video_paths(video: str, path: str = "") -> tuple[str, str]:
+# the upscale's name says where it started: the render's latent, or the
+# mp4's frames through the VAE
+UP_FROM_LATENT, UP_FROM_FRAMES = ".up.lat.mp4", ".up.vae.mp4"
+
+
+def load_video_paths(video: str, path: str = "", from_latent: bool = False) -> tuple[str, str]:
     """(the source, where its upscale goes). A `path` wins over the picked
-    `video` and its upscale goes beside it, <stem>.up.mp4; a picked (uploaded)
-    video's goes to ComfyUI's output folder, h3_upscale/<stem>.up.mp4."""
+    `video` and its upscale goes beside it; a picked (uploaded) video's goes to
+    ComfyUI's output folder, h3_upscale/. Named <stem>.up.lat.mp4 when it
+    starts from the render's latent (`from_latent`), <stem>.up.vae.mp4 from
+    the frames."""
+    suffix = UP_FROM_LATENT if from_latent else UP_FROM_FRAMES
     path = (path or "").strip().strip('"').strip()
     if path:
-        return path, os.path.splitext(path)[0] + ".up.mp4"
+        return path, os.path.splitext(path)[0] + suffix
     import folder_paths
     src = folder_paths.get_annotated_filepath(video)
     stem = os.path.splitext(os.path.basename(video))[0]
-    return src, os.path.join(folder_paths.get_output_directory(), "h3_upscale", stem + ".up.mp4")
+    return src, os.path.join(folder_paths.get_output_directory(), "h3_upscale", stem + suffix)
 
 
 LATENT_SUFFIX = ".latent.safetensors"
@@ -188,7 +196,8 @@ class H3LoadVideo:
     where its upscale goes (`out_path`, for H3SaveUpscale). With `use_latent`,
     also the latent the render was sampled to (`latent`, or the one beside the
     video), so an upscale starts from it and not the mp4's compressed frames;
-    `has_latent` says whether there was one."""
+    `has_latent` says whether there was one, and `out_path` says it too:
+    <stem>.up.lat.mp4 from the latent, <stem>.up.vae.mp4 from the frames."""
 
     @classmethod
     def INPUT_TYPES(cls):
@@ -237,7 +246,9 @@ class H3LoadVideo:
             return float("nan")
 
     def load(self, video, path="", use_latent=True, latent=""):
-        src, out = load_video_paths(video, path)
+        src = load_video_paths(video, path)[0]
+        lat = latent_beside(src, latent) if use_latent else None
+        out = load_video_paths(video, path, from_latent=lat is not None)[1]
         images = read_frames(src)
         fps = probe_fps(src)
         try:
@@ -247,7 +258,6 @@ class H3LoadVideo:
             audio = {"waveform": torch.zeros(1, 1, max(1, int(44100 * images.shape[0] / fps))),
                      "sample_rate": 44100}
         os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
-        lat = latent_beside(src, latent) if use_latent else None
         return (images, audio, fps, int(images.shape[0]), src, out,
                 load_latent(lat) if lat else None, lat is not None)
 

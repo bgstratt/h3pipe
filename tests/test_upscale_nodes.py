@@ -109,7 +109,7 @@ class UpscaleNodesTest(unittest.TestCase):
         images, audio, fps, frames, source, out, latent, has_latent = UN.H3LoadVideo().load("", quoted)
         self.assertEqual(tuple(images.shape), (24, 48, 96, 3))
         self.assertEqual((fps, frames, source), (24.0, 24, src))
-        self.assertEqual(out, self.p("sh010_t01.up.mp4"))         # beside the source
+        self.assertEqual(out, self.p("sh010_t01.up.vae.mp4"))     # beside it, from the frames
         self.assertEqual((latent, has_latent), (None, False))     # no latent beside it
         self.assertGreater(audio["waveform"].shape[-1], 0)
 
@@ -154,9 +154,11 @@ class UpscaleNodesTest(unittest.TestCase):
             self.assertEqual(r1["ui"]["images"][0]["filename"], "H3_00001_.mp4")
             out = UN.H3LoadVideo().load("", mp4)
             self.assertTrue(out[7])                                         # has_latent
+            self.assertEqual(out[5], mp4[:-4] + ".up.lat.mp4")             # named for it
             self.assertTrue(torch.equal(out[6]["samples"].tensors[0], video))
             self.assertTrue(torch.equal(out[6]["samples"].tensors[1], aud))
-            self.assertFalse(UN.H3LoadVideo().load("", mp4, use_latent=False)[7])
+            off = UN.H3LoadVideo().load("", mp4, use_latent=False)
+            self.assertEqual((off[7], off[5]), (False, mp4[:-4] + ".up.vae.mp4"))
             self.assertFalse(UN.H3LoadVideo().load("", r2["result"][0])[7])   # none beside it
         self.assertEqual(subprocess.run(["ffprobe", "-v", "error", "-select_streams", "a",
                                          "-show_entries", "stream=codec_name", "-of", "csv=p=0",
