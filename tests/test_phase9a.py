@@ -31,6 +31,7 @@ import h3promote as P  # noqa: E402
 import h3refs as R  # noqa: E402
 import h3source as H  # noqa: E402
 import h3takes as T  # noqa: E402
+from h3core import framing  # noqa: E402
 import test_api  # noqa: E402
 from test_api import ApiTest  # noqa: E402
 
@@ -133,8 +134,7 @@ class SourceTest(ApiTest):
                                                    "text": bad}))
         self.assertFalse(r["ok"])
         self.assertEqual(r["errors"], [{"file": "script", "line": 12, "message":
-                                        "size 'huge' must be one of ['close', 'cu', 'medium', "
-                                        "'ms', 'wide', 'ws']"}])
+                                        "size 'huge' isn't a shot size: " + framing.describe()}])
         # a build error about a shot: the line it names
         r = self.ok(A.post_source_check(self.ctx, {
             "ep": self.ep, "file": "script",

@@ -124,8 +124,10 @@ class SharedPlateWarningTest(unittest.TestCase):
     """Two speakers, one plate, one background: the cut reads as one camera."""
 
     def warn(self, text: str, c: dict | None = None) -> list[str]:
+        """This warning alone: these little scripts also cut the same person on
+        one plate at one size, which is the jump-cut warning's (test_framing)."""
         c = series_config_from(c or cfg())
-        return B.story_warnings(story(text, c), c)
+        return [w for w in B.story_warnings(story(text, c), c) if "a jump cut" not in w]
 
     TWO_HANDER = ("= ep01 T\n\n# sq01 kitchen\n\n"
                   "## sh010\nwho: ada, bo\ndur: 3\nThey face each other.\n\n"

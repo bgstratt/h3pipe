@@ -16,6 +16,11 @@ from the target's render graph; these are the pieces that graph doesn't have:
                        to the finished line
     H3SaveUpscale      <stem>.up.mp4: the picture, with the take's own audio
                        stream copied on unchanged, and <stem>.up.json closed
+    H3LoadVideo        any video (picked, dropped, or a path) for a standalone
+                       upscale: frames, audio, fps, where its upscale goes, and
+                       the render's latent when one is beside it
+    H3SaveRender       a render outside h3pipe as an mp4 and its latent under
+                       one name, so H3LoadVideo can start an upscale from it
     H3PixelUpscale     the pixel method (any target): an upscale model
                        (RealESRGAN, UltraSharp, ...) over the frames a few at a
                        time, each batch resized straight to the target size
@@ -35,9 +40,11 @@ import numpy as np
 import torch
 
 try:
-    from .h3_shotlist import H3SaveShot, _now, _write_json_atomic, load_audio, load_latent
+    from .h3_shotlist import (RGB_TO_BT709, H3SaveShot, _now, _write_json_atomic, load_audio,
+                              load_latent, save_audio, save_latent)
 except ImportError:                                      # imported on its own (tests)
-    from h3_shotlist import H3SaveShot, _now, _write_json_atomic, load_audio, load_latent
+    from h3_shotlist import (RGB_TO_BT709, H3SaveShot, _now, _write_json_atomic, load_audio,
+                             load_latent, save_audio, save_latent)
 
 
 def _abs(root: str, rel: str) -> str:
@@ -118,6 +125,215 @@ class H3LoadTakeVideo:
             audio = {"waveform": torch.zeros(1, 1, max(1, int(44100 * seconds))),
                      "sample_rate": 44100}
         return (images, audio)
+
+
+# ---------------------------------------------------------------------------
+# H3LoadVideo
+# ---------------------------------------------------------------------------
+
+def probe_fps(path: str) -> float:
+    """The video stream's frame rate (24 when ffprobe can't say)."""
+    out = subprocess.run(
+        ["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries",
+         "stream=r_frame_rate", "-of", "csv=p=0", path],
+        capture_output=True, text=True, timeout=60).stdout.strip()
+    try:
+        num, _, den = out.partition("/")
+        fps = float(num) / float(den or 1)
+    except ValueError:
+        return 24.0
+    return fps if fps > 0 else 24.0
+
+
+def _input_videos() -> list[str]:
+    try:
+        import folder_paths
+    except ImportError:                                  # outside ComfyUI (tests)
+        return []
+    d = folder_paths.get_input_directory()
+    files = [f for f in os.listdir(d) if os.path.isfile(os.path.join(d, f))]
+    return sorted(folder_paths.filter_files_content_types(files, ["video"]))
+
+
+# the upscale's name says where it started: the render's latent, or the
+# mp4's frames through the VAE
+UP_FROM_LATENT, UP_FROM_FRAMES = ".up.lat.mp4", ".up.vae.mp4"
+
+
+def load_video_paths(video: str, path: str = "", from_latent: bool = False) -> tuple[str, str]:
+    """(the source, where its upscale goes). A `path` wins over the picked
+    `video` and its upscale goes beside it; a picked (uploaded) video's goes to
+    ComfyUI's output folder, h3_upscale/. Named <stem>.up.lat.mp4 when it
+    starts from the render's latent (`from_latent`), <stem>.up.vae.mp4 from
+    the frames."""
+    suffix = UP_FROM_LATENT if from_latent else UP_FROM_FRAMES
+    path = (path or "").strip().strip('"').strip()
+    if path:
+        return path, os.path.splitext(path)[0] + suffix
+    import folder_paths
+    src = folder_paths.get_annotated_filepath(video)
+    stem = os.path.splitext(os.path.basename(video))[0]
+    return src, os.path.join(folder_paths.get_output_directory(), "h3_upscale", stem + suffix)
+
+
+LATENT_SUFFIX = ".latent.safetensors"
+
+
+def latent_beside(src: str, latent: str = "") -> str | None:
+    """The video's latent: `latent` when given, else <stem>.latent.safetensors
+    beside it (what H3SaveRender writes), or None when there is none."""
+    latent = (latent or "").strip().strip('"').strip()
+    if latent:
+        return latent
+    cand = os.path.splitext(src)[0] + LATENT_SUFFIX
+    return cand if os.path.isfile(cand) else None
+
+
+class H3LoadVideo:
+    """Any video, for a standalone upscale: pick or drop one (it goes to
+    ComfyUI's input folder), or give a `path` anywhere on disk, which wins.
+    Its frames, audio (silence when it has none), frame rate, its path, and
+    where its upscale goes (`out_path`, for H3SaveUpscale). With `use_latent`,
+    also the latent the render was sampled to (`latent`, or the one beside the
+    video), so an upscale starts from it and not the mp4's compressed frames;
+    `has_latent` says whether there was one, and `out_path` says it too:
+    <stem>.up.lat.mp4 from the latent, <stem>.up.vae.mp4 from the frames."""
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        files = _input_videos()
+        return {"required": {
+            "video": (files or [""], {"video_upload": True}),
+        }, "optional": {
+            "path": ("STRING", {"default": "", "tooltip": "A video anywhere on disk (quotes are "
+                                "fine); wins over the picked one. Its upscale goes beside it."}),
+            "use_latent": ("BOOLEAN", {"default": True, "tooltip": "Start from the render's "
+                           "latent when there is one (beside the video, or `latent`)"}),
+            "latent": ("STRING", {"default": "", "tooltip": "The render's latent, if it isn't "
+                       "<video name>.latent.safetensors beside the video"}),
+        }}
+
+    RETURN_TYPES = ("IMAGE", "AUDIO", "FLOAT", "INT", "STRING", "STRING", "LATENT", "BOOLEAN")
+    RETURN_NAMES = ("images", "audio", "fps", "frames", "source_path", "out_path", "latent",
+                    "has_latent")
+    FUNCTION = "load"
+    CATEGORY = "H3/upscale"
+
+    @classmethod
+    def VALIDATE_INPUTS(cls, video, path="", use_latent=True, latent=""):
+        lat = (latent or "").strip().strip('"').strip()
+        if use_latent and lat and not os.path.isfile(lat):
+            return f"no such latent: {lat}"
+        src = (path or "").strip().strip('"').strip()
+        if src:
+            return True if os.path.isfile(src) else f"no such video: {src}"
+        if not video:
+            return "pick or drop a video, or give a path"
+        import folder_paths
+        return True if folder_paths.exists_annotated_filepath(video) else f"no such video: {video}"
+
+    @classmethod
+    def IS_CHANGED(cls, video, path="", use_latent=True, latent=""):
+        try:
+            src = load_video_paths(video, path)[0]
+            stamp = []
+            for f in (src, latent_beside(src, latent) if use_latent else None):
+                if f:
+                    st = os.stat(f)
+                    stamp.append(f"{f}:{st.st_size}:{st.st_mtime_ns}")
+            return "|".join(stamp)
+        except Exception:
+            return float("nan")
+
+    def load(self, video, path="", use_latent=True, latent=""):
+        src = load_video_paths(video, path)[0]
+        lat = latent_beside(src, latent) if use_latent else None
+        out = load_video_paths(video, path, from_latent=lat is not None)[1]
+        images = read_frames(src)
+        fps = probe_fps(src)
+        try:
+            audio = load_audio(src)
+        except Exception:
+            # a mute video: silence of its length
+            audio = {"waveform": torch.zeros(1, 1, max(1, int(44100 * images.shape[0] / fps))),
+                     "sample_rate": 44100}
+        os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
+        return (images, audio, fps, int(images.shape[0]), src, out,
+                load_latent(lat) if lat else None, lat is not None)
+
+
+# ---------------------------------------------------------------------------
+# H3SaveRender
+# ---------------------------------------------------------------------------
+
+def mux_audio(picture: str, audio: dict, out: str) -> None:
+    """`out`: `picture`'s video stream with `audio` (a ComfyUI AUDIO) as AAC."""
+    fd, wav = tempfile.mkstemp(prefix=".tmp_", suffix=".wav",
+                               dir=os.path.dirname(os.path.abspath(out)))
+    os.close(fd)
+    try:
+        save_audio(audio, wav)
+        subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", picture, "-i", wav, "-map", "0:v:0",
+                        "-map", "1:a:0", "-c:v", "copy", "-c:a", "aac", "-b:a", "256k", out],
+                       capture_output=True, check=True, timeout=300)
+    finally:
+        os.remove(wav)
+
+
+class H3SaveRender:
+    """A render outside h3pipe, saved so it can be upscaled well: the mp4
+    (x264 at h3pipe's master quality by default, so an upscale isn't fed heavy
+    compression) and, when given, the sampler's latent beside it under the
+    same name, <prefix>_NNNNN_.latent.safetensors, which H3LoadVideo finds and
+    starts the upscale from. ComfyUI's SaveVideo and SaveLatent number their
+    files apart, and SaveLatent can't hold H3's joint audio/video latent; this
+    writes both at one counter."""
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {
+            "images": ("IMAGE",),
+            "filename_prefix": ("STRING", {"default": "video/H3"}),
+            "fps": ("FLOAT", {"default": 24.0, "min": 1.0, "max": 120.0, "step": 1.0}),
+            "quality": (list(QUALITIES), {"default": "master"}),
+            "encoder": (list(ENCODERS), {"default": "auto"}),
+        }, "optional": {
+            "audio": ("AUDIO",),
+            "latent": ("LATENT",),
+        }}
+
+    RETURN_TYPES = ("STRING",)
+    RETURN_NAMES = ("mp4_path",)
+    FUNCTION = "save"
+    OUTPUT_NODE = True
+    CATEGORY = "H3/upscale"
+
+    def save(self, images, filename_prefix, fps, quality="master", encoder="auto",
+             audio=None, latent=None):
+        import folder_paths
+        h, w = int(images.shape[1]), int(images.shape[2])
+        folder, name, counter, subfolder, _ = folder_paths.get_save_image_path(
+            filename_prefix, folder_paths.get_output_directory(), w, h)
+        os.makedirs(folder, exist_ok=True)
+        stem = f"{name}_{counter:05}_"
+        mp4 = os.path.join(folder, stem + ".mp4")
+        if audio is None:
+            encode_stream(images, mp4, float(fps), encoder, (0, 0), "crop", quality)
+        else:
+            fd, picture = tempfile.mkstemp(prefix=".tmp_", suffix=".mp4", dir=folder)
+            os.close(fd)
+            try:
+                encode_stream(images, picture, float(fps), encoder, (0, 0), "crop", quality)
+                mux_audio(picture, audio, mp4)
+            finally:
+                if os.path.exists(picture):
+                    os.remove(picture)
+        if latent is not None:
+            save_latent(latent, os.path.join(folder, stem + LATENT_SUFFIX), width=w, height=h,
+                        frames=int(images.shape[0]), fps=float(fps))
+        return {"ui": {"images": [{"filename": stem + ".mp4", "subfolder": subfolder,
+                                   "type": "output"}], "animated": (True,)},
+                "result": (mp4,)}
 
 
 # ---------------------------------------------------------------------------
@@ -500,8 +716,10 @@ def encode_stream(images, path: str, fps: float, encoder: str = "auto",
     `size` (W, H) by fit_filter when one is given. Returns the encoder used; on
     auto, a failed NVENC encode is retried on x264."""
     n, h, w = int(images.shape[0]), int(images.shape[1]), int(images.shape[2])
-    vf = fit_filter(w, h, int(size[0]), int(size[1]), fit)
-    ow, oh = (int(size[0]), int(size[1])) if vf else (w, h)
+    fit_vf = fit_filter(w, h, int(size[0]), int(size[1]), fit)
+    ow, oh = (int(size[0]), int(size[1])) if fit_vf else (w, h)
+    # sized while still RGB, then to BT.709 video (RGB_TO_BT709)
+    vf = ",".join(f for f in (fit_vf, RGB_TO_BT709) if f)
     name, args = encoder_args(encoder, ow, oh, quality)
 
     def run(args: list) -> None:
@@ -620,6 +838,8 @@ class H3SaveUpscale:
 NODE_CLASS_MAPPINGS = {
     "H3LoadTakeLatent": H3LoadTakeLatent,
     "H3LoadTakeVideo": H3LoadTakeVideo,
+    "H3LoadVideo": H3LoadVideo,
+    "H3SaveRender": H3SaveRender,
     "H3HoldAudio": H3HoldAudio,
     "H3SaveUpscale": H3SaveUpscale,
     "H3PixelUpscale": H3PixelUpscale,
@@ -629,6 +849,8 @@ NODE_CLASS_MAPPINGS = {
 NODE_DISPLAY_NAME_MAPPINGS = {
     "H3LoadTakeLatent": "H3 Load Take Latent",
     "H3LoadTakeVideo": "H3 Load Take Video",
+    "H3LoadVideo": "H3 Load Video",
+    "H3SaveRender": "H3 Save Render (mp4 + latent)",
     "H3HoldAudio": "H3 Hold Audio",
     "H3SaveUpscale": "H3 Save Upscale",
     "H3PixelUpscale": "H3 Pixel Upscale",

@@ -39,10 +39,8 @@ from __future__ import annotations
 
 import re
 
-SIZE_WORDS = {"close": "close-up", "cu": "close-up", "medium": "medium shot",
-              "ms": "medium shot", "wide": "wide shot", "ws": "wide shot"}
-CLOSE = ("close", "cu")
-WIDE = ("wide", "ws")
+from h3core import framing
+
 
 FIELDS = ("integrated_multimodal_description:", "overall_soundscape:", "non_diegetic_music:")
 
@@ -78,12 +76,12 @@ def build_prompt(shot, seq, series_cfg: dict, policy: str = "generate") -> str:
     on_screen = list(shot.cast) + [p for p in shot.props if p not in shot.cast]
 
     # ---- [Shot 1]: style, framing, where -----------------------------------
-    size = SIZE_WORDS.get(shot.size, "medium shot")
+    size = framing.term(shot.size)
     who = _and([name(s) for s in on_screen])
-    if shot.size in CLOSE:
+    if framing.family(shot.size) == "close":
         where = (f"{_article(size)} frames {who} against a shallow, out-of-focus slice of {env}"
                  if who else f"{_article(size)} holds on a detail of {env}")
-    elif shot.size in WIDE:
+    elif framing.family(shot.size) == "wide":
         where = (f"{_article(size)} takes in {env}, with {who} in it" if who
                  else f"{_article(size)} takes in {env}")
     else:

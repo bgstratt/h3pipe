@@ -189,6 +189,8 @@ which ones your ComfyUI can render.
 }
 ```
 
+- `style.look` opens every shot's description ("The target video is …"), so it sets the
+  photography of the whole series. See **Writing the `look` line**.
 - `kind` is `character`, `prop` or `vehicle`. Only characters speak.
 - `of` makes the subject a **wardrobe variant** of another one — the same character in
   different clothes, the same prop in a different state. See **A wardrobe change is a new
@@ -229,6 +231,7 @@ which ones your ComfyUI can render.
 | **Render at size** (the default) | 1344×768 | 448×256 | 7:4 | ~53 s | not needed | 1344×768 as rendered |
 | **Render small, upscale to 1080p** | 960×544 | 448×256 | ≈7:4 | ~20 s | re-sample 2x → 1920×1088, ~25–35 s | 1920×1080 (8 rows cropped) |
 | **Render 16:9, upscale to 1080p or 4K** | 1024×576 | 512×288 | 16:9 | ~23–24 s (est.) | re-sample 2x → 2048×1152 (scaled down to 1080p; for 4K, then an upscale model) | 1920×1080 or 3840×2160, exactly |
+| **Render at size, master 1440p** | 1344×768 | 960×544 (8 steps) | 7:4 | ~53 s | re-sample 2x → 2688×1536, ~75 s | 2560×1440 (scaled down, 23 rows cropped) |
 
 (Measured on an RTX 5090 with the 8-step turbo LoRA; the 1024×576 time is estimated from
 its 13% more pixels than 960×544, since attention grows a little faster than the pixel
@@ -252,7 +255,10 @@ their own grid (LTX-2's is 64: a 512×288 proxy renders there at 512×256, a lit
   keeps are upscaled, once, after the cut is locked. The upscale re-samples the take from
   late in its schedule under its own prompt, references and seed, with its audio held, so
   the performance and the lip sync are the take's; it adds detail a 960×544 frame is short
-  of (faces in wide shots, hands, small props).
+  of (hands, small props, texture). It can't add a face the render didn't draw: at 960×544 a
+  face in a medium-wide or wider is a few of H3's 16-pixel cells, and the re-sample
+  sharpens what's there (see **Faces need room**). A live-action series that lives on
+  faces and dialogue renders at 1344×768 (**Delivering 1440p** below).
 - **Render at size** when shots render on Wan (`wan22_i2v`, `wan22_ti2v`, `wan22_vace`:
   they re-sample, a pixel model then their own sampler, but slowly: minutes a shot), when
   the upscaler isn't installed, or when 1344×768 is the delivery. Upscaling a 1344×768 take to 2688×1536 works
@@ -266,8 +272,9 @@ their own grid (LTX-2's is 64: a 512×288 proxy renders there at 512×256, a lit
 
 **Writing a new series config for someone**, ask once which setup they want, unless they
 already said (a delivery size, "upscale", "fast iterations", "4K"): render at size
-(1344×768), render small for 1080p (960×544), or 16:9 for exact 1080p/4K (1024×576, proxy
-512×288). With no answer, write 1344×768: it renders on every target with nothing extra
+(1344×768), render small for 1080p (960×544), 16:9 for exact 1080p/4K (1024×576, proxy
+512×288), or render at size and master 1440p (1344×768, proxy 960×544) for a live-action
+series with close dialogue, where faces need the pixels. With no answer, write 1344×768: it renders on every target with nothing extra
 installed. When they name a delivery size, say what shape the frame will be and whether
 the delivery crops or pads it. For an existing series config, never change the size
 unasked.
@@ -396,7 +403,8 @@ shots that load the same model together, so ComfyUI loads each model once instea
 every change of target; the dialog remembers the choice.
 
 **Writing a new series config**, add an `upscale.master` block for the delivery they named
-(ask once if they didn't: 1080p is the usual; 4K when they say so). The patterns below are
+(ask once if they didn't: 1080p is the usual; 1440p for a series rendered at 1344×768; 4K
+when they say so). The patterns below are
 the best value in time and quality we've measured; say which you chose and why.
 
 #### Delivering 1080p
@@ -438,6 +446,38 @@ episode before planning a season on it).
 instead of re-encoding its video. A wide shot without dialogue that looks soft can take its
 own recipe with `detail: 1`; don't raise `detail` for every shot, it can change a speaking
 mouth.
+
+#### Delivering 1440p
+
+Render at 1344×768 and re-sample 2x; nothing after it. The take holds faces and mouths a
+960×544 render can't (see **Faces need room**), and the 2x re-sample to 2688×1536 is
+scaled down about 5% to 2560×1463 and cropped by 23 rows, so the master is slightly
+supersampled. Measured on an RTX 5090: **about 75 s a shot**, and cleaner than re-sampling
+1.5x and finishing with RealESRGAN, which took 210–230 s (the upscale model's pass at
+1440p is the slow part). Uploaded to YouTube at 1440p, it also streams better to viewers
+watching at 1080p than a 1080p upload does.
+
+- **Proxy at 960×544, on the 8-step LoRA at 8 steps** (`"proxy": {"width": 960, "height":
+  544, "steps": 8, "lora": "minimax_h3_ref2v_turbo_8step_v1.0_768p_comfyui_bf16.safetensors"}`):
+  a proxy then looks like a final, so a good one can stand in. Its 2x is only 1920×1088,
+  stretched to 1440p: give such a shot its own recipe at `"scale": 2.75` (960→2640), on a
+  short shot only.
+- **Long shots:** a 2x re-sample of 1344×768 is heavy. Up to about 6–7 s it fits a 32 GB
+  card; a 10 s shot at 2x ran out of VRAM and stalled. Give long shots their own recipe at
+  `"scale": 1.5` with `"then": "RealESRGAN_x2.pth"`.
+- Keep `"scale": 2`, not `"auto"`: auto would also choose 2x for a 1344×768 take, but takes
+  at other sizes would re-sample differently.
+
+```json
+"upscale": { "save_latents": "final",
+  "master": { "deliver": "1440p", "fit": "crop", "quality": "master",
+    "finish": { "frequency_split": true },
+    "targets": {
+      "minimax_h3_*": { "method": "latent", "scale": 2 },
+      "ltx2*":        { "method": "latent", "scale": 2 },
+      "wan22_*":      { "method": "seedvr2", "seedvr2_model": "7b" },
+      "*":            { "method": "pixel", "pixel_model": "RealESRGAN_x2.pth" } } } }
+```
 
 #### Delivering 4K
 
@@ -669,7 +709,29 @@ Weak: *"a mischievous kid with boundless energy who never sits still"* — none 
 drawable, and it crowds out detail that is.
 
 Location descriptions work the same way and must include the light: time of day, direction,
-quality. The plate is generated from that sentence.
+quality. The plate is generated from that sentence. **Name the sources**: the pendant lamp
+over the table, the chandeliers, the TV's glow, the streetlight through the blinds. A room
+lit by things you can point at renders as a lit set, with pools of light and shadow
+between them; "warm lighting" renders as an evenly lit showroom.
+
+### Writing the `look` line
+
+`style.look` is the first sentence of every shot's description, so it is the series'
+photography. Write it the way a director of photography would brief a crew: what the lens,
+the focus, the light and the film stock do. Adjectives about quality ("cinematic",
+"beautiful", "high quality") give the model nothing to draw.
+
+Weak: *"a cinematic prestige drama with moody lighting"*.
+
+Strong: *"a naturalistic live-action prestige drama shot on 35mm anamorphic lenses: shallow
+depth of field with the background falling into soft bokeh, low-key light from the practical
+lamps in each room, deep soft shadows with lifted blacks, muted desaturated color and fine
+film grain"*.
+
+Each clause is something the model can see: shallow focus and bokeh separate the subject
+from the room and soften what the model draws worst, low-key practical light gives the frame
+contrast and shape, and grain gives the image the texture of film. Keep it to one sentence;
+the per-shot light belongs in the location descriptions and the action.
 
 ### A location is one angle, not one place
 
@@ -887,7 +949,7 @@ sound: running footsteps on grass, fabric movement
 | `## shNNN` | a shot. **Every `##` is a cut** — no `CUT TO:` needed |
 | `who: a, b` | characters on screen, in this order (on H3 Ref2VA they become `<Picture 1..3>`); `cast:` is the same |
 | `with: x, y` | props and vehicles, after the characters; `props:` is the same |
-| `size: close/medium/wide` | shot size (`cu`, `ms`, `ws` also work); decides the framing and how much of the sheet is used |
+| `size: mcu` | shot size, from extreme close-up to extreme wide (`ecu`, `cu`/`close`, `mcu`, `ms`/`medium`, `cowboy`, `mws`, `fs`/`full`, `ws`/`wide`, `ews`; the full names work too). Opens the shot's prompt as its framing ("A medium close-up frames… from the chest up"), and decides how much of the location and of the sheet is used. See **Faces need room** |
 | `plate: street_gate` | this shot's angle; defaults to the sequence's location |
 | `dur: 3.04` | duration in seconds, from the grid below (`duration:` is the same) |
 | `dur: auto` | derive the duration from the dialogue at this shot's pace |
@@ -1241,6 +1303,25 @@ slightly / strongly · takes the subject's POV · rolls clockwise / counterclock
 "Arcs around them with large amplitude at fast speed" beats "swoops around dramatically",
 because it names a move the model was trained on.
 
+Film terms translate into that vocabulary:
+
+| You mean | Write |
+|---|---|
+| dolly in / dolly out (back) | `pushes in…` / `pulls out…` |
+| slide, crab | `trucks left…` / `trucks right…` |
+| pivot, swivel | `pans left…` / `pans right…` |
+| whip pan | `pans right with large amplitude at fast speed` |
+| crane / jib up or down | `pedestals up…` / `pedestals down…` |
+| orbit | `arcs around <name>…` |
+| follow, lead | `tracks <name> as she walks…` (in front of or behind, in the action) |
+| handheld | `shakes slightly` |
+| over the shoulder | not a move: frame it in the action, "over Ada's shoulder, Bo faces camera", with both in `who:` |
+| rack focus | not a move: say it in the action, "the focus shifts from the cup to Ada's face" |
+
+Staging (where people stand, who faces camera, how a scene's angles cut together) is the
+director's craft and is best learned from a book like Christopher Kenworthy's *Master
+Shots*; this guide covers only how to say the result to the model.
+
 On a wide full of big architecture (a plant, a street front, a church), prefer holding still,
 a pan or a slow push over a track, truck or arc. A camera that moves through the space makes
 the model redraw the buildings as it goes, and they build and unbuild themselves on screen.
@@ -1253,15 +1334,121 @@ the job.
 **Cut when** the subject changes, a new beat lands, someone new speaks, time skips, or the
 framing must change materially. **Don't cut** when only the distance shifts a little — use a
 camera move. A cut should bring new information; a cut to the same thing slightly closer is a
-jump cut, and it will render as one.
+jump cut, and it will render as one (see **Cutting within a location**).
 
 A workable rhythm for a dialogue scene: wide establishing → medium two-shot for the exchange →
-close on the reaction that matters → back out.
+close on the reaction that matters → back out. Keep the wide short and empty of anything
+that has to read on a face (see **Faces need room**).
 
 **Open every shot on movement.** The model has no memory of the previous cut, so a shot whose
 action describes a *position* renders that position and then looks for something to do with
 it. Write the state change: "Dex swings his boots onto the desk and settles back", not "Dex
 sits with his boots on the desk".
+
+### Faces need room
+
+`size:` is written into the prompt as the shot's framing (`A close-up frames <Subject 1>…`,
+`A medium shot frames…`, `A wide shot takes in…`), so it is what the model frames, not a
+label. Choose it by what the shot has to show:
+
+| `size:` | Framing | Holds | Use it for |
+|---|---|---|---|
+| `ecu` | extreme close-up | one detail: the eyes, a hand on the latch | an insert; tension |
+| `cu` (`close`) | close-up | the face, chin to hairline | the reaction or line that matters |
+| `mcu` | medium close-up | chest up | **most dialogue**: face and a little body language |
+| `ms` (`medium`) | medium shot | waist up | two-shots, business at a counter |
+| `cowboy` | cowboy shot | mid-thigh up | standing confrontations, a hand at the hip |
+| `mws` | medium-wide shot | knees up | walking and talking, a figure with their surroundings |
+| `fs` (`full`) | full shot | head to toe | a whole-body action: a trip, a dance step, a fall |
+| `ws` (`wide`) | wide shot | the subject in the room | geography, entrances |
+| `ews` | extreme wide shot | the subject small in a big setting | scale, isolation, establishing a place |
+
+The full names work too (`size: medium close-up`), and so do `ls` (long shot) and `els`. The
+in-between sizes put what the frame holds into the prompt ("from the chest up"), so a model
+that doesn't know the term still frames it. For the plate and the sheet, `ecu`/`mcu` act like
+a close-up, `cowboy`/`mws` like a medium, and `fs`/`ews` like a wide.
+
+**A face needs pixels to have a face.** H3 draws in cells of 16×16 pixels. On a wide of a
+standing person, the face is a few cells across, too few for eyes and a mouth: it comes out
+soft and smeared, and an upscale sharpens the smear rather than finding the face. At 960×544
+it is worse than at 1344×768. Measured on a 1344-wide full-body walk, the face was 50 pixels
+tall: three cells.
+
+- **Dialogue, reactions, and anything the audience must read on a face: `mcu`, `cu`, or
+  `ms`.** A medium close-up gives the face a few hundred pixels at 960×544; a close-up fills
+  the frame with it.
+- **Wides (`fs`, `ws`, `ews`) carry geography, entrances, crowds and big physical action**,
+  where nobody's expression has to read: a figure crossing a room, a back to camera, two
+  people seen from across a lot. Don't hold a wide on a face and expect the face to be there.
+- **Cut in for the face.** A fall, a collision or an entrance plays as `fs` for the action →
+  `cu` on the face that reacts → `mws` or `ms` for the result, not one wide shot that holds the
+  face at a distance.
+
+The prompt also scales the location to the framing: a wide describes the whole place around
+the subjects, a medium the part behind them, and a close-up only a magnified, out-of-focus
+slice of it. That is why a close-up on H3 has the room behind the face, softly, and not a
+studio backdrop.
+
+### Cutting within a location
+
+Every shot is generated on its own, so a shot never continues the one before it: it poses
+everyone from scratch. Cut between two shots that look alike and the eye reads it as a
+glitch, with people jerking into new positions or appearing out of nowhere. That's a jump
+cut. Two consecutive shots with **the same people on the same plate** need one of these
+between them:
+
+1. **A new angle.** Give the second shot another `plate:` of the place. A real change of
+   camera position (film's 30-degree rule) makes the new pose read as a new view. This is
+   the cheapest fix and why a location wants several angles.
+2. **A size two or more steps away**, along `ecu` `cu` `mcu` `ms` `cowboy` `mws` `fs` `ws`
+   `ews`: `mws` → `mcu`, `ms` → `cu`, `ws` → `ms`. One step (`ms` → `mcu`, `fs` → `ws`) reads
+   as the camera twitching.
+3. **A cutaway**, then back: the other character's reaction, an `ecu` insert of hands or a
+   prop, what she's looking at. Under a second is enough (H3's shortest take is 0.92 s), and
+   after it the return can be in any pose.
+4. **A cut on action.** Open the second shot mid-movement ("already turning to the door"),
+   not at rest: movement across the cut hides the change of pose. It helps the other three;
+   on its own it seldom saves a cut.
+5. **Continue the picture** when the second shot really is the same moment carrying on:
+   `first: continuity` on H3 FL2VA (`target: minimax_h3_fl2va`) opens the shot on the
+   previous shot's last frame, so nothing re-poses (see **Rendering a shot on H3 from
+   keyframes** and **Keyframes**). On H3 Ref2VA, `continuous: yes` under the `#` header chains
+   a whole sequence instead, at 22 frames a shot after the first. Either way, each take is
+   upscaled on its own, so the frame where one hands off to the next can differ slightly
+   between the two upscales.
+
+`h3.py check` warns about consecutive shots that do none of the first two and don't continue:
+the same people, the same plate, sizes less than two steps apart, the second not
+`first: continuity` and the sequence not `continuous`. It can't see a cutaway or a cut on
+action in the action text, so treat it as a question to answer, not an error.
+
+Worked through: Ada at the counter, then closer for her line. As written, a jump cut:
+
+```
+## sh020
+who: ada
+size: ms
+
+## sh030
+who: ada
+size: mcu
+```
+
+With Bo's reaction between them, and the return two steps tighter:
+
+```
+## sh020
+who: ada
+size: ms
+
+## sh025
+who: bo
+size: mcu
+
+## sh030
+who: ada
+size: cu
+```
 
 ### Every shot starts from an empty plate
 
@@ -1379,7 +1566,8 @@ smock and hard hat still turn into twenty of him. When the extras share the lead
 vary them in `extras:`: men and women, different ages and builds, hairnets instead of hard
 hats, faces turned away or soft in the background.
 
-On H3 Ref2VA, `size:` also decides what the plate means: on a wide or medium the room's layout
+On H3 Ref2VA, `size:` also decides what the plate means (besides the framing words; see
+**Faces need room**): on a wide or medium the room's layout
 is kept, and on a close-up the background is a zoomed-in crop of the plate — the part of the room
 right behind the subject — and never the plain backdrop of the character sheet. A close-up
 still leaves the room's layout to the shots around it, so stage the space on a medium first.

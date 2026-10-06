@@ -338,7 +338,8 @@ class RenderAnywayTest(unittest.TestCase):
         self.assertIn("Ada has no reference image and is drawn from this description: "
                       "a tall woman", text)
         self.assertIn("Ada, with a voice that is dry, quick and precise, (S1)", text)
-        self.assertIn("The scene takes place in a cramped diner kitchen", text)
+        self.assertIn("A medium shot frames <Subject 1>, <Subject 2>, and Ada in a cramped "
+                      "diner kitchen", text)                     # the location in words
         # everything the refs don't touch is the build's
         for k in ("id", "length", "seed", "steps", "model", "lora", "voices", "duration"):
             self.assertEqual(shot.get(k), job.shot.get(k), k)

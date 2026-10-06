@@ -24,8 +24,7 @@ Stdlib only.
 """
 from __future__ import annotations
 
-SIZE_WORDS = {"close": "close-up", "cu": "close-up", "medium": "medium shot",
-              "ms": "medium shot", "wide": "wide shot", "ws": "wide shot"}
+from h3core import framing
 
 
 def _sentence(text: str) -> str:
@@ -58,7 +57,7 @@ def build_prompt(shot, seq, series_cfg: dict) -> str:
         parts.append(f"Style: {look}.")
 
     # camera first: the framing, where, and how the camera moves
-    size = SIZE_WORDS.get(shot.size, "medium shot")
+    size = framing.term(shot.size)
     cam = (shot.camera or "").strip().rstrip(".")
     camera = f"the camera {cam}" if cam else "the camera remains static"
     parts.append(_sentence(f"{_article(size)}{' of ' + env if env else ''}, {camera}"))

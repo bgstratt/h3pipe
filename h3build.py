@@ -34,7 +34,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import targets as TG  # noqa: E402
-from h3core import ir  # noqa: E402,F401
+from h3core import framing, ir  # noqa: E402,F401
 from h3core.series_config import (character_ids, load_series_config,  # noqa: E402
                                   series_info, subject_ids, variant_of)
 # Model-neutral pieces, re-exported under their old names: h3align and others
@@ -156,6 +156,7 @@ def story_warnings(story: ir.Episode, series_cfg: dict | None = None) -> list[st
                 f"({plate}), so they are drawn against one background from one view and "
                 f"the cut reads as a single camera rather than a reverse angle. Give the "
                 f"location an angle per speaker and name it with `plate:`.")
+    out += jump_cuts(story, person, name)
     mode = ((series_cfg or {}).get("upscale") or {}).get("save_latents")
     if mode is not None and mode not in ("final", "always", "never"):
         out.append(f"series.json upscale.save_latents is {mode!r}: it takes \"final\" (the "
@@ -163,6 +164,46 @@ def story_warnings(story: ir.Episode, series_cfg: dict | None = None) -> list[st
     if "master" in ((series_cfg or {}).get("upscale") or {}):
         import h3upscale                               # the master recipe (Phase 13e)
         out += h3upscale.check_recipe(series_cfg["upscale"]["master"])
+    return out
+
+
+def jump_cuts(story: ir.Episode, person, name) -> list[str]:
+    """Consecutive shots of a sequence that would cut as a jump cut: the same
+    people, on the same plate, at sizes less than two steps apart. Each shot is
+    generated on its own, so the second re-poses everyone in place rather than
+    continuing the first, and the cut reads as people jerking or appearing.
+    A continuous sequence chains its shots on purpose, and a shot opening on
+    the previous one's last frame (`first: continuity`) continues it, so
+    neither is a jump cut. A warning, not an error: the action may still carry
+    the cut (a cut on movement), which the script fields can't show
+    (docs/AUTHORING.md, "Cutting within a location")."""
+    out = []
+    for sq in story.sequences:
+        if sq.continuous:
+            continue
+        for a, b in zip(sq.shots, sq.shots[1:]):
+            if (b.keyframe("first", sq) or "").strip().lower() == "continuity":
+                continue
+            who_a = {person(s) for s in a.cast}
+            if not who_a or who_a != {person(s) for s in b.cast}:
+                continue
+            plate = a.plate or sq.location
+            if plate != (b.plate or sq.location):
+                continue
+            apart = framing.steps_apart(a.size, b.size)
+            if apart is None or apart >= 2:
+                continue
+            names = sorted(name(w) for w in who_a)
+            listed = (names[0] if len(names) == 1 else
+                      " and ".join(names) if len(names) == 2 else
+                      ", ".join(names[:-1]) + " and " + names[-1])
+            sizes = (f"two {framing.term(a.size)}s" if apart == 0 else
+                     f"a {framing.term(a.size)} and a {framing.term(b.size)}")
+            out.append(
+                f"sequence {sq.id}: {a.id} -> {b.id} cuts between {sizes} of {listed} on the "
+                f"same plate ({plate}): a jump cut, everyone re-posed in place. Change the size "
+                f"by two or more steps, give {b.id} another `plate:`, or put a cutaway between "
+                f"them (docs/AUTHORING.md, \"Cutting within a location\").")
     return out
 
 

@@ -47,7 +47,7 @@ import re
 from dataclasses import dataclass
 
 import targets as TG
-from h3core import ir
+from h3core import framing, ir
 from h3core.ir import stable_seed
 from h3core.speech import RATE_CEILING, SPEECH_RATE, forced_rate, pacing, speech_seconds
 from targets.video.ltx2.compile import _duration, _lines, put_model_duration, shotlist_extra
@@ -191,7 +191,7 @@ def panel_view(ref: dict, subjects: list[str], book: dict, size: str) -> str:
     loader's choice, as ltx2_ingredients)."""
     return ("face" if len(subjects) == 1
             and book[subjects[0]].get("kind", "character") == "character"
-            and size in ref.get("face_sizes", ()) else "body")
+            and framing.in_sizes(size, ref.get("face_sizes", ())) else "body")
 
 
 def panels(ctx: Ctx, shot: ir.Shot, loc_key: str) -> list[dict]:

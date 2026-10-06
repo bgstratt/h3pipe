@@ -19,13 +19,14 @@ from __future__ import annotations
 import re
 
 from .ir import Episode, Line, Sequence, Shot
+from . import framing
 from .speech import SPEECH_RATE
 
 META_KEYS = {"who", "cast", "with", "props", "size", "audio", "dur", "duration",
              "camera", "sound", "music", "policy", "continuous", "text",
              "pace", "plate", "retention", "model", "lora", "steps", "extras",
              "target", "profile", "first", "last"}
-SIZES = {"close", "cu", "medium", "ms", "wide", "ws"}
+SIZES = framing.ALIASES          # every name `size:` takes (h3core/framing.py)
 
 # Voice-only delivery markers. A speaker tagged with one of these is NOT added
 # to the visible cast: they cost no reference slot and are never drawn. Without
@@ -232,8 +233,8 @@ def _parse(text: str, subject_ids: set[str], character_ids: set[str],
                 # named here, so no longer just someone a line put on screen
                 shot["_auto_cast"] = [c for c in shot["_auto_cast"] if c not in names]
             elif key == "size":
-                if val.lower() not in SIZES:
-                    raise ScriptError(n, line, f"size '{val}' must be one of {sorted(SIZES)}")
+                if not framing.is_size(val):
+                    raise ScriptError(n, line, f"size '{val}' isn't a shot size: {framing.describe()}")
                 shot["size"] = val.lower()
             elif key == "audio":
                 m2 = re.match(r"^([\d.]+)\s*-\s*([\d.]+)$", val)

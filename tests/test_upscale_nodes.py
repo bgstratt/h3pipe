@@ -101,6 +101,95 @@ class UpscaleNodesTest(unittest.TestCase):
         self.assertGreater(audio["waveform"].shape[-1], 0)
 
     @needs_ffmpeg
+    def test_load_video_from_a_path(self):
+        src = self.take_mp4()
+        quoted = f'"{src}"'                                     # Explorer's "Copy as path"
+        self.assertIs(UN.H3LoadVideo.VALIDATE_INPUTS("", quoted), True)
+        self.assertIn("no such video", UN.H3LoadVideo.VALIDATE_INPUTS("", src + ".nope"))
+        images, audio, fps, frames, source, out, latent, has_latent = UN.H3LoadVideo().load("", quoted)
+        self.assertEqual(tuple(images.shape), (24, 48, 96, 3))
+        self.assertEqual((fps, frames, source), (24.0, 24, src))
+        self.assertEqual(out, self.p("sh010_t01.up.vae.mp4"))     # beside it, from the frames
+        self.assertEqual((latent, has_latent), (None, False))     # no latent beside it
+        self.assertGreater(audio["waveform"].shape[-1], 0)
+
+    @needs_ffmpeg
+    def test_load_video_of_a_mute_clip_is_silence_of_its_length(self):
+        src = self.take_mp4(audio=False)
+        _, audio, fps, frames, _, _, _, _ = UN.H3LoadVideo().load("", src)
+        self.assertEqual(audio["waveform"].shape[-1], int(44100 * frames / fps))
+        self.assertEqual(float(audio["waveform"].abs().max()), 0.0)
+
+    def fake_folder_paths(self):
+        out = os.path.join(self.root, "output")
+        fp = mock.MagicMock()
+        fp.get_output_directory.return_value = out
+
+        def save_path(prefix, base, w=0, h=0):
+            sub, name = os.path.split(prefix)
+            folder = os.path.join(base, sub)
+            os.makedirs(folder, exist_ok=True)
+            taken = [int(f[len(name) + 1:].split("_")[0]) for f in os.listdir(folder)
+                     if f.startswith(name + "_") and f[len(name) + 1:].split("_")[0].isdigit()]
+            return folder, name, max(taken, default=0) + 1, sub, prefix
+        fp.get_save_image_path.side_effect = save_path
+        return fp
+
+    @needs_ffmpeg
+    def test_save_render_writes_the_mp4_and_its_latent_under_one_name(self):
+        """H3SaveRender's mp4 and latent share a counter, and H3LoadVideo finds
+        the latent beside the mp4 and hands back the joint AV latent."""
+        images = torch.rand(24, 48, 96, 3)
+        audio = {"waveform": torch.zeros(1, 1, 44100), "sample_rate": 44100}
+        video, aud = torch.randn(1, 4, 3, 6, 12), torch.randn(1, 8, 20)
+        mods = {**fake_comfy_nested(), "folder_paths": self.fake_folder_paths()}
+        with mock.patch.dict(sys.modules, mods):
+            r1 = UN.H3SaveRender().save(images, "video/H3", 24.0, "review", "x264", audio,
+                                        {"samples": FakeNested((video, aud))})
+            r2 = UN.H3SaveRender().save(images, "video/H3", 24.0, "review", "x264")
+            mp4 = r1["result"][0]
+            self.assertTrue(mp4.endswith(os.path.join("video", "H3_00001_.mp4")))
+            self.assertTrue(os.path.isfile(mp4[:-4] + ".latent.safetensors"))
+            self.assertTrue(r2["result"][0].endswith("H3_00002_.mp4"))     # the next counter
+            self.assertEqual(r1["ui"]["images"][0]["filename"], "H3_00001_.mp4")
+            out = UN.H3LoadVideo().load("", mp4)
+            self.assertTrue(out[7])                                         # has_latent
+            self.assertEqual(out[5], mp4[:-4] + ".up.lat.mp4")             # named for it
+            self.assertTrue(torch.equal(out[6]["samples"].tensors[0], video))
+            self.assertTrue(torch.equal(out[6]["samples"].tensors[1], aud))
+            off = UN.H3LoadVideo().load("", mp4, use_latent=False)
+            self.assertEqual((off[7], off[5]), (False, mp4[:-4] + ".up.vae.mp4"))
+            self.assertFalse(UN.H3LoadVideo().load("", r2["result"][0])[7])   # none beside it
+        self.assertEqual(subprocess.run(["ffprobe", "-v", "error", "-select_streams", "a",
+                                         "-show_entries", "stream=codec_name", "-of", "csv=p=0",
+                                         mp4], capture_output=True, text=True).stdout.strip(), "aac")
+        self.assertIn("no such latent", UN.H3LoadVideo.VALIDATE_INPUTS("", mp4, True, mp4 + ".nope"))
+
+    @needs_ffmpeg
+    def test_encodes_are_bt709_and_tagged(self):
+        """Pure red RGB comes out as BT.709 writes it (Y 63, U 102, V 240), all four
+        colour tags BT.709: on x264, and on NVENC where this ffmpeg has it."""
+        red = torch.zeros(8, 144, 256, 3)
+        red[..., 0] = 1.0
+        for enc in ("x264", "nvenc"):
+            if enc == "nvenc" and "h264_nvenc" not in UN.nvenc_encoders():
+                continue
+            out = self.p(f"red_{enc}.mp4")
+            UN.encode_stream(red, out, 24.0, enc)
+            raw = subprocess.run(["ffmpeg", "-v", "error", "-i", out, "-frames:v", "1", "-f",
+                                  "rawvideo", "-pix_fmt", "yuv420p", "-"],
+                                 capture_output=True, check=True).stdout
+            y, u, v = raw[0], raw[256 * 144], raw[256 * 144 + 128 * 72]
+            self.assertTrue(abs(y - 63) <= 2 and abs(u - 102) <= 2 and abs(v - 240) <= 2,
+                            (enc, y, u, v))
+            tags = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0",
+                                   "-show_entries", "stream=color_range,color_space,"
+                                   "color_primaries,color_transfer", "-of",
+                                   "default=nw=1:nk=1", out], capture_output=True,
+                                  text=True).stdout.split()
+            self.assertEqual(tags, ["tv", "bt709", "bt709", "bt709"], enc)
+
+    @needs_ffmpeg
     def test_save_upscale_copies_the_takes_audio(self):
         src = self.take_mp4()
         with open(self.p("sh010_t01.up.json"), "w", encoding="utf-8") as fh:

@@ -2991,6 +2991,16 @@ Measured on a one-subject shot at 864x480, same seed, same frozen shotlist:
 sparsify harder (54% -> 64%). On a 229-shot episode (156 one-subject, 64 two-subject) that is
 379 references it no longer sends, about 11 minutes of a proxy pass.
 
+**Correction (2026-10-05): the node does renumber.** `MiniMaxH3ReferenceToVideo` drops a `None`
+socket, and the text encoder labels only the pictures it is given, counting from 1
+(`comfy/text_encoders/minimax.py`, unchanged since H3 support landed on 2026-08-03): the
+table's "2 pictures" were `<Picture 1>` and `<Picture 2>`. So from 2026-09-22 a shot with fewer
+than three subjects sent its plate as `<Picture n+1>` under a prompt naming `<Picture 4>`
+(ep01-ep03 of Porchlights: 833 of 879 shots), and the plate reached H3 unnamed; the room still
+came out right from the prompt's words. Unused sockets now hold a 32x32 grey placeholder
+(`PLACEHOLDER_SIZE`): H3's smallest canvas, never enlarged, so each costs a 2x2 latent and a
+few vision tokens, and the plate is `<Picture 4>` again. No prompt or golden changed.
+
 ## Phase 12: a show's own targets, from any ComfyUI workflow (as built, 2026-09-21)
 
 A target was code plus data in this repo. Now a show can have targets of its own — data
