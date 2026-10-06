@@ -1296,7 +1296,7 @@ the job.
 **Cut when** the subject changes, a new beat lands, someone new speaks, time skips, or the
 framing must change materially. **Don't cut** when only the distance shifts a little — use a
 camera move. A cut should bring new information; a cut to the same thing slightly closer is a
-jump cut, and it will render as one.
+jump cut, and it will render as one (see **Cutting within a location**).
 
 A workable rhythm for a dialogue scene: wide establishing → medium two-shot for the exchange →
 close on the reaction that matters → back out. Keep the wide short and empty of anything
@@ -1350,6 +1350,62 @@ The prompt also scales the location to the framing: a wide describes the whole p
 the subjects, a medium the part behind them, and a close-up only a magnified, out-of-focus
 slice of it. That is why a close-up on H3 has the room behind the face, softly, and not a
 studio backdrop.
+
+### Cutting within a location
+
+Every shot is generated on its own, so a shot never continues the one before it: it poses
+everyone from scratch. Cut between two shots that look alike and the eye reads it as a
+glitch, with people jerking into new positions or appearing out of nowhere. That's a jump
+cut. Two consecutive shots with **the same people on the same plate** need one of these
+between them:
+
+1. **A new angle.** Give the second shot another `plate:` of the place. A real change of
+   camera position (film's 30-degree rule) makes the new pose read as a new view. This is
+   the cheapest fix and why a location wants several angles.
+2. **A size two or more steps away**, along `ecu` `cu` `mcu` `ms` `cowboy` `mws` `fs` `ws`
+   `ews`: `mws` → `mcu`, `ms` → `cu`, `ws` → `ms`. One step (`ms` → `mcu`, `fs` → `ws`) reads
+   as the camera twitching.
+3. **A cutaway**, then back: the other character's reaction, an `ecu` insert of hands or a
+   prop, what she's looking at. Under a second is enough (H3's shortest take is 0.92 s), and
+   after it the return can be in any pose.
+4. **A cut on action.** Open the second shot mid-movement ("already turning to the door"),
+   not at rest: movement across the cut hides the change of pose. It helps the other three;
+   on its own it seldom saves a cut.
+5. **`continuous: yes`** when the moment truly has to be one unbroken take. It costs 22
+   frames a shot after the first, and each take is upscaled on its own, so the frame where
+   one hands off to the next can differ slightly between the two upscales.
+
+`h3.py check` warns about consecutive shots that do none of the first two: the same people,
+the same plate, sizes less than two steps apart. It can't see a cutaway or a cut on action
+in the action text, so treat it as a question to answer, not an error.
+
+Worked through: Ada at the counter, then closer for her line. As written, a jump cut:
+
+```
+## sh020
+who: ada
+size: ms
+
+## sh030
+who: ada
+size: mcu
+```
+
+With Bo's reaction between them, and the return two steps tighter:
+
+```
+## sh020
+who: ada
+size: ms
+
+## sh025
+who: bo
+size: mcu
+
+## sh030
+who: ada
+size: cu
+```
 
 ### Every shot starts from an empty plate
 

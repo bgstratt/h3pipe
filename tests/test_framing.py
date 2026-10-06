@@ -112,5 +112,44 @@ class OpeningTest(unittest.TestCase):
             self.assertIn("never a plain studio backdrop", opening(size), size)
 
 
+class JumpCutTest(unittest.TestCase):
+    """h3build's warning for consecutive shots that cut as a jump cut: the same
+    people on the same plate at sizes less than two steps apart."""
+
+    def warnings(self, *shots, continuous=False) -> list[str]:
+        import h3build
+        from h3core.story import parse_story
+        text = "= ep01  Test\n\n# sq01  kitchen\n" + ("continuous: yes\n" if continuous else "")
+        for i, (who, size, plate) in enumerate(shots, 1):
+            text += f"\n## sh{i}0\nwho: {who}\nsize: {size}\n" + (f"plate: {plate}\n" if plate else "")
+            text += "dur: 3.04\n\nSomething happens.\n"
+        story = parse_story(text, {"ada", "bo"}, {"ada", "bo"})
+        return h3build.jump_cuts(story, lambda s: s, lambda s: s.title())
+
+    def test_steps_apart(self):
+        self.assertEqual(framing.steps_apart("ms", "mcu"), 1)
+        self.assertEqual(framing.steps_apart("mws", "mcu"), 3)
+        self.assertEqual(framing.steps_apart("close", "cu"), 0)
+        self.assertIsNone(framing.steps_apart("ms", "huge"))
+
+    def test_one_step_on_the_same_plate_is_flagged(self):
+        got = self.warnings(("ada", "ms", ""), ("ada", "mcu", ""))
+        self.assertEqual(len(got), 1)
+        self.assertIn("sh10 -> sh20 cuts between a medium shot and a medium close-up of Ada", got[0])
+        self.assertIn("Cutting within a location", got[0])
+        self.assertIn("two medium shots", self.warnings(("ada", "ms", ""), ("ada", "medium", ""))[0])
+
+    def test_what_fixes_it(self):
+        self.assertEqual(self.warnings(("ada", "ms", ""), ("ada", "cu", "")), [])          # 2 steps
+        self.assertEqual(self.warnings(("ada", "ms", ""), ("ada", "mcu", "kitchen_b")), [])  # angle
+        self.assertEqual(self.warnings(("ada", "ms", ""), ("bo", "mcu", ""),               # cutaway
+                                       ("ada", "mcu", "")), [])
+        self.assertEqual(self.warnings(("ada", "ms", ""), ("ada", "mcu", ""),
+                                       continuous=True), [])                               # one take
+
+    def test_different_people_are_not_a_jump_cut(self):
+        self.assertEqual(self.warnings(("ada", "ms", ""), ("ada, bo", "ms", "")), [])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -56,6 +56,9 @@ ALIASES = {
 
 FAMILIES = ("close", "medium", "wide")
 
+# tightest to widest: how far apart two sizes are (steps_apart)
+ORDER = ("ecu", "cu", "mcu", "ms", "cowboy", "mws", "fs", "ws", "ews")
+
 
 def _key(name: str) -> str:
     return re.sub(r"[^a-z]", "", (name or "").lower())
@@ -101,6 +104,16 @@ def in_sizes(name: str | None, names) -> bool:
     spelling of either."""
     c = canonical(name)
     return c is not None and c in {canonical(n) for n in (names or ())}
+
+
+def steps_apart(a: str | None, b: str | None) -> int | None:
+    """How many sizes apart two framings are (mws and mcu: 3), or None when
+    either isn't a size. Two shots of the same people on the same plate want
+    two or more, or the cut reads as a jump cut."""
+    ca, cb = canonical(a), canonical(b)
+    if ca is None or cb is None:
+        return None
+    return abs(ORDER.index(ca) - ORDER.index(cb))
 
 
 def describe() -> str:
