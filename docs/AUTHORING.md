@@ -1371,13 +1371,18 @@ between them:
 4. **A cut on action.** Open the second shot mid-movement ("already turning to the door"),
    not at rest: movement across the cut hides the change of pose. It helps the other three;
    on its own it seldom saves a cut.
-5. **`continuous: yes`** when the moment truly has to be one unbroken take. It costs 22
-   frames a shot after the first, and each take is upscaled on its own, so the frame where
-   one hands off to the next can differ slightly between the two upscales.
+5. **Continue the picture** when the second shot really is the same moment carrying on:
+   `first: continuity` on H3 FL2VA (`target: minimax_h3_fl2va`) opens the shot on the
+   previous shot's last frame, so nothing re-poses (see **Rendering a shot on H3 from
+   keyframes** and **Keyframes**). On H3 Ref2VA, `continuous: yes` under the `#` header chains
+   a whole sequence instead, at 22 frames a shot after the first. Either way, each take is
+   upscaled on its own, so the frame where one hands off to the next can differ slightly
+   between the two upscales.
 
-`h3.py check` warns about consecutive shots that do none of the first two: the same people,
-the same plate, sizes less than two steps apart. It can't see a cutaway or a cut on action
-in the action text, so treat it as a question to answer, not an error.
+`h3.py check` warns about consecutive shots that do none of the first two and don't continue:
+the same people, the same plate, sizes less than two steps apart, the second not
+`first: continuity` and the sequence not `continuous`. It can't see a cutaway or a cut on
+action in the action text, so treat it as a question to answer, not an error.
 
 Worked through: Ada at the counter, then closer for her line. As written, a jump cut:
 

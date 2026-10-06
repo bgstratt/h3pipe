@@ -116,12 +116,14 @@ class JumpCutTest(unittest.TestCase):
     """h3build's warning for consecutive shots that cut as a jump cut: the same
     people on the same plate at sizes less than two steps apart."""
 
-    def warnings(self, *shots, continuous=False) -> list[str]:
+    def warnings(self, *shots, continuous=False, first2="") -> list[str]:
         import h3build
         from h3core.story import parse_story
         text = "= ep01  Test\n\n# sq01  kitchen\n" + ("continuous: yes\n" if continuous else "")
         for i, (who, size, plate) in enumerate(shots, 1):
             text += f"\n## sh{i}0\nwho: {who}\nsize: {size}\n" + (f"plate: {plate}\n" if plate else "")
+            if i == 2 and first2:
+                text += f"first: {first2}\n"
             text += "dur: 3.04\n\nSomething happens.\n"
         story = parse_story(text, {"ada", "bo"}, {"ada", "bo"})
         return h3build.jump_cuts(story, lambda s: s, lambda s: s.title())
@@ -146,6 +148,13 @@ class JumpCutTest(unittest.TestCase):
                                        ("ada", "mcu", "")), [])
         self.assertEqual(self.warnings(("ada", "ms", ""), ("ada", "mcu", ""),
                                        continuous=True), [])                               # one take
+
+    def test_a_shot_that_continues_the_last_is_not_a_jump_cut(self):
+        # FL2VA's first: continuity opens on the previous shot's last frame
+        self.assertEqual(self.warnings(("ada", "ms", ""), ("ada", "mcu", ""),
+                                       first2="Continuity"), [])
+        self.assertEqual(len(self.warnings(("ada", "ms", ""), ("ada", "mcu", ""),
+                                           first2="generate")), 1)
 
     def test_different_people_are_not_a_jump_cut(self):
         self.assertEqual(self.warnings(("ada", "ms", ""), ("ada, bo", "ms", "")), [])

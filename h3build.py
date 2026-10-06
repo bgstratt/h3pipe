@@ -172,15 +172,18 @@ def jump_cuts(story: ir.Episode, person, name) -> list[str]:
     people, on the same plate, at sizes less than two steps apart. Each shot is
     generated on its own, so the second re-poses everyone in place rather than
     continuing the first, and the cut reads as people jerking or appearing.
-    A continuous sequence chains its shots on purpose and is left alone. A
-    warning, not an error: the action may still carry the cut (a cut on
-    movement), which the script fields can't show
+    A continuous sequence chains its shots on purpose, and a shot opening on
+    the previous one's last frame (`first: continuity`) continues it, so
+    neither is a jump cut. A warning, not an error: the action may still carry
+    the cut (a cut on movement), which the script fields can't show
     (docs/AUTHORING.md, "Cutting within a location")."""
     out = []
     for sq in story.sequences:
         if sq.continuous:
             continue
         for a, b in zip(sq.shots, sq.shots[1:]):
+            if (b.keyframe("first", sq) or "").strip().lower() == "continuity":
+                continue
             who_a = {person(s) for s in a.cast}
             if not who_a or who_a != {person(s) for s in b.cast}:
                 continue
