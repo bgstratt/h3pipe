@@ -239,6 +239,7 @@ which ones your ComfyUI can render.
 | **Render at size** (the default) | 1344×768 | 448×256 | 7:4 | ~53 s | not needed | 1344×768 as rendered |
 | **Render small, upscale to 1080p** | 960×544 | 448×256 | ≈7:4 | ~20 s | re-sample 2x → 1920×1088, ~25–35 s | 1920×1080 (8 rows cropped) |
 | **Render 16:9, upscale to 1080p or 4K** | 1024×576 | 512×288 | 16:9 | ~23–24 s (est.) | re-sample 2x → 2048×1152 (scaled down to 1080p; for 4K, then an upscale model) | 1920×1080 or 3840×2160, exactly |
+| **Render at size, master 1440p** | 1344×768 | 960×544 (8 steps) | 7:4 | ~53 s | re-sample 2x → 2688×1536, ~75 s | 2560×1440 (scaled down, 23 rows cropped) |
 
 (Measured on an RTX 5090 with the 8-step turbo LoRA; the 1024×576 time is estimated from
 its 13% more pixels than 960×544, since attention grows a little faster than the pixel
@@ -262,7 +263,10 @@ their own grid (LTX-2's is 64: a 512×288 proxy renders there at 512×256, a lit
   keeps are upscaled, once, after the cut is locked. The upscale re-samples the take from
   late in its schedule under its own prompt, references and seed, with its audio held, so
   the performance and the lip sync are the take's; it adds detail a 960×544 frame is short
-  of (faces in wide shots, hands, small props).
+  of (hands, small props, texture). It can't add a face the render didn't draw: at 960×544 a
+  face in a medium-wide or wider is a few of H3's 16-pixel cells, and the re-sample
+  sharpens what's there (see **Faces need room**). A live-action series that lives on
+  faces and dialogue renders at 1344×768 (**Delivering 1440p** below).
 - **Render at size** when shots render on Wan (`wan22_i2v`, `wan22_ti2v`, `wan22_vace`:
   they re-sample, a pixel model then their own sampler, but slowly: minutes a shot), when
   the upscaler isn't installed, or when 1344×768 is the delivery. Upscaling a 1344×768 take to 2688×1536 works
@@ -276,8 +280,9 @@ their own grid (LTX-2's is 64: a 512×288 proxy renders there at 512×256, a lit
 
 **Writing a new series config for someone**, ask once which setup they want, unless they
 already said (a delivery size, "upscale", "fast iterations", "4K"): render at size
-(1344×768), render small for 1080p (960×544), or 16:9 for exact 1080p/4K (1024×576, proxy
-512×288). With no answer, write 1344×768: it renders on every target with nothing extra
+(1344×768), render small for 1080p (960×544), 16:9 for exact 1080p/4K (1024×576, proxy
+512×288), or render at size and master 1440p (1344×768, proxy 960×544) for a live-action
+series with close dialogue, where faces need the pixels. With no answer, write 1344×768: it renders on every target with nothing extra
 installed. When they name a delivery size, say what shape the frame will be and whether
 the delivery crops or pads it. For an existing series config, never change the size
 unasked.
@@ -406,7 +411,8 @@ shots that load the same model together, so ComfyUI loads each model once instea
 every change of target; the dialog remembers the choice.
 
 **Writing a new series config**, add an `upscale.master` block for the delivery they named
-(ask once if they didn't: 1080p is the usual; 4K when they say so). The patterns below are
+(ask once if they didn't: 1080p is the usual; 1440p for a series rendered at 1344×768; 4K
+when they say so). The patterns below are
 the best value in time and quality we've measured; say which you chose and why.
 
 #### Delivering 1080p
@@ -448,6 +454,38 @@ episode before planning a season on it).
 instead of re-encoding its video. A wide shot without dialogue that looks soft can take its
 own recipe with `detail: 1`; don't raise `detail` for every shot, it can change a speaking
 mouth.
+
+#### Delivering 1440p
+
+Render at 1344×768 and re-sample 2x; nothing after it. The take holds faces and mouths a
+960×544 render can't (see **Faces need room**), and the 2x re-sample to 2688×1536 is
+scaled down about 5% to 2560×1463 and cropped by 23 rows, so the master is slightly
+supersampled. Measured on an RTX 5090: **about 75 s a shot**, and cleaner than re-sampling
+1.5x and finishing with RealESRGAN, which took 210–230 s (the upscale model's pass at
+1440p is the slow part). Uploaded to YouTube at 1440p, it also streams better to viewers
+watching at 1080p than a 1080p upload does.
+
+- **Proxy at 960×544, on the 8-step LoRA at 8 steps** (`"proxy": {"width": 960, "height":
+  544, "steps": 8, "lora": "minimax_h3_ref2v_turbo_8step_v1.0_768p_comfyui_bf16.safetensors"}`):
+  a proxy then looks like a final, so a good one can stand in. Its 2x is only 1920×1088,
+  stretched to 1440p: give such a shot its own recipe at `"scale": 2.75` (960→2640), on a
+  short shot only.
+- **Long shots:** a 2x re-sample of 1344×768 is heavy. Up to about 6–7 s it fits a 32 GB
+  card; a 10 s shot at 2x ran out of VRAM and stalled. Give long shots their own recipe at
+  `"scale": 1.5` with `"then": "RealESRGAN_x2.pth"`.
+- Keep `"scale": 2`, not `"auto"`: auto would also choose 2x for a 1344×768 take, but takes
+  at other sizes would re-sample differently.
+
+```json
+"upscale": { "save_latents": "final",
+  "master": { "deliver": "1440p", "fit": "crop", "quality": "master",
+    "finish": { "frequency_split": true },
+    "targets": {
+      "minimax_h3_*": { "method": "latent", "scale": 2 },
+      "ltx2*":        { "method": "latent", "scale": 2 },
+      "wan22_*":      { "method": "seedvr2", "seedvr2_model": "7b" },
+      "*":            { "method": "pixel", "pixel_model": "RealESRGAN_x2.pth" } } } }
+```
 
 #### Delivering 4K
 
