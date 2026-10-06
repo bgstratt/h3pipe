@@ -28,11 +28,10 @@ from __future__ import annotations
 import copy
 import re
 
+from h3core import framing as sizes   # this module has its own framing()
 from targets.image.krea2 import prompt as KP
 
-SIZE_WORDS = {"close": "close-up", "cu": "close-up", "medium": "medium shot",
-              "ms": "medium shot", "wide": "wide shot", "ws": "wide shot"}
-FACE_SIZES = ("close", "cu")
+FACE_SIZES = ("cu", "mcu", "ecu")          # h3core/framing.py names; any spelling matches
 
 
 def ref_prompt(target, req, series_cfg: dict) -> str:
@@ -161,7 +160,7 @@ def keyframe_prompt(shot, seq, series_cfg: dict, which: str,
     if intro:
         parts.append(intro)
     end = "first" if which == "first" else "last"
-    size = SIZE_WORDS.get(shot.size, "medium shot")
+    size = sizes.term(shot.size)
     parts.append(_sentence(f"the {end} frame of {_article(size)}"
                            f"{' of ' + env if env else ''}, one still picture"))
 
@@ -172,7 +171,8 @@ def keyframe_prompt(shot, seq, series_cfg: dict, which: str,
     people = [name_of(s) for s in shot.cast
               if (book.get(s) or {}).get("kind", "character") == "character"]
     things = [name_of(s) for s in on_screen if name_of(s) not in people]
-    frame = framing(size, people, things)
+    # framing() words the three families; the shot's own term stays in the text
+    frame = framing({"close": "close-up", "medium": "medium shot", "wide": "wide shot"}[sizes.family(shot.size)], people, things)
     if frame:
         parts.append(frame)
     if look:

@@ -27,10 +27,10 @@ Stdlib only.
 """
 from __future__ import annotations
 
+from h3core import framing
+
 
 COUNT_WORDS = {2: "two", 3: "three", 4: "four", 5: "five", 6: "six"}
-SIZE_WORDS = {"close": "close-up", "cu": "close-up", "medium": "medium shot",
-              "ms": "medium shot", "wide": "wide shot", "ws": "wide shot"}
 
 
 def _count(n: int) -> str:
@@ -235,7 +235,7 @@ def build_prompt(shot: dict, seq: dict, series_cfg: dict, panels: int,
     # dissolves, and the sheet's pose comes with it. So a close-up keeps the
     # plate as a magnified crop -- the part of the room right behind the
     # subject, at close range -- and says the sheet's backdrop is not it.
-    close = shot["size"] in ("close", "cu")
+    close = framing.family(shot["size"]) == "close"
     if no_plate:
         pass
     elif close:
@@ -292,23 +292,29 @@ def build_prompt(shot: dict, seq: dict, series_cfg: dict, panels: int,
     # behind them on a medium, and on a close-up a magnified, soft slice of
     # it -- never the sheet's studio backdrop (see the marker above).
     desc = ["detailed_description:", f"The target video is {look}."]
-    frame = SIZE_WORDS.get(shot["size"], "medium shot")
+    # The in-between sizes add what the frame holds ("from the chest up"), so
+    # a framing H3's guide doesn't name (cowboy, full, extreme wide) still
+    # reads; close-up, medium shot and wide shot say it with the name alone.
+    frame = framing.article(framing.term(shot["size"]))
+    ext = framing.extent(shot["size"])
+    held = "" if not ext else (f" {ext}" if ext.startswith("from") else f", {ext}")
     who = _and([subj[s] for s in subjects] + [book[s].get("name", s) for s in unref])
     place = env if no_plate else f"{bg_subj}, {env}"
-    wide = shot["size"] in ("wide", "ws")
+    wide = framing.family(shot["size"]) == "wide"
     if close:
-        where = (f"A {frame} frames {who}, filling most of the frame. Behind them, the frame "
+        fill = "" if ext and not ext.startswith("from") else ", filling most of the frame"
+        where = (f"{frame} frames {who}{held}{fill}. Behind them, the frame "
                  f"is filled by a magnified, softly focused part of {place}, recognizably the "
                  f"same place, never a plain studio backdrop; the rest of the space lies outside "
                  f"the frame." if who else
-                 f"A {frame} holds on a detail of {place}; the rest of the space lies outside "
+                 f"{frame} holds on a detail of {place}; the rest of the space lies outside "
                  f"the frame.")
     elif wide:
-        where = (f"A {frame} takes in {place}, with {who} in it." if who else
-                 f"A {frame} takes in {place}.")
+        where = (f"{frame} takes in {place}, with {who} in it{held}." if who else
+                 f"{frame} takes in {place}.")
     else:
-        where = (f"A {frame} frames {who} in {place}, showing the part of the space directly "
-                 f"behind them." if who else f"A {frame} frames {place}.")
+        where = (f"{frame} frames {who}{held} in {place}, showing the part of the space directly "
+                 f"behind them." if who else f"{frame} frames {place}.")
     body = f"[Shot 1] {where} {shot['action']}"
     cam = shot.get("camera", "").strip()
     body += f" The camera {cam}." if cam else " The camera holds a static shot with fixed composition."

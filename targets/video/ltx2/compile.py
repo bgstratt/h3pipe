@@ -49,7 +49,7 @@ import re
 import uuid
 
 import targets as TG
-from h3core import ir
+from h3core import framing, ir
 from h3core.ir import stable_seed
 from h3core.speech import RATE_CEILING, SPEECH_RATE, forced_rate, pacing, speech_seconds
 
@@ -313,7 +313,7 @@ def sheet_panels(doc: dict, shot: dict) -> list[dict]:
     chars = [s for s in ids if (book[s].get("kind") or "character") == "character"]
     ordered = chars + [s for s in ids if s not in chars]
     view = "face" if (len(ordered) == 1 and ordered[0] in chars
-                      and shot.get("size") in (SHEET.get("face_sizes") or ())) else "body"
+                      and framing.in_sizes(shot.get("size"), SHEET.get("face_sizes"))) else "body"
     out = []
     for s in ordered:
         e = book[s]

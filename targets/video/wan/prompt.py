@@ -19,7 +19,8 @@ Stdlib only.
 """
 from __future__ import annotations
 
-from targets.video.ltx2.prompt import SIZE_WORDS, _and, _article, _sentence
+from h3core import framing
+from targets.video.ltx2.prompt import _and, _article, _sentence
 
 
 def acting(shot, book: dict) -> list[str]:
@@ -60,7 +61,7 @@ def build_prompt(shot, seq, series_cfg: dict) -> str:
         parts.append(f"Style: {look}.")
 
     # the framing, where, and how the camera moves (static unless the script says)
-    size = SIZE_WORDS.get(shot.size, "medium shot")
+    size = framing.term(shot.size)
     cam = (shot.camera or "").strip().rstrip(".")
     camera = f"the camera {cam}" if cam else "the camera remains static"
     parts.append(_sentence(f"{_article(size)}{' of ' + env if env else ''}, {camera}"))

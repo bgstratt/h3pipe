@@ -76,6 +76,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import h3edit as E  # noqa: E402
 import h3jobs as J  # noqa: E402
 import h3takes as T  # noqa: E402
+from h3core import framing  # noqa: E402
 from h3core import series_config as SC  # noqa: E402
 
 # ---------------------------------------------------------------------------
@@ -594,7 +595,7 @@ def set_image_defaults(ep: str, fields: dict) -> dict:
     return ov
 
 
-FACE_SIZES = ("close", "cu")
+FACE_SIZES = ("cu", "mcu", "ecu")          # h3core/framing.py names
 
 
 def picked_view_file(s: Series, subject: str, view: str) -> str | None:
@@ -693,7 +694,7 @@ def _reference_parts(s: Series, sh, sq) -> list[dict]:
     subjects = list(sh.cast) + [p for p in sh.props if p not in sh.cast]
     chars = [x for x in subjects if (book.get(x) or {}).get("kind", "character") == "character"]
     ordered = chars + [x for x in subjects if x not in chars]
-    face = len(chars) == 1 and len(subjects) == 1 and sh.size in FACE_SIZES
+    face = len(chars) == 1 and len(subjects) == 1 and framing.in_sizes(sh.size, FACE_SIZES)
     view = "04_face" if face else "01_threequarter"
     out = []
     for sid in ordered:

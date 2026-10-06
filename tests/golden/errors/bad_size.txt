@@ -1,5 +1,5 @@
 exit 1
 
-  error in bad_size.md: line 4: size 'extreme' must be one of ['close', 'cu', 'medium', 'ms', 'wide', 'ws']
+  error in bad_size.md: line 4: size 'extreme' isn't a shot size: extreme close-up (ecu/xcu), close-up (cu/close), medium close-up (mcu), medium shot (ms/medium/mid), cowboy shot (cowboy), medium-wide shot (mws/mls), full shot (fs/full), wide shot (ws/wide/ls/long), extreme wide shot (ews/xws/els/xls)
     | size: extreme
 

@@ -25,7 +25,7 @@ from __future__ import annotations
 import re
 
 import targets as TG
-from h3core import ir
+from h3core import framing, ir
 from h3core.ir import stable_seed
 from h3core.speech import RATE_CEILING, SPEECH_RATE, forced_rate, pacing, speech_seconds
 
@@ -427,7 +427,7 @@ def _compile_shot(ctx: Ctx, seq: dict, i: int, shot: dict, seq_loc: dict) -> dic
     panels = int(RECIPE["panels"])
     panel_view = ("face" if (len(subjects) == 1
                   and book[subjects[0]].get("kind", "character") == "character"
-                  and shot["size"] in RECIPE["face_sizes"]) else "body")
+                  and framing.in_sizes(shot["size"], RECIPE["face_sizes"])) else "body")
 
     for s in subjects:
         r = subject_request(s, book[s])

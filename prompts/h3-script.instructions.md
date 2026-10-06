@@ -917,7 +917,7 @@ sound: running footsteps on grass, fabric movement
 | `## shNNN` | a shot. **Every `##` is a cut** — no `CUT TO:` needed |
 | `who: a, b` | characters on screen, in this order (on H3 Ref2VA they become `<Picture 1..3>`); `cast:` is the same |
 | `with: x, y` | props and vehicles, after the characters; `props:` is the same |
-| `size: close/medium/wide` | shot size (`cu`, `ms`, `ws` also work); opens the shot's prompt as its framing ("A close-up frames…"), and decides how much of the location and of the sheet is used. See **Faces need room** |
+| `size: mcu` | shot size, from extreme close-up to extreme wide (`ecu`, `cu`/`close`, `mcu`, `ms`/`medium`, `cowboy`, `mws`, `fs`/`full`, `ws`/`wide`, `ews`; the full names work too). Opens the shot's prompt as its framing ("A medium close-up frames… from the chest up"), and decides how much of the location and of the sheet is used. See **Faces need room** |
 | `plate: street_gate` | this shot's angle; defaults to the sequence's location |
 | `dur: 3.04` | duration in seconds, from the grid below (`duration:` is the same) |
 | `dur: auto` | derive the duration from the dialogue at this shot's pace |
@@ -1271,6 +1271,25 @@ slightly / strongly · takes the subject's POV · rolls clockwise / counterclock
 "Arcs around them with large amplitude at fast speed" beats "swoops around dramatically",
 because it names a move the model was trained on.
 
+Film terms translate into that vocabulary:
+
+| You mean | Write |
+|---|---|
+| dolly in / dolly out (back) | `pushes in…` / `pulls out…` |
+| slide, crab | `trucks left…` / `trucks right…` |
+| pivot, swivel | `pans left…` / `pans right…` |
+| whip pan | `pans right with large amplitude at fast speed` |
+| crane / jib up or down | `pedestals up…` / `pedestals down…` |
+| orbit | `arcs around <name>…` |
+| follow, lead | `tracks <name> as she walks…` (in front of or behind, in the action) |
+| handheld | `shakes slightly` |
+| over the shoulder | not a move: frame it in the action, "over Ada's shoulder, Bo faces camera", with both in `who:` |
+| rack focus | not a move: say it in the action, "the focus shifts from the cup to Ada's face" |
+
+Staging (where people stand, who faces camera, how a scene's angles cut together) is the
+director's craft and is best learned from a book like Christopher Kenworthy's *Master
+Shots*; this guide covers only how to say the result to the model.
+
 On a wide full of big architecture (a plant, a street front, a church), prefer holding still,
 a pan or a slow push over a track, truck or arc. A camera that moves through the space makes
 the model redraw the buildings as it goes, and they build and unbuild themselves on screen.
@@ -1298,7 +1317,24 @@ sits with his boots on the desk".
 
 `size:` is written into the prompt as the shot's framing (`A close-up frames <Subject 1>…`,
 `A medium shot frames…`, `A wide shot takes in…`), so it is what the model frames, not a
-label. Choose it by what the shot has to show.
+label. Choose it by what the shot has to show:
+
+| `size:` | Framing | Holds | Use it for |
+|---|---|---|---|
+| `ecu` | extreme close-up | one detail: the eyes, a hand on the latch | an insert; tension |
+| `cu` (`close`) | close-up | the face, chin to hairline | the reaction or line that matters |
+| `mcu` | medium close-up | chest up | **most dialogue**: face and a little body language |
+| `ms` (`medium`) | medium shot | waist up | two-shots, business at a counter |
+| `cowboy` | cowboy shot | mid-thigh up | standing confrontations, a hand at the hip |
+| `mws` | medium-wide shot | knees up | walking and talking, a figure with their surroundings |
+| `fs` (`full`) | full shot | head to toe | a whole-body action: a trip, a dance step, a fall |
+| `ws` (`wide`) | wide shot | the subject in the room | geography, entrances |
+| `ews` | extreme wide shot | the subject small in a big setting | scale, isolation, establishing a place |
+
+The full names work too (`size: medium close-up`), and so do `ls` (long shot) and `els`. The
+in-between sizes put what the frame holds into the prompt ("from the chest up"), so a model
+that doesn't know the term still frames it. For the plate and the sheet, `ecu`/`mcu` act like
+a close-up, `cowboy`/`mws` like a medium, and `fs`/`ews` like a wide.
 
 **A face needs pixels to have a face.** H3 draws in cells of 16×16 pixels. On a wide of a
 standing person, the face is a few cells across, too few for eyes and a mouth: it comes out
@@ -1306,15 +1342,15 @@ soft and smeared, and an upscale sharpens the smear rather than finding the face
 it is worse than at 1344×768. Measured on a 1344-wide full-body walk, the face was 50 pixels
 tall: three cells.
 
-- **Dialogue, reactions, and anything the audience must read on a face: `close` or
-  `medium`.** A medium is waist-up, with the face a few hundred pixels; a close-up fills the
-  frame with it.
-- **Wides carry geography, entrances, crowds and big physical action**, where nobody's
-  expression has to read: a figure crossing a room, a back to camera, two people seen from
-  across a lot. Don't hold a wide on a face and expect the face to be there.
-- **Cut in for the face.** A fall, a collision or an entrance plays as wide → close on the
-  face that reacts → wide or medium for the result, not one wide shot that holds the face
-  at a distance.
+- **Dialogue, reactions, and anything the audience must read on a face: `mcu`, `cu`, or
+  `ms`.** A medium close-up gives the face a few hundred pixels at 960×544; a close-up fills
+  the frame with it.
+- **Wides (`fs`, `ws`, `ews`) carry geography, entrances, crowds and big physical action**,
+  where nobody's expression has to read: a figure crossing a room, a back to camera, two
+  people seen from across a lot. Don't hold a wide on a face and expect the face to be there.
+- **Cut in for the face.** A fall, a collision or an entrance plays as `fs` for the action →
+  `cu` on the face that reacts → `mws` or `ms` for the result, not one wide shot that holds the
+  face at a distance.
 
 The prompt also scales the location to the framing: a wide describes the whole place around
 the subjects, a medium the part behind them, and a close-up only a magnified, out-of-focus

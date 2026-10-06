@@ -20,7 +20,7 @@
     "voice_slots": ["Audio 1", "Audio 2", "Audio 3"],
     "sheet_panels": 4,
     "panels": 1,
-    "face_sizes": ["close", "cu"],
+    "face_sizes": ["close", "cu", "mcu", "ecu"],
     "policies": ["generate", "dub", "dub_keep_foley", "clone"],
     "retention": {
       "_note": "H3's audio retention markers, and the IR's neutral `preserve` mapped onto them. fully_copy makes a dub slice the whole soundtrack; partially_copy copies the voices and lets H3 add foley; reference only borrows timbre and timing.",

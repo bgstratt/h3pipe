@@ -22,7 +22,7 @@
       "gap": 0.02,
       "sheet_panels": 4,
       "views": {"body": 0, "face": 3},
-      "face_sizes": ["close", "cu"]
+      "face_sizes": ["close", "cu", "mcu", "ecu"]
     },
     "ic_lora": "ltx-2.3-22b-ic-lora-ingredients-0.9.safetensors",
     "trained_frames": 121,

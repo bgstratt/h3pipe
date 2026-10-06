@@ -114,7 +114,9 @@
       },
       "face_sizes": [
         "close",
-        "cu"
+        "cu",
+        "mcu",
+        "ecu"
       ],
       "plate": false
     },
