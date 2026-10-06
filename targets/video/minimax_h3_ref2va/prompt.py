@@ -29,6 +29,8 @@ from __future__ import annotations
 
 
 COUNT_WORDS = {2: "two", 3: "three", 4: "four", 5: "five", 6: "six"}
+SIZE_WORDS = {"close": "close-up", "cu": "close-up", "medium": "medium shot",
+              "ms": "medium shot", "wide": "wide shot", "ws": "wide shot"}
 
 
 def _count(n: int) -> str:
@@ -283,13 +285,31 @@ def build_prompt(shot: dict, seq: dict, series_cfg: dict, panels: int,
                 + "without copying the original signal.")
 
     # ---- detailed_description ----------------------------------------------
+    # The shot opens on its framing, in words: H3 gets framing no other way
+    # (`size` otherwise only picks the plate marker and the sheet panels), and
+    # camera movement doesn't imply it. Then only as much of the location as
+    # that framing shows: the space around the subjects on a wide, the part
+    # behind them on a medium, and on a close-up a magnified, soft slice of
+    # it -- never the sheet's studio backdrop (see the marker above).
     desc = ["detailed_description:", f"The target video is {look}."]
-    body = (f"[Shot 1] The scene takes place in {env}. {shot['action']}" if no_plate else
-            f"[Shot 1] The scene takes place in {bg_subj}, {env}. {shot['action']}")
-    if close and not no_plate:
-        body += (f" Behind the subject, the frame is filled by a magnified, softly focused "
-                 f"part of {bg_subj}, recognizably the same place, never a plain studio "
-                 f"backdrop.")
+    frame = SIZE_WORDS.get(shot["size"], "medium shot")
+    who = _and([subj[s] for s in subjects] + [book[s].get("name", s) for s in unref])
+    place = env if no_plate else f"{bg_subj}, {env}"
+    wide = shot["size"] in ("wide", "ws")
+    if close:
+        where = (f"A {frame} frames {who}, filling most of the frame. Behind them, the frame "
+                 f"is filled by a magnified, softly focused part of {place}, recognizably the "
+                 f"same place, never a plain studio backdrop; the rest of the space lies outside "
+                 f"the frame." if who else
+                 f"A {frame} holds on a detail of {place}; the rest of the space lies outside "
+                 f"the frame.")
+    elif wide:
+        where = (f"A {frame} takes in {place}, with {who} in it." if who else
+                 f"A {frame} takes in {place}.")
+    else:
+        where = (f"A {frame} frames {who} in {place}, showing the part of the space directly "
+                 f"behind them." if who else f"A {frame} frames {place}.")
+    body = f"[Shot 1] {where} {shot['action']}"
     cam = shot.get("camera", "").strip()
     body += f" The camera {cam}." if cam else " The camera holds a static shot with fixed composition."
     if shot.get("_continuation"):

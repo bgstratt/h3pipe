@@ -197,6 +197,8 @@ which ones your ComfyUI can render.
 }
 ```
 
+- `style.look` opens every shot's description ("The target video is …"), so it sets the
+  photography of the whole series. See **Writing the `look` line**.
 - `kind` is `character`, `prop` or `vehicle`. Only characters speak.
 - `of` makes the subject a **wardrobe variant** of another one — the same character in
   different clothes, the same prop in a different state. See **A wardrobe change is a new
@@ -677,7 +679,29 @@ Weak: *"a mischievous kid with boundless energy who never sits still"* — none 
 drawable, and it crowds out detail that is.
 
 Location descriptions work the same way and must include the light: time of day, direction,
-quality. The plate is generated from that sentence.
+quality. The plate is generated from that sentence. **Name the sources**: the pendant lamp
+over the table, the chandeliers, the TV's glow, the streetlight through the blinds. A room
+lit by things you can point at renders as a lit set, with pools of light and shadow
+between them; "warm lighting" renders as an evenly lit showroom.
+
+### Writing the `look` line
+
+`style.look` is the first sentence of every shot's description, so it is the series'
+photography. Write it the way a director of photography would brief a crew: what the lens,
+the focus, the light and the film stock do. Adjectives about quality ("cinematic",
+"beautiful", "high quality") give the model nothing to draw.
+
+Weak: *"a cinematic prestige drama with moody lighting"*.
+
+Strong: *"a naturalistic live-action prestige drama shot on 35mm anamorphic lenses: shallow
+depth of field with the background falling into soft bokeh, low-key light from the practical
+lamps in each room, deep soft shadows with lifted blacks, muted desaturated color and fine
+film grain"*.
+
+Each clause is something the model can see: shallow focus and bokeh separate the subject
+from the room and soften what the model draws worst, low-key practical light gives the frame
+contrast and shape, and grain gives the image the texture of film. Keep it to one sentence;
+the per-shot light belongs in the location descriptions and the action.
 
 ### A location is one angle, not one place
 
@@ -895,7 +919,7 @@ sound: running footsteps on grass, fabric movement
 | `## shNNN` | a shot. **Every `##` is a cut** — no `CUT TO:` needed |
 | `who: a, b` | characters on screen, in this order (on H3 Ref2VA they become `<Picture 1..3>`); `cast:` is the same |
 | `with: x, y` | props and vehicles, after the characters; `props:` is the same |
-| `size: close/medium/wide` | shot size (`cu`, `ms`, `ws` also work); decides the framing and how much of the sheet is used |
+| `size: close/medium/wide` | shot size (`cu`, `ms`, `ws` also work); opens the shot's prompt as its framing ("A close-up frames…"), and decides how much of the location and of the sheet is used. See **Faces need room** |
 | `plate: street_gate` | this shot's angle; defaults to the sequence's location |
 | `dur: 3.04` | duration in seconds, from the grid below (`duration:` is the same) |
 | `dur: auto` | derive the duration from the dialogue at this shot's pace |
@@ -1264,12 +1288,40 @@ camera move. A cut should bring new information; a cut to the same thing slightl
 jump cut, and it will render as one.
 
 A workable rhythm for a dialogue scene: wide establishing → medium two-shot for the exchange →
-close on the reaction that matters → back out.
+close on the reaction that matters → back out. Keep the wide short and empty of anything
+that has to read on a face (see **Faces need room**).
 
 **Open every shot on movement.** The model has no memory of the previous cut, so a shot whose
 action describes a *position* renders that position and then looks for something to do with
 it. Write the state change: "Dex swings his boots onto the desk and settles back", not "Dex
 sits with his boots on the desk".
+
+### Faces need room
+
+`size:` is written into the prompt as the shot's framing (`A close-up frames <Subject 1>…`,
+`A medium shot frames…`, `A wide shot takes in…`), so it is what the model frames, not a
+label. Choose it by what the shot has to show.
+
+**A face needs pixels to have a face.** H3 draws in cells of 16×16 pixels. On a wide of a
+standing person, the face is a few cells across, too few for eyes and a mouth: it comes out
+soft and smeared, and an upscale sharpens the smear rather than finding the face. At 960×544
+it is worse than at 1344×768. Measured on a 1344-wide full-body walk, the face was 50 pixels
+tall: three cells.
+
+- **Dialogue, reactions, and anything the audience must read on a face: `close` or
+  `medium`.** A medium is waist-up, with the face a few hundred pixels; a close-up fills the
+  frame with it.
+- **Wides carry geography, entrances, crowds and big physical action**, where nobody's
+  expression has to read: a figure crossing a room, a back to camera, two people seen from
+  across a lot. Don't hold a wide on a face and expect the face to be there.
+- **Cut in for the face.** A fall, a collision or an entrance plays as wide → close on the
+  face that reacts → wide or medium for the result, not one wide shot that holds the face
+  at a distance.
+
+The prompt also scales the location to the framing: a wide describes the whole place around
+the subjects, a medium the part behind them, and a close-up only a magnified, out-of-focus
+slice of it. That is why a close-up on H3 has the room behind the face, softly, and not a
+studio backdrop.
 
 ### Every shot starts from an empty plate
 
@@ -1387,7 +1439,8 @@ smock and hard hat still turn into twenty of him. When the extras share the lead
 vary them in `extras:`: men and women, different ages and builds, hairnets instead of hard
 hats, faces turned away or soft in the background.
 
-On H3 Ref2VA, `size:` also decides what the plate means: on a wide or medium the room's layout
+On H3 Ref2VA, `size:` also decides what the plate means (besides the framing words; see
+**Faces need room**): on a wide or medium the room's layout
 is kept, and on a close-up the background is a zoomed-in crop of the plate — the part of the room
 right behind the subject — and never the plain backdrop of the character sheet. A close-up
 still leaves the room's layout to the shots around it, so stage the space on a medium first.
