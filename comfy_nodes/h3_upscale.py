@@ -40,11 +40,11 @@ import numpy as np
 import torch
 
 try:
-    from .h3_shotlist import (H3SaveShot, _now, _write_json_atomic, load_audio, load_latent,
-                              save_audio, save_latent)
+    from .h3_shotlist import (RGB_TO_BT709, H3SaveShot, _now, _write_json_atomic, load_audio,
+                              load_latent, save_audio, save_latent)
 except ImportError:                                      # imported on its own (tests)
-    from h3_shotlist import (H3SaveShot, _now, _write_json_atomic, load_audio, load_latent,
-                             save_audio, save_latent)
+    from h3_shotlist import (RGB_TO_BT709, H3SaveShot, _now, _write_json_atomic, load_audio,
+                             load_latent, save_audio, save_latent)
 
 
 def _abs(root: str, rel: str) -> str:
@@ -716,8 +716,10 @@ def encode_stream(images, path: str, fps: float, encoder: str = "auto",
     `size` (W, H) by fit_filter when one is given. Returns the encoder used; on
     auto, a failed NVENC encode is retried on x264."""
     n, h, w = int(images.shape[0]), int(images.shape[1]), int(images.shape[2])
-    vf = fit_filter(w, h, int(size[0]), int(size[1]), fit)
-    ow, oh = (int(size[0]), int(size[1])) if vf else (w, h)
+    fit_vf = fit_filter(w, h, int(size[0]), int(size[1]), fit)
+    ow, oh = (int(size[0]), int(size[1])) if fit_vf else (w, h)
+    # sized while still RGB, then to BT.709 video (RGB_TO_BT709)
+    vf = ",".join(f for f in (fit_vf, RGB_TO_BT709) if f)
     name, args = encoder_args(encoder, ow, oh, quality)
 
     def run(args: list) -> None:

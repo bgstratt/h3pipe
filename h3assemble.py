@@ -387,6 +387,31 @@ def normalise(src: str, dst: str, audio_wav: str | None, fps: float,
                            f"{r.stderr.decode('utf-8', 'replace')[-300:]}")
 
 
+# Every re-encoded clip comes out BT.709, tagged so (all four colour fields),
+# which is what YouTube, browsers and HD players assume. Takes and upscales
+# saved before 2026-10-05 are BT.601 and untagged (ffmpeg's default RGB
+# conversion), and are converted here; a clip tagged BT.709 (a take saved
+# since, a ComfyUI SaveVideo clip) is only retagged. The tags also go into
+# the H.264 headers, so an untagged clip never matches the standard and is
+# never copied unconverted beside converted ones.
+BT709_TAGS = "setparams=range=tv:color_primaries=bt709:color_trc=bt709:colorspace=bt709"
+
+
+def color_matrix(path: str) -> str:
+    """The first video stream's colour matrix tag ("bt709", "unknown", ...)."""
+    r = run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries",
+             "stream=color_space", "-of", "csv=p=0", path], timeout=60)
+    return (r.stdout.decode().strip() or "unknown") if r.returncode == 0 else "unknown"
+
+
+def to_bt709(matrix: str) -> list[str]:
+    """The filters that make a clip with colour matrix `matrix` BT.709: an
+    untagged or BT.601 clip is converted, a BT.709 one only tagged."""
+    conv = [] if matrix == "bt709" else [
+        "scale=in_color_matrix=bt601:out_color_matrix=bt709:in_range=tv:out_range=tv"]
+    return conv + ["format=yuv420p", BT709_TAGS]
+
+
 # how a re-encoded clip is written: review, or master (Phase 13e3: for delivery)
 QUALITY_ARGS = {"review": ["-crf", "16", "-preset", "medium"],
                 "master": ["-crf", "12", "-preset", "slow", "-profile:v", "high"]}
@@ -462,8 +487,10 @@ def conform(src: str, dst: str, audio: str | None, fps: float, frames: int,
         w, h = size
         vf += [f"scale={w}:{h}:force_original_aspect_ratio=decrease",
                f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2"]
-    # every clip written alike: pixels untagged (square), as a render saves its
-    # takes, so a scaled clip's H.264 headers are a plain one's (`standard`)
+    # every clip written alike: BT.709 (to_bt709), and pixels untagged (square)
+    # as a render saves its takes, so a scaled clip's H.264 headers are a plain
+    # one's (`standard`)
+    vf += to_bt709(color_matrix(src))
     vf.append("setsar=0")
     cmd += ["-map", "0:v:0", "-map", amap]
     if vf:

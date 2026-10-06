@@ -166,6 +166,30 @@ class UpscaleNodesTest(unittest.TestCase):
         self.assertIn("no such latent", UN.H3LoadVideo.VALIDATE_INPUTS("", mp4, True, mp4 + ".nope"))
 
     @needs_ffmpeg
+    def test_encodes_are_bt709_and_tagged(self):
+        """Pure red RGB comes out as BT.709 writes it (Y 63, U 102, V 240), all four
+        colour tags BT.709: on x264, and on NVENC where this ffmpeg has it."""
+        red = torch.zeros(8, 144, 256, 3)
+        red[..., 0] = 1.0
+        for enc in ("x264", "nvenc"):
+            if enc == "nvenc" and "h264_nvenc" not in UN.nvenc_encoders():
+                continue
+            out = self.p(f"red_{enc}.mp4")
+            UN.encode_stream(red, out, 24.0, enc)
+            raw = subprocess.run(["ffmpeg", "-v", "error", "-i", out, "-frames:v", "1", "-f",
+                                  "rawvideo", "-pix_fmt", "yuv420p", "-"],
+                                 capture_output=True, check=True).stdout
+            y, u, v = raw[0], raw[256 * 144], raw[256 * 144 + 128 * 72]
+            self.assertTrue(abs(y - 63) <= 2 and abs(u - 102) <= 2 and abs(v - 240) <= 2,
+                            (enc, y, u, v))
+            tags = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0",
+                                   "-show_entries", "stream=color_range,color_space,"
+                                   "color_primaries,color_transfer", "-of",
+                                   "default=nw=1:nk=1", out], capture_output=True,
+                                  text=True).stdout.split()
+            self.assertEqual(tags, ["tv", "bt709", "bt709", "bt709"], enc)
+
+    @needs_ffmpeg
     def test_save_upscale_copies_the_takes_audio(self):
         src = self.take_mp4()
         with open(self.p("sh010_t01.up.json"), "w", encoding="utf-8") as fh:

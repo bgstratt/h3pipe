@@ -84,6 +84,16 @@ def snap_up(frames: int) -> int:
     return value
 
 
+# RGB frames to HD video the way every player reads HD: the BT.709 matrix,
+# limited range, and all four colour tags written. ffmpeg's own conversion is
+# BT.601 and untagged, which YouTube, browsers and HD players decode as
+# BT.709: reds go orange and skin shifts (measured 2026-10-05: pure red came
+# out Y 81, BT.601's value, where BT.709's is 63). Takes, upscales and
+# renders all encode through this; h3assemble converts the older BT.601 takes.
+RGB_TO_BT709 = ("scale=out_color_matrix=bt709:out_range=tv,format=yuv420p,"
+                "setparams=range=tv:color_primaries=bt709:color_trc=bt709:colorspace=bt709")
+
+
 def _blank(h: int = 64, w: int = 64) -> torch.Tensor:
     return torch.zeros((1, h, w, 3), dtype=torch.float32)
 
@@ -1082,7 +1092,7 @@ class H3SaveShot:
         # is often a few milliseconds shorter than length/fps, and -shortest
         # would silently drop the final frame -- which breaks conform, because
         # the edit assumes every shot is exactly `length` frames long.
-        cmd += ["-frames:v", str(n_frames),
+        cmd += ["-frames:v", str(n_frames), "-vf", RGB_TO_BT709,
                 "-c:v", "libx264", "-crf", "16", "-pix_fmt", "yuv420p", mp4]
 
         proc = None

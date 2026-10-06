@@ -84,9 +84,10 @@ class Helpers(unittest.TestCase):
 
 @unittest.skipUnless(HAVE_FF and FONT, "needs ffmpeg, ffprobe and a font")
 class EndToEnd(unittest.TestCase):
-    def episode(self, show: str, assembled: bool) -> str:
+    def episode(self, show: str, assembled: bool, legacy: bool = False) -> str:
         """ep07 with 2 s titles (tagged BT.709, like ComfyUI's) and a 3 s cut:
-        encoded by h3assemble.conform, or a foreign ultrafast encode."""
+        encoded by h3assemble.conform, or a foreign ultrafast encode tagged
+        BT.709, or (`legacy`) one untagged, as cuts were before the colour fix."""
         ep = os.path.join(show, "ep07")
         os.makedirs(os.path.join(ep, "renders"))
         os.makedirs(os.path.join(show, "_titles"))
@@ -104,8 +105,16 @@ class EndToEnd(unittest.TestCase):
             raw = os.path.join(show, "raw.mp4")
             make_clip(raw, 3, "320x176", 24, sound=False)
             P.h3assemble.conform(raw, cut, None, 24, 72, quality="review")
-        else:
+        elif legacy:
             make_clip(cut, 3, "320x176", 24, sound=False)
+        else:
+            raw = os.path.join(show, "raw.mp4")
+            make_clip(raw, 3, "320x176", 24, sound=False)
+            r = subprocess.run(["ffmpeg", "-y", "-v", "error", "-i", raw, "-c", "copy",
+                                "-color_primaries", "bt709", "-color_trc", "bt709",
+                                "-colorspace", "bt709", "-color_range", "tv", cut],
+                               capture_output=True, text=True, timeout=120)
+            self.assertEqual(r.returncode, 0, r.stderr)
         with open(os.path.join(ep, "ep07.md"), "w", encoding="utf-8") as f:
             f.write("= ep07  Cul-de-sac\n")
         with open(os.path.join(ep, "series.json"), "w", encoding="utf-8") as f:
@@ -127,12 +136,18 @@ class EndToEnd(unittest.TestCase):
         self.assertTrue(got["audio"])
         return out, buf.getvalue()
 
+    def bt709(self, path: str) -> None:
+        got = P.probe(path)
+        self.assertEqual([got[k] for k in ("color_range", "color_space", "color_primaries",
+                                           "color_transfer")], ["tv", "bt709", "bt709", "bt709"])
+
     def test_assembled_cut_is_copied(self):
         with tempfile.TemporaryDirectory() as show:
             ep = self.episode(show, assembled=True)
             out, said = self.publish(ep)
             self.assertIn("picture copied", said)
             self.assertNotIn("re-encoding the whole cut", said)
+            self.bt709(out)
             cut = os.path.join(ep, "renders", "ep07.mp4")
             got, src = P.probe(out), P.probe(cut)
             self.assertEqual(P.frame_hashes(out, 48, 72, got), P.frame_hashes(cut, 0, 72, src))
@@ -161,6 +176,13 @@ class EndToEnd(unittest.TestCase):
         with tempfile.TemporaryDirectory() as show:
             _, said = self.publish(self.episode(show, assembled=False))
             self.assertIn("re-encoding the whole cut: the title clips can't be encoded", said)
+
+    def test_a_cut_from_before_the_colour_fix_is_converted(self):
+        # untagged (BT.601): re-encoded, and comes out BT.709 throughout
+        with tempfile.TemporaryDirectory() as show:
+            out, said = self.publish(self.episode(show, assembled=False, legacy=True))
+            self.assertIn("the cut isn't BT.709", said)
+            self.bt709(out)
 
     def run_with_progress(self, ep: str) -> tuple[int, list, str]:
         """h3publish as h3master runs it: through h3edit.run_tool, --progress."""

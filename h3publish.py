@@ -219,12 +219,16 @@ def _text(sub: dict, h: int, color: str, alpha: str) -> str:
 
 
 def titled(label: str, out: str, sub: dict, w: int, h: int, fps: float,
-           dur: float, alpha: str, tags: str = "setsar=1") -> list[str]:
+           dur: float, alpha: str, tags: str = "setsar=1," + h3assemble.BT709_TAGS,
+           matrix: str = "bt709") -> list[str]:
     """[label] scaled to the cut, the subtitle drawn with a soft glow under it -> [out]v.
-    `tags` sets the picture's aspect and colour tags (see cut_tags)."""
+    `tags` sets the picture's aspect and colour tags (see cut_tags); `matrix` is
+    the title clip's own colour matrix, converted to BT.709 when it isn't."""
     glow = max(0.5, sub["glow_size"] * h)
+    conv = "" if matrix == "bt709" else (
+        "scale=in_color_matrix=bt601:out_color_matrix=bt709:in_range=tv:out_range=tv,")
     return [
-        f"[{label}]scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},"
+        f"[{label}]{conv}scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},"
         f"fps={fps:g},format=yuv420p[{out}b]",
         f"color=c=black@0:s={w}x{h}:r={fps:g}:d={dur:.3f},format=rgba,"
         f"{_text(sub, h, sub['glow'], alpha)},gblur=sigma={glow:.2f}[{out}g]",
@@ -253,17 +257,18 @@ def filter_graph(cut: dict, intro: dict | None, outro: dict | None, sub: dict) -
     silence = int(intro is not None) + 1 + int(outro is not None)
     if intro:
         lines += titled(f"{i}:v", "in", sub, w, h, fps, intro["duration"],
-                        alpha_expr(sub["intro_in"]))
+                        alpha_expr(sub["intro_in"]), matrix=intro.get("color_space") or "")
         parts.append("[inv]")
         pieces.append((i, intro["audio"], intro["duration"]))
         i += 1
-    lines.append(f"[{i}:v]setsar=1,format=yuv420p[cv]")
+    lines.append(f"[{i}:v]setsar=1,{','.join(h3assemble.to_bt709(cut.get('color_space') or ''))}[cv]")
     parts.append("[cv]")
     pieces.append((i, cut["audio"], cut["duration"]))
     i += 1
     if outro:
         lines += titled(f"{i}:v", "out", sub, w, h, fps, outro["duration"],
-                        alpha_expr(sub["outro_in"], sub["outro_out"]))
+                        alpha_expr(sub["outro_in"], sub["outro_out"]),
+                        matrix=outro.get("color_space") or "")
         parts.append("[outv]")
         pieces.append((i, outro["audio"], outro["duration"]))
     lines.append(f"{''.join(parts)}concat=n={len(parts)}:v=1:a=0[v]")
@@ -317,6 +322,10 @@ def copy_blocker(cut: dict) -> str | None:
         return "the cut has no H.264 headers to match"
     if not cut["frames"]:
         return "the cut's frames can't be counted"
+    if cut.get("color_space") != "bt709":
+        # assembled before 2026-10-05: BT.601 and untagged, which players read
+        # as BT.709; only a re-encode can convert it (h3assemble.to_bt709)
+        return "the cut isn't BT.709 (assembled before the colour fix): re-encoded to convert it"
     return None
 
 
@@ -328,7 +337,7 @@ def encode_title(clip: str, dst: str, tmp: str, cut: dict, sub: dict, alpha: str
     src = probe(clip)
     frames = src["frames"] or round(src["duration"] * fps)
     graph = ";\n".join(titled("0:v", "t", sub, w, h, fps, frames / fps, alpha,
-                                cut_tags(cut)))
+                                cut_tags(cut), matrix=src.get("color_space") or ""))
     with open(os.path.join(tmp, "title_graph.txt"), "w", encoding="utf-8") as f:
         f.write(graph)
     r = run(["ffmpeg", "-y", "-v", "error", "-i", clip, "-/filter_complex", "title_graph.txt",
