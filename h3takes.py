@@ -129,6 +129,11 @@ class TakePaths:
     def up_mp4(self) -> str: return self._p(".up.mp4")
     @property
     def up_sidecar(self) -> str: return self._p(".up.json")
+    # the post pass (h3post): a version of the upscale, made from its .up.mp4
+    @property
+    def post_mp4(self) -> str: return self._p(".post.mp4")
+    @property
+    def post_sidecar(self) -> str: return self._p(".post.json")
 
 
 def take_paths(root: str, pass_: str, shot_id: str, take: int,
@@ -350,6 +355,25 @@ def upscale_of(take: Take) -> dict | None:
                 and data.get("source_mtime_ns") == st.st_mtime_ns)
         fresh = same or (data.get("source_sha1") is not None
                          and data.get("source_sha1") == file_sha1(take.paths.mp4))
+    return {**data, "fresh": fresh}
+
+
+def post_of(take: Take, up: dict | None = None) -> dict | None:
+    """The take's post record (<stem>.post.json) with `fresh` added: finished,
+    its mp4 there, made from the upscale as it is now (its stamp, as upscale_of
+    checks the take's), and that upscale itself fresh. None: never post-processed."""
+    data = read_sidecar(take.paths.post_sidecar)
+    if data is None:
+        return None
+    up = upscale_of(take) if up is None else up
+    fresh = False
+    if (data.get("status") == "ok" and os.path.isfile(take.paths.post_mp4)
+            and up and up.get("fresh") and os.path.isfile(take.paths.up_mp4)):
+        st = os.stat(take.paths.up_mp4)
+        same = (data.get("source_size") == st.st_size
+                and data.get("source_mtime_ns") == st.st_mtime_ns)
+        fresh = same or (data.get("source_sha1") is not None
+                         and data.get("source_sha1") == file_sha1(take.paths.up_mp4))
     return {**data, "fresh": fresh}
 
 

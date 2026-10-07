@@ -550,7 +550,10 @@ def compile_legacy(target, ep: dict, series_cfg: dict, pass_: str,
         "subjects": {
             s: {"kind": e.get("kind", "character"),
                 "sheet": e.get("sheet", ""),
-                "voice_sample": e.get("voice_sample", "")}
+                "voice_sample": e.get("voice_sample", ""),
+                # a supplied single picture (`sheet_panels: 1`): the loader
+                # sends it whole instead of cutting a panel out of a strip
+                **({"sheet_panels": int(e["sheet_panels"])} if e.get("sheet_panels") else {})}
             for s, e in book.items()
         },
         "shots": shots_out,

@@ -19,6 +19,10 @@ your projects, with the pipeline scripts beside it (see the README).
     python h3.py upscale  Shows\\ep05            # h3upscale: the final cut's takes at 2x
                                                     # (--only sh020, --take N, --start-step N,
                                                     #  --vae, --redo, --check, --prune-latents)
+    python h3.py post     Shows\\ep05 --enhance production
+                                                    # h3post: the cut's upscales finished
+                                                    # (--enhance draft|production|cinematic,
+                                                    #  --blur 0.25, --recipe: post.master)
     python h3.py assemble Shows\\ep05 --upscaled # the final cut from its upscales
     python h3.py master   Shows\\ep05 [Shows\\ep06 ...] --wait
                                                     # the series recipe (upscale.master) on every
@@ -210,6 +214,14 @@ def main() -> int:
         sys.path.insert(0, HERE)
         import h3upscale
         return h3upscale.main(argv[1:])
+    if argv and argv[0] == "post":
+        if len(argv) < 2 or argv[1].startswith("-"):
+            sys.exit("  !! usage: python h3.py post <episode> [--only sh020,...] [--take N] "
+                     "[--enhance draft|production|cinematic|pixel|seedvr2|supir|none] "
+                     "[--strength 0.2] [--blur 0.25] [--recipe] [--redo] [--check]")
+        sys.path.insert(0, HERE)
+        import h3post
+        return h3post.main(argv[1:])
     if argv and argv[0] == "master":
         if len(argv) < 2 or argv[1].startswith("-"):
             sys.exit("  !! usage: python h3.py master <episode> [<episode> ...] [--check] [--wait] "

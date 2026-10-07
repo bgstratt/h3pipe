@@ -19,6 +19,7 @@ import { MissingWindow } from "./components/Readiness";
 import { RefsTab } from "./components/RefsTab";
 import { RenderDialog } from "./components/RenderDialog";
 import { UpscaleDialog } from "./components/UpscaleDialog";
+import { PostDialog } from "./components/PostDialog";
 import { MasterDialog } from "./components/MasterDialog";
 import { ShotsTab } from "./components/ShotsTab";
 import { SourceWindows } from "./components/SourceWindow";
@@ -157,6 +158,7 @@ export const OVERLAY_WINDOWS: [string, ComponentType][] = [
   ["Redo", RedoDialog],
   ["Render", RenderDialog],
   ["Upscale", UpscaleDialog],
+  ["Post-process", PostDialog],
   ["Master", MasterDialog],
   ["Browse", BrowseDialog],
   ["Supply", SupplyDialog],

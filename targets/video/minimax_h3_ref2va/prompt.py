@@ -129,11 +129,16 @@ def build_prompt(shot: dict, seq: dict, series_cfg: dict, panels: int,
 
     # ---- subject_definitions ------------------------------------------------
     defs = ["subject_definitions:"]
+    # a character whose picture is one whole image (`sheet_panels: 1`, a
+    # supplied portrait rather than a model sheet) is sent uncropped
+    whole = ("a single reference image of ONE character, the whole picture of them. "
+             "Exactly one person appears in that image.")
     for s in subjects:
         e = book[s]
         if e.get("kind", "character") == "character":
+            clause = whole if int(e.get("sheet_panels") or 0) == 1 else ref_clause
             defs.append(
-                f"{subj[s]} is {e['name']}, defined by {pic[s]} — {ref_clause} "
+                f"{subj[s]} is {e['name']}, defined by {pic[s]} — {clause} "
                 f"Preserve the exact reference styling: {e['design']}.")
         else:
             defs.append(

@@ -229,6 +229,42 @@ class MasterTest(ApiTest):
         M.queue_master(M.plan_master(self.ep), self.ctx.comfy, self.ctx.comfy_url)
         return M.plan_master(self.ep), M.master_name(self.ep, (1920, 1080))
 
+    def test_prores_only(self):
+        plan, name = self.ready_plan()
+        # no master yet: refused
+        with self.assertRaisesRegex(M.MasterError, "no master"):
+            M.prores_only(self.ep)
+        self.err(A.post_master(self.ctx, {"ep": self.ep, "action": "prores"}), 409)
+        self.assertIsNone(self.ok(A.post_master(self.ctx, {"ep": self.ep}))["existing"])
+        # a master made earlier, with its report
+        mp4 = os.path.join(M.master_dir(self.ep), name + ".mp4")
+        os.makedirs(os.path.dirname(mp4), exist_ok=True)
+        with open(mp4, "wb") as fh:
+            fh.write(b"master")
+        M.write_report(plan, mp4, None)
+        made = []
+
+        def prores(src, mov):
+            made.append((src, mov))
+            with open(mov, "wb") as fh:
+                fh.write(b"prores")
+        # held by a run assembling: busy
+        lock = M.take_lock(self.ep, "h3.py master")
+        with self.assertRaises(M.MasterBusy):
+            M.prores_only(self.ep)
+        M.release_lock(lock)
+        with mock.patch("h3assemble.prores_from", side_effect=prores):
+            res = self.ok(A.post_master(self.ctx, {"ep": self.ep, "action": "prores"}))
+        # the master's own .mp4 into a .mov beside it, nothing assembled
+        self.assertEqual(made, [(mp4, mp4[:-4] + ".mov")])
+        self.assertTrue(res["mov"].endswith(name + ".mov"))
+        stem = os.path.join(M.master_dir(self.ep), "ks01_master")
+        self.assertTrue(T.read_json(stem + ".json")["prores"].endswith(name + ".mov"))
+        self.assertIn("(ProRes 422 HQ)", open(stem + ".md", encoding="utf-8").read())
+        # the plan says there is a master, and its .mov
+        ex = self.ok(A.post_master(self.ctx, {"ep": self.ep}))["existing"]
+        self.assertTrue(ex["output"].endswith(name + ".mp4") and ex["mov"].endswith(name + ".mov"))
+
     def talking_tool(self, name, picture="re-encoded", why="the cut is hevc, not H.264"):
         """A run_tool stand-in: h3assemble writes the master and says where it
         is; h3publish says what it did with the picture."""
@@ -432,6 +468,113 @@ class MasterTest(ApiTest):
         self.assertEqual(len(lines), 2)
         self.assertIn("assemble: writing the clips 0/2 sh000", lines[0])
         self.assertIn("titles: encoding the intro", lines[1])
+
+    def set_post(self, recipe):
+        p = os.path.join(self.ep, "series.json")
+        cfg = json.load(open(p, encoding="utf-8"))
+        if recipe is None:
+            cfg.pop("post", None)
+        else:
+            cfg["post"] = {"master": recipe}
+        with open(p, "w", encoding="utf-8") as fh:
+            json.dump(cfg, fh)
+
+    def test_post(self):
+        rendered = self.render_all()
+        self.set_recipe(RECIPE)
+        with self.assertRaisesRegex(M.MasterError, "no post.master"):
+            M.plan_master(self.ep, post=True)
+        self.comfy.nodes |= {"OpticalFlowLoader", "H3MotionBlur"}
+        self.comfy.info["OpticalFlowLoader"] = {"input": {"required": {
+            "model_name": [["raft_large_C_T_SKHT_V2-ff5fadd5.pth"], {}]}}}
+        self.set_post({"enhance": "draft", "motion_blur": 0.3})
+        plan = M.plan_master(self.ep, post=True)
+        a = self.by_shot(plan)[rendered[0]]
+        # not upscaled yet: its post is planned behind its upscale, at the master's size
+        self.assertEqual(a.status, "upscale")
+        self.assertEqual((a.post_job.width, a.post_job.height), (1920, 1080))
+        self.assertIn("post: pixel, then motion blur 0.3", a.recipe)
+        self.assertTrue(plan.view()["post"])
+        with self.assertRaisesRegex(M.MasterError, "still to upscale or post-process"):
+            M.check_assemble(plan)
+        # one queue takes each shot all the way: upscale, then its post right behind
+        queued, errors = M.queue_master(plan, self.ctx.comfy, self.ctx.comfy_url)
+        self.assertEqual(([r.shot for r in queued], errors), (rendered, []))
+        saves = [n["inputs"]["out_mp4"] for g in self.comfy.graphs[-2 * len(rendered):]
+                 for n in g.values() if n["class_type"] == "H3SaveUpscale"]
+        self.assertTrue(saves[0].endswith(".up.mp4") and saves[1].endswith(".post.mp4"))
+        t = T.get_take(self.ep, "final", rendered[0], 1)
+        self.assertTrue(T.post_of(t)["fresh"])
+        rows = self.by_shot(M.plan_master(self.ep, post=True))
+        self.assertEqual({rows[s].status for s in rendered}, {"ok"})
+        self.assertEqual(rows[rendered[0]].view()["post"]["status"], "ok")
+        # other post settings: kept, not redone, unless --conform
+        self.set_post({"enhance": "draft", "motion_blur": 0.5})
+        rows = self.by_shot(M.plan_master(self.ep, post=True))
+        self.assertEqual(rows[rendered[0]].status, "kept")
+        self.assertIn("post was made with other settings", rows[rendered[0]].why)
+        plan = M.plan_master(self.ep, post=True, conform=True)
+        self.assertEqual(self.by_shot(plan)[rendered[0]].status, "post")
+        queued, errors = M.queue_master(plan, self.ctx.comfy, self.ctx.comfy_url)
+        self.assertEqual((len(queued), errors), (len(rendered), []))
+        self.assertEqual({r.status for r in M.plan_master(self.ep, post=True).rows
+                          if r.shot in rendered}, {"ok"})
+        # a new upscale makes the post stale: posted again from it
+        with open(t.paths.up_mp4, "ab") as fh:
+            fh.write(b"again")
+        self.assertFalse(T.post_of(t)["fresh"])
+        # a shot whose post is none is mastered from its upscale
+        self.set_post({"enhance": "none"})
+        T.discard_files([t.paths.post_mp4, t.paths.post_sidecar], os.path.join(self.tmp, "trash"))
+        rows = self.by_shot(M.plan_master(self.ep, post=True))
+        self.assertEqual((rows[rendered[0]].status, rows[rendered[0]].recipe.endswith("post: none")),
+                         ("ok", True))
+        # without --post, the posts are ignored as before
+        self.assertFalse(M.plan_master(self.ep).view()["post"])
+
+    def test_post_where_present(self):
+        rendered = self.render_all()
+        self.set_recipe(RECIPE)
+        M.queue_master(M.plan_master(self.ep), self.ctx.comfy, self.ctx.comfy_url)
+        self.comfy.nodes |= {"OpticalFlowLoader", "H3MotionBlur"}
+        self.comfy.info["OpticalFlowLoader"] = {"input": {"required": {
+            "model_name": [["raft_large_C_T_SKHT_V2-ff5fadd5.pth"], {}]}}}
+        # one shot posted by hand (the take menu), no post recipe in the series at all
+        import h3post as P
+        a = T.get_take(self.ep, "final", rendered[0], 1)
+        job = P.plan_post(self.ep, a, enhance="draft", blur=0.3)
+        P.start(job)
+        P.mark_queued(job, self.ctx.comfy.queue(P.post_graph(job)))
+        self.assertTrue(T.post_of(a)["fresh"])
+        plan = M.plan_master(self.ep, post="present")
+        rows = self.by_shot(plan)
+        # nothing to queue: every rendered shot is ok, the one with a post says so
+        self.assertEqual({rows[s].status for s in rendered}, {"ok"})
+        self.assertTrue(rows[rendered[0]].recipe.endswith("; its post"))
+        self.assertTrue(rows[rendered[-1]].recipe.endswith("; its upscale"))
+        self.assertEqual(rows[rendered[0]].view()["post"]["status"], "ok")
+        self.assertEqual((plan.view()["post"], plan.view()["post_mode"]), (True, "present"))
+        self.assertEqual(M.queue_master(plan, self.ctx.comfy, self.ctx.comfy_url), ([], []))
+        # the assembly is told to prefer fresh posts
+        calls = []
+
+        def fake_tool(script, args, cwd, timeout, progress=None):
+            calls.append(args)
+            return 1, "", "stop here"
+        with mock.patch("h3edit.run_tool", fake_tool):
+            M._assemble(plan, [], False, 60, None)
+        self.assertIn("--post", calls[0])
+        # a stale post is passed over for the upscale
+        with open(a.paths.up_mp4, "ab") as fh:
+            fh.write(b"again")
+        T.update_sidecar(a.paths.up_sidecar, status="ok")
+        self.assertIn("its post is stale", self.by_shot(M.plan_master(self.ep, post="present"))[rendered[0]].recipe)
+        # the route takes the mode; a bad one is a 400
+        res = self.ok(A.post_master(self.ctx, {"ep": self.ep, "post": "present"}))
+        self.assertEqual(res["plan"]["post_mode"], "present")
+        self.err(A.post_master(self.ctx, {"ep": self.ep, "post": "sometimes"}), 400)
+        with self.assertRaises(M.MasterError):
+            M.plan_master(self.ep, post="sometimes")
 
     def test_queue_order(self):
         """In cut order by default; grouped by what ComfyUI loads on request, each

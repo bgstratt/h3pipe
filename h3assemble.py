@@ -578,6 +578,9 @@ def main() -> int:
     ap.add_argument("--upscaled", action="store_true",
                     help="each clip from its fresh upscale (h3upscale), the "
                          "cut at the upscale size; clips without one are scaled up")
+    ap.add_argument("--post", action="store_true",
+                    help="with --upscaled: a clip's fresh post (h3post) in place of its "
+                         "upscale where it has one")
     ap.add_argument("--quality", choices=sorted(QUALITY_ARGS), default="review",
                     help="how clips that must be re-encoded are written: review (x264 CRF 16) or "
                          "master (CRF 12, slow); clips that needn't be are copied either way")
@@ -693,6 +696,10 @@ def main() -> int:
         # same audio stream, twice the size)
         up = h3takes.upscale_of(t) if args.upscaled else None
         clip = t.paths.up_mp4 if up and up["fresh"] else t.paths.mp4
+        # --post: its fresh post (made from that upscale) in the upscale's place
+        po = h3takes.post_of(t, up) if args.post and up and up["fresh"] else None
+        if po and po["fresh"]:
+            clip = t.paths.post_mp4
         n = frame_count(clip)
         # a take rendered on another target (retargeted) has that target's
         # length, which its sidecar records
@@ -733,7 +740,7 @@ def main() -> int:
         if audio_src and not h3peaks.has_audio(audio_src):
             audio_src = None
         p = {"id": e.shot, "take": t.take, "src": e.pass_, "path": clip,
-             "upscaled": clip != t.paths.mp4,
+             "upscaled": clip != t.paths.mp4, "posted": clip == t.paths.post_mp4,
              "placeholder": e.pass_ != pass_, "listed": e.in_cut_file,
              "keep": keep, "trim_in": trim_in, "trim_out": trim_out,
              "frames": n, "used": used, "audio_in": s.get("audio_in"),
@@ -765,6 +772,9 @@ def main() -> int:
 
     if args.upscaled:
         plain = [p["id"] for p in plan if not p["upscaled"]]
+        posted = sum(1 for p in plan if p.get("posted"))
+        if args.post:
+            print(f"  {posted} clip(s) from their posts")
         print(f"  {len(ups)} clip(s) from their upscales"
               + (f"; {len(plain)} without a fresh one, scaled up: "
                  + ", ".join(plain[:10]) + (" ..." if len(plain) > 10 else "")

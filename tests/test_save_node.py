@@ -111,13 +111,27 @@ class SaveNodeTest(unittest.TestCase):
 
     def test_input_is_last_optional_with_empty_default(self):
         """`sidecar` is the last optional *widget*, so saved workflows keep their
-        widget order; `latent` after it is a link, which has no widget value."""
+        widget order; `latent` and `ref_info` after it are links (ref_info a
+        forced input), which have no widget value."""
         opt = N.H3SaveShot.INPUT_TYPES()["optional"]
-        widgets = [k for k, v in opt.items() if v[0] in ("STRING", "INT", "FLOAT", "BOOLEAN")]
+        widgets = [k for k, v in opt.items() if v[0] in ("STRING", "INT", "FLOAT", "BOOLEAN")
+                   and not (len(v) > 1 and v[1].get("forceInput"))]
         self.assertEqual(widgets[-1], "sidecar")
         self.assertEqual(opt["sidecar"], ("STRING", {"default": ""}))
-        self.assertEqual(list(opt)[-1], "latent")
+        self.assertEqual(list(opt)[-2:], ["latent", "ref_info"])
         self.assertEqual(opt["latent"], ("LATENT",))
+        self.assertEqual(opt["ref_info"], ("STRING", {"forceInput": True}))
+
+    def test_loaded_refs_are_the_loaders_reference_lines(self):
+        info = "\n".join(["shot 3 of 5   —   sh030", "subjects: ella, cindy   size: cu",
+                          "RENDERED WITHOUT: Picture 2 (missing refs)", "refs:",
+                          "  ella (character) ella_ref.png [808x1080, whole]",
+                          "  background ballroom.png -> <Picture 4>", "seed: 7"])
+        self.assertEqual(N.loaded_refs(info), [
+            "RENDERED WITHOUT: Picture 2 (missing refs)",
+            "ella (character) ella_ref.png [808x1080, whole]",
+            "background ballroom.png -> <Picture 4>"])
+        self.assertEqual(N.loaded_refs(""), [])
 
     def test_saved_workflow_still_converts(self):
         path = os.path.join(REPO, "targets", "video", "minimax_h3_ref2va", "workflow.json")

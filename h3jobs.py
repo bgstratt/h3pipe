@@ -80,6 +80,8 @@ import targets as TG
 # have always imported. Job code reads the job's own target instead.
 _DEFAULT = TG.load_target(TG.DEFAULT_VIDEO_TARGET, "video").binding
 LOADER = _DEFAULT.loader_class
+# H3ShotListLoader's `info` output (its RETURN_NAMES, 0-based)
+LOADER_INFO_OUTPUT = 15
 SAVER = _DEFAULT.saver_class
 LORA = _DEFAULT.param("loras")["class_type"]
 UNET = _DEFAULT.param("model")["class_type"]
@@ -2184,6 +2186,11 @@ def graph_for(base: dict, job: Job, take: T.Take, *, panel_mode: str | None = No
     si[sin["sidecar"]] = os.path.relpath(take.paths.sidecar, job.root)
     if save_frames is not None:
         si["save_frames"] = save_frames
+    if (b.loader_class == "H3ShotListLoader" and g[saver]["class_type"] == "H3SaveShot"
+            and "ref_info" not in si):
+        # the loader's info (what each reference was: file, cut, size, slot)
+        # goes into the take's record as `loaded_refs`
+        si["ref_info"] = [loader, LOADER_INFO_OUTPUT]
     if job.save_latent and b.saver.get("latent"):
         # the saver keeps the take's latent: link the node the binding names
         spec = b.saver["latent"]

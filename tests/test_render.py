@@ -512,20 +512,26 @@ class FakeComfy:
         root = si["project_root"]
         px = next((v["inputs"] for v in graph.values()
                    if v["class_type"] in ("H3PixelUpscale", "ImageScale")), None)
+        loader = next((v["inputs"] for v in graph.values() if v["class_type"] == J.LOADER), None)
         if px is not None:                       # the pixel method: its node says the size
             w, h = px["width"], px["height"]
-        else:
-            loader = next(v["inputs"] for v in graph.values() if v["class_type"] == J.LOADER)
+        elif loader is not None:
             w, h = (int(x) for x in loader["resolution_override"].split("x"))
+        else:                                    # a post that only blurs: as queued
+            rec = T.read_json(os.path.join(root, si["sidecar"])) or {}
+            w, h = rec.get("width"), rec.get("height")
         if si.get("width") and si.get("height"):        # a delivery size: the saver makes it
             w, h = si["width"], si["height"]
         with open(os.path.join(root, si["out_mp4"]), "wb") as fh:
             fh.write(b"upscaled")
         if self.mode == "node":
+            # a post: the upscale it's made from stamped as it saves (stamp_source)
+            stamp = (T.source_stamp(os.path.join(root, si["source_mp4"]))
+                     if si.get("stamp_source") else {})
             T.update_sidecar(os.path.join(root, si["sidecar"]), status="ok",
                              finished=T.now(), width=w, height=h,
                              mp4=os.path.basename(si["out_mp4"]), audio="copied",
-                             save_notes="fake")
+                             save_notes="fake", **stamp)
         self.history[pid] = {"status": {"status_str": "success", "completed": True},
                              "outputs": {}}
         return pid

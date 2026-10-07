@@ -430,6 +430,8 @@ def episode_status(root: str, pass_: str, folder: str | None = None) -> dict:
                 "save_notes": (t.sidecar or {}).get("save_notes", ""),
                 # Phase 13: its upscale (null: never upscaled)
                 "upscale": upscale_summary(root, t, cache),
+                # its post (h3post; null: never post-processed)
+                "post": post_summary(root, t),
             } for t in takes],
         })
     d = doc0.get("defaults", {})
@@ -1513,6 +1515,19 @@ def upscale_summary(root: str, t: T.Take, cache: dict | None = None) -> dict | N
             "comfy_prompt_id": up.get("comfy_prompt_id"),
             "mp4": rel(root, t.paths.up_mp4) if os.path.isfile(t.paths.up_mp4) else None,
             "save_notes": up.get("save_notes", "")}
+
+
+def post_summary(root: str, t: T.Take) -> dict | None:
+    """A take's post for the editor (None: it has none): status, whether it is
+    fresh (made from its upscale as it is now), what it did, its size and file."""
+    if not os.path.isfile(t.paths.post_sidecar):
+        return None
+    po = T.post_of(t) or {}
+    return {"status": po.get("status", "queued"), "fresh": bool(po.get("fresh")),
+            "recipe": po.get("recipe"), "width": po.get("width"), "height": po.get("height"),
+            "comfy_prompt_id": po.get("comfy_prompt_id"),
+            "mp4": rel(root, t.paths.post_mp4) if os.path.isfile(t.paths.post_mp4) else None,
+            "save_notes": po.get("save_notes", "")}
 
 
 def target_nodes(t, graph: dict | None = None, where: str = "") -> dict[str, dict]:

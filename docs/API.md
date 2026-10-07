@@ -478,11 +478,13 @@ is x264 CRF 12 on a slow preset (NVENC p7/hq at CQ 14 when `encoder` is `"nvenc"
 H.264 8-bit so the editor plays it; the `.up.json` records `quality`.
 
 ### `POST /h3pipe/master`
-Body `{"ep", "pass"?, "action": "plan" | "queue" | "assemble", "conform"?, "allow_gaps"?,
-"prores"?, "order"?}` (h3master). `order` (queue only): `"cut"` (the default: the cut's
+Body `{"ep", "pass"?, "action": "plan" | "queue" | "assemble" | "prores", "conform"?, "allow_gaps"?,
+"prores"?, "order"?, "post"?}` (h3master). `post` is the dialog's **Post-process**: `false`
+/ `"off"` (the upscales), `"present"` (each shot's fresh post where it has one, its upscale
+otherwise; nothing queued) or `true` / `"recipe"` (see **Post-process** below). `order` (queue only): `"cut"` (the default: the cut's
 order) or `"target"` (grouped by what ComfyUI loads: a re-sample's target model, else the
 upscale or SeedVR2 model; groups where their first shot is, cut order within). Every answer has `plan`: `{pass, size: [w, h], fit, quality,
-counts: {upscale, ok, kept, queued, gap}, ready, rows: [{shot, take, target, status, why,
+counts: {upscale, post, ok, kept, queued, gap}, ready, rows: [{shot, take, target, status, why,
 recipe, upscale: {width, height, status, keep} | null}]}`, a row per shot of the cut in
 order. `status`: `upscale` (none, from an older take, or failed: queued by the recipe),
 `ok` (fresh, the recipe's settings), `kept` (fresh, marked Keep or made with other
@@ -512,6 +514,12 @@ started}`) is held while one runs, whoever started it, the editor or `h3.py mast
 second `assemble` is a 409 `{"error": "a master of this episode is already being
 assembled by …", "job"}`. A lock whose process has gone (or another machine's, a day old)
 is stale and taken over.
+
+`action: "prores"` makes the ProRes 422 HQ `.mov` of the master already made at the recipe's
+size, beside it, and sets the report's `prores` (`h3.py master <ep> --prores-only`): nothing
+is planned, upscaled or assembled. `{"output", "mov"}`; 409 without a master yet, or while
+one is being assembled. Every other answer has `existing`: `{"output", "mov"}` (the master
+already made and its `.mov`, `mov` null when there is none) or null.
 
 ### `GET /h3pipe/master/job?ep=…`
 `{"job": {...} | null}`: the master this ComfyUI is assembling for the episode, or the last
@@ -565,6 +573,72 @@ so the dialog can show what every scale makes before anything is queued.
 Removes the take's upscale. 404 when it has none; 409 while ComfyUI still has it queued
 or running.
 
+## Post-process (h3post, 2026-10-06)
+
+A take's **post** is its fresh upscale finished: an enhance step (SeedVR2, a pixel model or
+SUPIR, at the upscale's size) then motion blur. `<stem>.post.mp4` / `.post.json` beside
+it, its audio the upscale's; stale when the upscale changes. docs/POST_PROCESSING.md is
+the design record. The series config's recipe is `"post": {"master": {"enhance":
+"production", "motion_blur": 0.3}}`, a shot's own in overrides.json's top-level
+`"post": {"sh020": {…}}`. `enhance` is a tier (`draft`: pixel at 1x; `production`:
+SeedVR2 7B in fixed chunks; `cinematic`: SUPIR 0.2), a method (`pixel`, `seedvr2`,
+`supir`), an object (`{"tier" | "method", …fields}`) or `"none"`; `motion_blur` 0–1 of
+the frame interval (0.5 is a 180° shutter).
+
+### `POST /h3pipe/post`
+Body `{"ep", "pass"?, "shots"? | "takes"?, "redo"?, "recipe"?, "enhance"?, "blur"?,
+"quality"?}`: queue posts. `shots` (their cut takes; null: the whole cut) or `takes`
+(`[{shot, take}]`). `recipe: true`, or neither `enhance` nor `blur` given: each by the
+series' `post.master` with its shot's own over it (409 without one); else `enhance` and
+`blur` as given. `quality` (`review` | `master`; default: as each upscale was encoded).
+A take needs a fresh upscale (an error per take otherwise); a fresh post with the same
+settings is skipped unless `redo`. 409 when this ComfyUI can't run them (`missing`
+sentences). `{"queued": [{shot, take, what, width, height, prompt_id}], "skipped":
+[{shot, take?, reason}], "errors": [{shot, take, error}]}`.
+
+### `GET /h3pipe/post/options[?ep=…]`
+```json
+{"tiers": [{"id": "production", "enhance": {"method": "seedvr2", "seedvr2_model": "7b",
+            "chunk": "fit", "overlap": 6}, "text": "SeedVR2 7b",
+            "readiness": {"status": "ready", "missing": []}}, "…"],
+ "methods": ["pixel", "seedvr2", "supir"],
+ "blur": {"min": 0, "max": 1, "default": 0.3, "readiness": {"status": "ready", "missing": []}},
+ "strength": {"min": 0.05, "max": 0.5, "default": 0.2},
+ "recipe": {"fields": {"enhance": "production", "motion_blur": 0.3},
+            "text": "SeedVR2 7b, then motion blur 0.3", "shots": {}, "problems": []}}
+```
+`recipe` is null without `?ep=` or without a `post.master`.
+
+### `DELETE /h3pipe/post?ep=…&shot=sh020&take=3[&pass=proxy]`
+Removes the take's post. 404 when it has none; 409 while ComfyUI still has it queued or
+running.
+
+### A take's `post`
+Every take in `GET /h3pipe/episode` has `post`: null (never post-processed), else
+`{"status": "queued" | "ok" | "failed", "fresh", "recipe", "width", "height",
+"comfy_prompt_id", "mp4", "save_notes"}`. `fresh` is false once its upscale isn't the one
+it was made from (the upscale stamped by `H3SaveUpscale` as the post is saved, so a post
+can be queued behind its upscale), or the upscale itself is stale.
+
+### Master with `post: "present"`
+Nothing is post-processed and no `post.master` is needed: each shot's `recipe` ends `; its
+post` (a fresh one), `; its upscale (its post is stale)`, `; its upscale (a post is on its
+way: master again after)` or `; its upscale`, rows have `post`, the plan has `post: true`
+and `post_mode: "present"`, and `assemble` uses each fresh post (h3assemble `--post`) and
+each other shot's upscale. For posting only the shots that need it: post them from the take
+menu (`POST /h3pipe/post`), then master with `"present"`.
+
+### Master with `post: true` (`"recipe"`)
+The plan's `post` is true, `post_mode` `"recipe"`, each row's `recipe` ends `; post: …`, rows have `post: {status,
+fresh, recipe} | null`, and `counts` has `post`. A row is `post` when its upscale is good
+but its post is missing, from an older upscale or failed. An `upscale` row's post is
+queued right behind its upscale (with `order: "target"`, after all the upscales), so one
+`queue` takes every shot all the way; `ok`, `kept` (a post made with other settings,
+`conform` redoes it), `queued` and `gap` speak for both. `assemble` uses each shot's fresh
+post (h3assemble `--post`) and refuses while any are to upscale or post-process. 409 when
+the series config has no `post.master`. A shot whose post recipe is `"none"` is mastered
+from its upscale.
+
 ### A take's `upscale`
 Every take in `GET /h3pipe/episode` has `upscale`: null (a proxy take, or never
 upscaled), else `{"status": "queued" | "ok" | "failed", "fresh", "width", "height",
@@ -593,6 +667,9 @@ knows from `/h3pipe/render`. Two custom events come from the node pack:
 - **`h3pipe.upscale`** (Phase 13), `{"ep", "shot", "take", "status"}`: "queued" from
   `POST /h3pipe/upscale`, "ok" or "failed" from `H3SaveUpscale` when it closes the
   `.up.json`, "deleted" from `DELETE /h3pipe/upscale`.
+- **`h3pipe.post`**, `{"ep", "shot", "take", "status"}`: "queued" from `POST /h3pipe/post`
+  and Master's `queue`, "ok" or "failed" from `H3SaveUpscale` when it closes the
+  `.post.json`, "deleted" from `DELETE /h3pipe/post`.
 - **`h3pipe.master`**, the whole job as `GET /h3pipe/master/job` has it: once when an
   `assemble` starts, at every step (each clip written, each title encoded), and once
   more when it is `done` or `failed`.

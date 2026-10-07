@@ -984,29 +984,215 @@ def recipe_view(ep: str) -> dict | None:
             "problems": U.check_recipe(r)}
 
 
+# ---------------------------------------------------------------------------
+# the post pass (h3post, docs/POST_PROCESSING.md)
+# ---------------------------------------------------------------------------
+
+def post_event(ctx: Context, ep: str, shot: str, take: int, status: str) -> None:
+    ctx.emit("h3pipe.post", {"ep": ep, "shot": shot, "take": take, "status": status})
+
+
+@handler
+def queue_post(ctx: Context, body):
+    """Queue posts of a pass's takes (h3post; `pass`, default final): `shots`
+    (their cut takes; null for the whole cut) or `takes` ([{shot, take}]). Each
+    take needs a fresh upscale. `recipe: true` (or neither `enhance` nor `blur`
+    given) posts each by the series config's `post.master` with its shot's
+    override; else `enhance` (a tier, a method, an object or "none") and `blur`
+    (0-1). `redo` posts again even if fresh. 409 when this ComfyUI can't, or
+    there is no recipe."""
+    import h3post as P
+    body = body_dict(body)
+    ep = check_ep(ctx, body.get("ep"))
+    pass_ = check_pass(body.get("pass"), "final")
+    shots, takes = body.get("shots"), body.get("takes")
+    if shots is not None and (not isinstance(shots, list)
+                              or not all(isinstance(s, str) and s for s in shots)):
+        raise ApiError(400, "shots must be a list of shot ids (or null for the final cut)")
+    if takes is not None and (not isinstance(takes, list) or not all(
+            isinstance(x, dict) and isinstance(x.get("shot"), str) for x in takes)):
+        raise ApiError(400, "takes must be a list of {shot, take}")
+    redo = body.get("redo", False)
+    if not isinstance(redo, bool):
+        raise ApiError(400, "redo must be true or false")
+    enhance, blur = body.get("enhance"), body.get("blur")
+    if blur is not None and (isinstance(blur, bool) or not isinstance(blur, (int, float))):
+        raise ApiError(400, "blur must be a number from 0 to 1, or null")
+    quality = body.get("quality")
+    if quality is not None and quality not in U.QUALITIES:
+        raise ApiError(400, "quality must be review or master, or null (as each upscale was)")
+    use_recipe = body.get("recipe", enhance is None and blur is None)
+    if not isinstance(use_recipe, bool):
+        raise ApiError(400, "recipe must be true or false")
+    recipe = shot_rs = None
+    if use_recipe:
+        recipe = P.master_recipe(ep)
+        if not recipe:
+            raise ApiError(409, "the series config has no post.master recipe")
+        shot_rs = P.shot_recipes(ep)
+    if takes is not None:
+        found = []
+        for x in takes:
+            n = check_take(x.get("take"))
+            found.append((x["shot"], T.get_take(ep, pass_, x["shot"], n),
+                          f"{pass_} take {n} of {x['shot']} doesn't exist"))
+    else:
+        found = U.cut_takes(ep, set(shots) if shots is not None else None, pass_=pass_)
+    jobs, skipped, errors = [], [], []
+    for shot, t, why in found:
+        if t is None:
+            skipped.append({"shot": shot, "reason": why})
+            continue
+        kw = (P.recipe_for(ep, shot, recipe, shot_rs) if use_recipe
+              else {"enhance": enhance, "blur": blur or 0.0})
+        if quality is not None:
+            kw["quality"] = quality
+        job = P.plan_post(ep, t, redo=redo, **kw)
+        if job.action == "skip":
+            skipped.append({"shot": shot, "take": t.take, "reason": job.why})
+        elif job.action == "error":
+            errors.append({"shot": shot, "take": t.take, "error": job.why})
+        else:
+            jobs.append(job)
+    queued = []
+    if jobs:
+        try:
+            info = ctx.comfy.object_info()
+        except Exception as e:
+            raise ApiError(502, f"ComfyUI didn't answer: {e}")
+        missing = P.not_ready(jobs, info)
+        if missing:
+            raise ApiError(409, "this ComfyUI can't run these posts: " + "; ".join(missing))
+        for job in jobs:
+            try:
+                P.start(job)
+                pid = ctx.comfy.queue(P.post_graph(job))
+                P.mark_queued(job, pid)
+            except Exception as e:
+                if os.path.isfile(job.take.paths.post_sidecar):
+                    P.mark_failed(job, str(e)[:800])
+                errors.append({"shot": job.shot, "take": job.take.take, "error": str(e)})
+                continue
+            queued.append({"shot": job.shot, "take": job.take.take, "what": P.describe(job),
+                           "width": job.width, "height": job.height, "prompt_id": pid})
+            post_event(ctx, ep, job.shot, job.take.take, "queued")
+    return 200, {"queued": queued, "skipped": skipped, "errors": errors}
+
+
+def post_recipe_view(ep: str) -> dict | None:
+    """The episode's post recipe for the dialogs (None: the series config has
+    none): its fields and words, each shot's override, what's wrong with it."""
+    import h3post as P
+    r = P.master_recipe(ep)
+    if not r:
+        return None
+    return {"fields": r, "text": P.describe_recipe(P.recipe_for(ep, "", r, {})),
+            "shots": {s: {"fields": f, "text": P.describe_recipe(
+                P.recipe_for(ep, s, r, {s: f}))} for s, f in P.shot_recipes(ep).items()},
+            "problems": P.check_recipe(r)}
+
+
+@handler
+def get_post_options(ctx: Context, query: dict):
+    """What the Post-process dialog offers: the tiers (what each runs), the
+    methods, the blur range, whether this ComfyUI can run each step, and the
+    episode's post recipe (`ep`)."""
+    import h3post as P
+    try:
+        info = ctx.comfy.object_info()
+    except Exception:
+        info = None
+
+    def ready(enhance=None, blur=0.0):
+        job = P.PostJob(root="", take=None, enhance=P.resolve_enhance(enhance), blur=blur)
+        if info is None:
+            return {"status": "unknown", "missing": []}
+        missing = P.not_ready([job], info)
+        return {"status": "not_ready" if missing else "ready", "missing": missing}
+
+    tiers = [{"id": k, "enhance": v, "text": P.describe_recipe({"enhance": k}),
+              "readiness": ready(k)} for k, v in P.TIERS.items()]
+    ep = check_ep(ctx, query["ep"]) if query.get("ep") else None
+    return 200, {"tiers": tiers, "methods": list(P.METHODS),
+                 "blur": {"min": P.BLUR[0], "max": P.BLUR[1], "default": 0.3,
+                          "readiness": ready(None, 0.3)},
+                 "strength": {"min": P.STRENGTH[0], "max": P.STRENGTH[1], "default": 0.2},
+                 "recipe": post_recipe_view(ep) if ep else None}
+
+
+@handler
+def delete_post(ctx: Context, query: dict):
+    """Remove a take's post (<stem>.post.mp4 and .post.json). 409 while ComfyUI
+    still has it queued or running."""
+    ep = check_ep(ctx, query.get("ep"))
+    shot = check_shot(query.get("shot"))
+    try:
+        n = int(query.get("take"))
+    except (TypeError, ValueError):
+        raise ApiError(400, "take must be a take number")
+    pass_ = check_pass(query.get("pass"), "final")
+    t = T.get_take(ep, pass_, shot, check_take(n))
+    if t is None:
+        raise ApiError(404, f"{pass_} take {n} of {shot} doesn't exist")
+    po = T.post_of(t)
+    if po is None:
+        raise ApiError(404, f"{shot} take {n} has no post")
+    pid = po.get("comfy_prompt_id")
+    if po.get("status") == "queued" and pid:
+        try:
+            alive = ctx.comfy.alive()
+        except Exception:
+            alive = set()
+        if pid in alive:
+            raise ApiError(409, f"{shot} take {n}'s post is still in ComfyUI's queue")
+    for p in (t.paths.post_mp4, t.paths.post_sidecar):
+        if os.path.isfile(p):
+            os.remove(p)
+    post_event(ctx, ep, shot, n, "deleted")
+    return 200, {"shot": shot, "take": n, "deleted": True}
+
+
 @handler
 def post_master(ctx: Context, body):
     """Phase 13e: an episode's master (h3master). `action`: "plan" (what each
-    shot of the cut is: upscale / ok / kept / queued / gap), "queue" (queue the
-    upscale ones by the recipe) or "assemble" (the master from the upscales into
-    <episode>/master/; 409 while any are to do, or with gaps unless
-    `allow_gaps`). `conform` redoes upscales made with other settings (never a
-    Keep); `prores` adds the ProRes .mov. Every answer carries the plan."""
+    shot of the cut is: upscale / post / ok / kept / queued / gap), "queue"
+    (queue the upscale ones by the recipe, and with `post` their posts behind
+    them and the post ones) or "assemble" (the master from the upscales, or with
+    `post` the posts, into <episode>/master/; 409 while any are to do, or with
+    gaps unless `allow_gaps`). `conform` redoes upscales (and posts) made with
+    other settings (never a Keep); `prores` adds the ProRes .mov; `post` is the
+    dialog's Post-process (the series config's post.master on every shot).
+    Every answer carries the plan."""
     import h3master as M
     body = body_dict(body)
     ep = check_ep(ctx, body.get("ep"))
     pass_ = check_pass(body.get("pass"), "final")
     action = body.get("action") or "plan"
-    if action not in ("plan", "queue", "assemble"):
-        raise ApiError(400, "action must be plan, queue or assemble")
+    if action not in ("plan", "queue", "assemble", "prores"):
+        raise ApiError(400, "action must be plan, queue, assemble or prores")
+    if action == "prores":
+        # the .mov of the master already made: nothing is planned or assembled
+        try:
+            res = M.prores_only(ep, by="the editor")
+        except M.MasterBusy as e:
+            raise ApiError(409, str(e), job=master_job(M, ep))
+        except M.MasterError as e:
+            raise ApiError(409, str(e))
+        return 200, {"output": E.rel(ep, res["output"]), "mov": E.rel(ep, res["mov"])}
     flags = {k: body.get(k, False) for k in ("conform", "allow_gaps", "prores")}
     if not all(isinstance(v, bool) for v in flags.values()):
         raise ApiError(400, "conform, allow_gaps and prores must be true or false")
+    # post: false / "off", "present" (posts where there are fresh ones), true / "recipe"
+    flags["post"] = body.get("post", False)
+    try:
+        M.post_mode(flags["post"])
+    except M.MasterError:
+        raise ApiError(400, "post must be true, false, \"off\", \"present\" or \"recipe\"")
     order = body.get("order") or "cut"
     if order not in M.ORDERS:
         raise ApiError(400, "order must be cut or target")
     try:
-        plan = M.plan_master(ep, pass_, flags["conform"])
+        plan = M.plan_master(ep, pass_, flags["conform"], flags["post"])
     except M.MasterError as e:
         raise ApiError(409, str(e))
     out: dict = {}
@@ -1016,12 +1202,20 @@ def post_master(ctx: Context, body):
         except M.MasterError as e:
             raise ApiError(409, str(e))
         for r in queued:
-            upscale_event(ctx, ep, r.shot, r.take.take, "queued")
+            if r.job is not None:                      # this run queued its upscale
+                upscale_event(ctx, ep, r.shot, r.take.take, "queued")
+            if r.post_job is not None:
+                post_event(ctx, ep, r.shot, r.take.take, "queued")
         out = {"queued": [r.shot for r in queued],
                "errors": [{"shot": r.shot, "error": e} for r, e in errors]}
     elif action == "assemble":
         out = assemble_job(ctx, M, ep, pass_, plan, flags)
-    return 200, {"plan": plan.view(), **out}
+    have = M.existing_master(ep)
+    return 200, {"plan": plan.view(), **out,
+                 "existing": ({"output": E.rel(ep, have),
+                               "mov": E.rel(ep, have[:-4] + ".mov")
+                               if os.path.isfile(have[:-4] + ".mov") else None}
+                              if have else None)}
 
 
 # The master being assembled, per episode: what the Master dialog shows when it
@@ -2755,6 +2949,9 @@ ROUTES = [
     ("POST", "/h3pipe/master", post_master, "body"),
     ("GET", "/h3pipe/master/job", get_master_job, "query"),
     ("DELETE", "/h3pipe/upscale", delete_upscale, "query"),
+    ("POST", "/h3pipe/post", queue_post, "body"),
+    ("GET", "/h3pipe/post/options", get_post_options, "query"),
+    ("DELETE", "/h3pipe/post", delete_post, "query"),
     ("PUT", "/h3pipe/pick", put_pick, "body"),
     ("PUT", "/h3pipe/cut", put_cut, "body"),
     ("POST", "/h3pipe/cut/reset", post_cut_reset, "body"),

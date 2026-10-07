@@ -141,6 +141,9 @@ export interface UpscaleAsk {
   redo?: boolean;
 }
 
+/** The Post-process dialog's subject: named takes of a pass, or that pass's whole cut. */
+export type PostAsk = UpscaleAsk;
+
 export interface RefTakeRef {
   ep: string;
   ref: string;
@@ -293,6 +296,7 @@ export interface AppState {
   /** the render confirmation (shots that will be skipped for missing refs) */
   renderAsk: RenderAsk | null;
   upscaleAsk: UpscaleAsk | null;
+  postAsk: PostAsk | null;
   masterAsk: MasterAsk | null;
   /** the episode's master job: being assembled, or the last one (null: none known) */
   masterJob: MasterJob | null;
@@ -419,6 +423,7 @@ export function initialState(prefs: Prefs = {}): AppState {
     browse: null,
     renderAsk: null,
     upscaleAsk: null,
+    postAsk: null,
     masterAsk: null,
     masterJob: null,
     refs: {},
