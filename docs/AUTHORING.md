@@ -192,6 +192,11 @@ which ones your ComfyUI can render.
 - `style.look` opens every shot's description ("The target video is …"), so it sets the
   photography of the whole series. See **Writing the `look` line**.
 - `kind` is `character`, `prop` or `vehicle`. Only characters speak.
+- A character's `sheet` is a **four-panel strip** (three-quarter body, side, back, face),
+  and a shot gets one panel of it: the three-quarter body, or the face on a one-character
+  close-up. A picture you supply that is **one image** of the character (a portrait, a
+  full-length shot on white) needs `"sheet_panels": 1`, or it is cut into quarters and the
+  model gets a strip from its left edge. With it the picture is sent whole on H3 Ref2VA.
 - `of` makes the subject a **wardrobe variant** of another one — the same character in
   different clothes, the same prop in a different state. See **A wardrobe change is a new
   subject**.
@@ -390,7 +395,9 @@ The series config says how, once, in `upscale.master` (the **recipe**):
   made until it's fixed, unless `--allow-gaps`.
 
 Then it assembles the master from the upscales into `Shows\ep05\master\`
-(`ep05_master_3840x2160.mp4`, with `--prores` a ProRes 422 HQ `.mov` too) and writes
+(`ep05_master_3840x2160.mp4`, with `--prores` a ProRes 422 HQ `.mov` too; a master already
+made gets its `.mov` without assembling again from `--prores-only`, or the dialog's
+**ProRes from this master**) and writes
 `ep05_master.md` / `.json`: every shot's take, target, recipe and status. It never changes
 the cut: lock the picks first. Several episodes, or a whole show folder, master in one go
 (`h3.py master Shows`); an episode with gaps is skipped, not half-made. `--check` shows the
@@ -518,6 +525,49 @@ scale it down for 1080p, rather than upscaling every shot twice (switching the r
 them).
 
 `fit: crop` unless they'd rather keep the whole frame with bars (`pad`).
+
+### Post-process: the `post` block
+
+A **post** finishes a shot's upscale, at the same size: a clean-up pass over the whole
+frame, then motion blur. It is for what H3's latents leave behind even after the re-sample:
+blocky edges and shadows, and moving things that smear in blocks instead of blurring.
+
+```json
+"post": { "master": { "enhance": "production", "motion_blur": 0.3 } }
+```
+
+- `enhance`:
+  - `"production"` is SeedVR2 7B at the upscale's size, the one to use. It was chosen on
+    Porchlights ep01 against the upscale alone, an earlier re-sample start, SeedVR2 3B, an
+    upscale model and SUPIR. It cleaned edges, lettering, hairnets and faces in motion
+    best, and took about 4.5 minutes a 5 s shot at 1080p. At 1440p it's about 100 seconds per second of
+    footage (11 minutes for a 6.6 s shot, against 4 for its 2x re-sample), so post the shots
+    that need it, or plan an overnight run.
+  - `"draft"` is an upscale model at 1x: a quick sharpen that also sharpens the blocks.
+  - `"cinematic"` is SUPIR: about 30 minutes a shot, frame by frame.
+  - `"none"` skips the clean-up.
+- `motion_blur`: a fraction of the frame interval, 0 to 1. 0.3 smooths blocky motion; 0.5 is
+  a 180° film shutter. Still areas are left alone.
+- A shot can have its own over it in overrides.json: `"post": {"sh040": {"motion_blur": 0},
+  "sh050": {"enhance": "none"}}`.
+- Face detailing (redrawing faces with an image model) was tried and dropped: it changed who
+  the characters were (docs/POST_PROCESSING.md).
+
+`h3.py post Shows\ep05` posts every upscaled shot of the cut by the recipe (`--only`,
+`--redo`, or `--enhance` / `--blur` for a one-off), and the editor's take and cut menus
+have **Post-process…**. The Master dialog's **Post-process** says what the master is made from:
+
+- **Off**: the upscales.
+- **Where present** (`h3.py master Shows\ep05 --post present`): each shot's fresh post where
+  it has one, its upscale otherwise; nothing is post-processed and no `post` block is needed.
+  The way to post only the shots that need it: upscale, scrub the cut, **Post-process…** the
+  ones that need it from the take menu, then master.
+- **All by recipe** (`h3.py master Shows\ep05 --post --wait`): every shot by the `post`
+  block; a shot without an upscale gets its post queued right behind the upscale.
+
+**Writing a new series config**, add a `post` block with `"enhance": "production"` and
+`"motion_blur": 0.3` when the master is 1080p or 1440p. Leave it out if they haven't asked
+for it, or if the episode will be mastered at 4K: a post at 4K hasn't been measured.
 
 ### Series intro and outro: the `publish` block
 

@@ -3,7 +3,7 @@ import {
   cancelTake, clearRef, closeMenu, copyText, discardTake, generateKeyframe, keyframeFromTake, loadRefs, openClipAudio,
   openIssue,
   keepUpscale, openInspector, openRedo, openSidecar, openViewer, pickTake, playAll, removeUpscale, requestRender, showInScript, showMissingRefs,
-  upscaleTake,
+  upscaleTake, postTake, removePost,
 } from "../actions";
 import { clearClipAudio, nudgeClip, setTrims, toggleFlag, toggleLock, toggleOut } from "../cutActions";
 import { audioOf, audioWhy } from "../lib/audioSource";
@@ -283,6 +283,20 @@ export function ContextMenu() {
           {take.upscale && take.upscale.status !== "queued" && (
             <button onClick={run(() => void removeUpscale({ ep, pass: menu.pass, shot: menu.shot, take: take.take }))}>
               <i className="pi pi-times" /> Remove upscale
+            </button>
+          )}
+          <button
+            disabled={!take.upscale?.fresh || take.upscale.status !== "ok" || take.post?.status === "queued"}
+            title={take.post?.status === "queued" ? "Its post is queued"
+              : !take.upscale?.fresh || take.upscale.status !== "ok" ? "Upscale it first: a post finishes the upscale"
+              : "Finish its upscale: SeedVR2 clean-up and/or motion blur, by the series recipe or your choice"}
+            onClick={run(() => void postTake({ ep, pass: menu.pass, shot: menu.shot, take: take.take }, !!take.post?.fresh))}
+          >
+            <i className="pi pi-sparkles" /> {take.post?.fresh ? "Post-process again…" : "Post-process…"}
+          </button>
+          {take.post && take.post.status !== "queued" && (
+            <button onClick={run(() => void removePost({ ep, pass: menu.pass, shot: menu.shot, take: take.take }))}>
+              <i className="pi pi-times" /> Remove post
             </button>
           )}
           <button

@@ -164,6 +164,9 @@ def story_warnings(story: ir.Episode, series_cfg: dict | None = None) -> list[st
     if "master" in ((series_cfg or {}).get("upscale") or {}):
         import h3upscale                               # the master recipe (Phase 13e)
         out += h3upscale.check_recipe(series_cfg["upscale"]["master"])
+    if "master" in ((series_cfg or {}).get("post") or {}):
+        import h3post                                  # the post recipe
+        out += h3post.check_recipe(series_cfg["post"]["master"])
     return out
 
 

@@ -58,6 +58,8 @@ export interface TakeSummary {
   audio?: string | null;
   /** Phase 13: the take's upscale (null: never upscaled; absent from older servers). */
   upscale?: TakeUpscale | null;
+  /** its post (h3post: the upscale finished; null: never post-processed; absent from older servers) */
+  post?: TakePost | null;
   /** Phase 13: the take's size, from its sidecar (the Upscale dialog's arithmetic) */
   width?: number | null;
   height?: number | null;
@@ -771,6 +773,59 @@ export interface UpscaleRequest {
   grain?: number;
 }
 
+/** A take's post (docs/API.md "A take's `post`"): its fresh upscale finished
+ * (enhance, motion blur). `fresh`: made from the upscale as it is now. */
+export interface TakePost {
+  status: "queued" | "ok" | "failed";
+  fresh: boolean;
+  /** what made it: {size, enhance?: {method, ...}, motion_blur?} */
+  recipe?: { size?: [number, number]; enhance?: Record<string, unknown>; motion_blur?: number } | null;
+  width?: number | null;
+  height?: number | null;
+  comfy_prompt_id?: string | null;
+  mp4: string | null;
+  save_notes: string;
+}
+
+/** POST /h3pipe/post. `recipe` (or neither `enhance` nor `blur`): the series' post.master. */
+export interface PostRequest {
+  ep: string;
+  pass?: Pass;
+  shots?: string[] | null;
+  takes?: { shot: string; take: number }[];
+  redo?: boolean;
+  recipe?: boolean;
+  /** a tier (draft, production, cinematic), a method, an object, or "none" */
+  enhance?: string | Record<string, unknown> | null;
+  /** motion blur, 0-1 of the frame interval */
+  blur?: number | null;
+  quality?: "review" | "master" | null;
+}
+
+export interface PostResult {
+  queued: { shot: string; take: number; what: string; width: number; height: number; prompt_id: string }[];
+  skipped: { shot: string; take?: number; reason: string }[];
+  errors: { shot: string; take?: number; error: string }[];
+}
+
+/** whether this ComfyUI can run a post step (h3post.not_ready's sentences) */
+export interface PostReadiness {
+  status: "ready" | "not_ready" | "unknown";
+  missing: string[];
+}
+
+/** GET /h3pipe/post/options */
+export interface PostOptions {
+  tiers: { id: string; enhance: Record<string, unknown>; text: string; readiness: PostReadiness }[];
+  methods: string[];
+  blur: { min: number; max: number; default: number; readiness: PostReadiness };
+  strength: { min: number; max: number; default: number };
+  /** the episode's post.master (asked with `ep`; null: none) */
+  recipe: { fields: Record<string, unknown>; text: string;
+            shots: Record<string, { fields: Record<string, unknown>; text: string }>;
+            problems: string[] } | null;
+}
+
 /** GET /h3pipe/upscale/options: what the Upscale dialog can offer here. */
 export interface UpscaleOptions {
   pixel: { status: "ready" | "not_ready" | "unknown"; missing: string[]; models: string[]; default: string };
@@ -799,12 +854,17 @@ export interface MasterPlan {
   size: [number, number];
   fit: "crop" | "pad";
   quality: "review" | "master";
-  counts: { upscale: number; ok: number; kept: number; queued: number; gap: number };
+  /** Post-process on: posts where present or by the recipe (absent from older servers) */
+  post?: boolean;
+  /** off, present (each shot's fresh post where it has one, else its upscale) or recipe */
+  post_mode?: "off" | "present" | "recipe";
+  counts: { upscale: number; post?: number; ok: number; kept: number; queued: number; gap: number };
   ready: boolean;
   rows: {
     shot: string; take: number | null; target: string | null;
-    status: "upscale" | "ok" | "kept" | "queued" | "gap"; why: string; recipe: string;
+    status: "upscale" | "post" | "ok" | "kept" | "queued" | "gap"; why: string; recipe: string;
     upscale: { width: number | null; height: number | null; status: string; keep: boolean } | null;
+    post?: { status: string; fresh: boolean; recipe: Record<string, unknown> | null } | null;
   }[];
 }
 
@@ -820,6 +880,8 @@ export interface MasterResult {
   titles?: MasterTitles | null;
   /** assemble: the job as it ended (GET /h3pipe/master/job has the same) */
   job?: MasterJob;
+  /** the master already made at the recipe's size and its ProRes .mov (null: none yet) */
+  existing?: { output: string; mov: string | null } | null;
 }
 
 /** The titles h3publish put on a master, and how it laid the cut in between:

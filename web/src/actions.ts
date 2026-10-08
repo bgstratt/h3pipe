@@ -27,7 +27,7 @@ import type {
   AlignEvent, AlignMissing, AlignRequest, AssembleOptions, BuildResult, CutAudioSource, EpisodeStatus, Lora, NewEpisodeResult, SourceFile, OverrideFields, Pass,
   ProgressEvent, PromptEvent, Ref, RefEvent, RefGenerateRequest, RefTake, RenderRequest, RenderResult, RenderSkip, Seed,
   Issue, MasterJob, SeedMode, ShotDetail, TakeEvent, TakeRef, TargetProposal, TrackResult,
-  UpscaleEvent, UpscaleRequest, VoiceFromTakeRequest, WorkflowFile,
+  UpscaleEvent, UpscaleRequest, VoiceFromTakeRequest, WorkflowFile, PostRequest,
 } from "./types";
 
 const set = store.set;
@@ -434,7 +434,7 @@ export async function loadEpisodes() {
 
 export function selectEpisode(ep: string | null) {
   set((s) => ({
-    ep, shot: null, take: null, viewer: null, menu: null, redo: null, renderAsk: null, upscaleAsk: null, masterAsk: null, masterJob: null, refSel: null,
+    ep, shot: null, take: null, viewer: null, menu: null, redo: null, renderAsk: null, upscaleAsk: null, postAsk: null, masterAsk: null, masterJob: null, refSel: null,
     cutPlay: { ...s.cutPlay, playing: false, pos: 0 },
     build: { busy: false, result: null, error: null },
     // Phase 9c: the Recording and voice-clip windows belong to one episode
@@ -1036,6 +1036,61 @@ export function closeUpscale() {
   set({ upscaleAsk: null });
 }
 
+/**
+ * Queue posts (POST /h3pipe/post): each take's fresh upscale finished by the
+ * series recipe or the dialog's choice. Says what was queued and why anything
+ * wasn't; the h3pipe.post events refresh the status as each one finishes.
+ */
+export async function queuePost(req: Omit<PostRequest, "ep">, busyKey: string) {
+  const s = get();
+  if (!s.ep) return;
+  const ep = s.ep;
+  set({ menu: null });
+  return withBusy(`post|${busyKey}`, async () => {
+    try {
+      const r = await api().post({ ep, ...req });
+      const n = r.queued.length;
+      const why = [...r.errors.map((x) => `${x.shot}: ${x.error}`), ...r.skipped.map((x) => `${x.shot}: ${x.reason}`)];
+      host().toast(r.errors.length ? "warn" : n ? "info" : "warn",
+                   n ? `Queued ${n} post${n === 1 ? "" : "s"}` : "Nothing to post-process",
+                   why.slice(0, 6).join("\n") + (why.length > 6 ? `\n… and ${why.length - 6} more` : ""));
+      scheduleRefresh(0);
+    } catch (e) {
+      report("Couldn't post-process", e);
+    }
+  });
+}
+
+/** The Post-process dialog for one take (`redo`: it already has a fresh post). */
+export function postTake(ref: TakeRef, redo = false) {
+  set({ menu: null, postAsk: { title: `Post-process ${ref.shot} ${tn(ref.take)}`, pass: ref.pass,
+                               takes: [{ shot: ref.shot, take: ref.take }], redo } });
+}
+
+/** The Post-process dialog for every take of the current pass's cut. */
+export function postCut() {
+  const pass = get().pass;
+  set({ menu: null, postAsk: { title: `Post-process the ${pass} cut`, pass, takes: null } });
+}
+
+export function closePost() {
+  set({ postAsk: null });
+}
+
+/** Remove a take's post (DELETE /h3pipe/post). Asks first. */
+export async function removePost(ref: TakeRef) {
+  set({ menu: null });
+  if (!confirm(`Remove ${ref.shot} ${tn(ref.take)}'s post? Its upscale stays.`)) return;
+  return withBusy(`unpost|${ref.shot}|${ref.take}`, async () => {
+    try {
+      await api().deletePost(ref.ep, ref.shot, ref.take, ref.pass);
+      scheduleRefresh(0);
+    } catch (e) {
+      report(`Couldn't remove ${ref.shot} ${tn(ref.take)}'s post`, e);
+    }
+  });
+}
+
 /** Phase 13e: the Master dialog for the current pass's cut. */
 export function masterCut() {
   set({ menu: null, masterAsk: { pass: get().pass } });
@@ -1455,6 +1510,13 @@ export function wireEvents() {
     if (!sameEp(u.ep, get().ep)) return;
     if (u.status === "ok") host().toast("success", `${u.shot} ${tn(u.take)} upscaled`);
     if (u.status === "failed") host().toast("error", `${u.shot} ${tn(u.take)}'s upscale failed`, "Its .up.json says why (Show details).");
+    scheduleRefresh();
+  });
+  h.on("h3pipe.post", (d) => {
+    const u = (d ?? {}) as UpscaleEvent;
+    if (!sameEp(u.ep, get().ep)) return;
+    if (u.status === "ok") host().toast("success", `${u.shot} ${tn(u.take)} post-processed`);
+    if (u.status === "failed") host().toast("error", `${u.shot} ${tn(u.take)}'s post failed`, "Its .post.json says why.");
     scheduleRefresh();
   });
   h.on("h3pipe.episode", (d) => {

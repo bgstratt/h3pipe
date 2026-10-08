@@ -17,6 +17,7 @@ import type {
   RefGenerateResult, RefImportRequest, RefKeyframeRequest, RefList, RefMatchResult, RefOverrideInfo, RefOverrideRequest, RefPickRequest, RefPickResult,
   RefTake, RefUploadRequest, RenderRequest, RenderResult, Seed, ShotDetail, TakeRef, TargetKind, TargetList, TrackResult,
   MasterJob, MasterResult, UpscaleOptions, UpscaleRequest, UpscaleResult,
+  PostOptions, PostRequest, PostResult,
   CustomTargetResult, TargetProposal, VoiceFromTakeRequest, VoiceFromTakeResult,
   WorkflowFile, WorkflowInstallResult,
   PromoteHashes, PromotePlan, PromoteResult, SourceCheck, SourceDoc, SourceFile, SourceHash, SourceSaveRequest, SourceSaveResult,
@@ -73,8 +74,15 @@ export interface Api {
   /** Phase 13e: PUT /h3pipe/upscale/recipe: one shot's upscale recipe (the
    * request's fields; null clears it) */
   /** Phase 13e: POST /h3pipe/master: plan, queue the upscales, or assemble the master */
-  master(req: { ep: string; pass?: Pass; action: "plan" | "queue" | "assemble"; conform?: boolean;
-                allow_gaps?: boolean; prores?: boolean; order?: "cut" | "target" }): Promise<MasterResult>;
+  master(req: { ep: string; pass?: Pass; action: "plan" | "queue" | "assemble" | "prores"; conform?: boolean;
+                allow_gaps?: boolean; prores?: boolean; order?: "cut" | "target";
+                post?: boolean | "off" | "present" | "recipe" }): Promise<MasterResult>;
+  /** POST /h3pipe/post: queue posts (each take's fresh upscale finished: enhance, motion blur) */
+  post(req: PostRequest): Promise<PostResult>;
+  /** GET /h3pipe/post/options: the tiers, the blur, readiness, the episode's post recipe */
+  postOptions(ep?: string | null): Promise<PostOptions>;
+  /** DELETE /h3pipe/post: remove a take's post (409 while it is queued) */
+  deletePost(ep: string, shot: string, take: number, pass?: Pass): Promise<{ shot: string; take: number; deleted: boolean }>;
   /** GET /h3pipe/master/job: the master being assembled (or the last one), null: none */
   masterJob(ep: string): Promise<{ job: MasterJob | null }>;
   /** Phase 13e: PUT /h3pipe/upscale/keep: mark a take's upscale Keep, or clear it */
@@ -419,6 +427,9 @@ export function createHttpApi(t: Transport): Api {
     upscale: (req) => call("POST", "/h3pipe/upscale", req),
     upscaleOptions: (ep) => get(`/h3pipe/upscale/options${ep ? `?${qs({ ep })}` : ""}`),
     master: (req) => call("POST", "/h3pipe/master", req),
+    post: (req) => call("POST", "/h3pipe/post", req),
+    postOptions: (ep) => get(`/h3pipe/post/options${ep ? `?${qs({ ep })}` : ""}`),
+    deletePost: (ep, shot, take, pass) => call("DELETE", `/h3pipe/post?${qs({ ep, shot, take: String(take), pass })}`),
     masterJob: (ep) => get(`/h3pipe/master/job?${qs({ ep })}`),
     putUpscaleKeep: (ep, shot, take, keep, pass) => call("PUT", "/h3pipe/upscale/keep", { ep, shot, take, keep, ...(pass ? { pass } : {}) }),
     putUpscaleRecipe: (ep, shot, recipe) => call("PUT", "/h3pipe/upscale/recipe", { ep, shot, recipe }),

@@ -5,7 +5,7 @@ machine); the Linux/macOS differences are called out where they exist. The comma
 written with Windows paths: on Linux/macOS use forward slashes, and `python3` where
 `python` is missing.
 
-What you end up with: a `custom_nodes` pack that adds twelve nodes and the editor to
+What you end up with: a `custom_nodes` pack that adds eighteen nodes and the editor to
 ComfyUI, a `h3.py` command line, and one episode folder holding a series config, a
 script, and everything the pipeline generated from them.
 
@@ -131,10 +131,12 @@ Two environment variables are worth setting for the command line (neither is req
 
 ## 2. The custom node pack
 
-`comfy_nodes/` is the ComfyUI side: twelve nodes — the shot list's (`H3 Shot List Loader`,
+`comfy_nodes/` is the ComfyUI side: eighteen nodes — the shot list's (`H3 Shot List Loader`,
 `H3 Shot Info`, `H3 Save Shot`, `H3 Save Ref Take`, `H3 Save Ref Audio`), the upscale's
-(`H3 Load Take Latent`, `H3 Load Take Video`, `H3 Hold Audio`, `H3 Pixel Upscale`,
-`H3 Finish Upscale`, `H3 Save Upscale`) and `H3 Continuity Frame` — the editor's HTTP routes
+(`H3 Load Take Latent`, `H3 Load Take Video`, `H3 Load Video`, `H3 Save Render`,
+`H3 Hold Audio`, `H3 Pixel Upscale`, `H3 Finish Upscale`, `H3 Save Upscale`), the post
+pass's (`H3 Save Face Tracks`, `H3 Load Face Tracks`, `H3 Frames To Batch`,
+`H3 Motion Blur`) and `H3 Continuity Frame` — the editor's HTTP routes
 ([docs/API.md](docs/API.md)) and the editor's frontend bundle
 (`comfy_nodes/web/h3pipe-editor.js`).
 

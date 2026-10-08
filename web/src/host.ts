@@ -20,6 +20,8 @@ export type HostEvent =
   | "h3pipe.issues"
   /** Phase 13: a take's upscale was queued, finished, failed or deleted */
   | "h3pipe.upscale"
+  /** a take's post was queued, finished, failed or deleted */
+  | "h3pipe.post"
   /** a master being assembled: each step, then done or failed (a MasterJob) */
   | "h3pipe.master";
 

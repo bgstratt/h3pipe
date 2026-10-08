@@ -1211,17 +1211,46 @@ export function createMockApi(emit: Emit, opts: MockOptions = {}): Api & { outsi
     async master(req) {
       await wait();
       need(req.ep);
+      if (req.action === "prores") {
+        // the .mov of the master already made (the mock's last job), nothing assembled
+        if (!masterJob?.output) throw new MockError("there is no master of this episode at the recipe's size yet", 409);
+        const mov = masterJob.output.replace(/\.mp4$/, ".mov");
+        return { plan: undefined as unknown as import("../types").MasterPlan, output: masterJob.output, mov };
+      }
       const rows = st(req.pass ?? "final").shots.map((s) => {
         const t = s.takes.find((x) => x.take === s.cut.take);
-        const status = !t ? "gap" as const : t.upscale?.status === "ok" && t.upscale.fresh ? "ok" as const : "upscale" as const;
+        const up = !!t && t.upscale?.status === "ok" && !!t.upscale.fresh;
+        const byRecipe = req.post === true || req.post === "recipe";
+        const status = !t ? "gap" as const : !up ? "upscale" as const
+          : byRecipe && !(t.post?.status === "ok" && t.post.fresh) ? "post" as const : "ok" as const;
         return { shot: s.shot, take: t?.take ?? null, target: t?.target ?? null, status,
-                 why: status === "gap" ? "no usable pick" : "", recipe: "re-sample 2x → 1080p (crop)", upscale: null };
+                 why: status === "gap" ? "no usable pick" : status === "post" ? "not post-processed yet" : "",
+                 recipe: "re-sample 2x → 1080p (crop)" + (req.post ? "; post: SeedVR2 7b, then motion blur 0.3" : ""),
+                 upscale: null, post: req.post && t?.post ? { status: t.post.status, fresh: t.post.fresh, recipe: null } : null };
       });
+      if (req.action === "queue") {
+        for (const s of st(req.pass ?? "final").shots) {
+          const t = s.takes.find((x) => x.take === s.cut.take);
+          if (!t) continue;
+          if (!(t.upscale?.status === "ok" && t.upscale.fresh)) {
+            t.upscale = { status: "ok", fresh: true, width: 1920, height: 1080, route: "latent", method: "latent", start_step: 7,
+                          comfy_prompt_id: null, mp4: t.mp4, save_notes: "mock" };
+            emit("h3pipe.upscale", { ep: EP, shot: s.shot, take: t.take, status: "ok" });
+          }
+          if ((req.post === true || req.post === "recipe") && !(t.post?.status === "ok" && t.post.fresh)) {
+            t.post = { status: "ok", fresh: true, width: 1920, height: 1080, mp4: t.mp4, save_notes: "mock",
+                       recipe: { enhance: { method: "seedvr2" }, motion_blur: 0.3 } };
+            emit("h3pipe.post", { ep: EP, shot: s.shot, take: t.take, status: "ok" });
+          }
+        }
+      }
       const count = (k: string) => rows.filter((r) => r.status === k).length;
-      const plan = { pass: req.pass ?? "final", size: [1920, 1080] as [number, number], fit: "crop" as const, quality: "master" as const,
-                     counts: { upscale: count("upscale"), ok: count("ok"), kept: 0, queued: 0, gap: count("gap") },
-                     ready: count("upscale") === 0 && count("gap") === 0, rows };
-      if (req.action !== "assemble") return { plan, queued: [], errors: [] };
+      const mode = req.post === true ? "recipe" as const : req.post === "present" || req.post === "recipe" ? req.post : "off" as const;
+      const plan = { pass: req.pass ?? "final", post: mode !== "off", post_mode: mode, size: [1920, 1080] as [number, number], fit: "crop" as const, quality: "master" as const,
+                     counts: { upscale: count("upscale"), post: count("post"), ok: count("ok"), kept: 0, queued: 0, gap: count("gap") },
+                     ready: count("upscale") === 0 && count("post") === 0 && count("gap") === 0, rows };
+      const existing = masterJob?.output ? { output: masterJob.output, mov: null } : null;
+      if (req.action !== "assemble") return { plan, queued: [], errors: [], existing };
       if (masterJob?.state === "running") {
         throw new MockError("a master of this episode is already being assembled by the editor", 409, { job: masterJob });
       }
@@ -1288,6 +1317,50 @@ export function createMockApi(emit: Emit, opts: MockOptions = {}): Api & { outsi
         encoders: ["auto", "nvenc", "x264"],
         precisions: ["fp16", "fp32"],
       };
+    },
+    async post(req) {
+      await wait();
+      need(req.ep);
+      const fin = st(req.pass ?? "final");
+      const want = req.takes ?? fin.shots
+        .filter((s) => !req.shots || req.shots.includes(s.shot))
+        .flatMap((s) => (s.cut.take != null && !s.cut.placeholder ? [{ shot: s.shot, take: s.cut.take }] : []));
+      const out: import("../types").PostResult = { queued: [], skipped: [], errors: [] };
+      for (const w of want) {
+        const t = fin.shots.find((s) => s.shot === w.shot)?.takes.find((x) => x.take === w.take);
+        if (!t || !(t.upscale?.status === "ok" && t.upscale.fresh)) { out.errors.push({ shot: w.shot, take: w.take, error: "no upscale yet (h3.py upscale first)" }); continue; }
+        if (t.post?.fresh && !req.redo) { out.skipped.push({ shot: w.shot, take: w.take, reason: "a fresh post with these settings" }); continue; }
+        t.post = { status: "ok", fresh: true, width: t.upscale.width, height: t.upscale.height, mp4: t.mp4, save_notes: "mock",
+                   recipe: { enhance: { method: "seedvr2" }, motion_blur: req.blur ?? 0.3 } };
+        out.queued.push({ shot: w.shot, take: w.take, what: "SeedVR2 7b, then motion blur 0.3", width: 1920, height: 1080, prompt_id: `mock-post-${w.shot}` });
+        emit("h3pipe.post", { ep: EP, shot: w.shot, take: w.take, status: "ok" });
+      }
+      return out;
+    },
+    async postOptions(ep) {
+      await wait();
+      const ready = { status: "ready" as const, missing: [] };
+      return {
+        tiers: [
+          { id: "draft", enhance: { method: "pixel" }, text: "pixel", readiness: ready },
+          { id: "production", enhance: { method: "seedvr2", seedvr2_model: "7b", chunk: "fit", overlap: 6 }, text: "SeedVR2 7b", readiness: ready },
+          { id: "cinematic", enhance: { method: "supir", strength: 0.2 }, text: "SUPIR 0.2",
+            readiness: { status: "not_ready" as const, missing: ["SUPIR-v0F_fp16.safetensors in models/model_patches/"] } },
+        ],
+        methods: ["pixel", "seedvr2", "supir"],
+        blur: { min: 0, max: 1, default: 0.3, readiness: ready },
+        strength: { min: 0.05, max: 0.5, default: 0.2 },
+        recipe: ep ? { fields: { enhance: "production", motion_blur: 0.3 }, text: "SeedVR2 7b, then motion blur 0.3", shots: {}, problems: [] } : null,
+      };
+    },
+    async deletePost(ep, shot, take, pass) {
+      await wait();
+      need(ep);
+      const t = st(pass ?? "final").shots.find((s) => s.shot === shot)?.takes.find((x) => x.take === take);
+      if (!t?.post) throw new MockError(`${shot} take ${take} has no post`, 404);
+      t.post = null;
+      emit("h3pipe.post", { ep: EP, shot, take, status: "deleted" });
+      return { shot, take, deleted: true };
     },
     async deleteUpscale(ep, shot, take, pass) {
       await wait();

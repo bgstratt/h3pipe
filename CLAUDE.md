@@ -37,6 +37,10 @@ docstrings; there is no separate plan file.
   series' master recipe (`upscale.master`); `h3master.py` — the recipe on every shot of a
   cut, then the master assembled into `<episode>/master/` (`h3.py master`), titled by h3publish
   when the show has `_titles/INTRO.mp4` / `OUTRO.mp4`
+- `h3post.py` — the post pass: a take's upscale finished into `<stem>.post.mp4` (enhance:
+  the draft/production/cinematic tiers, pixel / SeedVR2 / SUPIR at 1x; then motion blur,
+  `H3MotionBlur`), `h3.py post`, the series' `post.master` recipe. Not yet in master or
+  the editor. Face detailing was tried and dropped (`docs/POST_PROCESSING.md`)
 - `h3publish.py` — the series intro + a cut + the outro, the episode title drawn under the
   series title, the cut's picture copied (h3master's titles; `h3.py publish` on a review cut)
 - `h3align.py` — times the script against a dialogue recording

@@ -613,16 +613,28 @@ def copy_audio(picture: str, source: str, out: str) -> str:
     return "none"
 
 
-def _notify(root: str, shot, take, status: str) -> None:
-    """Tell open h3pipe editors an upscale is done (the `h3pipe.upscale` event
-    of docs/API.md). Only inside ComfyUI; never affects saving."""
+def _stamp(path: str) -> dict:
+    """h3takes.source_stamp's fields for `path`: size, mtime and sha1."""
+    import hashlib
+    st = os.stat(path)
+    h = hashlib.sha1()
+    with open(path, "rb") as fh:
+        for block in iter(lambda: fh.read(1 << 20), b""):
+            h.update(block)
+    return {"source_size": st.st_size, "source_mtime_ns": st.st_mtime_ns,
+            "source_sha1": h.hexdigest()}
+
+
+def _notify(root: str, shot, take, status: str, event: str = "h3pipe.upscale") -> None:
+    """Tell open h3pipe editors an upscale (or a post: `h3pipe.post`) is done
+    (docs/API.md's events). Only inside ComfyUI; never affects saving."""
     try:
         from server import PromptServer
         server = getattr(PromptServer, "instance", None)
         if server is None or not shot:
             return
-        server.send_sync("h3pipe.upscale", {"ep": os.path.abspath(root), "shot": shot,
-                                            "take": take, "status": status})
+        server.send_sync(event, {"ep": os.path.abspath(root), "shot": shot,
+                                 "take": take, "status": status})
     except Exception:
         pass
 
@@ -780,6 +792,11 @@ class H3SaveUpscale:
             "fit": (["crop", "pad"], {"default": "crop"}),
             # review (the default) or master (x264 CRF 12: for delivery)
             "quality": (list(QUALITIES), {"default": "review"}),
+            # the post pass: record which file it was made from (source_mp4, its
+            # size, mtime and sha1) when it is saved, not when it was queued (a
+            # post can be queued behind the upscale it is made from)
+            "stamp_source": ("BOOLEAN", {"default": False}),
+            "event": ("STRING", {"default": "h3pipe.upscale"}),
         }}
 
     RETURN_TYPES = ("STRING",)
@@ -789,7 +806,8 @@ class H3SaveUpscale:
     CATEGORY = "H3/upscale"
 
     def save(self, images, project_root, source_mp4, out_mp4, fps, sidecar="", encoder="auto",
-             width=0, height=0, fit="crop", quality="review"):
+             width=0, height=0, fit="crop", quality="review", stamp_source=False,
+             event="h3pipe.upscale"):
         root = os.path.normpath(project_root)
         out = _abs(root, out_mp4)
         source = _abs(root, source_mp4)
@@ -830,8 +848,11 @@ class H3SaveUpscale:
                         mp4=stem if ok else None,
                         audio=audio, encoder=used, quality=quality, save_ms=ms,
                         save_notes=f"{stem}: " + "; ".join(notes))
+            if stamp_source and ok:
+                data.update(_stamp(source))
             _write_json_atomic(path, data)
-            _notify(root, data.get("shot"), data.get("take"), "ok" if ok else "failed")
+            _notify(root, data.get("shot"), data.get("take"), "ok" if ok else "failed",
+                    event or "h3pipe.upscale")
         return (f"{stem}: " + "; ".join(notes),)
 
 

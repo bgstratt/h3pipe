@@ -1147,34 +1147,48 @@ def seedvr2_nodes(g: dict, up: UpscaleJob, images: list, model: str, width: int,
     """SeedVR2's nodes on `images` (the take's frames, or a re-sample's) to
     width x height, finished against them; returns the link to the result."""
     seed = int((up.take.sidecar or {}).get("seed") or 0) % (1 << 50)
+    return seedvr2_chain(g, images, model, width, height, seed, up.finish_inputs())
+
+
+def seedvr2_chain(g: dict, images: list, model: str, width: int, height: int, seed: int,
+                  finish: dict, prefix: str = "up_", chunk: int = 0, overlap: int = 2) -> list:
+    """SeedVR2 on `images` to width x height (the same size: a restoration),
+    finished against them by H3FinishUpscale with `finish`; the node ids start
+    with `prefix`. Returns the link to the result. The upscale's and the post
+    pass's (h3post). `chunk`: pixel frames per temporal chunk (4n+1), 0 for
+    auto, which sizes chunks to the VRAM free at the time, so two runs can split
+    a shot differently; `overlap`: latent frames crossfaded between chunks."""
+    p = prefix
+    chunking = ({"chunking_mode": "manual", "chunking_mode.frames_per_chunk": int(chunk)}
+                if chunk else {"chunking_mode": "auto"})
     tile = {"tile_size": 512, "overlap": 128, "temporal_size": 64, "temporal_overlap": 8}
     g.update({
-        "up_resize": {"class_type": "ImageScale", "inputs": {
+        p + "resize": {"class_type": "ImageScale", "inputs": {
             "image": images, "upscale_method": "lanczos", "width": width,
             "height": height, "crop": "disabled"}},
-        "up_pre": {"class_type": "SeedVR2Preprocess", "inputs": {"resized_images": ["up_resize", 0]}},
-        "up_vae": {"class_type": "VAELoader", "inputs": {"vae_name": SEEDVR2_VAE}},
-        "up_enc": {"class_type": "VAEEncodeTiled", "inputs": {"pixels": ["up_pre", 0], "vae": ["up_vae", 0], **tile}},
-        "up_chunk": {"class_type": "SeedVR2TemporalChunk", "inputs": {
-            "latent": ["up_enc", 0], "temporal_overlap": 2, "chunking_mode": "auto"}},
-        "up_unet": {"class_type": "UNETLoader", "inputs": {"unet_name": model,
-                                                          "weight_dtype": "default"}},
-        "up_cond": {"class_type": "SeedVR2Conditioning", "inputs": {
-            "model": ["up_unet", 0], "vae_conditioning": ["up_chunk", 0]}},
-        "up_ks": {"class_type": "KSampler", "inputs": {
-            "model": ["up_unet", 0], "positive": ["up_cond", 0], "negative": ["up_cond", 1],
-            "latent_image": ["up_chunk", 0], "seed": seed, "steps": 1, "cfg": 1.0,
+        p + "pre": {"class_type": "SeedVR2Preprocess", "inputs": {"resized_images": [p + "resize", 0]}},
+        p + "vae": {"class_type": "VAELoader", "inputs": {"vae_name": SEEDVR2_VAE}},
+        p + "enc": {"class_type": "VAEEncodeTiled", "inputs": {"pixels": [p + "pre", 0], "vae": [p + "vae", 0], **tile}},
+        p + "chunk": {"class_type": "SeedVR2TemporalChunk", "inputs": {
+            "latent": [p + "enc", 0], "temporal_overlap": int(overlap), **chunking}},
+        p + "unet": {"class_type": "UNETLoader", "inputs": {"unet_name": model,
+                                                           "weight_dtype": "default"}},
+        p + "cond": {"class_type": "SeedVR2Conditioning", "inputs": {
+            "model": [p + "unet", 0], "vae_conditioning": [p + "chunk", 0]}},
+        p + "ks": {"class_type": "KSampler", "inputs": {
+            "model": [p + "unet", 0], "positive": [p + "cond", 0], "negative": [p + "cond", 1],
+            "latent_image": [p + "chunk", 0], "seed": seed, "steps": 1, "cfg": 1.0,
             "sampler_name": "euler", "scheduler": "simple", "denoise": 1.0}},
-        "up_merge": {"class_type": "SeedVR2TemporalMerge", "inputs": {
-            "latents": ["up_ks", 0], "temporal_overlap": ["up_chunk", 1]}},
-        "up_dec": {"class_type": "VAEDecodeTiled", "inputs": {"samples": ["up_merge", 0], "vae": ["up_vae", 0], **tile}},
-        "up_post": {"class_type": "SeedVR2PostProcessing", "inputs": {
-            "images": ["up_dec", 0], "original_resized_images": ["up_resize", 0],
+        p + "merge": {"class_type": "SeedVR2TemporalMerge", "inputs": {
+            "latents": [p + "ks", 0], "temporal_overlap": [p + "chunk", 1]}},
+        p + "dec": {"class_type": "VAEDecodeTiled", "inputs": {"samples": [p + "merge", 0], "vae": [p + "vae", 0], **tile}},
+        p + "post": {"class_type": "SeedVR2PostProcessing", "inputs": {
+            "images": [p + "dec", 0], "original_resized_images": [p + "resize", 0],
             "color_correction_method": "lab"}},
-        "up_finish": {"class_type": "H3FinishUpscale", "inputs": {
-            "images": ["up_post", 0], "source": images, "chunk": 8, **up.finish_inputs()}},
+        p + "finish": {"class_type": "H3FinishUpscale", "inputs": {
+            "images": [p + "post", 0], "source": images, "chunk": 8, **finish}},
     })
-    return ["up_finish", 0]
+    return [p + "finish", 0]
 
 
 def pixel_graph(up: UpscaleJob) -> dict:

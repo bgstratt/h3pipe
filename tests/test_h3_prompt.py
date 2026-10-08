@@ -127,3 +127,31 @@ class GoldenShapeTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class WholePictureTest(unittest.TestCase):
+    """`sheet_panels: 1`: a supplied single picture (a portrait, not a model
+    sheet) is described as the whole picture and sent uncropped."""
+
+    def setUp(self):
+        SERIES["subjects"]["bo"]["sheet_panels"] = 1
+        self.addCleanup(SERIES["subjects"]["bo"].pop, "sheet_panels")
+
+    def test_only_that_subject_is_described_whole(self):
+        lines = defs_of(["ada", "bo"])
+        ada = next(ln for ln in lines if ln.startswith("<Subject 1> is Ada"))
+        bo = next(ln for ln in lines if ln.startswith("<Subject 2> is Bo"))
+        self.assertIn("three-quarter view", ada)
+        self.assertIn("the whole picture of them", bo)
+        self.assertNotIn("three-quarter", bo)
+
+    def test_the_loader_keeps_a_one_panel_picture_whole(self):
+        try:
+            import torch
+            sys.path.insert(0, os.path.join(ROOT, "comfy_nodes"))
+            from h3_shotlist import crop_panels
+        except Exception as e:                  # noqa: BLE001 (no torch here)
+            self.skipTest(f"needs torch: {e}")
+        img = torch.zeros(1, 40, 80, 3)
+        self.assertEqual(tuple(crop_panels(img, 1, [0]).shape), (1, 40, 80, 3))
+        self.assertEqual(tuple(crop_panels(img, 4, [0]).shape), (1, 40, 20, 3))

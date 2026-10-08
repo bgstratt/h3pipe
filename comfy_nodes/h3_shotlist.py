@@ -476,8 +476,11 @@ class H3ShotListLoader:
                 continue
             img = load_image(path)
             if kind == "character":
-                img = crop_panels(img, panels_total, keep)
-                note = f"{sid} ({kind}) {os.path.basename(path)} [{img.shape[2]}x{img.shape[1]}, {mode_used}]"
+                # `sheet_panels: 1` in the series config: a single picture, sent whole
+                n_panels = int(entry.get("sheet_panels") or panels_total)
+                img = crop_panels(img, n_panels, keep)
+                how = "whole" if n_panels <= 1 else f"{mode_used} of {n_panels} panels"
+                note = f"{sid} ({kind}) {os.path.basename(path)} [{img.shape[2]}x{img.shape[1]}, {how}]"
             else:
                 note = f"{sid} ({kind}) {os.path.basename(path)} [{img.shape[2]}x{img.shape[1]}, whole]"
             refs.append(img)
@@ -648,6 +651,22 @@ class H3ShotInfo:
 # H3SaveShot
 # ---------------------------------------------------------------------------
 
+def loaded_refs(info: str) -> list[str]:
+    """The reference lines of H3ShotListLoader's `info` (under "refs:", and a
+    RENDERED WITHOUT line), as a take records them; [] for none."""
+    out, inside = [], False
+    for line in (info or "").splitlines():
+        if line.startswith("RENDERED WITHOUT"):
+            out.append(line.strip())
+        elif line.strip() == "refs:":
+            inside = True
+        elif inside and line.startswith("  "):
+            out.append(line.strip())
+        elif inside:
+            inside = False
+    return out
+
+
 def _write_json_atomic(path: str, data) -> None:
     """Same bytes and atomicity as h3takes.write_json (not importable here):
     temp file in the same folder, then os.replace; LF, indent 2, trailing newline."""
@@ -769,6 +788,9 @@ class H3SaveShot:
                 # the sampler's latent, kept for an upscale (h3jobs links it
                 # when the render asks for it)
                 "latent": ("LATENT",),
+                # the loader's `info`: its reference lines (each picture, how
+                # it was cut, its size, its slot) go into the take's record
+                "ref_info": ("STRING", {"forceInput": True}),
             },
         }
 
@@ -807,7 +829,7 @@ class H3SaveShot:
     # -- main --------------------------------------------------------------
 
     def save(self, images, shot_id, audio_policy, project_root, subfolder,
-             take, fps, save_frames, audio=None, sidecar="", latent=None):
+             take, fps, save_frames, audio=None, sidecar="", latent=None, ref_info=""):
         from PIL import Image
 
         safe = re.sub(r"[^A-Za-z0-9_.-]", "_", shot_id) or "shot"
@@ -905,7 +927,8 @@ class H3SaveShot:
                     stem=stem, status="ok" if mp4_ok else "failed",
                     frames=int(images.shape[0]), fps=float(fps),
                     mp4=os.path.basename(mp4) if mp4_ok else None,
-                    thumb=thumb, strip=strip, save_ms=ms, latent=latent_file)
+                    thumb=thumb, strip=strip, save_ms=ms, latent=latent_file,
+                    loaded_refs=loaded_refs(ref_info))
             except Exception as exc:
                 notes.append(f"sidecar update failed: {exc}")
             else:
@@ -942,7 +965,8 @@ class H3SaveShot:
     def _finish_sidecar(sidecar: str, root: str, shot_id: str, take: int,
                         notes: list[str], *, stem: str, status: str, frames: int,
                         mp4, thumb, strip, fps: float | None = None,
-                        save_ms: dict | None = None, latent: str | None = None) -> None:
+                        save_ms: dict | None = None, latent: str | None = None,
+                        loaded_refs: list | None = None) -> None:
         """Close the take's record: set the saver's fields, leave the rest alone.
 
         Warnings go into `notes` first, so they reach both save_notes and the
@@ -975,6 +999,9 @@ class H3SaveShot:
         if latent:
             # the take's latent file, beside it (an upscale starts from it)
             data["latent"] = latent
+        if loaded_refs:
+            # what the loader fed the model: each picture, how it was cut, its size
+            data["loaded_refs"] = loaded_refs
         if save_ms:
             # what this node spent, in milliseconds, per step (frames, audio,
             # mp4, thumb, strip, total). ComfyUI only reports the whole graph's
