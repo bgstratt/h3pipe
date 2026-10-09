@@ -43,8 +43,13 @@ overlap: 39          # optional: frames of the previous clip held (latent only)
 - **`overlap:`** only matters for `latent`. Its default comes from series.json (proposed:
   `continuous: {"overlap": 39}` at the top level); a shot's own value beats it. `first` is
   always one frame.
-- **On a `#` header**, `continuous:` is a shortcut for "every shot after the first in this
-  sequence". A shot can override it, or break the chain with `continuous: none`.
+- **On a `#` header** (a sequence's, not the episode's `=` line), `continuous:` is a
+  shortcut for "every shot after the first **in this sequence**". It stops at the next `#`;
+  there is no episode-wide default, since a new sequence is a new place or time. A shot can
+  override it, or break the chain with `continuous: none`.
+- **Across a sequence boundary**, only the shot itself can say it: `continuous:` written on
+  the first shot of a sequence continues from the previous shot in the cut, the last of the
+  sequence before. That's for the rare case where the same moment carries on.
 - **`first:` goes back to meaning only the keyframe:** `generate`, `import`, `none` or a
   path. It no longer takes `continuity`.
 
