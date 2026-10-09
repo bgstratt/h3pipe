@@ -3,10 +3,11 @@
   model        minimax_h3_ref2va_pruned_int8_convrot.safetensors
   lora         minimax_h3_ref2v_lightx2v_turbo_4step_v0.1_resized_avg_rank_20_bf16.safetensors
   ------------------------------------------------------------
-  1 sequences, 2 shots
-  runtime      0:05.38  (scripted 0:05.08, +7f grid pad)
-  audio        2x generate
+  2 sequences, 5 shots
+  runtime      0:16.21  (scripted 0:15.21, +24f grid pad)
+  audio        5x generate
   references   0/3 on disk, 3 to make
+    ! sh090: overlap 30 holds 39 frames (H3 holds 17j+5: 22, 39, 56, 73, ...)
     ! sequence sq01: Ada and Bo each get their own shot on the same plate (kitchen), so they are drawn against one background from one view and the cut reads as a single camera rather than a reverse angle. Give the location an angle per speaker and name it with `plate:`.
     ! line 42: `first: continuity` on shot sh050 is the old form: write `continuous: first`
 

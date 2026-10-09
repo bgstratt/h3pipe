@@ -2112,7 +2112,68 @@ def refresh_continuity(s: Series, pass_: str, shots=None, dry_run: bool = False)
         except (NotUsable, RefError, UnknownRef, FfmpegMissing, OSError) as e:
             out["live"].pop(shot, None)
             out["errors"].append({"shot": shot, "error": str(e)})
+    chains_before_render(s, pass_, batch, out)
     return out
+
+
+def chains_before_render(s: Series, pass_: str, batch: set | None, out: dict) -> None:
+    """refresh_continuity's part for `continuous: latent` shots (a built entry
+    with `hold`): each is `live` (queued in cut order, behind the shot it
+    continues); `wait` (`chain`: true) when that shot's take is in this batch
+    or still rendering, the previous take found as the render starts
+    (H3ChainLatent, chain_source); an error when there is nothing to continue,
+    now or coming. Nothing is cut: the take itself is read when it runs."""
+    try:
+        shots = J.episode_shots(s.ep, pass_)
+    except (FileNotFoundError, ValueError):
+        return
+    for doc, i in shots:
+        shot = doc["shots"][i]["id"]
+        if not doc["shots"][i].get("hold") or (batch is not None and shot not in batch):
+            continue
+        try:
+            prev = E.cut_neighbour(s.ep, pass_, shot, -1)
+        except KeyError:
+            continue                                    # not in this pass's cut
+        if prev is None:
+            out["errors"].append({"shot": shot, "error": f"continuous: latent, but {shot} is the "
+                                  f"first shot of the {pass_} cut: nothing to continue"})
+            continue
+        out["live"][shot] = {"after": prev.shot, "pass": pass_}
+        if batch is not None and prev.shot in batch:
+            out["wait"].append({"shot": shot, "after": prev.shot, "chain": True})
+            continue
+        busy = [t for t in T.list_takes(s.ep, prev.pass_, prev.shot) if t.status == "queued"]
+        if busy:
+            out["wait"].append({"shot": shot, "after": prev.shot, "take": busy[-1].take,
+                                "chain": True})
+            continue
+        try:
+            keyframe_source(s, shot, "first", pass_)
+        except (NotUsable, RefError, UnknownRef) as e:
+            out["live"].pop(shot, None)
+            out["errors"].append({"shot": shot, "error": f"continuous: latent: {e}"})
+
+
+def chain_source(ep: str, shot: str, pass_: str) -> dict:
+    """When a `continuous: latent` shot starts rendering (H3ChainLatent): the
+    take the cut uses NOW for the shot before it (keyframe_source's rule; a
+    take queued ahead of it in the same run has just become it).
+    {"from": {shot, take, pass}, "latent": its kept latent or None, "video":
+    its mp4}. Raises when there is none."""
+    t, src_pass = keyframe_source(load_series(ep), shot, "first", pass_)
+    lat = t.paths.latent if os.path.isfile(t.paths.latent) else None
+    return {"from": {"shot": t.shot, "take": t.take, "pass": src_pass}, "latent": lat,
+            "video": t.paths.mp4}
+
+
+def chain_record(ep: str, sidecar: str, held: dict) -> None:
+    """The take's sidecar (relative to the episode) records what it continued:
+    `continued_from` {shot, take, pass, via: latent | frames, overlap,
+    video_steps, audio_steps}."""
+    full = sidecar if os.path.isabs(sidecar) else os.path.join(ep, sidecar)
+    if os.path.isfile(full):
+        T.update_sidecar(full, continued_from=held)
 
 
 def continuity_at_start(ep: str, shot: str, pass_: str, sidecar: str = "") -> dict:

@@ -242,6 +242,126 @@
           "continuous": "first"
         }
       ]
+    },
+    {
+      "id": "sq03",
+      "location": "kitchen",
+      "continuous": "latent",
+      "overrides": {
+        "model": null,
+        "lora": null,
+        "steps": null
+      },
+      "source": {
+        "line": 56
+      },
+      "shots": [
+        {
+          "id": "sh070",
+          "cast": [
+            "bo"
+          ],
+          "props": [],
+          "plate": "kitchen",
+          "size": "medium",
+          "camera": null,
+          "action": "Bo sets his cup down on the counter and turns toward the window.",
+          "dialogue": [],
+          "sound": null,
+          "music": null,
+          "extras": null,
+          "text": null,
+          "timing": {
+            "seconds": 3.04
+          },
+          "pace": null,
+          "audio": null,
+          "preserve": null,
+          "seed_key": "cont01/sq03/sh070",
+          "overrides": {
+            "model": null,
+            "lora": null,
+            "steps": null
+          },
+          "source": {
+            "line": 60,
+            "end_line": 64
+          }
+        },
+        {
+          "id": "sh080",
+          "cast": [
+            "bo"
+          ],
+          "props": [],
+          "plate": "kitchen",
+          "size": "medium",
+          "camera": null,
+          "action": "Bo crosses to the window and wipes the fog off the glass with his sleeve.",
+          "dialogue": [],
+          "sound": null,
+          "music": null,
+          "extras": null,
+          "text": null,
+          "timing": {
+            "seconds": 4.04
+          },
+          "pace": null,
+          "audio": null,
+          "preserve": null,
+          "seed_key": "cont01/sq03/sh080",
+          "overrides": {
+            "model": null,
+            "lora": null,
+            "steps": null
+          },
+          "source": {
+            "line": 67,
+            "end_line": 71
+          }
+        },
+        {
+          "id": "sh090",
+          "cast": [
+            "ada",
+            "bo"
+          ],
+          "props": [],
+          "plate": "kitchen",
+          "size": "wide",
+          "camera": null,
+          "action": "Ada comes in behind him and stops at his shoulder.",
+          "dialogue": [
+            {
+              "speaker": "ada",
+              "mode": "on",
+              "delivery": "",
+              "line": "Still raining?"
+            }
+          ],
+          "sound": null,
+          "music": null,
+          "extras": null,
+          "text": null,
+          "timing": {
+            "seconds": 3.04
+          },
+          "pace": null,
+          "audio": null,
+          "preserve": null,
+          "seed_key": "cont01/sq03/sh090",
+          "overrides": {
+            "model": null,
+            "lora": null,
+            "steps": null
+          },
+          "source": {
+            "line": 74,
+            "end_line": 80
+          },
+          "overlap": 30
+        }
+      ]
     }
   ]
 }

@@ -1158,7 +1158,8 @@ def shot_targets(story, series_cfg: dict) -> dict[str, str]:
     renders its mode. `first` on one that reads no first keyframe (H3 Ref2VA)
     renders on that target's partner for it (its target.json `continuous.first`:
     H3 FL2VA) -- unless the shot names its own target, which is then an error, as
-    is a mode neither renders. `latent` isn't built yet (phase b): an error."""
+    is a mode neither renders. `latent` renders on a target whose
+    `continuous.modes` lists it (H3 Ref2VA)."""
     profiles = series_profiles(series_cfg)
     default = video_target(series_cfg)
     known = [x.id for x in list_targets("video")]
@@ -1183,11 +1184,6 @@ def shot_targets(story, series_cfg: dict) -> dict[str, str]:
 def continuous_target(shot_id: str, mode: str, t: "Target", named: bool,
                       known: list[str]) -> str:
     """The target a shot continuing by `mode` renders on (shot_targets)."""
-    if mode == "latent":
-        raise ValueError(
-            f"shot {shot_id}: `continuous: latent` (chaining on the previous take's latent) "
-            f"isn't built yet (docs/CONTINUOUS.md, phase b): use `continuous: first` for "
-            f"now, which opens on the previous shot's last frame")
     if mode in continuous_modes(t):
         return t.id
     partner = (t.spec.get("continuous") or {}).get(mode)

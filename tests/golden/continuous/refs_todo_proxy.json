@@ -7,7 +7,10 @@
     "exists": false,
     "blocks_shots": [
       "sh010",
-      "sh040"
+      "sh040",
+      "sh070",
+      "sh080",
+      "sh090"
     ]
   },
   {
@@ -17,7 +20,8 @@
     "size_hint": "4096x1024 or larger (horizontal 4-panel strip)",
     "exists": false,
     "blocks_shots": [
-      "sh010"
+      "sh010",
+      "sh090"
     ]
   },
   {
@@ -27,7 +31,10 @@
     "size_hint": "4096x1024 or larger (horizontal 4-panel strip)",
     "exists": false,
     "blocks_shots": [
-      "sh040"
+      "sh040",
+      "sh070",
+      "sh080",
+      "sh090"
     ]
   }
 ]

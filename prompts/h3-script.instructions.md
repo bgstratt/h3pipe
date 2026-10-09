@@ -1059,8 +1059,8 @@ sound: running footsteps on grass, fabric movement
 | `profile: dialogue_close` | a render profile from the series config; also valid under a `#` header |
 | `target: ltx2` | the video model for this shot or sequence (`minimax_h3_ref2va`, `ltx2`, `ltx2_ingredients`, `minimax_h3_fl2va`, `wan22_i2v`, `wan22_ti2v` or `wan22_vace`); see below |
 | `first: generate` / `last: refs/x.png` | how this shot's first / last keyframe is made: `generate`, `import`, `none`, or a path to an image; also valid under a `#` header (the default of its shots); see **Keyframes** |
-| `continuous: first` | this shot carries straight on from the previous one in the cut: `first` (open on its last frame) or `latent` (not built yet); under a `#` header, every shot after the sequence's first; `none` breaks the chain; see **Continuous shots** |
-| `overlap: 39` | frames of the previous clip a `continuous: latent` shot holds (not built yet) |
+| `continuous: first` | this shot carries straight on from the previous one in the cut: `first` (open on its last frame) or `latent` (hold the previous take's last frames and carry on from them); under a `#` header, every shot after the sequence's first; `none` breaks the chain; see **Continuous shots** |
+| `overlap: 39` | frames of the previous take a `continuous: latent` shot holds (39, the default, is right almost always; any other number rounds up to 22, 39, 56, 73, ...); also valid under a `#` header |
 | `NAME: line` | dialogue from someone on screen (the name is a character's key, in capitals) |
 | `NAME (breathless): line` | a delivery direction, written into the prompt |
 | `NAME (V.O.): line` | voiceover: speaks, is not drawn, costs no reference slot |
@@ -1318,16 +1318,41 @@ continuous: first
   target that reads a first frame (`minimax_h3_fl2va`, `ltx2`, the Wan targets). A shot on
   H3 Ref2VA (which doesn't) builds on **H3 FL2VA instead**, by itself, unless the shot names
   its own `target:` (then it's an error that says which targets can).
-- `latent`: it continues the previous take's latent itself, keeping its own reference
-  sheets: **not built yet** (docs/CONTINUOUS.md); a build stops on it.
+- `latent`: it carries on from the previous take's last frames and their sound, on H3
+  Ref2VA, keeping its own reference sheets. The render holds the end of the previous take
+  at its head and generates the rest from there, so motion, sound and the camera carry
+  across the join; the held frames are cut off again, and the take starts where the
+  previous one ended. Use it for one action running across a cut in framing that the
+  same reference sheets can draw (a camera that keeps moving, someone walking into the
+  frame of the next shot). See **How much a latent shot holds** below.
 - Only the shot that continues says it. "Previous" is the previous shot in the cut, so
   moving a shot on the timeline changes what it continues from.
 - Under a `#` header, `continuous:` covers every shot after the first **in that sequence**
   (it stops at the next `#`). A shot breaks the chain with `continuous: none`. A shot can
   also say it on the first shot of a sequence, continuing the last shot of the one before.
 - Old scripts: `first: continuity` reads as `continuous: first`, and `continuous: yes` under
-  a header as `continuous: latent` (which stops the build until it's built). `h3.py check`
-  says how to write each.
+  a header as `continuous: latent`. `h3.py check` says how to write each.
+
+**How much a latent shot holds: `overlap:`.** The number of frames of the previous take
+held at the head of the render. Leave it alone: **39 frames (1.6 s), the default**, is what
+was tested. Fewer frames give H3 too little motion to carry on: at 22, with the sound not
+held, someone walking in popped into frame and was then drawn twice. More frames cost
+render time without a better join. H3 can only hold certain lengths (22, 39, 56, 73, ...:
+17 more each time), so any other number is **rounded up** to the next one, and
+`h3.py check` says so (`overlap: 30` holds 39). Set it on a shot, under a `#` header for its
+shots, or for the whole series in the series config:
+
+```
+"continuous": { "overlap": 39 }
+```
+
+The held frames are rendered and thrown away, so a latent shot costs about 40% more render
+time than the same shot cut fresh, and its take can run up to 16 frames (0.7 s) longer than
+its `dur:` asks, like any H3 length. It continues whichever take the cut uses for the
+previous shot when its render **starts**: a whole chain can be queued at once, each shot
+behind the one it continues. The previous take's kept latent is used when it has one (the
+final pass keeps them, `upscale.save_latents`); otherwise its last frames and sound are read
+back through H3's VAEs, which works for any take, even one from another target.
 
 **Generating a keyframe** writes a still from the shot: the look, the framing and the
 location, who is in frame (their `design`), and the action at that moment: for `first` how

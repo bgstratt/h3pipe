@@ -1,4 +1,0 @@
-exit 1
-
-  error in continuous_latent.md: shot sh020: `continuous: latent` (chaining on the previous take's latent) isn't built yet (docs/CONTINUOUS.md, phase b): use `continuous: first` for now, which opens on the previous shot's last frame
-

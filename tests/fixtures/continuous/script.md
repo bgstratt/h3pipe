@@ -52,3 +52,29 @@ who: ada
 size: medium
 dur: 3.04
 Ada walks on, past the neon sign, head down.
+
+# sq03  kitchen
+continuous: latent
+
+// the sequence's first shot: it doesn't continue
+## sh070
+who: bo
+size: medium
+dur: 3.04
+Bo sets his cup down on the counter and turns toward the window.
+
+// continues sh070 by the header, holding its last 39 frames (the default)
+## sh080
+who: bo
+size: medium
+dur: 4.04
+Bo crosses to the window and wipes the fog off the glass with his sleeve.
+
+// an overlap that isn't 17j+5 rounds up: 30 holds 39
+## sh090
+overlap: 30
+who: ada, bo
+size: wide
+dur: 3.04
+Ada comes in behind him and stops at his shoulder.
+ADA: Still raining?

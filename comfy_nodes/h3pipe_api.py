@@ -750,6 +750,8 @@ def wait_reason(w: dict) -> str:
     """Where a chained continuity shot's first frame will come from (refresh_continuity's `wait`)."""
     what = (f"{w['after']} t{w['take']:02d}, still rendering" if w.get("take")
             else f"{w['after']}'s new take in this run")
+    if w.get("chain"):
+        return f"it continues {what} (its latent, else its last frames)"
     return f"its first frame is cut from {what} when its render starts"
 
 

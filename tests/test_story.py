@@ -107,6 +107,11 @@ class FixtureTest(unittest.TestCase):
                             sh["steps"] = int(sh["steps"])
                     if "steps" in sq:
                         sq["steps"] = int(sq["steps"])
+                # a `continuous: latent` shot carries its overlap to compile
+                for sq_ir, sq in zip(story.sequences, want["sequences"]):
+                    for s, sh in zip(sq_ir.shots, sq["shots"]):
+                        if s.continues(sq_ir) == "latent":
+                            sh["_latent"] = s.overlap if s.overlap is not None else sq_ir.overlap
                 self.assertEqual(h3build.legacy_episode(story), want)
 
 

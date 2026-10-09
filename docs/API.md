@@ -278,6 +278,14 @@ Queues takes on ComfyUI's own queue and returns without waiting.
   from the current take (`continuity`: `[{shot, from, why}]`); the shots cut at start are in
   `continuity_at_start` (`[{shot, after}]`). One with nothing to start from, now or coming,
   is an error and isn't queued.
+- Latent chains (`h3refs.chains_before_render`): a `continuous: latent` shot (its built
+  entry's `hold`) queues the same way, in cut order behind the shot it continues, and is in
+  `continuity_at_start` while that shot's take is in the request or still rendering. Its
+  graph has H3ChainLatent before the sampler, which finds the previous take as it runs
+  (`h3refs.chain_source`: its kept latent, else its last frames through the VAEs) and
+  records it in the take's sidecar (`continued_from`: `{shot, take, pass, via, overlap,
+  video_steps, audio_steps}`), and H3ChainTrim before the saver. The sidecar's `hold` is
+  the frames held; `length` is the take's own.
 ```json
 {"queued": [{"shot": "sh020", "take": 3, "prompt_id": "…", "seed": "…",
              "seed_source": "new"}],

@@ -13,9 +13,11 @@
   },
 
   "continuous": {
-    "_note": "docs/CONTINUOUS.md. `latent`: the previous take's latent tail held at the head (phase b, not built yet). `continuous: first` needs a first keyframe, which Ref2VA doesn't read: such a shot builds on `first` (H3 FL2VA) instead, unless it names its own target.",
+    "_note": "docs/CONTINUOUS.md. `latent`: the previous take's last `overlap` frames (rounded up to 17j+5) held at the head of the render, video and audio, by H3ChainLatent between `sampler`'s `input` and its source; it reads the previous take's kept latent, else encodes its last frames through the VAEs. The held frames are trimmed off before the saver (H3ChainTrim). `continuous: first` needs a first keyframe, which Ref2VA doesn't read: such a shot builds on `first` (H3 FL2VA) instead, unless it names its own target.",
     "modes": ["latent"],
-    "first": "minimax_h3_fl2va"
+    "first": "minimax_h3_fl2va",
+    "latent": {"overlap": 39, "hold_audio": true,
+               "sampler": {"class_type": "SamplerCustomAdvanced", "input": "latent_image"}}
   },
 
   "recipe": {

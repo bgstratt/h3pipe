@@ -899,6 +899,12 @@ def _plan(root: str, take: T.Take, *, scale: float | None = None,
             raise UpscaleError(f"{job.label} has no frozen shotlist to upscale from")
         if r == "latent" and not has_latent:
             raise UpscaleError(f"{job.label} kept no latent: upscale it through the VAE")
+        if r == "vae" and sc.get("hold"):
+            # continuous: latent: the render was the held frames and the take;
+            # its frames alone don't rebuild it
+            raise UpscaleError(f"{job.label} continues the shot before it (it held "
+                               f"{sc['hold']} frames of it): its upscale re-samples its kept "
+                               f"latent, and it has none. Render it again keeping its latent")
         if not w or not h:
             raise UpscaleError(f"{job.label}'s sidecar doesn't say its size")
         if fixed_scale(spec) is not None and s != fixed_scale(spec):
@@ -1060,6 +1066,11 @@ def upscale_graph(base: dict, up: UpscaleJob) -> dict:
     t, spec, take = up.target, up.spec, up.take
     b = t.binding
     g = J.graph_for(base, take_job(up), take, review_copy=False)
+    for v in g.values():
+        if v["class_type"] == "H3ChainTrim":
+            # continuous: latent: the re-sample is the whole render, held frames
+            # and all, cut back to the take here; its sound comes from the take
+            v["inputs"].pop("audio", None)
     if up.first_from is not None:
         continuity_frame(g, up)
     saver = J.node_of(g, b.saver_class)

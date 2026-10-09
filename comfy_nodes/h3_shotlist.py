@@ -406,7 +406,11 @@ class H3ShotListLoader:
                 raise ValueError(f"shot {shot.get('id')}: audio_out must follow audio_in")
         else:
             duration = float(shot.get("duration", defaults.get("duration", 3.04)))
-        length = snap_up(max(1, round(duration * fps)))
+        # continuous: latent (docs/CONTINUOUS.md): `hold` more frames, the
+        # previous take's last ones held at the head (H3ChainLatent) and
+        # trimmed off after decoding (H3ChainTrim)
+        hold = int(shot.get("hold") or 0)
+        length = snap_up(max(1, round(duration * fps)) + hold)
 
         # ---- references --------------------------------------------------
         # Slots 1-3 are the shot's subjects (characters first, then props and
@@ -575,10 +579,12 @@ class H3ShotListLoader:
             if not src:
                 audio_note = f"{policy} <- recording MISSING (no audio reference)"
             elif "audio_in" in shot and not shot.get("audio_file"):
-                audio_refs[0] = load_audio(src, float(shot["audio_in"]),
-                                           float(shot["audio_out"]))
+                # a held head starts the window that much earlier on the
+                # recording, so the voices land where the shot's own frames are
+                a_in = max(0.0, float(shot["audio_in"]) - hold / fps)
+                audio_refs[0] = load_audio(src, a_in, float(shot["audio_out"]))
                 audio_note = (f"{policy} <- {os.path.basename(src)} "
-                              f"[{shot['audio_in']:.2f}..{shot['audio_out']:.2f}]")
+                              f"[{a_in:.2f}..{shot['audio_out']:.2f}]")
             else:
                 audio_refs[0] = load_audio(src)
                 audio_note = f"{policy} <- {os.path.basename(src)}"
@@ -596,7 +602,7 @@ class H3ShotListLoader:
         # scheduler widget happens to say.
         steps = int(shot.get("steps", defaults.get("steps", 4)))
 
-        pad = length - round(duration * fps)
+        pad = length - hold - round(duration * fps)
         # 1-based, and stated as "of N" rather than "/ N-1". The Shot Index
         # widget is NOT a progress readout: ComfyUI serializes the whole batch
         # up front, incrementing the widget once per prompt at queue time, so it
@@ -606,7 +612,8 @@ class H3ShotListLoader:
         info = "\n".join([
             f"shot {pos + 1} of {len(shots)}   —   {shot.get('id', '?')}",
             f"{width}x{height}   {length} frames   {length / fps:.2f}s   {steps} steps"
-            f"   (asked {duration:.2f}s, pad {pad}f)",
+            f"   (asked {duration:.2f}s, pad {pad}f)"
+            + (f"   holding {hold}f of the previous take" if hold else ""),
             f"subjects: {', '.join(subject_ids) if subject_ids else '- (plate only)'}   size: {size}",
             f"voices: {', '.join(shot.get('voices', [])) or '-'}",
             f"audio: {audio_note}",

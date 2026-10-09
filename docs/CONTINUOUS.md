@@ -117,7 +117,14 @@ one (`upscale.save_latents`, final-only by default).
 
 ## Open questions
 
-1. **`overlap` length: 22 or 39 frames.** obvpm's code says a latent held exactly (video and
+1. **`overlap` length: settled, 39 frames** (prototype, 2026-10-09: ep02 sh520 → sh530 on a
+   scratch copy). Both versions opened exactly on sh520's last frame. The 39-frame hold,
+   video and audio, then carried on coherently: Hector kept sipping, Denise walked in and
+   past, the camera tracked her, as the action says. The 22-frame video-only hold had
+   Denise pop in beside Hector by frame 20 and duplicated her from frame 80. Default 39;
+   `overlap:` takes the other hold lengths that slice cleanly off H3's latent (17j+5: 22,
+   56, 73, ...). Cost: a 124-frame shot renders 175 frames (the hold plus the grid
+   rounding, trimmed off), about 40% more time. The original question, for the record: obvpm's code says a latent held exactly (video and
    audio, noise mask 0) must sit on H3's shared audio/video grid. The smallest length that
    fits is 39 frames (≈1.6 s), and their 22-frame window is bumped to 39 when held. 22 works
    as a "guide": conditioning, not held exactly, so softer. Phase b prototypes both on one
@@ -176,28 +183,61 @@ Decisions made while building it:
       `examples/` if any use the old forms.
 - [x] Tests: parsing, migration warnings, header default and `none`, the auto-switch (ready
       / not ready), latent "not built yet", goldens.
-- [ ] Migrate the real scripts (Porchlights and the others) with `h3.py check`'s advice;
-      confirm each still builds the same shots on the same targets.
+- [x] Migrate the real scripts (Porchlights and the others) with `h3.py check`'s advice;
+      confirm each still builds the same shots on the same targets. (Only Porchlights ep01
+      used the old form: 14 lines; its shotlists build identically.)
 
 ### (b) `continuous: latent` (prototype on one Porchlights chain, then build)
 
-- [ ] Prototype: a hand-built Ref2VA graph holding the previous take's latent tail (video
+Built (2026-10-09). How it fits together:
+
+- **Build.** A latent shot's entry gets `hold`: its overlap (the shot's, the header's, the
+  series config's `continuous.overlap`, else the target's `continuous.latent.overlap`, 39),
+  rounded **up** to 17j+5 with a check warning when that changes it. Its render is
+  `snap(asked + hold)` frames; the take keeps the **end** of it, `length = render - hold`,
+  so up to 16 frames over what was asked, like any H3 snap. The end, not the start: the
+  take's latent tail is then its video tail, which a shot after it holds.
+- **Loader.** Renders `snap(asked + hold)` frames; a dub's recording window starts `hold`
+  frames earlier, so the voices land under the shot's own frames.
+- **Graph** (`h3jobs.chain_latent`, from target.json `continuous.latent`): H3ChainLatent
+  between MiniMaxH3ReferenceToVideo's latent and the sampler, fed both VAEs; H3ChainTrim
+  on everything the decoders fed (the saver, the review copy).
+- **At run time** the node asks `h3refs.chain_source` for the take the cut uses for the
+  previous shot NOW (keyframe_source's rule): its kept latent, else (none, another size,
+  not an H3 latent) its last `hold` frames and their sound encoded through the VAEs. So no
+  take ever has to be re-rendered to be continued. The sidecar records `continued_from`.
+- **Queueing** (`h3refs.chains_before_render`, inside refresh_continuity): a chain queues
+  in cut order and waits on the take ahead of it; nothing to continue is an error.
+- **Upscale** (phase c's minimum): a held take re-samples its whole kept latent and
+  H3ChainTrim cuts it back before the saver; without a kept latent it can't be upscaled
+  (its frames alone don't rebuild the render).
+
+- [x] `overlap:` (and series.json `continuous.overlap`) rounds up to a 17j+5 hold, with a
+      warning; default 39.
+
+- [x] Prototype: a hand-built Ref2VA graph holding the previous take's latent tail (video
       and audio, noise mask 0) at the head of the new latent; trim after decode. Try 22 and
       39 frames; look at the join. Answer the two open questions.
-- [ ] comfy_nodes: a loader node that reads the previous take's latent when the render
+- [x] comfy_nodes: a loader node that reads the previous take's latent when the render
       runs, slices its tail, and builds the head-held latent and noise mask (audio feather
       if needed).
-- [ ] Ref2VA compile and graph: the node wired in for a `continuous: latent` shot, the
+- [x] Ref2VA compile and graph: the node wired in for a `continuous: latent` shot, the
       length grown by `overlap` (on H3's frame grid), the trim after decode, the take's
       sidecar recording what it continued from.
-- [ ] Keeping latents: a take whose next shot in the cut is `continuous: latent` keeps one
-      in both passes; queueing a chained shot whose previous take has none says to
-      re-render it.
-- [ ] Queue order: chains in cut order, as for `first`.
-- [ ] Docs and tests.
+- [x] ~~Keeping latents~~: dropped. A previous take without a kept latent is encoded from
+      its last frames and sound instead (the same VAE route an upscale uses), so any take
+      can be continued: a proxy, an old take, one from another target.
+- [x] Queue order: chains in cut order, as for `first`.
+- [x] Docs and tests (AUTHORING.md **Continuous shots**, API.md, the `continuous` fixture's
+      sq03, tests/test_latent_chain.py).
+- [ ] A live render through the pipeline: a Porchlights chain queued at once, one link
+      from a kept latent and one from frames; step across each join.
+- [ ] Staleness: a latent shot whose previous take changed since it rendered (another pick,
+      a re-render) should read as stale, as a `first` keyframe does.
 
 ### (c) `continuous: latent` upscales
 
+- [x] A held take's upscale re-samples the whole render and trims it (built with b).
 - [ ] An upscale keeps its re-sampled latent (`<take>.up.latent.safetensors`) when a
       `continuous: latent` shot follows it.
 - [ ] A `continuous: latent` shot's re-sample holds its head on the previous shot's upscaled
