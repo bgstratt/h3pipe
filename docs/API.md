@@ -98,8 +98,10 @@ queued takes whose ComfyUI job is gone (`h3takes.sweep_queued`, with `as_of` tak
  }]}
 ```
 - `status` is `queued` | `ok` | `failed`.
-- `stale` holds any of `script`, `ref`, `preset`; `unknown` means a take from before
-  sidecars.
+- `stale` holds any of `script`, `ref`, `preset` (and `target`, `chain`: a
+  `continuous: latent` take whose previous shot in the cut now uses another take, or that
+  take was rendered again, or the cut puts another shot before it); `unknown` means a
+  take from before sidecars.
 - `thumb`, `strip` and `mp4` are null when the file is missing.
 - `length` / `seconds` are the build's. A take's `frames` is its real frame count, from
   the saver (its sidecar's `frames`), or null (not rendered, or a take from before the

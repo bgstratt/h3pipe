@@ -230,10 +230,13 @@ Built (2026-10-09). How it fits together:
 - [x] Queue order: chains in cut order, as for `first`.
 - [x] Docs and tests (AUTHORING.md **Continuous shots**, API.md, the `continuous` fixture's
       sq03, tests/test_latent_chain.py).
-- [ ] A live render through the pipeline: a Porchlights chain queued at once, one link
-      from a kept latent and one from frames; step across each join.
-- [ ] Staleness: a latent shot whose previous take changed since it rendered (another pick,
-      a re-render) should read as stale, as a `first` keyframe does.
+- [x] A live render through the pipeline (scratch copy of ep02, sh520 -> sh530, 2026-10-09):
+      from the kept latent it reproduced the prototype take (1.3/255 mean difference); from
+      the frames it rendered its own, as seamless (joins step 8.2-8.4 against sh520's own
+      7.9-9.1). Queueing both shots at once is unit-tested only.
+- [x] Staleness: a latent take is stale `chain` (h3edit.chain_changed) when the cut puts
+      another shot before it, uses another take of that shot, or that take's mp4 changed
+      (`continued_from.sha1`).
 
 ### (c) `continuous: latent` upscales
 

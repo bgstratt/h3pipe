@@ -160,6 +160,47 @@ class ChainBuildTest(unittest.TestCase):
         self.assertFalse([e for e in out["errors"] if e["shot"] in ("sh080", "sh090")])
 
 
+class ChainStaleTest(unittest.TestCase):
+    """A latent take is stale `chain` when what the cut puts before it changed."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = self._tmp.name
+        build(self.root)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def take(self, sid: str, **sidecar) -> T.Take:
+        doc, i = J.find_shot(self.root, "final", sid)
+        job = J.plan_job(self.root, "final", doc, i, J.RenderRequest(sid, seed_mode="new"), {})
+        t = J.start_job(job)
+        with open(t.paths.mp4, "wb") as fh:
+            fh.write(f"{sid} {t.take}".encode())
+        T.update_sidecar(t.paths.sidecar, status="ok", finished=T.now(), **sidecar)
+        return T.get_take(self.root, "final", sid, t.take)
+
+    def stale(self, t: T.Take) -> list[str]:
+        import h3edit as E
+        doc, i = J.find_shot(self.root, "final", t.shot)
+        return E.take_stale(self.root, "final", doc, doc["shots"][i], t.sidecar,
+                            "minimax_h3_ref2va", {})
+
+    def test_another_take_or_a_re_render_before_it(self):
+        a = self.take("sh070")
+        held = {"shot": "sh070", "take": a.take, "pass": "final",
+                "sha1": T.file_sha1(a.paths.mp4), "via": "latent", "overlap": 39}
+        b = self.take("sh080", continued_from=held)
+        self.assertNotIn("chain", self.stale(b))
+        with open(a.paths.mp4, "ab") as fh:              # sh070 t01 rendered again
+            fh.write(b" again")
+        self.assertIn("chain", self.stale(b))
+        b = self.take("sh080", continued_from=dict(held, sha1=T.file_sha1(a.paths.mp4)))
+        self.assertNotIn("chain", self.stale(b))
+        self.take("sh070")                               # a newer take: the cut uses it
+        self.assertIn("chain", self.stale(b))
+
+
 try:
     import torch
     HAVE_TORCH = True

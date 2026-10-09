@@ -2159,17 +2159,18 @@ def chain_source(ep: str, shot: str, pass_: str) -> dict:
     """When a `continuous: latent` shot starts rendering (H3ChainLatent): the
     take the cut uses NOW for the shot before it (keyframe_source's rule; a
     take queued ahead of it in the same run has just become it).
-    {"from": {shot, take, pass}, "latent": its kept latent or None, "video":
-    its mp4}. Raises when there is none."""
+    {"from": {shot, take, pass, sha1 (of its mp4: a re-render shows)},
+    "latent": its kept latent or None, "video": its mp4}. Raises when there is
+    none."""
     t, src_pass = keyframe_source(load_series(ep), shot, "first", pass_)
     lat = t.paths.latent if os.path.isfile(t.paths.latent) else None
-    return {"from": {"shot": t.shot, "take": t.take, "pass": src_pass}, "latent": lat,
-            "video": t.paths.mp4}
+    return {"from": {"shot": t.shot, "take": t.take, "pass": src_pass,
+                     "sha1": T.file_sha1(t.paths.mp4)}, "latent": lat, "video": t.paths.mp4}
 
 
 def chain_record(ep: str, sidecar: str, held: dict) -> None:
     """The take's sidecar (relative to the episode) records what it continued:
-    `continued_from` {shot, take, pass, via: latent | frames, overlap,
+    `continued_from` {shot, take, pass, sha1, via: latent | frames, overlap,
     video_steps, audio_steps}."""
     full = sidecar if os.path.isabs(sidecar) else os.path.join(ep, sidecar)
     if os.path.isfile(full):
