@@ -65,11 +65,21 @@ def _overrides(d: dict | None = None) -> dict:
 
 
 def _put_choice(d: dict, node) -> None:
-    """`target`, `profile`, `first` and `last`, only when set (see the module
-    docstring)."""
+    """`target`, `profile`, `first` and `last` (and a shot's `continuous`,
+    `overlap` and legacy notes), only when set (see the module docstring)."""
     for k in ("target", "profile", "first", "last"):
         if getattr(node, k):
             d[k] = getattr(node, k)
+    for k in ("overlap", "legacy"):
+        if getattr(node, k, None):
+            d[k] = getattr(node, k)
+
+
+# `continuous:` (docs/CONTINUOUS.md): how a shot follows the previous one in
+# the cut. `first`: the previous take's last frame is its first keyframe;
+# `latent`: the previous take's latent tail is held at its head. `none` on a
+# shot breaks a sequence's chain.
+CONTINUOUS = ("first", "latent")
 
 
 @dataclass
@@ -115,13 +125,31 @@ class Shot:
     profile: str | None = None
     first: str | None = None         # `first:`: a keyframe method or an image path
     last: str | None = None
+    continuous: str | None = None    # `continuous:` on the shot: first | latent | none
+    overlap: int | None = None       # `overlap:`: frames of the previous clip a latent holds
+    legacy: list = field(default_factory=list)   # old forms read, for `h3.py check`
+
+    def continues(self, seq: "Sequence | None" = None) -> str | None:
+        """How this shot follows the previous one (CONTINUOUS), else None: its
+        own `continuous:` (`none` breaks the chain), else its sequence's for a
+        shot after the sequence's first."""
+        if self.continuous:
+            return None if self.continuous == "none" else self.continuous
+        if seq is not None and seq.continuous and seq.shots and seq.shots[0] is not self \
+                and seq.shots[0].id != self.id:
+            return seq.continuous
+        return None
 
     def keyframe(self, end: str, seq: "Sequence | None" = None) -> str | None:
         """The script's `first:` / `last:` for this shot: its own line, else
-        its sequence's, else None (the target and the refs listing decide)."""
+        its sequence's, else None (the target and the refs listing decide).
+        A shot that continues by `first` takes the previous shot's last frame:
+        its first keyframe's method is "continuity"."""
         own = getattr(self, end)
         if own:
             return own
+        if end == "first" and self.continues(seq) == "first":
+            return "continuity"
         return getattr(seq, end) if seq is not None else None
 
     def to_json(self) -> dict:
@@ -136,6 +164,8 @@ class Shot:
              "seed_key": self.seed_key, "overrides": dict(self.overrides),
              "source": dict(self.source)}
         _put_choice(d, self)
+        if self.continuous:
+            d["continuous"] = self.continuous
         if self.unparsed:
             d["unparsed"] = dict(self.unparsed)
         return d
@@ -153,14 +183,18 @@ class Shot:
                    seed_key=d.get("seed_key", ""), overrides=_overrides(d.get("overrides")),
                    source=dict(d.get("source", {})), unparsed=dict(d.get("unparsed", {})),
                    target=d.get("target"), profile=d.get("profile"),
-                   first=d.get("first"), last=d.get("last"))
+                   first=d.get("first"), last=d.get("last"),
+                   continuous=d.get("continuous"), overlap=d.get("overlap"),
+                   legacy=list(d.get("legacy") or []))
 
 
 @dataclass
 class Sequence:
     id: str
     location: str
-    continuous: bool = False
+    # `continuous:` under the `#` header: the CONTINUOUS mode of every shot
+    # after the first (None: they don't continue)
+    continuous: str | None = None
     overrides: dict = field(default_factory=_overrides)
     source: dict = field(default_factory=dict)
     shots: list[Shot] = field(default_factory=list)
@@ -169,9 +203,12 @@ class Sequence:
     profile: str | None = None
     first: str | None = None         # the default `first:` / `last:` of its shots
     last: str | None = None
+    overlap: int | None = None       # its shots' default `overlap:`
+    legacy: list = field(default_factory=list)
 
     def to_json(self) -> dict:
-        d = {"id": self.id, "location": self.location, "continuous": self.continuous,
+        # `false` when unset, as the old boolean was written
+        d = {"id": self.id, "location": self.location, "continuous": self.continuous or False,
              "overrides": dict(self.overrides), "source": dict(self.source)}
         _put_choice(d, self)
         if self.unparsed:
@@ -181,14 +218,17 @@ class Sequence:
 
     @classmethod
     def from_json(cls, d: dict) -> "Sequence":
+        c = d.get("continuous")
         return cls(id=d["id"], location=d["location"],
-                   continuous=bool(d.get("continuous", False)),
+                   # an old IR's `true` was the chaining `latent` stands for
+                   continuous=("latent" if c is True else c or None),
                    overrides=_overrides(d.get("overrides")),
                    source=dict(d.get("source", {})),
                    shots=[Shot.from_json(s) for s in d.get("shots", [])],
                    unparsed=dict(d.get("unparsed", {})),
                    target=d.get("target"), profile=d.get("profile"),
-                   first=d.get("first"), last=d.get("last"))
+                   first=d.get("first"), last=d.get("last"), overlap=d.get("overlap"),
+                   legacy=list(d.get("legacy") or []))
 
 
 @dataclass

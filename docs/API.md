@@ -271,7 +271,7 @@ Queues takes on ComfyUI's own queue and returns without waiting.
   of `h3pipe`, from an executor, and then calls `mark_queued`.
 - A failure while queueing marks that take failed (`mark_failed`) and is reported
   for that shot. The other shots still queue.
-- Continuity (`h3refs.refresh_continuity`): each `first: continuity` shot's first frame
+- Continuity (`h3refs.refresh_continuity`): each `continuous: first` shot's first frame
   is cut again when its render starts (H3ContinuityFrame replaces the LoadImage of its
   `first` input; `h3refs.continuity_at_start`), from the take the cut uses then, so a chain
   queues in one request, in cut order. Before queueing, a missing or stale keyframe is cut
@@ -1586,7 +1586,7 @@ left it open).
   - `none` means "don't use one", even when the target could.
 - **`GET /h3pipe/refs`** lists keyframe refs for every shot that needs one, or whose script asks for one, even before any take exists. Each carries:
   - `need: "required" | "optional"`;
-  - `method`: the script's, else `continuity` for a shot with a previous shot, else `generate`;
+  - `method`: the script's (a `continuous: first` shot's first is `continuity`), else `generate`;
   - `shot`, `which`, and the `target` that will read it.
   
   The Refs tab's "this episode" filter includes them; "missing" includes only required ones plus any whose script asks.
@@ -1673,9 +1673,10 @@ here too) or **[settled]** (the contract left it open).
 - **[settled]** Script lines `first:` / `last:` on a shot or a `#` header; IR `first` /
   `last` on shots and sequences, omitted when unset. `none` removes an optional keyframe
   from the built entry's `keyframes` (a required one stays: the shot stays blocked).
-- **[settled]** `method` defaults to `continuity` only for a **first** frame whose shot has a
-  previous shot **in the same sequence** (across sequences the location changes); else
-  `generate`. A path in the script is `method: "import"` with `import_path`.
+- **[settled, changed 2026-10-09]** `method` is `continuity` only for the **first** frame of
+  a `continuous: first` shot (docs/CONTINUOUS.md: the shot says it continues; it no longer
+  follows from having a previous shot); else `generate`. A path in the script is
+  `method: "import"` with `import_path`.
 - **[added]** Keyframe refs carry `shot`, `which`, `need`, `method`, `target` (the video
   target), `requested` (the script asks for one), `script` (the raw line), `reads` (whether
   the target reads that end), `import_path`, `cleared`, and with an edit keyframe target

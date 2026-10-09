@@ -1,0 +1,33 @@
+[
+  {
+    "path": "refs/_bg/kitchen.png",
+    "kind": "background plate",
+    "prompt": "A background plate drawn as a naturalistic live-action drama shot on 35mm film. An empty establishing view of a cramped diner kitchen at night, steel counters, a ticket rail. No characters, no props, no figures in frame — the environment only. Wide framing that shows the layout of the space.",
+    "size_hint": "1344x768 (the render resolution)",
+    "exists": false,
+    "blocks_shots": [
+      "sh010",
+      "sh040"
+    ]
+  },
+  {
+    "path": "refs/ada/ada_sheet_4panel.png",
+    "kind": "character sheet",
+    "prompt": "A character model sheet on a plain flat background: FOUR panels side by side in a single horizontal strip, left to right — three-quarter body, side profile full body, back view full body, and a head-and-shoulders facial close-up. The SAME character in all four. a tall woman in her thirties with short black hair and a green raincoat. Drawn as a naturalistic live-action drama shot on 35mm film. Output 4096x1024 or larger.",
+    "size_hint": "4096x1024 or larger (horizontal 4-panel strip)",
+    "exists": false,
+    "blocks_shots": [
+      "sh010"
+    ]
+  },
+  {
+    "path": "refs/bo/bo_sheet_4panel.png",
+    "kind": "character sheet",
+    "prompt": "A character model sheet on a plain flat background: FOUR panels side by side in a single horizontal strip, left to right — three-quarter body, side profile full body, back view full body, and a head-and-shoulders facial close-up. The SAME character in all four. a stocky man in his forties with a grey beard and a brown work jacket. Drawn as a naturalistic live-action drama shot on 35mm film. Output 4096x1024 or larger.",
+    "size_hint": "4096x1024 or larger (horizontal 4-panel strip)",
+    "exists": false,
+    "blocks_shots": [
+      "sh040"
+    ]
+  }
+]

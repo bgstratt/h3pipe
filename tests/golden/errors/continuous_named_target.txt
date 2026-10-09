@@ -1,0 +1,4 @@
+exit 1
+
+  error in continuous_named_target.md: shot sh020: `continuous: first` on minimax_h3_ref2va, which the shot names, but minimax_h3_ref2va can't render it: name one that can (ltx2, minimax_h3_fl2va, wan22_i2v, wan22_ti2v, wan22_vace), or drop the shot's `target:`
+

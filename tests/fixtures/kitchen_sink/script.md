@@ -72,7 +72,6 @@ BO (voiceover): Here we go again, then, everybody.
 CY (offscreen): Bo!
 
 # sq02  street
-continuous: yes
 model: seq_model.safetensors
 steps: 12
 
@@ -117,7 +116,7 @@ retention: reference
 The street empties; the neon sign flickers once and goes dark.
 NARRATOR (V.O.): And that was the last anyone saw of the kettle.
 
-// duration: alias; short continuous shot (chaining-cost warning)
+// duration: alias
 ## sh150
 who: ada
 duration: 1.00

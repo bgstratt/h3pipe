@@ -1,0 +1,110 @@
+{
+  "episode": "cont01",
+  "title": "Continuous",
+  "target": "minimax_h3_fl2va",
+  "defaults": {
+    "width": 448,
+    "height": 256,
+    "fps": 24.0,
+    "steps": 4,
+    "model": "minimax_h3_fl2va_pruned_int8_convrot.safetensors",
+    "lora": "minimax_h3_fl2v_lightx2v_turbo_4step_v0.1_comfy.safetensors",
+    "audio_policy": "generate",
+    "master_track": "",
+    "sampler": "euler",
+    "text_encoder": "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
+    "video_vae": "minimax_h3_video_vae_fp16.safetensors",
+    "audio_vae": "minimax_h3_audio_vae_fp32.safetensors"
+  },
+  "subjects": {
+    "ada": {
+      "kind": "character",
+      "sheet": "refs/ada/ada_sheet_4panel.png",
+      "voice_sample": ""
+    },
+    "bo": {
+      "kind": "character",
+      "sheet": "refs/bo/bo_sheet_4panel.png",
+      "voice_sample": ""
+    }
+  },
+  "shots": [
+    {
+      "id": "sh020",
+      "sequence": "sq01",
+      "subjects": [
+        "ada"
+      ],
+      "background": "refs/_bg/kitchen.png",
+      "size": "medium",
+      "length": 73,
+      "seed": 7997479955492041634,
+      "steps": 4,
+      "audio_policy": "generate",
+      "prompt": "integrated_multimodal_description: [Shot 1] A naturalistic live-action drama shot on 35mm film, a medium shot frames Ada against a cramped diner kitchen at night, steel counters, a ticket rail. Ada is a tall woman in her thirties with short black hair and a green raincoat. Ada keeps wiping, then stops and looks up at the door. The camera holds a static shot with fixed composition.\n\noverall_soundscape: Continuous room tone and environmental ambience with synchronized physical action sounds.\n\nnon_diegetic_music: N/A",
+      "keyframes": {
+        "first": "refs/shots/sh020/first.png",
+        "last": "refs/shots/sh020/last.png"
+      },
+      "duration": 3.04
+    },
+    {
+      "id": "sh030",
+      "sequence": "sq01",
+      "subjects": [
+        "ada",
+        "bo"
+      ],
+      "background": "refs/_bg/kitchen.png",
+      "size": "wide",
+      "length": 107,
+      "seed": 9098139706950154990,
+      "steps": 4,
+      "audio_policy": "generate",
+      "prompt": "integrated_multimodal_description: [Shot 1] A naturalistic live-action drama shot on 35mm film, a wide shot takes in a cramped diner kitchen at night, steel counters, a ticket rail, with Ada and Bo in it. Ada is a tall woman in her thirties with short black hair and a green raincoat. Bo is a stocky man in his forties with a grey beard and a brown work jacket. Bo pushes through the door, shaking rain off his jacket. The camera holds a static shot with fixed composition. Bo, with a voice that is warm and slow, (S1) says: <d>[English] Still open?</d>\n\noverall_soundscape: Continuous room tone and environmental ambience with synchronized physical action sounds.\n\nnon_diegetic_music: N/A",
+      "keyframes": {
+        "first": "refs/shots/sh030/first.png",
+        "last": "refs/shots/sh030/last.png"
+      },
+      "duration": 4.04
+    },
+    {
+      "id": "sh050",
+      "sequence": "sq02",
+      "subjects": [
+        "ada"
+      ],
+      "background": "refs/_bg/street.png",
+      "size": "wide",
+      "length": 73,
+      "seed": 348538211978418736,
+      "steps": 4,
+      "audio_policy": "generate",
+      "prompt": "integrated_multimodal_description: [Shot 1] A naturalistic live-action drama shot on 35mm film, a wide shot takes in a wet street outside the diner at night, neon reflected in puddles, with Ada in it. Ada is a tall woman in her thirties with short black hair and a green raincoat. Ada steps out into the rain and pulls her hood up. The camera holds a static shot with fixed composition.\n\noverall_soundscape: Continuous room tone and environmental ambience with synchronized physical action sounds.\n\nnon_diegetic_music: N/A",
+      "keyframes": {
+        "first": "refs/shots/sh050/first.png",
+        "last": "refs/shots/sh050/last.png"
+      },
+      "duration": 3.04
+    },
+    {
+      "id": "sh060",
+      "sequence": "sq02",
+      "subjects": [
+        "ada"
+      ],
+      "background": "refs/_bg/street.png",
+      "size": "medium",
+      "length": 73,
+      "seed": 4681650727199987593,
+      "steps": 4,
+      "audio_policy": "generate",
+      "prompt": "integrated_multimodal_description: [Shot 1] A naturalistic live-action drama shot on 35mm film, a medium shot frames Ada against a wet street outside the diner at night, neon reflected in puddles. Ada is a tall woman in her thirties with short black hair and a green raincoat. Ada walks on, past the neon sign, head down. The camera holds a static shot with fixed composition.\n\noverall_soundscape: Continuous room tone and environmental ambience with synchronized physical action sounds.\n\nnon_diegetic_music: N/A",
+      "keyframes": {
+        "first": "refs/shots/sh060/first.png",
+        "last": "refs/shots/sh060/last.png"
+      },
+      "duration": 3.04
+    }
+  ]
+}

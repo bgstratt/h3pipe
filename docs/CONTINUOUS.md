@@ -1,6 +1,7 @@
 # Continuous shots: `continuous: first` and `continuous: latent`
 
-Status (2026-10-09): **designed, not built.** This file is the design record and the
+Status (2026-10-09): **phase (a) built** (`continuous: first`, the migration, the
+auto-switch); `latent` (b) and its upscales (c) are next. This file is the design record and the
 checklist. As each phase lands, its contracts move to the docstrings, `docs/API.md` and
 `docs/AUTHORING.md`, and this file shrinks to what's still open.
 
@@ -128,34 +129,52 @@ one (`upscale.save_latents`, final-only by default).
 
 ## Checklist
 
-### (a) The field, the migration, the auto-switch (`first` working exactly as today)
+### (a) The field, the migration, the auto-switch (`first` working exactly as today) — built
 
-- [ ] `h3core/story.py`: parse `continuous:` on shots and `#` headers (`first`, `latent`,
+Decisions made while building it:
+
+- **No hidden default any more.** A shot on a keyframe target used to open on the previous
+  shot's last frame just by having one before it in its sequence. Now only
+  `continuous: first` does; otherwise the first keyframe is `generate`. (The real scripts
+  checked, Porchlights ep01, write `first: continuity` on every such shot, so nothing
+  rendered changes.)
+- **`continuous: first` is the existing machinery.** It makes the shot's first keyframe
+  method `continuity` (`ir.Shot.keyframe`), so the keyframe cutting, H3ContinuityFrame, the
+  editor's badges and the upscale fix all work unchanged.
+- **The switch to FL2VA happens at build time**, whatever is installed, so a build doesn't
+  depend on ComfyUI being up. If FL2VA's models are missing, the render's readiness check
+  says so, as for any target. A shot that names its own target isn't switched (an error).
+- **A target supports `first` when it reads a first keyframe**; only Ref2VA declares
+  anything (`continuous.modes: ["latent"]`, `continuous.first: "minimax_h3_fl2va"`).
+- **The upscale keeps tracing the keyframe** to its source take: that covers shots rendered
+  before and after the change alike, so it doesn't need to read the field.
+
+- [x] `h3core/story.py`: parse `continuous:` on shots and `#` headers (`first`, `latent`,
       `none`) and `overlap:`; reject other values with a sentence.
-- [ ] `h3core/ir.py`: carry them on the shot (header default resolved, `none` breaking it).
+- [x] `h3core/ir.py`: carry them on the shot (header default resolved, `none` breaking it).
       `first: continuity` → `continuous: first`; header `continuous: yes` → `latent`, with
       warnings collected for `h3.py check`.
-- [ ] `first:` no longer takes `continuity` in new scripts (old ones read as above).
-- [ ] series.json: top-level `continuous: {"overlap": N}`, checked on load.
-- [ ] Targets: `continuous` modes in target.json (`first` on FL2VA, LTX-2, LTX-2
+- [x] `first:` no longer takes `continuity` in new scripts (old ones read as above).
+- [x] series.json: top-level `continuous: {"overlap": N}`, checked on load.
+- [x] Targets: `continuous` modes in target.json (`first` on FL2VA, LTX-2, LTX-2
       ingredients, Wan I2V; `latent` on Ref2VA), and a first-frame partner on Ref2VA (FL2VA).
-- [ ] h3build / compile: `continuous: first` builds on the partner when it's ready, with a
+- [x] h3build / compile: `continuous: first` builds on the partner when it's ready, with a
       note; an error naming what's needed when not. `continuous: latent` errors "not built
       yet" until (b).
-- [ ] Remove the fake chaining: Ref2VA's `_continuation` sentence, `chain_frames` and its
+- [x] Remove the fake chaining: Ref2VA's `_continuation` sentence, `chain_frames` and its
       warning (`targets/__init__.py` `continuous_warning`). Update the golden fixtures that
       used `continuous: yes`, with the reason in the commit.
-- [ ] Keyframe and continuity code (`h3refs` keyframe needs and methods, the
+- [x] Keyframe and continuity code (`h3refs` keyframe needs and methods, the
       H3ContinuityFrame path, the editor's keyframe badges) reads `continuous: first`
       instead of `first: continuity`.
-- [ ] Upscale: `continuity_source` uses the shot's `continuous: first` when present (the
+- [x] Upscale: `continuity_source` uses the shot's `continuous: first` when present (the
       keyframe trace stays for older takes).
-- [ ] Editor: wherever it shows or sets "continuity" (keyframe method labels, Refs tab
+- [x] Editor: wherever it shows or sets "continuity" (keyframe method labels, Refs tab
       keyframe rows, the inspector) speaks of `continuous: first`.
-- [ ] Docs: AUTHORING (the fields table, Keyframes, "Cutting within a location" item 5,
+- [x] Docs: AUTHORING (the fields table, Keyframes, "Cutting within a location" item 5,
       Sequences), `prompts/` regenerated, the h3pipe episode-script skill's references,
       `examples/` if any use the old forms.
-- [ ] Tests: parsing, migration warnings, header default and `none`, the auto-switch (ready
+- [x] Tests: parsing, migration warnings, header default and `none`, the auto-switch (ready
       / not ready), latent "not built yet", goldens.
 - [ ] Migrate the real scripts (Porchlights and the others) with `h3.py check`'s advice;
       confirm each still builds the same shots on the same targets.

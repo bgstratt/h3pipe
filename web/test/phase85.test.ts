@@ -284,7 +284,7 @@ describe("mock: Phase 8.5", () => {
       voice_target: "ltx2_voice", voice_target_source: "default",
     });
     const k = (id: string) => refs.find((r) => r.id === id)!;
-    expect(k("shot:sh060:first")).toMatchObject({ need: "required", method: "continuity", target: "wan22_i2v", exists: false, can_generate: true });
+    expect(k("shot:sh060:first")).toMatchObject({ need: "required", method: "generate", target: "wan22_i2v", exists: false, can_generate: true });
     expect(k("shot:sh070:first")).toMatchObject({ need: "required", exists: true, picked: 1 });
     expect(k("shot:sh070:first").takes[0]).toMatchObject({ source: "generated", target: "flux2_klein_edit" });
     expect(k("shot:sh030:first")).toMatchObject({ need: "optional", method: "continuity", target: "ltx2", requested: true });

@@ -1,0 +1,86 @@
+{
+  "episode": "cont01",
+  "title": "Continuous",
+  "prompt_prefix": "",
+  "defaults": {
+    "width": 960,
+    "height": 544,
+    "steps": 8,
+    "model": "minimax_h3_ref2va_pruned_int8_convrot.safetensors",
+    "lora": "minimax_h3_ref2v_turbo_8step_v1.0_768p_comfyui_bf16.safetensors",
+    "sheet_panels": 4,
+    "ref_image_size": "max",
+    "audio_policy": "generate",
+    "master_track": ""
+  },
+  "subjects": {
+    "ada": {
+      "kind": "character",
+      "sheet": "refs/ada/ada_sheet_4panel.png",
+      "voice_sample": ""
+    },
+    "bo": {
+      "kind": "character",
+      "sheet": "refs/bo/bo_sheet_4panel.png",
+      "voice_sample": ""
+    }
+  },
+  "shots": [
+    {
+      "id": "sh010",
+      "sequence": "sq01",
+      "subjects": [
+        "ada"
+      ],
+      "background": "refs/_bg/kitchen.png",
+      "size": "medium",
+      "panels": 1,
+      "panel_view": "body",
+      "length": 73,
+      "seed": 3330562156371935263,
+      "steps": 8,
+      "audio_policy": "generate",
+      "audio_retention": "",
+      "voices": [],
+      "voice_subject": "",
+      "voice_refs": [],
+      "prompt": [
+        "subject_definitions:\n<Subject 1> is Ada, defined by <Picture 1> — a single reference image of ONE character, a three-quarter view of the whole body. Exactly one person appears in that image. Preserve the exact reference styling: a tall woman in her thirties with short black hair and a green raincoat.\nExactly one character appears in this shot: <Subject 1>.\n<Subject 2> is the location, defined by <Picture 4> — a background plate of a cramped diner kitchen at night, steel counters, a ticket rail. It establishes the layout, color palette, lighting direction and depth of the space, not a fixed camera framing.",
+        "summary:\n[reference generation] Ada wipes down the counter, glancing at the ticket rail.",
+        "retention_analysis:\n<Subject 1> (appears in [Shot 1]): fully_preserved - facial identity, hairstyle, body proportions, wardrobe and colors are retained from <Picture 1> while allowing natural poses and expressions.\n<Subject 2> (appears in [Shot 1]): partially_preserved - the layout, color palette and lighting direction of the location are retained while the camera framing and visible portion of the space differ from the plate.",
+        "detailed_description:\nThe target video is a naturalistic live-action drama shot on 35mm film.\n[Shot 1] A medium shot frames <Subject 1> in <Subject 2>, a cramped diner kitchen at night, steel counters, a ticket rail, showing the part of the space directly behind them. Ada wipes down the counter, glancing at the ticket rail. The camera holds a static shot with fixed composition.",
+        "overall_soundscape: Continuous room tone and environmental ambience with synchronized physical action sounds.",
+        "non_diegetic_music: N/A"
+      ],
+      "duration": 3.04
+    },
+    {
+      "id": "sh040",
+      "sequence": "sq01",
+      "subjects": [
+        "bo"
+      ],
+      "background": "refs/_bg/kitchen.png",
+      "size": "close",
+      "panels": 1,
+      "panel_view": "face",
+      "length": 56,
+      "seed": 886464778372115849,
+      "steps": 8,
+      "audio_policy": "generate",
+      "audio_retention": "",
+      "voices": [],
+      "voice_subject": "",
+      "voice_refs": [],
+      "prompt": [
+        "subject_definitions:\n<Subject 1> is Bo, defined by <Picture 1> — a single reference image of ONE character, a head-and-shoulders facial close-up. Exactly one person appears in that image. Preserve the exact reference styling: a stocky man in his forties with a grey beard and a brown work jacket.\nExactly one character appears in this shot: <Subject 1>.\n<Subject 2> is the location, defined by <Picture 4> — a background plate of a cramped diner kitchen at night, steel counters, a ticket rail. It establishes the layout, color palette, lighting direction and depth of the space, not a fixed camera framing.",
+        "summary:\n[reference generation] Bo's eyes on the empty stools.",
+        "retention_analysis:\n<Subject 1> (appears in [Shot 1]): fully_preserved - facial identity, hairstyle, body proportions, wardrobe and colors are retained from <Picture 1> while allowing natural poses and expressions.\n<Subject 2> (appears in [Shot 1]): partially_preserved - the background is a zoomed-in crop of the location: the surfaces, objects, color palette and lighting direction directly behind the subject are retained at close range, while the rest of the space falls outside the frame. The plain backdrop of a reference image is never used as the background.",
+        "detailed_description:\nThe target video is a naturalistic live-action drama shot on 35mm film.\n[Shot 1] A close-up frames <Subject 1>, filling most of the frame. Behind them, the frame is filled by a magnified, softly focused part of <Subject 2>, a cramped diner kitchen at night, steel counters, a ticket rail, recognizably the same place, never a plain studio backdrop; the rest of the space lies outside the frame. Bo's eyes on the empty stools. The camera holds a static shot with fixed composition.",
+        "overall_soundscape: Continuous room tone and environmental ambience with synchronized physical action sounds.",
+        "non_diegetic_music: N/A"
+      ],
+      "duration": 2.04
+    }
+  ]
+}

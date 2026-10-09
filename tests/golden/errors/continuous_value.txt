@@ -1,0 +1,5 @@
+exit 1
+
+  error in continuous_value.md: line 8: `continuous: frame` must be first (open on the previous shot's last frame), latent (hold the previous take's latent) or none
+    | continuous: frame
+

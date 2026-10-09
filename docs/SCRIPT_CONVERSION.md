@@ -168,10 +168,10 @@ Filbert's and Becky's sheets as reference pictures), and leaving it out means th
 can be moved to another model from the editor without touching the script.
 
 `first: generate` under `# sq02` matters only on a target that reads keyframes (H3 FL2VA,
-LTX, Wan). There, a shot with a shot before it in its sequence would otherwise open on that
-shot's last frame (continuity), and every cut in this kitchen changes the subject or the
-size: `sh030` must not open on a close-up of a counter. Continuity is for a shot that picks
-up the previous one's picture; this scene has none.
+LTX, Wan): each shot opens on a still drawn from its own description (the default anyway).
+None of these shots says `continuous: first`, because every cut in this kitchen changes the
+subject or the size: `sh030` must not open on the previous shot's close-up of a counter.
+Continuity is for a shot that picks up the previous one's picture; this scene has none.
 
 `sh010` is a good candidate for `dur: model` on LTX if you don't care exactly how long the
 push-in runs; the dialogue shots keep their `dur:`, because the lines need their room.

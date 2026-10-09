@@ -75,7 +75,26 @@ def series_config_from(series_cfg: dict) -> dict:
     _check_required(series_cfg)
     _check_groups(series_cfg["subjects"])
     _check_angles(series_cfg["locations"])
+    _check_continuous(series_cfg)
     return series_cfg
+
+
+def _check_continuous(cfg: dict) -> None:
+    """The top-level `continuous` block (docs/CONTINUOUS.md): {"overlap": N},
+    the frames of the previous clip a `continuous: latent` shot holds by
+    default (a shot's `overlap:` beats it)."""
+    c = cfg.get("continuous")
+    if c is None:
+        return
+    if not isinstance(c, dict):
+        raise ValueError('series.json `continuous` must be an object, e.g. {"overlap": 39}')
+    bad = set(k for k in c if not k.startswith("_")) - {"overlap"}
+    if bad:
+        raise ValueError(f"series.json `continuous` takes overlap, not {', '.join(sorted(bad))}")
+    ov = c.get("overlap")
+    if ov is not None and (isinstance(ov, bool) or not isinstance(ov, int) or not 1 <= ov <= 360):
+        raise ValueError(f"series.json `continuous.overlap` {ov!r}: a whole number of frames, "
+                         f"1 to 360")
 
 
 def _check_angles(locations: dict) -> None:

@@ -423,7 +423,6 @@ def _compile_shot(ctx: Ctx, seq: dict, i: int, shot: dict, seq_loc: dict) -> dic
         policy, retention = "generate", ""
         shot["_policy"], shot["_audio_ref"] = policy, False
     shot["_retention"] = retention
-    shot["_continuation"] = seq["continuous"] and i > 0
 
     # Always one panel. A 2- or 4-panel strip is a multi-figure image,
     # and H3 renders it as multiple people -- worst on wides. The face
@@ -438,10 +437,6 @@ def _compile_shot(ctx: Ctx, seq: dict, i: int, shot: dict, seq_loc: dict) -> dic
         r = subject_request(s, book[s])
         need(r.path, r.kind, ctx.wording(r), shot["id"])
 
-    if seq["continuous"] and i > 0:
-        w = template.continuous_warning(shot["id"], raw)
-        if w:
-            warnings.append(w)
     pad = raw - req
     if ("audio_in" not in shot and not shot.get("duration_auto")
             and shot.get("duration_model") is None and pad / raw > 0.15):

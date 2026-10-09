@@ -145,8 +145,9 @@ shot 93. So:
   `series.target`, so a whole episode can be moved to another model without touching the
   script.
 - **Name it** (`target:` on a shot, or under a `#` header for its sequence) when a shot
-  needs something only one model does: a silent insert on Wan, a continuity shot on
-  `minimax_h3_fl2va`, a shot whose length you want LTX to choose (`dur: model`).
+  needs something only one model does: a silent insert on Wan, a shot whose length you want
+  LTX to choose (`dur: model`). A `continuous: first` shot moves to H3 FL2VA by itself (see
+  **Continuous shots**).
 - **Dialogue needs a target with sound**, and lip sync to a recording needs an H3 target.
   Wan acts the lines silently.
 - **On a target that takes no reference pictures** (`ltx2`, `minimax_h3_fl2va`, `wan22_i2v`,
@@ -1057,13 +1058,14 @@ sound: running footsteps on grass, fabric movement
 | `model:`, `lora:`, `steps:` | per-shot render overrides; also valid under a `#` header |
 | `profile: dialogue_close` | a render profile from the series config; also valid under a `#` header |
 | `target: ltx2` | the video model for this shot or sequence (`minimax_h3_ref2va`, `ltx2`, `ltx2_ingredients`, `minimax_h3_fl2va`, `wan22_i2v`, `wan22_ti2v` or `wan22_vace`); see below |
-| `first: continuity` / `last: generate` | how this shot's first / last keyframe is made: `continuity`, `generate`, `import`, `none`, or a path to an image; also valid under a `#` header (the default of its shots); see **Keyframes** |
+| `first: generate` / `last: refs/x.png` | how this shot's first / last keyframe is made: `generate`, `import`, `none`, or a path to an image; also valid under a `#` header (the default of its shots); see **Keyframes** |
+| `continuous: first` | this shot carries straight on from the previous one in the cut: `first` (open on its last frame) or `latent` (not built yet); under a `#` header, every shot after the sequence's first; `none` breaks the chain; see **Continuous shots** |
+| `overlap: 39` | frames of the previous clip a `continuous: latent` shot holds (not built yet) |
 | `NAME: line` | dialogue from someone on screen (the name is a character's key, in capitals) |
 | `NAME (breathless): line` | a delivery direction, written into the prompt |
 | `NAME (V.O.): line` | voiceover: speaks, is not drawn, costs no reference slot |
 | `NAME (O.S.): line` | off-screen: in the space, outside the frame |
 | `NAME (V.O., on the truck radio): line` | a voice marker and a delivery together; the note describes the voice and is never spoken |
-| `continuous: yes` | under a `#` header: the sequence is one unbroken take |
 | `// text` | comment |
 
 Any other line is action prose. Prose under a `#` header before its first shot is a
@@ -1167,9 +1169,10 @@ pictures**: what pins the look is the shot's keyframes. What changes for such a 
 
 - **Keyframes instead of sheets.** `refs/shots/<shot>/first.png` is the first frame and
   `last.png` the last. Both are optional; with neither the shot is text-to-video. They come
-  from **continuity** (`python h3.py keyframe <ep> <shot>`: the previous shot's last frame
-  as this one's first, or `--last` for the next shot's first frame as this one's last; the
-  editor's Refs tab does the same) or from an **import** in the Refs tab. The render adds
+  from the previous shot (`continuous: first`, see **Continuous shots**; or by hand,
+  `python h3.py keyframe <ep> <shot>`, or `--last` for the next shot's first frame as this
+  one's last; the editor's Refs tab does the same), from a still (`first: generate`) or from
+  an **import** in the Refs tab. The render adds
   the model's alignment line for whichever it has, so there is nothing to write for them.
 - **Subjects in words.** No `<Picture N>` slots: everyone in `who:` / `with:` is described
   from their `design`, and the place from the location's `description` (all of it on a
@@ -1186,8 +1189,8 @@ pictures**: what pins the look is the shot's keyframes. What changes for such a 
   this model: those shots render with `generate` (each speaker's `voice` line shapes the
   voice), and the build and the take say so.
 - **Length:** H3's `17k + 5` grid. The model is trained on about 5 to 15 seconds (124 to
-  362 frames); longer shots render with a warning. No `continuous: yes` chaining: continue
-  a shot from the one before with its first keyframe instead.
+  362 frames); longer shots render with a warning. A shot continues the one before by its
+  first keyframe: `continuous: first`.
 - **Size** comes from the series config's pass blocks (multiples of 32). Model, LoRA and
   steps are the target's own unless it is the series target.
 
@@ -1201,10 +1204,10 @@ Three Wan 2.2 targets, for pictures without sound:
 - **`wan22_i2v`** (label "Wan 2.2 14B I2V"): the 14B image-to-video pair (a high noise model,
   then a low noise one, each with its 4-step turbo LoRA). It animates a picture you give
   it: **a first frame is required** (`refs/shots/<shot>/first.png`: generated from the
-  shot's description, cut from the previous shot by continuity, or imported; see
+  shot's description, cut from the previous shot with `continuous: first`, or imported; see
   **Keyframes**). A shot without one is blocked, and rendering anyway can't help: "Wan 14B
-  I2V needs a first frame: generate one or use continuity (or import one), or retarget to
-  wan22_ti2v". A `last.png` too makes it a first/last-frame shot.
+  I2V needs a first frame: generate one, import one, give the shot `continuous: first` (the
+  previous shot's last frame), or retarget to wan22_ti2v". A `last.png` too makes it a first/last-frame shot.
 - **`wan22_ti2v`** ("Wan 2.2 5B TI2V"): the small 5B model, text-to-video, or from a first
   frame when there is one. Nothing blocks it: the fast, cheap choice for proxies, and
   where an I2V shot without a first frame can go.
@@ -1264,7 +1267,7 @@ made. You choose that with a line on the shot, or under a `#` header for all its
 
 ```
 # sq02  workshop
-first: continuity
+first: generate
 
 ## sh030
 last: generate
@@ -1273,14 +1276,17 @@ first: refs/stills/sh030_open.png
 
 | value | meaning |
 |---|---|
-| `continuity` | the previous shot's last frame (the default for a shot with a previous shot in its sequence) |
-| `generate` | a still made from the shot's own description (the default otherwise) |
+| `generate` | a still made from the shot's own description (the default) |
 | `import` | you'll import one (the Refs tab) |
 | a path | this image is imported as the keyframe (relative to the episode) |
 | `none` | no keyframe, even where the target could use one (a required one stays required) |
 
+A first frame cut from the previous shot isn't a `first:` value: the shot says
+`continuous: first` (see **Continuous shots**). The old `first: continuity` still reads that
+way, and `h3.py check` says how to write it.
+
 **A render keeps continuity current, and a whole chain queues at once.** A
-`first: continuity` shot's first frame is cut when its render **starts**, from the take
+`continuous: first` shot's first frame is cut when its render **starts**, from the take
 the cut uses at that moment for the shot before it (the H3ContinuityFrame node in its
 graph). ComfyUI runs its queue in order, so queue sh080, sh090 and sh110 together and each
 starts on the new last frame of the one ahead of it; the model swaps between targets on the
@@ -1295,9 +1301,33 @@ neighbour.
 
 **Continuity is for a shot that picks up the previous one's picture**: the same framing
 carrying on, or a match on action. After a real cut (a new subject, a new angle, a
-different size) the previous shot's last frame is the wrong opening picture, so write
-`first: generate` on that shot. A good pattern is `first: generate` under the `#` header and
-`first: continuity` on the shots that continue.
+different size) the previous shot's last frame is the wrong opening picture: leave
+`continuous:` off that shot (or write `continuous: none` under a header that sets it).
+
+### Continuous shots: `continuous:`
+
+A shot that carries straight on from the one before it (the same moment, the camera still
+running) says so, and how:
+
+```
+## sh090
+continuous: first
+```
+
+- `first`: it opens on the previous shot's last frame, as its first keyframe. That needs a
+  target that reads a first frame (`minimax_h3_fl2va`, `ltx2`, the Wan targets). A shot on
+  H3 Ref2VA (which doesn't) builds on **H3 FL2VA instead**, by itself, unless the shot names
+  its own `target:` (then it's an error that says which targets can).
+- `latent`: it continues the previous take's latent itself, keeping its own reference
+  sheets: **not built yet** (docs/CONTINUOUS.md); a build stops on it.
+- Only the shot that continues says it. "Previous" is the previous shot in the cut, so
+  moving a shot on the timeline changes what it continues from.
+- Under a `#` header, `continuous:` covers every shot after the first **in that sequence**
+  (it stops at the next `#`). A shot breaks the chain with `continuous: none`. A shot can
+  also say it on the first shot of a sequence, continuing the last shot of the one before.
+- Old scripts: `first: continuity` reads as `continuous: first`, and `continuous: yes` under
+  a header as `continuous: latent` (which stops the build until it's built). `h3.py check`
+  says how to write each.
 
 **Generating a keyframe** writes a still from the shot: the look, the framing and the
 location, who is in frame (their `design`), and the action at that moment: for `first` how
@@ -1310,7 +1340,8 @@ props and **the plate** as reference images, so the characters look like their s
 prompt names each one ("image 1 is Ada: draw this character exactly as in image 1").
 
 `python h3.py keyframe Shows\ep05 --missing` fills every required keyframe and every one the
-script asks for (continuity when the previous shot has a usable take, else a still);
+script asks for (a `continuous: first` shot's from the previous shot's take when it has a
+usable one, else a still);
 `h3.py keyframe Shows\ep05 sh030 --generate` makes one still; `--clear` takes a keyframe away
 (the shot renders without one, and nothing puts it back until you pick one).
 
@@ -1501,16 +1532,14 @@ between them:
    not at rest: movement across the cut hides the change of pose. It helps the other three;
    on its own it seldom saves a cut.
 5. **Continue the picture** when the second shot really is the same moment carrying on:
-   `first: continuity` on H3 FL2VA (`target: minimax_h3_fl2va`) opens the shot on the
-   previous shot's last frame, so nothing re-poses (see **Rendering a shot on H3 from
-   keyframes** and **Keyframes**). On H3 Ref2VA, `continuous: yes` under the `#` header chains
-   a whole sequence instead, at 22 frames a shot after the first. Either way, each take is
-   upscaled on its own, so the frame where one hands off to the next can differ slightly
-   between the two upscales.
+   `continuous: first` opens the shot on the previous shot's last frame, so nothing
+   re-poses (on H3 FL2VA, which the shot moves to by itself; see **Continuous shots**). Its
+   upscale starts from the previous shot's upscaled last frame, so the two meet on one
+   picture.
 
 `h3.py check` warns about consecutive shots that do none of the first two and don't continue:
 the same people, the same plate, sizes less than two steps apart, the second not
-`first: continuity` and the sequence not `continuous`. It can't see a cutaway or a cut on
+continuing the first (`continuous:`). It can't see a cutaway or a cut on
 action in the action text, so treat it as a question to answer, not an error.
 
 Worked through: Ada at the counter, then closer for her line. As written, a jump cut:
@@ -1713,8 +1742,8 @@ kitchen`, `# sq04 phone_room`, `# sq05 kitchen`.
 Keep a sequence intact and vary the shots with `plate:` rather than splitting a scene into
 one-shot sequences, which re-seeds every shot in it.
 
-`continuous: yes` chains a sequence into one unbroken take on H3 Ref2VA, carrying motion
-across the joins. Use it rarely: it costs 22 frames per shot after the first, which is 30% of a 3-second shot.
+`continuous:` under the `#` header makes every shot after the first carry straight on from
+the one before (see **Continuous shots**).
 
 ## What goes on which line
 

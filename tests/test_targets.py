@@ -116,9 +116,14 @@ class TemplateTest(unittest.TestCase):
         self.assertEqual(str(cm.exception), "height=720 is not a multiple of 32 — H3 rejects "
                                              "it. Nearest legal: 704 or 736.")
 
-    def test_continuous(self):
-        self.assertIsNone(self.t.continuous_warning("sh1", 199))
-        self.assertIn("costs 22 of 73 frames (30%)", self.t.continuous_warning("sh1", 73))
+    def test_continuous_modes(self):
+        """docs/CONTINUOUS.md: `first` where a target reads a first keyframe;
+        H3 Ref2VA declares `latent` and FL2VA as its partner for `first`."""
+        self.assertEqual(TG.continuous_modes(TG.load_target("minimax_h3_fl2va")), {"first"})
+        r2v = TG.load_target(H3)
+        self.assertEqual(TG.continuous_modes(r2v), {"latent"})
+        self.assertEqual(r2v.spec["continuous"]["first"], "minimax_h3_fl2va")
+        self.assertIn("first", TG.continuous_modes(TG.load_target("ltx2")))
 
 
 class PresetTest(unittest.TestCase):

@@ -102,3 +102,15 @@ class GenerateTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ContinuousConfigTest(unittest.TestCase):
+    """series.json's `continuous` block (docs/CONTINUOUS.md)."""
+
+    def test_overlap(self):
+        self.assertEqual(series_config_from(cfg(**{}) | {"continuous": {"overlap": 39}})
+                         ["continuous"]["overlap"], 39)
+        for bad, why in (({"overlap": 0}, "1 to 360"), ({"overlap": "39"}, "1 to 360"),
+                         ({"frames": 3}, "takes overlap"), ([39], "must be an object")):
+            with self.subTest(bad=bad), self.assertRaisesRegex(ValueError, why):
+                series_config_from(cfg() | {"continuous": bad})

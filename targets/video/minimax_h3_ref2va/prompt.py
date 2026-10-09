@@ -11,7 +11,6 @@ prepares, with these compile-set keys:
     _policy        generate | dub | dub_keep_foley | clone
     _audio_ref     True unless the policy is generate
     _retention     fully_copy | partially_copy | reference | ""
-    _continuation  a shot after the first in a continuous sequence
 
 and two that only a render-anyway recompile sets (compile.compile_without),
 for a shot whose reference files are missing:
@@ -361,9 +360,6 @@ def build_prompt(shot: dict, seq: dict, series_cfg: dict, panels: int,
     body = f"[Shot 1] {where} {shot['action']}"
     cam = shot.get("camera", "").strip()
     body += f" The camera {cam}." if cam else " The camera holds a static shot with fixed composition."
-    if shot.get("_continuation"):
-        body += (" Continue the incoming action, pose, camera movement, lighting and object "
-                 "states from the previous segment without resetting them.")
     desc.append(body)
     for d in shot["dialogue"]:
         deliv = f" {d['delivery']}," if d["delivery"] else ""

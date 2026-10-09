@@ -85,11 +85,11 @@ sound: muffled television from another room
 
 
 # sq03  path
-continuous: yes
 
-// continuous:yes means this whole sequence is ONE unbroken take.
-// The shots chain together and carry motion across the joins.
-// Use it sparingly — it costs 22 frames per shot after the first.
+// A shot that carries straight on from the one before it writes
+// `continuous: first`: it opens on that shot's last frame (on H3 FL2VA).
+// Under this `#` header it would apply to every shot after the first.
+// See docs/CONTINUOUS.md.
 
 ## sh060
 who: huey, riley

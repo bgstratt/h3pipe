@@ -6,11 +6,16 @@
   "code": "compile.py",
 
   "template": {
-    "_note": "H3 renders 17k+5 frames, at most 3592; width and height must be multiples of 32. A shot after the first in a continuous sequence spends 22 frames on the chain.",
+    "_note": "H3 renders 17k+5 frames, at most 3592; width and height must be multiples of 32.",
     "fps": 24,
     "frames": {"step": 17, "base": 5, "max": 3592},
-    "size_multiple": 32,
-    "continuous": {"chain_frames": 22, "warn_above": 0.15}
+    "size_multiple": 32
+  },
+
+  "continuous": {
+    "_note": "docs/CONTINUOUS.md. `latent`: the previous take's latent tail held at the head (phase b, not built yet). `continuous: first` needs a first keyframe, which Ref2VA doesn't read: such a shot builds on `first` (H3 FL2VA) instead, unless it names its own target.",
+    "modes": ["latent"],
+    "first": "minimax_h3_fl2va"
   },
 
   "recipe": {

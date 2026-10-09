@@ -20,7 +20,7 @@ import { tags as t, type Tag } from "@lezer/highlight";
 /** h3core/story.py META_KEYS */
 export const META_KEYS = new Set([
   "who", "cast", "with", "props", "size", "audio", "dur", "duration", "camera", "sound", "music", "policy", "continuous", "text",
-  "pace", "plate", "retention", "model", "lora", "steps", "extras", "target", "profile", "first", "last",
+  "pace", "plate", "retention", "model", "lora", "steps", "extras", "target", "profile", "first", "last", "overlap",
 ]);
 
 /** fields whose value is a list of series config subject ids */

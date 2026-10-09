@@ -1,0 +1,11 @@
+= e01  Error
+# sq01  kitchen
+## sh010
+who: ada
+dur: 3.04
+Ada waits.
+## sh020
+continuous: latent
+who: ada
+dur: 3.04
+Ada keeps waiting.

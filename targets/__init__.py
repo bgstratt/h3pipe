@@ -19,7 +19,7 @@ h3jobs, h3refs, the routes) only talks to a target through this module:
 A Target has four parts:
 
     template   legal lengths and sizes: snap(frames), frames(seconds, fps),
-               validate_size(w, h), continuous_warning(shot, frames)
+               validate_size(w, h)
     recipe     how subjects, plates and voices become inputs (target.json
                "recipe"; the packing itself is the target's code)
     binding    the workflow file, the loader/saver node classes, and which
@@ -121,7 +121,6 @@ class Template:
         self.size_multiple = int(spec.get("size_multiple", 1))
         self.max_size = dict(spec.get("max_size") or {})
         self.size_fit = spec.get("size_fit", "error")
-        self.continuous = dict(spec.get("continuous") or {})
         self.short = short
         self.spec = spec
 
@@ -179,17 +178,6 @@ class Template:
     def frames(self, seconds: float, fps: float) -> int:
         """The frames a render of `seconds` at `fps` will actually have."""
         return self.snap(max(1, round(seconds * fps)))
-
-    def continuous_warning(self, shot_id: str, frames: int) -> str | None:
-        """The warning for a shot after the first in a `continuous: yes`
-        sequence, when chaining eats too much of it (None: no warning)."""
-        cost = self.continuous.get("chain_frames")
-        if not cost:
-            return None
-        if cost / frames > float(self.continuous.get("warn_above", 0.15)):
-            return (f"{shot_id}: continuous chaining costs {cost} of {frames} frames "
-                    f"({cost / frames:.0%}). Shots this short are cheaper as separate cuts.")
-        return None
 
     def to_json(self) -> dict:
         d = {"fps": "series" if self.fps_from_series else self.fps,
@@ -1150,12 +1138,27 @@ def layered_lora(layers: list[dict]) -> tuple[str, object] | None:
     return None
 
 
+def continuous_modes(t: "Target") -> set[str]:
+    """The `continuous:` modes a target renders (docs/CONTINUOUS.md): `first`
+    when it reads a first keyframe, plus its target.json `continuous.modes`."""
+    modes = set((t.spec.get("continuous") or {}).get("modes") or ())
+    if "first" in (t.recipe.get("keyframes") or ()):
+        modes.add("first")
+    return modes
+
+
 def shot_targets(story, series_cfg: dict) -> dict[str, str]:
     """{shot id: the video target it renders on}, in script order, after
     checking every `profile:` and `target:` the script names. Each shot layers
     like any render setting: the series config's `series.target` -> sequence
     profile -> sequence `target:` -> shot profile -> shot `target:`. A target
-    no video target is called is an error naming the known ones."""
+    no video target is called is an error naming the known ones.
+
+    A continuous shot (`continuous:`, docs/CONTINUOUS.md) needs a target that
+    renders its mode. `first` on one that reads no first keyframe (H3 Ref2VA)
+    renders on that target's partner for it (its target.json `continuous.first`:
+    H3 FL2VA) -- unless the shot names its own target, which is then an error, as
+    is a mode neither renders. `latent` isn't built yet (phase b): an error."""
     profiles = series_profiles(series_cfg)
     default = video_target(series_cfg)
     known = [x.id for x in list_targets("video")]
@@ -1169,8 +1172,34 @@ def shot_targets(story, series_cfg: dict) -> dict[str, str]:
             if tid not in known:
                 raise ValueError(f"shot {s.id}: target '{tid}' is not a video target "
                                  f"(known: {', '.join(known)})")
+            mode = s.continues(sq) if hasattr(s, "continues") else None
+            if mode:
+                tid = continuous_target(s.id, mode, load_target(tid, "video"), bool(s.target),
+                                        known)
             out[s.id] = tid
     return out
+
+
+def continuous_target(shot_id: str, mode: str, t: "Target", named: bool,
+                      known: list[str]) -> str:
+    """The target a shot continuing by `mode` renders on (shot_targets)."""
+    if mode == "latent":
+        raise ValueError(
+            f"shot {shot_id}: `continuous: latent` (chaining on the previous take's latent) "
+            f"isn't built yet (docs/CONTINUOUS.md, phase b): use `continuous: first` for "
+            f"now, which opens on the previous shot's last frame")
+    if mode in continuous_modes(t):
+        return t.id
+    partner = (t.spec.get("continuous") or {}).get(mode)
+    if partner and partner in known and not named:
+        return partner
+    can = [x.id for x in list_targets("video") if mode in continuous_modes(x)]
+    if named:
+        raise ValueError(f"shot {shot_id}: `continuous: {mode}` on {t.id}, which the shot names, "
+                         f"but {t.id} can't render it: name one that can ({', '.join(can)}), or "
+                         f"drop the shot's `target:`")
+    raise ValueError(f"shot {shot_id}: `continuous: {mode}` needs a target that renders it "
+                     f"({', '.join(can)}); {t.id} doesn't")
 
 
 def episode_targets(story, series_cfg: dict) -> list[tuple[Target, set[str] | None]]:

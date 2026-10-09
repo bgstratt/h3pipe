@@ -159,7 +159,7 @@ export function buildSeries(title: string, shots: MockShotSource[]): string {
 
 const META_KEYS = new Set([
   "who", "cast", "with", "props", "size", "audio", "dur", "duration", "camera", "sound", "music", "policy", "continuous", "text",
-  "pace", "plate", "retention", "model", "lora", "steps", "extras", "target", "profile", "first", "last",
+  "pace", "plate", "retention", "model", "lora", "steps", "extras", "target", "profile", "first", "last", "overlap",
 ]);
 const SIZES = new Set(["close", "cu", "medium", "ms", "wide", "ws"]);
 const PACES = new Set(["slow", "normal", "fast"]);
@@ -251,7 +251,11 @@ export function checkScript(text: string, cfg: Partial<SeriesCfg>, file = "scrip
     if (m && META_KEYS.has(m[1])) {
       const [, key, val] = m;
       const col = line.indexOf(":") + 2 + (val ? line.slice(line.indexOf(":") + 1).search(/\S/) : 0);
-      if (key === "continuous" && shot) err(n, "`continuous:` belongs under `# sequence`, not a shot");
+      if (key === "continuous" && !["first", "latent", "none"].includes(val.toLowerCase()) && !(!shot && ["yes", "true", "1", "on"].includes(val.toLowerCase()))) {
+        err(n, `\`continuous: ${val}\` must be first (open on the previous shot's last frame), latent (hold the previous take's latent) or none`, col - 1);
+      } else if (key === "overlap" && !(Number.isInteger(Number(val)) && Number(val) >= 1 && Number(val) <= 360)) {
+        err(n, `\`overlap: ${val}\` must be a whole number of frames, 1 to 360`, col - 1);
+      }
       else if (["size", "audio", "dur", "duration", "pace", "who", "cast", "with", "props"].includes(key) && !shot) err(n, `\`${key}:\` outside a \`## shot\``);
       else if (["who", "cast", "with", "props"].includes(key)) {
         for (const c of val.split(",").map((x) => x.trim()).filter(Boolean)) {
@@ -270,7 +274,7 @@ export function checkScript(text: string, cfg: Partial<SeriesCfg>, file = "scrip
         }
       } else if (key === "pace" && !PACES.has(val.toLowerCase())) err(n, `pace '${val}' must be one of ${JSON.stringify([...PACES].sort())}`, col - 1);
       else if ((key === "first" || key === "last") && !KEYFRAMES.has(val.toLowerCase()) && !/\.(png|jpe?g|webp)$/i.test(val)) {
-        err(n, `\`${key}: ${val}\` must be continuity, generate, import, none or a path to an image (.png, .jpg, .jpeg, .webp)`, col - 1);
+        err(n, `\`${key}: ${val}\` must be generate, import, none or a path to an image (.png, .jpg, .jpeg, .webp); a shot that opens on the previous shot's last frame says \`continuous: first\``, col - 1);
       } else if (key === "plate" && val && !locations.has(val)) err(n, `plate '${val}' is not in series.json's locations`, col - 1);
       return;
     }

@@ -91,6 +91,9 @@ class FixtureTest(unittest.TestCase):
                     for k in [k for k in ("model", "lora") if not sq.get(k)]:
                         sq.pop(k, None)
                     for sh in sq["shots"]:
+                        # docs/CONTINUOUS.md: target choice and keyframes, not compile's
+                        for k in ("continuous", "overlap", "first", "last", "_legacy"):
+                            sh.pop(k, None)
                         for k in [k for k, v in sh.items() if v == "" and k in RAW]:
                             del sh[k]          # an empty value means "not set"
                         sh["plate"] = sh.get("plate") or sq["location_key"]

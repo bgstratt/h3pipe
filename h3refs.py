@@ -321,14 +321,15 @@ def keyframe_refs(ep: str, needs: dict | None = None) -> list[Ref]:
 #
 #   capabilities.keyframes   the ends a target reads (optional ones)
 #   requires_first           the first is required (Wan 14B I2V)
-#   first: / last:           continuity | generate | import | none | <path>
-#                            (the shot's line, else its sequence's)
+#   first: / last:           generate | import | none | <path> (the shot's
+#                            line, else its sequence's); `continuous: first`
+#                            makes the first "continuity" (docs/CONTINUOUS.md)
 #
 # A keyframe is listed when the target reads it or the script asks for one
 # (anything but `none`); `none` turns an optional one off. `method` is the
-# script's (a path is "import", with `import_path`), else "continuity" for a
-# first frame when the shot has a previous shot in its sequence, else
-# "generate".
+# script's (a path is "import", with `import_path`; a `continuous: first` shot's
+# first is "continuity"), else "generate". A shot no longer continues just by
+# having a previous shot: it says so.
 
 KEYFRAME_METHODS = ("continuity", "generate", "import", "none")
 
@@ -415,7 +416,9 @@ def keyframe_needs(ep: str) -> dict[tuple[str, str], dict]:
                 elif script and script != "none":
                     method = "import"
                 else:
-                    method = "continuity" if (end == "first" and prev) else "generate"
+                    # a shot opens on the previous one's last frame only when it
+                    # says `continuous: first` (sh.keyframe: "continuity")
+                    method = "generate"
                 d = {"need": "required" if required else "optional", "method": method,
                      "script": script, "target": tid, "reads": reads}
                 if method == "import" and script not in KEYFRAME_METHODS:
