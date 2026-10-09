@@ -2590,7 +2590,7 @@ def plan_edit(s: Series, ref: Ref, req: GenRequest, overrides: dict | None = Non
 
 PANO_TARGET = "qwen_image_21"
 PANO_LORA = "pano360_qwen21_edit_v1.safetensors"
-PANO_SIZE = (1536, 768)
+PANO_SIZE = (2048, 1024)      # the card's larger 2:1 size: a third more detail per view than 1536x768
 PANO_WORDS = 35             # the LoRA's card: a one-sentence scene of 15-35 words
 
 

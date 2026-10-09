@@ -871,7 +871,7 @@ Queues one candidate per call. It returns without waiting, like `/render`.
 - **How it's made:** Qwen-Image 2.1 (`qwen_image_21`) with the
   `pano360_qwen21_edit_v1.safetensors` LoRA at 1.0. The prompt is the LoRA's trigger
   sentence plus the location's description, cut to one sentence of at most 35 words. The
-  text is encoded at 1088, and sampling starts from an empty 1536x768 latent: the
+  text is encoded at 1088, and sampling starts from an empty 2048x1024 latent (`size` can ask for another 2:1 size, e.g. 1536x768, which is faster and softer): the
   `latent: "empty"` value makes the target's switch skip the references' latent.
 - **Where it lands:** takes of the location's `pano` pseudo-view, listed as `panos`, with
   `source: "pano"`. `PUT /refs/pick` refuses them (400): a 360 is never the plate.

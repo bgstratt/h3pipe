@@ -1315,6 +1315,8 @@ export interface RefGenerateRequest {
   edit?: RefEditRequest | null;
   /** P5: a 360 panorama of a location (its live plate, then `with`'s) */
   pano?: { with?: string[] } | null;
+  /** P4: the picture's size, "WxH" (a 360's: 2:1) */
+  size?: string | null;
 }
 
 /** A picture brought into an edit (image 2 onward): a ref's live picture, or one take. */

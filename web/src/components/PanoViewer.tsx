@@ -30,8 +30,11 @@ function defaultRect(): Rect {
 }
 
 /** The 360 row of a location: Make 360, and its panoramas to open. */
+const PANO_SIZES = ["2048x1024", "1536x768"];
+
 export function PanoSection({ ep, r }: { ep: string; r: Ref }) {
   const busy = useApp((s) => !!s.busy[`refgen|${r.id}`]);
+  const [psize, setPsize] = useState(PANO_SIZES[0]);
   const panos = r.panos ?? [];
   return (
     <div className="h3-col" style={{ gap: 3 }}>
@@ -43,11 +46,14 @@ export function PanoSection({ ep, r }: { ep: string; r: Ref }) {
           title={r.exists ? "Turn the live plate into a 360 panorama (Qwen 2.1 + the pano360 LoRA). Open it to aim a camera and save a view as a new angle." : "Pick or import a plate first"}
           onClick={() => void generateRef({
             ref: r.id, view: null, count: 1, seed_mode: "new", seed: null, prompt: null, model: null,
-            loras: null, steps: null, note: "360", pano: {},
+            loras: null, steps: null, note: "360", pano: {}, size: psize,
           })}
         >
           <i className={busy ? "pi pi-spin pi-spinner" : "pi pi-globe"} /> Make 360
         </button>
+        <select className="h3-in" value={psize} onChange={(e) => setPsize(e.target.value)} title="The 360's size: 2048x1024 has a third more detail in every view; 1536x768 is about twice as fast">
+          {PANO_SIZES.map((x) => <option key={x} value={x}>{x}</option>)}
+        </select>
         {!panos.length && <span className="h3-small h3-muted">none yet</span>}
       </div>
       {panos.length > 0 && (
