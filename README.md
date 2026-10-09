@@ -8,9 +8,10 @@ ComfyUI workflow), generates the reference images and keyframes the shots need t
 a local ComfyUI, and cuts the takes together.
 
 You drive it from an editor inside ComfyUI (shots, takes, refs, the cut) or from one
-command, `h3.py`. One shot per queue: nothing chains, so a bad shot is re-rendered alone
-and the rest of the episode is untouched. Every take is kept with the exact settings that
-made it.
+command, `h3.py`. One shot per queue, so a bad shot is re-rendered alone and the rest of
+the episode is untouched; a shot written `continuous:` (it carries straight on from the one
+before) reads that shot's take when its render starts, so a whole chain still queues at
+once. Every take is kept with the exact settings that made it.
 
 New here? **[INSTALL.md](INSTALL.md)** goes from a clean ComfyUI to a rendered proxy
 episode; **[docs/AUTHORING.md](docs/AUTHORING.md)** is the script and series config format.
@@ -66,6 +67,8 @@ queued; no rebuild. The format and how to choose are in
 | `flux_kontext` | FLUX.1 Kontext dev (edit, one reference) |
 | `minimax_h3_still` | MiniMax H3 as an image model: renders 5 frames, keeps the first, up to 9 references |
 | `qwen_image_21` | Qwen-Image 2.1: text to image with nothing to edit from, an edit of up to 16 reference images when there is. The only image target with a usable cfg, scheduler, denoise and negative prompt |
+| `qwen_rapid_aio` | Qwen-Image-Edit Rapid AIO: a 4-step all-in-one edit checkpoint, up to 3 references; quick for composing several characters into one picture |
+| `klein_erp_360` | FLUX.2 Klein 9B base with a 360 outpaint LoRA: a location plate as an equirectangular 360 panorama (the Refs tab's **Make 360**; not offered as a ref's model) |
 
 | Audio target | Label |
 |---|---|
@@ -129,9 +132,10 @@ See also **Which model? Readiness and downloads** in [docs/AUTHORING.md](docs/AU
 
 The default target, H3 Ref2VA, from
 [Comfy-Org/MiniMax-H3](https://huggingface.co/Comfy-Org/MiniMax-H3), with the proxy turbo
-LoRA from [Kijai/MiniMax-H3_comfy](https://huggingface.co/Kijai/MiniMax-H3_comfy). The final
-pass's 8-step turbo LoRA (lightx2v's) has no download link recorded yet; search Hugging Face
-for its name. Without it the final pass renders on the slower base preset:
+LoRA from [Kijai/MiniMax-H3_comfy](https://huggingface.co/Kijai/MiniMax-H3_comfy) and the
+final pass's 8-step turbo LoRA from
+[lightx2v/Minimax-h3-Turbo](https://huggingface.co/lightx2v/Minimax-h3-Turbo). Without a
+turbo LoRA a pass renders on the slower base preset:
 
 | Role | File used here |
 |---|---|
@@ -152,17 +156,24 @@ Open ComfyUI after installing the node pack:
   stale marks; render, redo, cancel, pick the take the cut uses, discard a take to
   `renders[_proxy]/_trash/`.
 - **h3 Refs** (sidebar): every character view, prop, plate, voice and shot keyframe the
-  series config and script call for, with candidates (takes) to generate, import, compare,
-  discard and pick, and each ref's prompt override and image target.
-- **h3 Timeline** (bottom panel): the cut as an editable track — drag to reorder, drag the
-  clip edges to trim frame by frame, lock a clip, undo/redo, copy the order or the trims
-  from the other pass, **Play all** (watch the cut straight from its takes, no ffmpeg) and
-  **Export** (assemble the mp4).
+  series config and script call for, for the episode picked at its top, with candidates
+  (takes) to generate, import, compare, discard and pick, and each ref's prompt, image
+  target, size, cfg, negative and sampler settings (or a take's settings reused). A
+  picture can be **edited** with an edit model (Klein, Qwen, Kontext, Rapid AIO, H3 still:
+  **Queue Edit**, with relight presets); a character's view can be **turned** from another
+  (Qwen's multi-angle LoRA); a location gets **angles of a master** (`of:`) made from its
+  plate, a **360 panorama** with a viewer that saves any view as a new angle, and an H3
+  **camera tour** whose held frames become candidates. A **group** (`members:`) is one
+  picture of several people, cast like a character.
+- **h3 Timeline** (bottom panel, with its own episode picker): the cut as an editable
+  track — drag to reorder, drag the clip edges to trim frame by frame, lock a clip,
+  undo/redo, copy the order or the trims from the other pass, **Play all** (watch the cut
+  straight from its takes, no ffmpeg) and **Export** (assemble the mp4).
 - **Script** and **Series config** (floating): the two authored files, edited in place with
   live checking, Ctrl-S to save and rebuild, and a copy of the old version kept in
   `_history/`. The Script window follows the selected shot both ways.
 - **Viewer** (floating): a shot's takes with A/B compare (side by side or wipe), Play all,
-  and a ref's candidates.
+  and a ref's candidates; a tour plays there to keep any frame, a 360 opens in its viewer.
 - **Inspector** (floating): the selected shot: target, overrides (prompt, seed, model,
   LoRAs, steps, per pass), refs used, missing refs.
 - **Recording** (floating): attach the episode's dialogue recording — browse the ComfyUI

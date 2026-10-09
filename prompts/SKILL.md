@@ -854,6 +854,12 @@ angles of it:
   On a text-to-image model (Krea 2) it is drawn from its words as before.
 - The Refs tab lists the angles under their master.
 - An angle's master must be a location that isn't itself an angle.
+- The Refs tab can also make an angle's picture from the master's plate in two other ways:
+  a **360 panorama** of it (Make 360), whose viewer saves any view you turn to; or an H3
+  **camera tour** through it, whose held frames (and any frame you stop on) become
+  candidates. Both keep the master's room exactly, and a picture made this way is picked
+  into the angle like any other. Qwen's multi-angle LoRA (a character's **Turn**) isn't
+  used on plates: it turns a room into a diorama.
 
 ### Two people talking need an angle each
 

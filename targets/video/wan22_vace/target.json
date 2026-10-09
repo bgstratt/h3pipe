@@ -397,13 +397,13 @@
     "_note": "Where to get each file this target names (docs/API.md 'Downloads'). A url is only given when a trustworthy record has it: a ComfyUI template's or saved workflow's properties.models entry, or ComfyUI-Manager's model list; `source` says which. Otherwise url is null and source says what to search for. Never a guessed URL.",
     "wan2.2_fun_vace_high_noise_14B_fp8_scaled.safetensors": {
       "folder": "diffusion_models",
-      "url": null,
-      "source": "no URL: no ComfyUI template, saved workflow or ComfyUI-Manager model list known to h3pipe records this file. Search Hugging Face for its exact name (Wan 2.2 Fun VACE A14B high-noise expert, fp8 scaled ComfyUI repack)."
+      "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/diffusion_models/wan2.2_fun_vace_high_noise_14B_fp8_scaled.safetensors",
+      "source": "the Hugging Face repo Comfy-Org/Wan_2.2_ComfyUI_Repackaged (file and name checked on the Hugging Face repo 2026-10-09)"
     },
     "wan2.2_fun_vace_low_noise_14B_fp8_scaled.safetensors": {
       "folder": "diffusion_models",
-      "url": null,
-      "source": "no URL: no ComfyUI template, saved workflow or ComfyUI-Manager model list known to h3pipe records this file. Search Hugging Face for its exact name (Wan 2.2 Fun VACE A14B low-noise expert, fp8 scaled ComfyUI repack)."
+      "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/diffusion_models/wan2.2_fun_vace_low_noise_14B_fp8_scaled.safetensors",
+      "source": "the Hugging Face repo Comfy-Org/Wan_2.2_ComfyUI_Repackaged (file and name checked on the Hugging Face repo 2026-10-09)"
     },
     "umt5_xxl_fp8_e4m3fn_scaled.safetensors": {
       "folder": "text_encoders",
