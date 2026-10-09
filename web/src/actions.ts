@@ -2793,6 +2793,15 @@ export function closeVoiceClip() {
   set({ voiceClip: null });
 }
 
+/** P5: open the 360 viewer on a location's panorama. */
+export function openPano(ref: string, take: number) {
+  set({ panoView: { ref, take }, menu: null });
+}
+
+export function closePano() {
+  set({ panoView: null });
+}
+
 // ---------------------------------------------------------------------------
 // Phase 9d: a shot's audio from elsewhere
 // ---------------------------------------------------------------------------

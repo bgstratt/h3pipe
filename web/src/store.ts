@@ -380,6 +380,8 @@ export interface AppState {
   trackBuild: Record<string, BuildResult | null>;
   /** Phase 9c-B: the "use a line from a take" window (null: closed) */
   voiceClip: VoiceClipState | null;
+  /** P5: the 360 viewer: a location and one of its panoramas (null: closed) */
+  panoView: { ref: string; take: number } | null;
   /** Phase 9d: the "Audio from…" window for one clip (null: closed) */
   clipAudio: ClipAudioState | null;
   /** P8: the Supply window for files dropped in bulk (null: closed) */
@@ -473,6 +475,7 @@ export function initialState(prefs: Prefs = {}): AppState {
     alignResult: {},
     trackBuild: {},
     voiceClip: null,
+    panoView: null,
     clipAudio: null,
     supply: null,
     issues: {},

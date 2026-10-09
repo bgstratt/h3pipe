@@ -138,7 +138,7 @@ class KeyframeTest(unittest.TestCase):
     # -- a render keeps continuity current -----------------------------------
 
     def test_refresh_continuity_before_a_render(self):
-        # sh020 (LTX) reads a first frame; with a previous shot its method is continuity
+        # sh020 (LTX, `continuous: first`) opens on sh010's last frame
         live = os.path.join(self.root, "refs", "shots", "sh020", "first.png")
         make_take(self.root, "proxy", "sh010")
         fresh = lambda: R.keyframe_freshness(self.s, "sh020", "first", "proxy")  # noqa: E731

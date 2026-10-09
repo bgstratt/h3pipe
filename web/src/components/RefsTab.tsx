@@ -2,7 +2,7 @@
 // file, its candidates (takes), pick / generate / import / compare, and the
 // ref's prompt and settings override.
 
-import { memo, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
+import { Fragment, memo, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import {
   clearRef, copyText, discardRefTake, dismissMissingResult, dropFilesFromDrag, generateMissing, generateRef, keyframeFromTake, loadRefs, openBrowse,
   openImageCompare, openRefFile, pickRef, revertRefOverride, saveRefOverride, selectRefTake, setRefDefault, setRefsFilter, toggleRefOpen,
@@ -30,13 +30,18 @@ import {
 } from "../lib/refs";
 import { findTarget, targetLabel, targetShort } from "../lib/targets";
 import { store, useApp } from "../store";
-import type { Ref, RefTake, SeedMode } from "../types";
+import { TUNABLE_PARAMS, type OverrideFields as OverrideFieldValues, type Ref, type RefEffective, type RefParams, type RefTake, type SeedMode, type Target } from "../types";
+import { sizeRule } from "../lib/size";
+import { knobFields, knobsOf, takeSettings, type Knobs } from "../lib/refSettings";
 import { useStatus } from "./hooks";
 import { useTargets } from "./Targets";
 import { OverrideFields } from "./OverrideFields";
-import { PassToggle } from "./ShotsTab";
+import { EpisodeSelect, PassToggle } from "./ShotsTab";
 import { Progress } from "./Thumb";
 import { DropSlot, SupplyPicker, UploadButton } from "./Upload";
+import { EditForm, editSourceText } from "./RefEdit";
+import { PanoSection } from "./PanoViewer";
+import { TourSection } from "./TourSection";
 
 const FILTERS: { id: RefFilter; label: string; title: string }[] = [
   { id: "episode", label: "this episode", title: "Refs used by this episode's shots (this pass)" },
@@ -77,9 +82,11 @@ function ImageModelBar() {
     const badge = readinessBadge(t?.readiness);
     const editor = src === "editor";
     const what = kind === "voices" ? voiceModeText(t) || "audio model" : imageModeText(t) || "image model";
+    // what the voice model can and can't do, kept on the label's mouseover
+    const notes = kind === "voices" && t ? `${targetLabel(list, t.id)}: ${voiceModeText(t)}.\n${voiceCapNotes(t).join("\n")}` : "";
     return (
       <span className="h3-row" style={{ gap: 4 }}>
-        <span className="h3-muted h3-small">{label}</span>
+        <span className="h3-muted h3-small" title={notes || undefined} style={notes ? { cursor: "help", textDecoration: "underline dotted" } : undefined}>{label}</span>
         <select
           className="h3-in"
           value={editor ? cur : ""}
@@ -98,7 +105,6 @@ function ImageModelBar() {
       </span>
     );
   };
-  const voiceTarget = findTarget(list, defaults.voices);
   const custom = (["refs", "keyframes", "voices"] as RefTargetKind[]).filter((k) => defaultOf(defaults, k).source === "editor");
   const WHAT: Record<RefTargetKind, string> = { refs: "refs", keyframes: "keyframes", voices: "voice samples" };
   return (
@@ -108,11 +114,6 @@ function ImageModelBar() {
         {row("keyframes", "Keyframes with:")}
         {row("voices", "Voices with:")}
       </div>
-      {voiceTarget && (
-        <span className="h3-small h3-muted" title={voiceCapNotes(voiceTarget).join(" ")}>
-          {targetLabel(list, voiceTarget.id)}: {voiceModeText(voiceTarget)}. {voiceCapNotes(voiceTarget)[0]}
-        </span>
-      )}
       {custom.map((k) => {
         const id = defaultOf(defaults, k).target;
         return (
@@ -325,7 +326,7 @@ const Candidate = memo(function Candidate({ ep, r, view, t, live, selected }: {
         }}
       >
         {!(url && t.status === "ok") && <span className={t.status === "failed" ? "h3-err" : ""}>{t.status}</span>}
-        <span className="h3-thumb-label">{tn(t.take)}{t.source === "imported" ? " ⤓" : t.source === "frame" && t.from ? ` ← ${t.from.shot}` : ""}</span>
+        <span className="h3-thumb-label">{tn(t.take)}{t.source === "imported" ? " ⤓" : t.source === "edited" ? ` ✎${t.edit?.take != null ? ` ← ${tn(t.edit.take)}` : ""}` : t.source === "frame" && t.from ? ` ← ${t.from.shot}` : ""}</span>
         {live && <span className="h3-cand-live">live</span>}
       </div>
       {prog && <Progress value={prog.value} max={prog.max} />}
@@ -360,6 +361,8 @@ function Selection({ r }: { r: Ref }) {
   const sel = useApp((s) => (s.refSel && s.refSel.ref === r.id ? s.refSel : null));
   const busy = useApp((s) => !!s.busy[`refpick|${r.id}`]);
   const busyDiscard = useApp((s) => !!sel && !!s.busy[`refdiscard|${r.id}|${sel.view ?? ""}|${sel.take}`]);
+  const [editing, setEditing] = useState<string | null>(null);
+  const busySettings = useApp((s) => !!s.busy[`refoverride|${r.id}`]);
   if (!sel) return null;
   const t = takesOf(r, sel.view).find((x) => x.take === sel.take);
   if (!t) return null;
@@ -386,6 +389,26 @@ function Selection({ r }: { r: Ref }) {
             <i className="pi pi-clone" /> {picked != null && !live ? "Compare with live" : "View"}
           </button>
         )}
+        {!isAudioRef(r) && (t.source === "generated" || t.source === "edited") && t.status === "ok" && (
+          <button
+            className="h3-btn"
+            disabled={busySettings}
+            title={`Make ${tn(t.take)}'s seed, model, LoRAs, steps, cfg, sampler and size ${sel.view ? `${viewLabel(sel.view)}'s` : "this ref's"} settings, for the next Generate (the prompt stays as it is)`}
+            onClick={() => void saveRefOverride(r.id, takeSettings(t, isKeyframeRef(r)), sel.view)}
+          >
+            <i className="pi pi-replay" /> Use these settings
+          </button>
+        )}
+        {!isAudioRef(r) && sel.view !== SHEET_VIEW && (
+          <button
+            className={`h3-btn${editing === `${sel.view}|${t.take}` ? " h3-on" : ""}`}
+            disabled={!usable}
+            title={`Change ${tn(t.take)} with an edit model (“remove the people”, “a red coat”): the result is a new candidate`}
+            onClick={() => setEditing(editing === `${sel.view}|${t.take}` ? null : `${sel.view}|${t.take}`)}
+          >
+            <i className="pi pi-pencil" /> Edit…
+          </button>
+        )}
         {live && (
           <button
             className="h3-btn h3-danger"
@@ -408,8 +431,18 @@ function Selection({ r }: { r: Ref }) {
           <i className={busyDiscard ? "pi pi-spin pi-spinner" : "pi pi-trash"} /> Discard
         </button>
       </div>
+      {editing === `${sel.view}|${t.take}` && <EditForm r={r} view={sel.view} take={t.take} onDone={() => setEditing(null)} />}
       {(t.prompt || t.model || t.note || t.original_name || keyframeSource(t) || (t.source === "generated") || (t.status === "failed" && t.save_notes)) && (
         <div className="h3-kv">
+          {t.source === "edited" && t.edit && (
+            <>
+              <span>edited</span>
+              <span title={t.edit.wrap === false ? "Sent as typed" : "The instruction, with the rest of the picture named as fixed"}>
+                {editSourceText(t.edit)}: “{t.edit.instruction}”
+                {t.edit.with?.length ? ` · with ${t.edit.with.map((w) => `${w.ref}${w.view ? ` (${viewLabel(w.view)})` : ""}`).join(", ")}` : ""}
+              </span>
+            </>
+          )}
           {keyframeSource(t) && <><span>from</span><span>{keyframeSource(t)}</span></>}
           {t.source === "generated" && (
             <>
@@ -428,7 +461,7 @@ function Selection({ r }: { r: Ref }) {
           {t.target && <><span>model</span><span>{t.target}</span></>}
           {t.note && <><span>note</span><span>{t.note}</span></>}
           {t.model && <><span>file</span><span title={t.model}>{shortName(t.model, 40)}</span></>}
-          {t.steps != null && <><span>steps</span><span>{t.steps}</span></>}
+          {t.steps != null && <><span>steps</span><span>{t.steps}{t.cfg != null ? ` · cfg ${t.cfg}` : ""}{t.params && Object.keys(t.params).length ? ` · ${Object.entries(t.params).map(([k, v]) => `${k} ${v}`).join(" · ")}` : ""}{t.width && t.height ? ` · ${t.width}x${t.height}` : ""}</span></>}
           {t.status === "failed" && t.save_notes && <><span>error</span><span className="h3-err">{t.save_notes}</span></>}
           {t.prompt && <><span>prompt</span><span className="h3-small" title={t.prompt}>{t.prompt.length > 180 ? t.prompt.slice(0, 179) + "…" : t.prompt}</span></>}
         </div>
@@ -448,7 +481,15 @@ function GenerateBar({ r }: { r: Ref }) {
   const gen = canGenerate(r) && !isAudioRef(r);
   const importView = isChar ? view || null : null;
   const kind = isAudioRef(r) ? "audio" : "image";
+  const [editing, setEditing] = useState(false);
+  // the live picture: a character's picked views (the form picks which;
+  // the view chosen here first), else the ref's file (one dropped in by hand
+  // has no take to select, and this is how it gets edited)
+  const pickedViews = isChar ? VIEWS.map((v) => v.view).filter((v) => pickedOf(r, v) != null) : [];
+  const live = isChar ? pickedViews.length > 0 : r.exists;
+  const editView = isChar ? (view && pickedViews.includes(view) ? view : pickedViews[0] ?? null) : null;
   return (
+    <>
     <div className="h3-row h3-wrap h3-genbar">
       {isChar && (
         <select className="h3-in" value={view} onChange={(e) => setView(e.target.value)} title="Which view to generate or import into">
@@ -487,6 +528,16 @@ function GenerateBar({ r }: { r: Ref }) {
       >
         <i className="pi pi-download" /> Import…
       </button>
+      {!isAudioRef(r) && (
+        <button
+          className={`h3-btn${editing ? " h3-on" : ""}`}
+          disabled={!live}
+          title={live ? "Change the live picture with an edit model: the result is a new candidate" : isChar ? "No view is picked yet: pick or import one first" : "Nothing is live yet: pick or import a picture first"}
+          onClick={() => setEditing(!editing)}
+        >
+          <i className="pi pi-pencil" /> Edit live…
+        </button>
+      )}
       {!isChar ? (
         <UploadButton refId={r.id} view={null} kind={kind} title={`Upload ${kind === "audio" ? "an audio file" : "an image"} from this computer as a new candidate, live at once (or drop one on this row)`} />
       ) : (
@@ -500,6 +551,8 @@ function GenerateBar({ r }: { r: Ref }) {
         />
       )}
     </div>
+    {editing && live && <EditForm r={r} view={editView} take={null} viewChoices={isChar ? pickedViews : undefined} onDone={() => setEditing(false)} />}
+    </>
   );
 }
 
@@ -602,23 +655,35 @@ function RefSettingsForm({ r, view }: { r: Ref; view: string | null }) {
   const initial = useMemo(() => formFromDetail(src), [src]);
   const [form, setForm] = useState<OverrideForm>(initial);
   const [base, setBase] = useState<OverrideForm>(initial);
+  // P4: cfg and the sampler knobs, where the image target has them
+  const { list: targetList } = useTargets();
+  const refDefaultsNow = useRefDefaults();
+  const tgt = findTarget(targetList, eff?.target ?? refTargetOf(r, refDefaultsNow).target);
+  const initialKnobs = useMemo(() => knobsOf(src.override), [src]);
+  const [knobs, setKnobs] = useState<Knobs>(initialKnobs);
+  const [baseKnobs, setBaseKnobs] = useState<Knobs>(initialKnobs);
   const [showDiff, setShowDiff] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const dirty = isDirty(form, base);
+  const knobsDirty = JSON.stringify(knobs) !== JSON.stringify(baseKnobs);
+  const dirty = isDirty(form, base) || knobsDirty;
   const dirtyRef = useRef(dirty);
   dirtyRef.current = dirty;
   useEffect(() => {
-    if (!dirtyRef.current) setForm(initial);
+    if (!dirtyRef.current) {
+      setForm(initial);
+      setKnobs(initialKnobs);
+    }
     setBase(initial);
-  }, [initial]);
+    setBaseKnobs(initialKnobs);
+  }, [initial, initialKnobs]);
   const set = (p: Partial<OverrideForm>) => {
     setErr(null);
     setForm((f) => ({ ...f, ...p }));
   };
   const save = async () => {
-    let fields;
+    let fields: OverrideFieldValues;
     try {
-      fields = overrideFields(form, base, src);
+      fields = { ...overrideFields(form, base, src), ...knobFields(knobs, baseKnobs) };
     } catch (e) {
       setErr(errText(e));
       return;
@@ -657,11 +722,17 @@ function RefSettingsForm({ r, view }: { r: Ref; view: string | null }) {
         stepsPlaceholder={`${ov.steps == null && eff?.steps != null ? eff.steps : ""} (series config)`}
         effLoras={eff?.loras ?? null}
         lorasOverridden={ov.loras != null || ovFields.includes("loras")}
+        negative={tgt?.widgets?.negative && !isAudioRef(r) ? { effective: eff?.negative ?? "", source: eff?.negative_source ?? "" } : null}
+        size={isAudioRef(r) || isKeyframeRef(r) || noPrompt ? null : {
+          built: ov.size == null && eff?.width && eff?.height ? `${eff.width}x${eff.height}` : "",
+          rule: sizeRule(tgt?.template),
+        }}
       />
+      {!isAudioRef(r) && !noPrompt && <KnobFields knobs={knobs} set={(k) => setKnobs((x) => ({ ...x, ...k }))} eff={eff} target={tgt} />}
       {err && <div className="h3-note h3-note-err">{err}</div>}
       <div className="h3-row h3-wrap">
         <button className="h3-btn h3-primary" disabled={!dirty || busy} onClick={() => void save()}>{busy ? "Saving…" : "Save"}</button>
-        <button className="h3-btn" disabled={!dirty || busy} onClick={() => setForm(base)}>Discard edits</button>
+        <button className="h3-btn" disabled={!dirty || busy} onClick={() => { setForm(base); setKnobs(baseKnobs); }}>Discard edits</button>
         <span className="h3-grow" />
         <button
           className="h3-btn h3-danger"
@@ -674,6 +745,69 @@ function RefSettingsForm({ r, view }: { r: Ref; view: string | null }) {
       </div>
       <div className="h3-muted h3-small">Used by the next Generate. Candidates already made keep their settings.</div>
     </div>
+  );
+}
+
+const KNOB_TITLES: Record<string, string> = {
+  cfg: "Guidance scale. 1 on a distilled or turbo model (the negative prompt is inert there); higher follows the prompt harder",
+  sampler: "The sampler (ComfyUI's sampler_name), e.g. euler, er_sde, euler_ancestral",
+  scheduler: "The noise schedule, e.g. simple, beta, karras",
+  denoise: "How much of the picture is redrawn, 0 to 1 (1: all of it)",
+  shift: "The model's sampling shift (flow models)",
+  guidance: "Flux-style distilled guidance",
+};
+
+/** P4: cfg and the image target's sampler knobs, each only if it has that widget. */
+function KnobFields({ knobs, set, eff, target }: { knobs: Knobs; set: (k: Partial<Knobs>) => void; eff: RefEffective | null; target: Target | undefined }) {
+  const shown = (["cfg", ...TUNABLE_PARAMS] as const).filter((k) => !!target?.widgets?.[k]);
+  if (!shown.length) return null;
+  const now = (k: string) => (k === "cfg" ? eff?.cfg : eff?.params?.[k as keyof RefParams]);
+  return (
+    <div className="h3-field">
+      {shown.map((k) => (
+        <Fragment key={k}>
+          <label title={KNOB_TITLES[k]}>{k === "cfg" ? "CFG" : k[0].toUpperCase() + k.slice(1)}</label>
+          <div className="h3-row">
+            <input
+              className="h3-in h3-grow h3-mono"
+              value={knobs[k]}
+              inputMode={k === "sampler" || k === "scheduler" ? "text" : "decimal"}
+              placeholder={`${now(k) ?? ""} (${target?.short ?? "the target"}'s)`}
+              title={KNOB_TITLES[k]}
+              onChange={(e) => set({ [k]: e.target.value } as Partial<Knobs>)}
+            />
+            {knobs[k] && <button className="h3-btn h3-icon" title="Clear" onClick={() => set({ [k]: "" } as Partial<Knobs>)}>✕</button>}
+          </div>
+        </Fragment>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * P5: draw a character's view from another view it has, by turning the camera
+ * round it (Qwen 2.1 + the multi-angle LoRA): the three-quarter body if that is
+ * picked, else the first picked view. A new candidate, not picked.
+ */
+function TurnButton({ r, view, label }: { r: Ref; view: string; label: string }) {
+  const busy = useApp((s) => !!s.busy[`refgen|${r.id}`]);
+  const picked = VIEWS.map((v) => v.view).filter((v) => v !== view && pickedOf(r, v) != null);
+  const from = picked.includes("01_threequarter") ? "01_threequarter" : picked[0];
+  return (
+    <button
+      className="h3-btn h3-icon"
+      disabled={!from || busy}
+      title={from
+        ? `Draw ${label} from the ${viewLabel(from)} view by turning the camera round ${r.name} (Qwen 2.1 + the multi-angle LoRA): a new candidate`
+        : "Pick another view first: this one is drawn from it"}
+      onClick={() => from && void generateRef({
+        ref: r.id, view, count: 1, seed_mode: "new", seed: null, prompt: null, model: null,
+        loras: null, steps: null, note: `turned from ${viewLabel(from)}`,
+        edit: { take: null, from_view: from, turn: true },
+      })}
+    >
+      ↻
+    </button>
   );
 }
 
@@ -716,6 +850,7 @@ function RefDetail({ ep, r }: { ep: string; r: Ref }) {
                     {v.label}
                     <span className={live ? "h3-muted" : "h3-err"}>{live ? ` ${tn(live.take)}` : rv?.cleared ? " cleared" : " —"}</span>
                     <span className="h3-grow" />
+                    <TurnButton r={r} view={v.view} label={v.label} />
                     <UploadButton refId={r.id} view={v.view} kind="image" label="" title={`Upload an image from this computer as ${r.name}'s ${v.label} view, live at once (or drop one on this column)`} />
                   </div>
                   <CandidateGrid ep={ep} r={r} view={v.view} cols />
@@ -739,6 +874,8 @@ function RefDetail({ ep, r }: { ep: string; r: Ref }) {
         </div>
       )}
       {!isKeyframeRef(r) && <GenerateBar r={r} />}
+      {r.kind === "location" && <PanoSection ep={ep} r={r} />}
+      {r.kind === "location" && <TourSection ep={ep} r={r} />}
       {canGenerate(r) && (
         <details className="h3-ref-settings">
           <summary>Prompt and settings{r.override.fields.length ? ` (override: ${r.override.fields.join(", ")})` : ""}</summary>
@@ -806,9 +943,11 @@ function RefRow({ ep, r }: { ep: string; r: Ref }) {
             {r.of && (
               <span
                 className="h3-muted h3-small h3-ell"
-                title={`A wardrobe variant of ${r.of}: same character, own sheet. Its views are generated from ${r.of}'s, and it shares ${r.of}'s voice.`}
+                title={r.kind === "location"
+                  ? `An angle of ${r.of}: the same place from another camera, with its own plate. An edit model generates it from ${r.of}'s plate.`
+                  : `A wardrobe variant of ${r.of}: same character, own sheet. Its views are generated from ${r.of}'s, and it shares ${r.of}'s voice.`}
               >
-                variant of {r.of}
+                {r.kind === "location" ? `↳ angle of ${r.of}` : `variant of ${r.of}`}
               </span>
             )}
             <span className="h3-muted h3-small h3-ell">{r.id}</span>
@@ -913,13 +1052,14 @@ export function RefsTab() {
     <div className="h3-surface">
       <div className="h3-bar">
         <span className="h3-title">Refs</span>
-        {refs && <span className="h3-muted h3-small">{refs.length} in the series config</span>}
+        <EpisodeSelect compact />
+        {refs && <span className="h3-muted h3-small h3-nowrap">{refs.length} refs</span>}
         <span className="h3-grow" />
         {loading && <i className="pi pi-spin pi-spinner h3-muted" />}
         <PassToggle />
         <button className="h3-btn h3-icon" title="Refresh" disabled={!ep} onClick={() => void loadRefs()}><i className="pi pi-refresh" /></button>
       </div>
-      {!ep && <div className="h3-empty-state">Pick an episode in the h3 Shots tab.</div>}
+      {!ep && <div className="h3-empty-state">Pick an episode above.</div>}
       {ep && (
         <>
           <div className="h3-pad h3-col" style={{ gap: 4 }}>

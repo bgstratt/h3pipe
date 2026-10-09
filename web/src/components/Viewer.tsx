@@ -5,7 +5,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as RPointerEvent, type ReactNode } from "react";
 import {
-  closeViewer, currentPlaylist, openInspector, openMenu, openRedo, openSidecar, openViewer, pickRef, pickTake,
+  closeViewer, currentPlaylist, openPano, openInspector, openMenu, openRedo, openSidecar, openViewer, pickRef, pickTake,
   reportCutPos, seekCut, setCutPlaying, toggleUpscaled, updateViewer,
 } from "../actions";
 import { cutKey, isTyping, lockedPickRefusal, setCutAudio } from "../cutActions";
@@ -18,7 +18,8 @@ import {
   atOutPoint, baseIn, clipOffset, cutTime, fileTime, locate, nextVideo, totalDuration, type PlayItem,
 } from "../lib/playlist";
 import { masterSync, needsResync, recordingAt, trackState } from "../lib/recording";
-import { takesOf, viewLabel, viewOf } from "../lib/refs";
+import { PANO_VIEW, TOUR_VIEW, takesOf, viewLabel, viewOf } from "../lib/refs";
+import { HoldUseBar } from "./TourSection";
 import { shotTarget, takeTargetBadge, targetLabel } from "../lib/targets";
 import { store, useApp, type CompareMode, type ViewerState } from "../store";
 import type { RefTake, TakeSummary } from "../types";
@@ -911,6 +912,14 @@ function StillsView({ ep, v }: { ep: string; v: ViewerState }) {
           </div>
           <div className="h3-transport" style={{ justifyContent: "flex-end", flexWrap: "wrap" }}>
             <span className="h3-muted h3-small h3-grow">Click a candidate to load {mode === "single" || v.target === "a" ? "A" : "B"} · ctrl/⌘-click loads B</span>
+            {/* P5: a location's tour hold or 360 is never picked where it is */}
+            {view === TOUR_VIEW && tA && tA.status === "ok" && <HoldUseBar ep={ep} r={ref} take={tA.take} />}
+            {view === PANO_VIEW && tA && tA.status === "ok" && (
+              <button className="h3-btn h3-primary" onClick={() => { closeViewer(); openPano(ref.id, tA.take); }}>
+                <i className="pi pi-globe" /> Open in the 360 viewer
+              </button>
+            )}
+            {view !== TOUR_VIEW && view !== PANO_VIEW && (
             <button
               className="h3-btn h3-primary"
               disabled={!tA || tA.status !== "ok" || tA.take === picked || busy}
@@ -918,7 +927,8 @@ function StillsView({ ep, v }: { ep: string; v: ViewerState }) {
             >
               <i className="pi pi-check" /> {tA && tA.take === picked ? "Live" : `Pick ${tA ? tn(tA.take) : "A"}`}
             </button>
-            {tB && (
+            )}
+            {tB && view !== TOUR_VIEW && view !== PANO_VIEW && (
               <button className="h3-btn" disabled={tB.status !== "ok" || tB.take === picked || busy} onClick={() => v.ref && void pickRef(v.ref, view, tB.take)}>
                 Pick B ({tn(tB.take)})
               </button>

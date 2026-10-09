@@ -125,14 +125,14 @@ export function createMockApi(emit: Emit, opts: MockOptions = {}): Api & { outsi
   /**
    * The build's keyframe needs (Phase 8.5): every shot whose target reads
    * keyframes, or whose script asks for one. Wan I2V's first frame is required.
-   * The method: the script's, else continuity with a previous shot, else generate.
+   * The method: the script's (`continuous: first` is continuity), else generate.
    */
   function keyframeNeeds(): KeyframeNeedSpec[] {
     const s = status.proxy ?? status.final;
     if (!s) return [];
     const shots = s.shots.filter((x) => !x.orphan);
     const out: KeyframeNeedSpec[] = [];
-    shots.forEach((sh, i) => {
+    shots.forEach((sh) => {
       const d = detail.proxy?.[sh.shot] ?? detail.final?.[sh.shot];
       const target = shotTargetOf(sh.shot, d?.override ?? {}).target;
       const caps = MOCK_TARGETS.targets.find((t) => t.id === target)?.capabilities;
@@ -141,11 +141,10 @@ export function createMockApi(emit: Emit, opts: MockOptions = {}): Api & { outsi
       for (const which of ["first", "last"] as const) {
         const asked = script[which];
         if (!reads.includes(which) && !asked) continue;
-        const neighbour = which === "first" ? i > 0 : i < shots.length - 1;
         out.push({
           shot: sh.shot, which, target,
           need: which === "first" && caps?.requires_first ? "required" : "optional",
-          method: asked ?? (neighbour ? "continuity" : "generate"),
+          method: asked ?? "generate",
           requested: !!asked && asked !== "none",
         });
       }
@@ -1590,6 +1589,21 @@ export function createMockApi(emit: Emit, opts: MockOptions = {}): Api & { outsi
       await wait();
       need(req.ep);
       return refs.generate(req);
+    },
+    async refsTour(req) {
+      await wait();
+      need(req.ep);
+      return { queued: [{ tour: 1, comfy_prompt_id: "mock-tour" }] };
+    },
+    async refsTourFrame(req) {
+      await wait();
+      need(req.ep);
+      throw new Error(`the mock has no tour video for ${req.ref}`);
+    },
+    async refsCopyTake(req) {
+      await wait();
+      need(req.ep);
+      throw new Error(`the mock can't copy ${req.ref} t${req.take} into ${req.to}`);
     },
     async refsPick(req) {
       await wait();

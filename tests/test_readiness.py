@@ -547,9 +547,11 @@ class ReadinessTest(unittest.TestCase):
         self.assertIn("                  -> models/model_patches/   https://huggingface.co/"
                       "Lightricks/LTX-2.5/resolve/main/model_patches/"
                       "ltx-2.5-duration-head-bf16.safetensors", lines)
-        # no record: no URL, what to search for instead
+        # Wan VACE's missing expert, with the link it now has (a file with no
+        # record prints "no URL: " and what to search for; see the tests above)
         self.assertTrue(any(line.startswith("                  -> models/diffusion_models/   "
-                                            "no URL: ") for line in lines), out)
+                                            "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_"
+                                            "Repackaged/") for line in lines), out)
         buf = io.StringIO()
         with mock.patch.object(J.Comfy, "object_info", return_value=info), \
                 contextlib.redirect_stdout(buf):

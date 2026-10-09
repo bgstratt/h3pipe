@@ -1,0 +1,5 @@
+exit 1
+
+  error in overlap_value.md: line 9: `overlap: lots` must be a whole number of frames, 1 to 360
+    | overlap: lots
+

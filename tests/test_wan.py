@@ -335,7 +335,8 @@ class RenderTest(unittest.TestCase):
     # -- wan22_i2v -------------------------------------------------------------
 
     def test_i2v_blocked_without_a_first_frame(self):
-        why = "Wan 14B I2V needs a first frame: generate one or use continuity (or import one), or retarget to wan22_ti2v"
+        why = ("Wan 14B I2V needs a first frame: generate one, import one, give the shot "
+               "`continuous: first` (the previous shot's last frame), or retarget to wan22_ti2v")
         job = self.plan("sh010", I2V)
         self.assertEqual(job.action, "blocked")
         self.assertEqual([(r["slot"], r["anyway"], r["why"]) for r in job.missing],

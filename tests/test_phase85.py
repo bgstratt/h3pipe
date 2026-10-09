@@ -341,8 +341,10 @@ class KeyframeListingTest(Episode):
         refs = {r["id"]: r for r in R.list_refs(self.ep)}
         some = next(iter(needs))
         r = refs[f"shot:{some[0]}:{some[1]}"]
+        # requested: the script asks for it (sh020's `continuous: first` does)
         self.assertEqual((r["shot"], r["which"], r["need"], r["target"], r["exists"],
-                          r["requested"]), (some[0], some[1], "optional", "ltx2", False, False))
+                          r["requested"]), (some[0], some[1], "optional", "ltx2", False,
+                                            needs[some]["script"] is not None))
         self.assertTrue(r["can_generate"])
 
     def test_wan_first_is_required_and_script_lines(self):
@@ -371,7 +373,8 @@ class KeyframeListingTest(Episode):
         self.episode_target("wan22_i2v")
         miss = R.missing_keyframes(self.s)
         self.assertTrue(miss)
-        self.assertTrue(all(n["need"] == "required" for _s, _w, n in miss))
+        # required ones, and ones the script asks for (`continuous: first` on sh020)
+        self.assertTrue(all(n["need"] == "required" or n["script"] for _s, _w, n in miss))
         shot, which, _ = miss[0]
         self.live(f"refs/shots/{shot}/{which}.png")
         self.assertNotIn((shot, which), [(s, w) for s, w, _ in R.missing_keyframes(self.s)])

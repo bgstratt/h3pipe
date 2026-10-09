@@ -61,6 +61,8 @@ const STALE_WHY: Record<string, string> = {
   script: "the script changed this shot since the take",
   ref: "a reference image changed since the take",
   preset: "model / LoRA / steps / size defaults changed since the take",
+  target: "rendered on another target than the shot's next render uses",
+  chain: "it continues the shot before it (continuous: latent), whose take in the cut changed since",
 };
 
 export function staleTitle(reasons: string[]): string {

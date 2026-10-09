@@ -230,7 +230,72 @@ def plan_master(root: str, pass_: str = "final", conform: bool = False,
         plan.rows.append(row)
     if not plan.rows:
         raise MasterError(f"the {pass_} cut is empty")
+    continuity_rows(plan, recipe, shots, mode, post_shots, conform)
     return plan
+
+
+def continuity_rows(plan: Plan, recipe: dict, shots: dict, mode: str | None,
+                    post_shots: dict, conform: bool) -> None:
+    """Continuity shots (h3upscale.set_continuity): a shot whose first
+    keyframe is the previous shot's last frame starts its upscale from that
+    shot's upscaled last frame, so the cut doesn't jump in colour. Two upscales
+    that are otherwise fresh are made again for it (never a Keep): the source's,
+    when it has no last frame kept (made before upscales kept one), and the
+    continuing shot's own, when it was made from the low-res keyframe."""
+    by_take = {(r.take.shot, r.take.take): r for r in plan.rows if r.take is not None}
+
+    def remake(r: Row, why: str) -> None:
+        try:
+            job = U.plan_upscale(plan.root, r.take, redo=True,
+                                 **U.recipe_for(plan.root, r.take, recipe, shots))
+        except U.UpscaleError as e:
+            r.status, r.why = "gap", str(e)
+            return
+        if job.action == "error":
+            r.status, r.why = "gap", job.why
+            return
+        r.status, r.why, r.job = "upscale", why, job
+        if mode == "recipe":
+            plan_row_post(plan, r, post_shots, conform)
+
+    for r in plan.rows:
+        if r.take is None or r.status == "gap":
+            continue
+        chain_rows(plan, r, by_take, remake)
+        found = U.continuity_source(r.take, plan.root)
+        if not found:
+            continue
+        src_take = found[0]
+        src = by_take.get((src_take.shot, src_take.take))
+        if (src is not None and src.status in ("ok", "kept") and not U.kept(src.take)
+                and not os.path.isfile(src_take.paths.up_last)):
+            remake(src, f"made again so {r.shot} can start from its last frame")
+        if r.status in ("ok", "kept") and not U.kept(r.take):
+            rec = T.upscale_of(r.take) or {}
+            if not (rec.get("recipe") or {}).get("first_from"):
+                remake(r, f"made again from {src_take.shot}'s upscaled last frame "
+                          f"(it started from the low-res one)")
+
+
+def chain_rows(plan: Plan, r: Row, by_take: dict, remake) -> None:
+    """continuity_rows for a `continuous: latent` take (h3upscale.set_chain):
+    its upscale holds the previous take's upscaled latent tail. That upscale is
+    made again when it kept no latent (made before it was asked to), and this
+    one when it wasn't held (made before, or it ran before that latent
+    existed: its `chain_hold`)."""
+    src_take = U.chain_source(r.take, plan.root)
+    if src_take is None:
+        return
+    src = by_take.get((src_take.shot, src_take.take))
+    if (src is not None and src.status in ("ok", "kept") and not U.kept(src.take)
+            and not os.path.isfile(src_take.paths.up_latent)):
+        remake(src, f"made again keeping its latent, so {r.shot} can hold its tail")
+    if r.status in ("ok", "kept") and not U.kept(r.take):
+        rec = T.upscale_of(r.take) or {}
+        if not (rec.get("recipe") or {}).get("held_from"):
+            remake(r, f"made again holding {src_take.shot}'s upscaled tail")
+        elif not (rec.get("chain_hold") or {}).get("held"):
+            remake(r, f"made again: it ran before {src_take.shot}'s upscaled latent was there")
 
 
 def plan_row_post(plan: Plan, row: Row, post_shots: dict, conform: bool) -> None:
@@ -314,7 +379,24 @@ def in_order(rows: list, order: str = "cut") -> list:
     first: dict = {}
     for i, r in enumerate(rows):
         first.setdefault(load_key(r.job), i)
-    return sorted(rows, key=lambda r: first[load_key(r.job)])
+    out = sorted(rows, key=lambda r: first[load_key(r.job)])
+    # a continuity shot's upscale reads the previous shot's upscaled last frame
+    # when it runs (h3upscale.set_continuity), a latent chain's that shot's
+    # upscaled latent (set_chain): it goes after that upscale
+    def key(take):
+        return (take.shot, take.take) if take is not None else None
+    moved = True
+    while moved:
+        moved = False
+        at = {key(getattr(r.job, "take", None)): i for i, r in enumerate(out)}
+        for i, r in enumerate(out):
+            src = getattr(r.job, "first_from", None) or getattr(r.job, "held_from", None)
+            j = at.get(key(src)) if src is not None else None
+            if j is not None and j > i:
+                out.insert(j, out.pop(i))
+                moved = True
+                break
+    return out
 
 
 def queue_master(plan: Plan, comfy, comfy_url: str, order: str = "cut") -> tuple[list, list]:

@@ -94,6 +94,23 @@ class UpscaleJob:
     fit: str = "crop"
     # how the .up.mp4 is encoded: review, or master (Phase 13e3: for delivery)
     quality: str = "review"
+    # a long re-sample sampled in windows of `window` seconds overlapping by
+    # `window_overlap` (the target's `windows`: H3ContextWindows), so a take
+    # longer than a window fits the card; 0: one pass however long
+    window: float = 0.0
+    window_overlap: float = 0.0
+    # a continuity shot (its first keyframe a frame of the previous shot's
+    # take): that take, whose upscale's last frame this upscale starts from
+    # (continuity_frame), and the staged name of the low-res keyframe it falls
+    # back to when that frame isn't there when it runs
+    first_from: "T.Take | None" = None
+    first_fallback: str = ""
+    # continuous: latent (phase c): the take this one's render held the tail
+    # of, whose upscaled latent this re-sample holds at its head (set_chain);
+    # and whether this upscale keeps its own re-sampled latent, because the
+    # next shot in the cut holds it
+    held_from: "T.Take | None" = None
+    keep_latent: bool = False
 
     def finish_inputs(self, grain: bool = True) -> dict:
         """The finishing inputs of an H3PixelUpscale node (`grain` False: before a
@@ -453,7 +470,8 @@ RECIPE_GLOBAL = ("deliver", "fit", "quality", "encoder")
 # a target section's, or a shot's
 RECIPE_FIELDS = ("method", "scale", "detail", "start_step", "vae", "pixel_model",
                  "seedvr2_model", "then", "then_scale", "precision",
-                 "frequency_split", "keep_soft", "grain")
+                 "frequency_split", "keep_soft", "grain", "window")
+WINDOW_RANGE = (2.0, 30.0)          # a re-sample window, seconds (0: off)
 QUALITIES = ("review", "master")
 
 
@@ -527,7 +545,8 @@ def recipe_kwargs(fields: dict, recipe: dict | None = None) -> dict:
     g = recipe or {}
     kw = {k: fields[k] for k in ("method", "scale", "detail", "start_step", "pixel_model",
                                  "seedvr2_model", "then_scale", "precision",
-                                 "frequency_split", "keep_soft", "grain") if k in fields}
+                                 "frequency_split", "keep_soft", "grain", "window")
+          if k in fields}
     if fields.get("vae"):
         kw["route"] = "vae"
     then = fields.get("then")
@@ -546,7 +565,7 @@ def recipe_from_request(body: dict) -> dict:
     per-shot recipe (RECIPE_FIELDS): what the dialog saves for one shot."""
     out = {}
     for k in ("method", "scale", "detail", "start_step", "pixel_model", "seedvr2_model",
-              "then_scale", "precision", "frequency_split", "keep_soft", "grain"):
+              "then_scale", "precision", "frequency_split", "keep_soft", "grain", "window"):
         if body.get(k) is not None:
             out[k] = body[k]
     if body.get("vae"):
@@ -645,13 +664,17 @@ def check_fields(sec: dict) -> list[str]:
             out.append(f"{k} {v!r}: 0 to {hi:g}")
     if sec.get("then") and sec.get("method", "latent") != "latent":
         out.append("then: only after a re-sample (method latent)")
+    w = sec.get("window")
+    if w is not None and (isinstance(w, bool) or not isinstance(w, (int, float))
+                          or not (w == 0 or WINDOW_RANGE[0] <= w <= WINDOW_RANGE[1])):
+        out.append(f"window {w!r}: 0 (off), or {WINDOW_RANGE[0]:g} to {WINDOW_RANGE[1]:g} seconds")
     return out
 
 
 def plan_upscale(root: str, take: T.Take, *, encoder: str = "auto", precision: str = "fp16",
                  frequency_split: bool = True, keep_soft: float = 0.0, grain: float = 0.0,
                  deliver=None, fit: str = "crop", respect_keep: bool = False,
-                 quality: str = "review", **kw) -> UpscaleJob:
+                 quality: str = "review", window: float | None = None, **kw) -> UpscaleJob:
     """_plan (below), with how the result is encoded (`encoder`) and the upscale
     model run (`precision`), both checked, and sized to `deliver` (see
     deliver_to). A `scale` of "auto" is worked out here, per take (auto_scale)."""
@@ -684,7 +707,148 @@ def plan_upscale(root: str, take: T.Take, *, encoder: str = "auto", precision: s
     job.quality = quality or "review"
     if job.action != "error" and job.quality not in QUALITIES:
         job.action, job.why = "error", f"quality {quality!r}: it's review or master"
+    if job.method == "latent" and job.action != "error":
+        problems = check_fields({"window": window}) if window is not None else []
+        if problems:
+            job.action, job.why = "error", problems[0]
+        else:
+            set_window(job, window)
+            set_continuity(job)
+            set_chain(job)
     return job
+
+
+def continuity_source(take: T.Take, root: str) -> "tuple[T.Take, str] | None":
+    """The take a continuity shot's first keyframe was cut from, when it was
+    that take's LAST frame and of the same pass, and the staged name of the
+    keyframe the take rendered with: (source take, input name), else None.
+    The render's sidecar names its first keyframe's sha1 (`refs`, role first);
+    the keyframe candidate with that picture says where it was cut from
+    (h3refs.keyframe_from_take: source shot, take, pass, frame)."""
+    sc = take.sidecar or {}
+    first = (sc.get("inputs") or {}).get("first")
+    ref = next((r for r in sc.get("refs") or [] if r.get("role") == "first"), None)
+    sha = (ref or {}).get("sha1")
+    if not first or not sha:
+        return None
+    import h3refs as R
+    try:
+        kref = R.keyframe_ref(root, take.shot, "first")
+        cands = R.list_takes(kref, None)
+    except Exception:
+        return None
+    for k in cands:
+        ks = k.sidecar or {}
+        if ks.get("source") != "frame" or not os.path.isfile(k.paths.image):
+            continue
+        if T.file_sha1(k.paths.image) != sha:
+            continue
+        n, i = ks.get("source_frames"), ks.get("source_frame")
+        if ks.get("source_pass") != take.pass_ or n is None or i is None or int(i) != int(n) - 1:
+            return None                     # not the previous take's last frame
+        try:
+            src = T.get_take(root, ks["source_pass"], ks["source_shot"], int(ks["source_take"]))
+        except Exception:
+            return None
+        return src, first
+    return None
+
+
+def set_continuity(job: UpscaleJob) -> None:
+    """A continuity shot's upscale starts from the previous shot's upscaled
+    last frame instead of the low-res keyframe its take rendered from. The two
+    upscales then meet on one picture: re-sampling each clip from the same
+    low-res frame made two different 2x pictures of it, a colour jump at a cut
+    that should be seamless. The frame is read when the upscale runs
+    (H3LoadTakeFrame), so the previous shot's upscale only has to be queued
+    first; without it the keyframe is used, as before."""
+    if job.spec.get("mode", RESAMPLE) != RESAMPLE:
+        return
+    found = continuity_source(job.take, job.root)
+    if not found:
+        return
+    job.first_from, job.first_fallback = found
+    src = job.first_from
+    have = os.path.isfile(src.paths.up_last)
+    job.notes.append(f"starts from {src.shot} t{src.take:02d}'s upscaled last frame"
+                     + ("" if have else " (once that upscale has run; the low-res keyframe "
+                                        "if it hasn't when this one runs)"))
+
+
+def chain_source(take: T.Take, root: str) -> "T.Take | None":
+    """The take a `continuous: latent` take held the tail of (its sidecar's
+    `hold` and `continued_from`), else None."""
+    sc = take.sidecar or {}
+    cf = sc.get("continued_from") or {}
+    if not sc.get("hold") or not cf.get("shot") or cf.get("take") is None:
+        return None
+    return T.get_take(root, cf.get("pass") or take.pass_, cf["shot"], int(cf["take"]))
+
+
+def holds_next(take: T.Take, root: str) -> str | None:
+    """The shot after this take's in its pass's cut when that shot is
+    `continuous: latent` (its built entry's `hold`), else None."""
+    import h3edit as E
+    try:
+        nxt = E.cut_neighbour(root, take.pass_, take.shot, 1)
+        if nxt is None:
+            return None
+        doc, i = J.find_shot(root, take.pass_, nxt.shot)
+    except (KeyError, FileNotFoundError, ValueError):
+        return None
+    return nxt.shot if doc["shots"][i].get("hold") else None
+
+
+def set_chain(job: UpscaleJob) -> None:
+    """continuous: latent, upscaled. A take whose render held the previous
+    take's tail re-samples with its head held on that take's upscaled latent
+    (`held_from`), read when it runs, so the two upscales meet on one picture;
+    re-sampling each on its own drew the join twice. And an upscale whose next
+    shot in the cut does that keeps its re-sampled latent (`keep_latent`)."""
+    if job.spec.get("mode", RESAMPLE) != RESAMPLE:
+        return
+    nxt = holds_next(job.take, job.root)
+    if nxt:
+        job.keep_latent = True
+        job.notes.append(f"keeps its latent: {nxt} holds its tail")
+    if not (job.take.sidecar or {}).get("hold"):
+        return
+    src = chain_source(job.take, job.root)
+    if src is None:
+        job.notes.append("its render held the shot before it, whose take is gone: the head "
+                         "isn't held")
+        return
+    job.held_from = src
+    have = os.path.isfile(src.paths.up_latent)
+    job.notes.append(f"holds {src.shot} t{src.take:02d}'s upscaled tail"
+                     + ("" if have else " (once that upscale has run keeping its latent; "
+                                        "unheld if it hasn't when this one runs)"))
+
+
+def take_seconds(take: T.Take) -> float:
+    """How long a take is, from its sidecar's frames and rate (0: unknown)."""
+    sc = take.sidecar or {}
+    n, fps = int(sc.get("length") or 0), float(sc.get("fps") or 24)
+    return n / fps if n and fps else 0.0
+
+
+def set_window(job: UpscaleJob, window: float | None = None) -> None:
+    """Window the job's re-sample when its take is longer than one window: the
+    recipe's `window` (seconds, 0: off), else the target's `windows.seconds`.
+    A re-sample at 2x holds four times the tokens of the take: 1344x768 x2 is
+    2688x1536, about twice the pixels of the 1920x1088 obvpm measured at ~7 GB
+    of activations per 5 s window, so a long shot runs out of memory on one
+    pass. The target says how (its `windows`); the job only says how long."""
+    spec = job.spec.get("windows") or {}
+    if not spec or job.spec.get("mode", RESAMPLE) != RESAMPLE:
+        return
+    w = float(spec.get("seconds", 0) if window is None else window)
+    if w <= 0 or take_seconds(job.take) <= w:
+        return
+    job.window = w
+    job.window_overlap = min(float(spec.get("overlap", w / 4)), w / 2)
+    job.notes.append(f"sampled in {w:g}s windows overlapping by {job.window_overlap:g}s "
+                     f"({take_seconds(job.take):.1f}s take)")
 
 
 def resolve_auto_scale(root: str, take: T.Take, deliver, fit: str, kw: dict) -> float | None:
@@ -792,6 +956,12 @@ def _plan(root: str, take: T.Take, *, scale: float | None = None,
             raise UpscaleError(f"{job.label} has no frozen shotlist to upscale from")
         if r == "latent" and not has_latent:
             raise UpscaleError(f"{job.label} kept no latent: upscale it through the VAE")
+        if r == "vae" and sc.get("hold"):
+            # continuous: latent: the render was the held frames and the take;
+            # its frames alone don't rebuild it
+            raise UpscaleError(f"{job.label} continues the shot before it (it held "
+                               f"{sc['hold']} frames of it): its upscale re-samples its kept "
+                               f"latent, and it has none. Render it again keeping its latent")
         if not w or not h:
             raise UpscaleError(f"{job.label}'s sidecar doesn't say its size")
         if fixed_scale(spec) is not None and s != fixed_scale(spec):
@@ -953,6 +1123,13 @@ def upscale_graph(base: dict, up: UpscaleJob) -> dict:
     t, spec, take = up.target, up.spec, up.take
     b = t.binding
     g = J.graph_for(base, take_job(up), take, review_copy=False)
+    for v in g.values():
+        if v["class_type"] == "H3ChainTrim":
+            # continuous: latent: the re-sample is the whole render, held frames
+            # and all, cut back to the take here; its sound comes from the take
+            v["inputs"].pop("audio", None)
+    if up.first_from is not None:
+        continuity_frame(g, up)
     saver = J.node_of(g, b.saver_class)
     sampler = J.latent_node(g, saver, spec.get("sampler") or b.saver["latent"])
     si = g[sampler]["inputs"]
@@ -986,10 +1163,49 @@ def upscale_graph(base: dict, up: UpscaleJob) -> dict:
         g[sig]["inputs"][sspec["field"]] = ", ".join(vals[up.start_step:])
     else:
         resample(g, up, sampler)
+        if up.held_from is not None:
+            chain_hold(g, up, sampler)
 
     images = g[saver]["inputs"]["images"]
     del g[saver]
-    return finish_graph(g, up, images)
+    g = finish_graph(g, up, images)
+    if up.keep_latent:
+        g["up_save"]["inputs"].update(latent=[sampler, 0],
+                                      latent_file=rel(up.root, take.paths.up_latent))
+    if "up_chain" in g:
+        g["up_save"]["inputs"]["chain_hold"] = ["up_chain", 1]
+    return g
+
+
+def chain_hold(g: dict, up: UpscaleJob, sampler: str) -> None:
+    """A `continuous: latent` take's re-sample held, at its head, on the
+    previous take's upscaled latent (set_chain): H3ChainLatent in its upscale
+    mode (missing_ok) on the sampler's latent, video only (H3HoldAudio holds
+    the sound). Whether it held goes to the saver (`chain_hold`, linked in
+    upscale_graph), which writes it into the record when the job ends."""
+    si = g[sampler]["inputs"]
+    take = up.take
+    g["up_chain"] = {"class_type": "H3ChainLatent", "inputs": {
+        "latent": si["latent_image"], "project_root": up.root, "shot": take.shot,
+        "pass_": take.pass_, "overlap": int((take.sidecar or {})["hold"]), "hold_audio": False,
+        "previous_latent": rel(up.root, up.held_from.paths.up_latent), "missing_ok": True,
+        "fps": float((take.sidecar or {}).get("fps") or 24)},
+        "_meta": {"title": "Hold the previous upscale's tail (continuous: latent)"}}
+    si["latent_image"] = ["up_chain", 0]
+
+
+def continuity_frame(g: dict, up: UpscaleJob) -> None:
+    """The LoadImage that reads the take's first keyframe becomes an
+    H3LoadTakeFrame of the source take's upscaled last frame (set_continuity),
+    with the keyframe as its fallback."""
+    for v in g.values():
+        if v.get("class_type") == "LoadImage" and v["inputs"].get("image") == up.first_fallback:
+            v["class_type"] = "H3LoadTakeFrame"
+            v["inputs"] = {"project_root": up.root,
+                           "image_file": rel(up.root, up.first_from.paths.up_last),
+                           "fallback": up.first_fallback}
+            return
+    up.notes.append("no first-frame LoadImage to point at the previous upscale")
 
 
 def resample(g: dict, up: UpscaleJob, sampler: str) -> None:
@@ -1049,6 +1265,28 @@ def resample(g: dict, up: UpscaleJob, sampler: str) -> None:
         si["sigmas"] = ["up_sigmas", 1]
     else:
         sampler_tail(g, sampler, up.start_step)
+    if up.window:
+        windowed(g, up, sampler)
+
+
+def windowed(g: dict, up: UpscaleJob, sampler: str) -> None:
+    """The re-sample's model sampled in windows along time (the target's
+    `windows`: obvpm's H3 Context Windowing, MultiDiffusion with pyramid
+    weights over each overlap, every step): the model that feeds the sampler,
+    or its guider, goes through it first. One window's worth of memory, the
+    same work per step."""
+    spec = up.spec["windows"]
+    si = g[sampler]["inputs"]
+    host, field = sampler, "model"
+    if "model" not in si and isinstance(si.get("guider"), list):
+        host = si["guider"][0]
+    if not isinstance(g[host]["inputs"].get(field), list):
+        raise UpscaleError(f"{up.target.short}'s re-sample has no model input to window")
+    g["up_windows"] = {"class_type": spec.get("class_type", "H3ContextWindows"), "inputs": {
+        "model": g[host]["inputs"][field],
+        spec.get("seconds_input", "window_seconds"): up.window,
+        spec.get("overlap_input", "overlap_seconds"): up.window_overlap}}
+    g[host]["inputs"][field] = ["up_windows", 0]
 
 
 def pixel_refine(g: dict, up: UpscaleJob, sampler: str) -> None:
@@ -1104,6 +1342,9 @@ def finish_graph(g: dict, up: UpscaleJob, images: list) -> dict:
         "images": images, "project_root": up.root, "source_mp4": rel(up.root, take.paths.mp4),
         "out_mp4": rel(up.root, take.paths.up_mp4), "fps": float((take.sidecar or {}).get("fps") or 24),
         "sidecar": rel(up.root, take.paths.up_sidecar), "encoder": up.encoder,
+        # the last frame at the size it was made: a continuity shot after this
+        # one starts its upscale from it
+        "last_frame": rel(up.root, take.paths.up_last),
         **up.save_inputs()}}
     if up.then_model and up.then_method == "seedvr2":
         # the re-sample's frames through SeedVR2 before they're saved
@@ -1227,6 +1468,13 @@ def not_ready(jobs: list[UpscaleJob], object_info: dict | None) -> list[str]:
               if j.method == "latent" and j.then_model and j.then_method == "pixel"}
     wants |= {j.pixel_model for j in jobs
               if j.method == "latent" and j.spec.get("mode") == PIXEL_REFINE}
+    for j in jobs:
+        ct = (j.spec.get("windows") or {}).get("class_type", "H3ContextWindows")
+        if j.window and object_info is not None and ct not in object_info:
+            out.append(f"{j.label} is {take_seconds(j.take):.1f}s, longer than one "
+                       f"{j.window:g}s window, and windowing it needs {ct} "
+                       f"({(j.spec.get('windows') or {}).get('pack', 'comfyui-obvpm-timeline')}); "
+                       f"install it, or set the recipe's window to 0 to try one pass")
     sv2 = {j.seedvr2_model for j in jobs if j.method == "seedvr2"}
     sv2 |= {j.then_model for j in jobs if j.method == "latent" and j.then_method == "seedvr2"}
     for want in sorted(sv2):
@@ -1314,6 +1562,12 @@ def settings_of(up: UpscaleJob) -> dict:
         d["fit"] = up.fit
     if up.quality != "review":
         d["quality"] = up.quality
+    if up.window:
+        d["window"] = [up.window, up.window_overlap]
+    if up.first_from is not None:
+        d["first_from"] = f"{up.first_from.shot} t{up.first_from.take:02d}"
+    if up.held_from is not None:
+        d["held_from"] = f"{up.held_from.shot} t{up.held_from.take:02d}"
     return d
 
 

@@ -1815,6 +1815,10 @@ def sidecar_for(job: Job) -> dict:
         **({"inputs": dict(job.inputs)} if job.inputs else {}),
         # its first frame is cut again when it starts (the node fills in `continuity`)
         **({"continuity_after": dict(job.continuity)} if job.continuity else {}),
+        # continuous: latent: the render held this many frames of the previous
+        # take at its head, trimmed off (the node fills in `continued_from`)
+        **({"hold": int((job.recompiled or job.shot)["hold"])}
+           if (job.recompiled or job.shot).get("hold") else {}),
         **({"notes": notes} if notes else {}),
         # where the negative prompt came from (a target that takes one)
         **({"negative_source": job.negative_source} if job.negative_source != "none" else {}),
@@ -2202,6 +2206,8 @@ def graph_for(base: dict, job: Job, take: T.Take, *, panel_mode: str | None = No
         t.patch_graph(g, job, dict(job.inputs if inputs is None else inputs))
     if job.continuity:
         continuity_frame(g, job, take, dict(job.inputs if inputs is None else inputs))
+    if (job.recompiled or job.shot).get("hold"):
+        chain_latent(g, job, take)
     if job.duration_head:
         add_duration_predictor(g, t, job)
     if b.prune:
@@ -2228,6 +2234,59 @@ def continuity_frame(g: dict, job: Job, take: T.Take, inputs: dict) -> None:
                            "pass_": job.continuity.get("pass") or job.pass_,
                            "sidecar": os.path.relpath(take.paths.sidecar, job.root)}
             v.setdefault("_meta", {})["title"] = "Continuity first frame"
+
+
+def chain_latent(g: dict, job: Job, take: T.Take) -> None:
+    """A `continuous: latent` shot (its entry's `hold`, docs/CONTINUOUS.md):
+    H3ChainLatent between the target's `continuous.latent.sampler` input and
+    its source, which holds the previous take's last frames at the head of the
+    render (found as it runs: a whole chain queues at once), fed the binding's
+    video_vae / audio_vae to encode that take's frames when it kept no latent;
+    then H3ChainTrim on what the saver is given (every consumer of it), which
+    cuts the held frames and their sound off again. The saver writes what was
+    held (the node's `record`) into the take's record as `continued_from`:
+    nothing writes it while the job runs, when the queuer may still be."""
+    t = job_target(job)
+    spec = (t.spec.get("continuous") or {}).get("latent")
+    if not spec:
+        raise ValueError(f"{t.short} can't render a continuous: latent shot")
+    b = t.binding
+    hold = int((job.recompiled or job.shot)["hold"])
+    s = spec["sampler"]
+    sampler = node_of(g, s["class_type"])
+    vaes = {}
+    for name in ("video_vae", "audio_vae"):
+        specs = b.specs(name)
+        found = select_nodes(g, specs[0]) if specs else []
+        if found:
+            vaes[name] = [found[0], 0]
+    nid = str(_next_id(g))
+    g[nid] = {"class_type": "H3ChainLatent", "inputs": {
+        "latent": g[sampler]["inputs"][s["input"]], "project_root": job.root,
+        "shot": job.shot["id"], "pass_": job.pass_, "overlap": hold,
+        "hold_audio": bool(spec.get("hold_audio", True)),
+        "fps": float(job.fps), **vaes},
+        "_meta": {"title": "Chain latent (continuous: latent)"}}
+    g[sampler]["inputs"][s["input"]] = [nid, 0]
+    saver = node_of(g, b.saver_class)
+    si = g[saver]["inputs"]
+    si["chain"] = [nid, 1]
+    images, audio = si.get("images"), si.get("audio")
+    if not is_link(images):
+        raise ValueError(f"{t.short}'s saver has no images input to trim")
+    tid = str(_next_id(g))
+    g[tid] = {"class_type": "H3ChainTrim", "inputs": {
+        "images": images, "frames": hold, "fps": float(job.fps),
+        **({"audio": audio} if is_link(audio) else {})},
+        "_meta": {"title": "Chain trim (the held frames off)"}}
+    for k, v in g.items():
+        if k == tid:
+            continue
+        for name, val in v["inputs"].items():
+            if val == images:
+                v["inputs"][name] = [tid, 0]
+            elif is_link(audio) and val == audio:
+                v["inputs"][name] = [tid, 1]
 
 
 def add_duration_predictor(g: dict, target: "TG.Target", job: Job) -> None:

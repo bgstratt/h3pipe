@@ -1,5 +1,5 @@
 {
-  "_README": "Golden-test fixture. Exercises every branch of h3build that no real episode reaches: per-pass/sequence/shot model, lora and steps; a LoRA whose step count disagrees; clone mode with a track so audio windows work; explicit policies and retentions; continuous sequences; a speaker with no voice sample; a subject with no kind; render profiles at sequence and shot level.",
+  "_README": "Golden-test fixture. Exercises every branch of h3build that no real episode reaches: per-pass/sequence/shot model, lora and steps; a LoRA whose step count disagrees; clone mode with a track so audio windows work; explicit policies and retentions; a speaker with no voice sample; a subject with no kind; render profiles at sequence and shot level. (Continuous shots are the `continuous` fixture's.)",
   "series": {
     "id": "kitchen_sink",
     "title": "Kitchen Sink",

@@ -1,5 +1,5 @@
 exit 1
 
-  error in continuous_in_shot.md: line 4: `continuous:` belongs under `# sequence`, not a shot
+  error in continuous_in_shot.md: line 4: `continuous: yes` must be first (open on the previous shot's last frame), latent (hold the previous take's latent) or none
     | continuous: yes
 

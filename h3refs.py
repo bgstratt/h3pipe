@@ -60,6 +60,7 @@ Stdlib only.
 from __future__ import annotations
 
 import copy
+import dataclasses
 import glob
 import hashlib
 import os
@@ -95,8 +96,9 @@ from targets.image.krea2.graph import (  # noqa: E402,F401
     REFS_WORKFLOW, SAMPLER, SAVER, SCHED, STEPS, UNET, VAE, VIEW_SIZE, _one, _splice_lora,
     build_graph, patch_workflow, take_graph)
 from targets.image.krea2.prompt import (  # noqa: E402,F401
-    VIEW_DESC, VIEW_TAGS, VIEW_TMPL, VIEWS, object_prompt, plate_prompt, sheet_prompt,
-    view_edit_prompt, view_prompt)
+    VIEW_DESC, VIEW_TAGS, VIEW_TMPL, VIEWS, angle_prompt, group_prompt, object_prompt,
+    plate_prompt, sheet_prompt, view_edit_prompt, view_prompt)
+from h3core.series_config import members  # noqa: E402
 
 IMAGE_TARGET = TG.load_target(TG.DEFAULT_IMAGE_TARGET, "image")
 NEW_SEED_BITS = 53         # as h3jobs: a browser can hold these as numbers
@@ -207,7 +209,8 @@ class Ref:
 
     @property
     def has_views(self) -> bool:
-        return self.kind == "character"
+        # a group (`members: N`) is one whole picture of all of them, no views
+        return self.kind == "character" and not members(self.entry)
 
     @property
     def views(self) -> list[str | None]:
@@ -318,14 +321,15 @@ def keyframe_refs(ep: str, needs: dict | None = None) -> list[Ref]:
 #
 #   capabilities.keyframes   the ends a target reads (optional ones)
 #   requires_first           the first is required (Wan 14B I2V)
-#   first: / last:           continuity | generate | import | none | <path>
-#                            (the shot's line, else its sequence's)
+#   first: / last:           generate | import | none | <path> (the shot's
+#                            line, else its sequence's); `continuous: first`
+#                            makes the first "continuity" (docs/CONTINUOUS.md)
 #
 # A keyframe is listed when the target reads it or the script asks for one
 # (anything but `none`); `none` turns an optional one off. `method` is the
-# script's (a path is "import", with `import_path`), else "continuity" for a
-# first frame when the shot has a previous shot in its sequence, else
-# "generate".
+# script's (a path is "import", with `import_path`; a `continuous: first` shot's
+# first is "continuity"), else "generate". A shot no longer continues just by
+# having a previous shot: it says so.
 
 KEYFRAME_METHODS = ("continuity", "generate", "import", "none")
 
@@ -412,7 +416,9 @@ def keyframe_needs(ep: str) -> dict[tuple[str, str], dict]:
                 elif script and script != "none":
                     method = "import"
                 else:
-                    method = "continuity" if (end == "first" and prev) else "generate"
+                    # a shot opens on the previous one's last frame only when it
+                    # says `continuous: first` (sh.keyframe: "continuity")
+                    method = "generate"
                 d = {"need": "required" if required else "optional", "method": method,
                      "script": script, "target": tid, "reads": reads}
                 if method == "import" and script not in KEYFRAME_METHODS:
@@ -455,11 +461,23 @@ def find_ref(s: Series, ref_id) -> Ref:
 # it, which `live_from` reports as None.
 SHEET_VIEW = "sheet"
 
+# P5: a location's 360 panoramas, a pseudo-view as SHEET_VIEW is for a
+# character: takes `<key>_pano_tNN.png` beside the plate's own, never picked
+# into the plate (a 2:1 equirectangular picture is no plate). The editor's 360
+# viewer aims a camera into one and saves that view as a plate candidate of the
+# location or one of its angles.
+PANO_VIEW = "pano"
+# ...and the held frames of its camera tours (h3tour.py), the same way
+TOUR_VIEW = "tour"
+LOCATION_VIEWS = (PANO_VIEW, TOUR_VIEW)
+
 
 def check_view(ref: Ref, view, required: bool = False,
                allow_sheet: bool = False) -> str | None:
     """A view for this ref: one of VIEW_TAGS for a character, None otherwise.
     `allow_sheet` also takes SHEET_VIEW (a supplied whole sheet); see there."""
+    if view in LOCATION_VIEWS and ref.kind == "location":
+        return view
     if view in (None, ""):
         if required and ref.has_views:
             raise RefError(f"{ref.id} is a character: give a view "
@@ -641,6 +659,25 @@ def variant_reference_images(s: Series, ref: Ref, view: str | None,
     return [d]
 
 
+def angle_reference_images(s: Series, ref: Ref, target=None,
+                           limit: int | None = None) -> list[dict]:
+    """The reference image an edit target reads to generate an angle of a
+    location (`of:`): the master's live plate, so the angle is the same place
+    seen from elsewhere. Same shape as reference_images' plate. [] when the
+    ref is no angle, the target reads no references, or the master has no
+    plate yet."""
+    if limit is None:
+        limit = target.capabilities().get("max_refs", 0) if target is not None else 0
+    of = ref.entry.get("of")
+    if not limit or ref.kind != "location" or not of:
+        return []
+    master = (s.series_cfg.get("locations") or {}).get(of) or {}
+    if not (master.get("plate") and os.path.isfile(ref_file(s.home, master["plate"]))):
+        return []
+    return [{"role": "plate", "location": of, "name": master.get("name", of), "kind": "plate",
+             "path": ref_file(s.home, master["plate"])}]
+
+
 COMPOSITE_FIGURES = 4       # at most this many figures in a composed reference
 
 
@@ -703,7 +740,9 @@ def _reference_parts(s: Series, sh, sq) -> list[dict]:
             continue
         kind = e.get("kind", "character")
         d = {"role": "subject", "subject": sid, "name": e.get("name", sid), "kind": kind}
-        if kind == "character":
+        if members(e):
+            d["members"] = members(e)
+        if kind == "character" and not members(e):
             p = picked_view_file(s, sid, view)
             if p:
                 d.update(view=view, path=p)
@@ -761,9 +800,20 @@ def built_prompt(s: Series, ref: Ref, view: str | None = None,
     if ref.kind == "voice":
         return voice_brief(s, ref, target)[0]
     if ref.kind == "location":
-        return plate_prompt(s.look, e["description"]) if e.get("description") else None
+        if not e.get("description"):
+            return None
+        if refs and e.get("of"):
+            # an angle generated as an edit of its master's plate
+            master = (s.series_cfg.get("locations") or {}).get(e["of"]) or {}
+            word = ((target.recipe.get("ref_word") if target is not None else None)
+                    or "reference image")
+            return angle_prompt(s.look, e["description"], e["of"].replace("_", " "),
+                                master.get("description", ""), word)
+        return plate_prompt(s.look, e["description"])
     if not e.get("design"):
         return None
+    if ref.kind == "character" and members(e):
+        return group_prompt(e["design"], s.look, members(e), *gen_size(ref, target=target))
     if ref.kind == "character":
         if view is None:
             # a variant's hand-made-sheet description says where to start from
@@ -810,6 +860,8 @@ def gen_size(ref: Ref, view_size: tuple[int, int] | None = None, target=None,
     if ref.kind == "keyframe":
         return keyframe_size(s, ref, target, pass_)[:2]
     tpl = (target.spec.get("template") or {}) if target is not None else {}
+    if ref.kind == "character" and members(ref.entry):
+        return tuple(tpl.get("plate_size") or PLATE_SIZE)     # a row of people is wide
     if ref.kind == "character":
         return tuple(view_size or tpl.get("view_size") or VIEW_SIZE)
     if ref.kind == "location":
@@ -1089,7 +1141,61 @@ def _atomic_copy(src: str, dst: str) -> None:
 
 OVERRIDES_FILE = os.path.join("refs", "_overrides.json")
 PICKS_FILE = os.path.join("refs", "_picks.json")
-OVERRIDE_FIELDS = ("prompt", "seed", "model", "loras", "steps", "note", "target")
+OVERRIDE_FIELDS = ("prompt", "seed", "model", "loras", "steps", "note", "target",
+                   "size", "cfg", "negative", "params")
+# The sampler knobs a ref override (`params`) may set, each only where the
+# image target's binding has it: everything else a target exposes is a model
+# file (`model`, the preset's text encoder / VAE) or set by the job itself.
+TUNABLE_PARAMS = ("sampler", "scheduler", "denoise", "shift", "guidance")
+SIZE_RANGE = (256, 4096)
+
+
+def parse_override_size(v) -> tuple[int, int]:
+    """A `size` override ("1344x768") as (w, h). RefError when it isn't one."""
+    m = re.fullmatch(r"\s*(\d+)\s*[x\u00d7]\s*(\d+)\s*", v) if isinstance(v, str) else None
+    if not m:
+        raise RefError(f"size must be WIDTHxHEIGHT, e.g. 1344x768, not {v!r}")
+    w, h = int(m.group(1)), int(m.group(2))
+    lo, hi = SIZE_RANGE
+    if not (lo <= w <= hi and lo <= h <= hi):
+        raise RefError(f"size must be {lo} to {hi} pixels a side, not {w}x{h}")
+    return w, h
+
+
+def check_override_value(name: str, v):
+    """The new fields' shapes (the API checks the older ones). None clears."""
+    if v is None:
+        return None
+    if name == "size":
+        w, h = parse_override_size(v)
+        return f"{w}x{h}"
+    if name == "cfg":
+        if isinstance(v, bool) or not isinstance(v, (int, float)) or not 0 <= v <= 30:
+            raise RefError(f"cfg must be a number from 0 to 30, not {v!r}")
+        return float(v)
+    if name == "negative":
+        if not isinstance(v, str):
+            raise RefError("negative must be text or null")
+        return v
+    if name == "params":
+        if not isinstance(v, dict):
+            raise RefError(f"params must be an object of {', '.join(TUNABLE_PARAMS)}")
+        bad = set(v) - set(TUNABLE_PARAMS)
+        if bad:
+            raise RefError(f"params takes {', '.join(TUNABLE_PARAMS)}, not "
+                           f"{', '.join(sorted(bad))}")
+        out = {}
+        for k, x in v.items():
+            if x is None or x == "":
+                continue
+            if k in ("sampler", "scheduler"):
+                if not isinstance(x, str):
+                    raise RefError(f"params.{k} must be a name, e.g. euler")
+            elif isinstance(x, bool) or not isinstance(x, (int, float)):
+                raise RefError(f"params.{k} must be a number")
+            out[k] = x
+        return out or None
+    return v
 
 
 def load_overrides(home: str) -> dict:
@@ -1128,6 +1234,9 @@ def set_ref_override(data: dict, ref: Ref, view: str | None, fields: dict,
     if unknown:
         raise RefError(f"unknown override field(s) {', '.join(sorted(unknown))}: "
                        f"one of {', '.join(OVERRIDE_FIELDS)}")
+    fields = {k: check_override_value(k, v) for k, v in fields.items()}
+    if ref.is_audio and any(fields.get(k) is not None for k in ("size", "params")):
+        raise RefError(f"{ref.id} is a voice: it has no picture size or sampler settings")
     if ref.has_views and view is None and fields.get("prompt") is not None:
         raise RefError(f"{ref.id} is a character: a prompt override is per view")
     if fields.get("target") is not None:
@@ -1294,6 +1403,12 @@ def pick_take(s: Series, ref: Ref, view: str | None, take: int,
     refs/voices/<id>.wav and the series config gains that line, through the
     Phase 9a save path (set_voice_sample); the result says `series_changed`."""
     view = check_view(ref, view, required=True, allow_sheet=True)
+    if view == PANO_VIEW:
+        raise RefError(f"a 360 isn't a plate: open {ref.id}'s 360 t{take:02d} and save a view "
+                       f"from it as a candidate")
+    if view == TOUR_VIEW:
+        raise RefError(f"a tour's hold isn't picked where it is: use {ref.id}'s hold "
+                       f"t{take:02d} for the location or one of its angles (copy_take)")
     t = get_take(ref, view, take)
     if not os.path.isfile(t.paths.image):
         raise NotUsable(f"{ref.id}{' ' + view if view else ''} t{take:02d} has no file")
@@ -1688,6 +1803,29 @@ def import_take(s: Series, ref: Ref, view: str | None, source_path: str,
     return t
 
 
+def copy_take(s: Series, src: Ref, view: str | None, take: int, dest: Ref) -> RefTake:
+    """A finished take of one ref copied in as a new candidate of another (a
+    tour's hold or a saved 360 view into a location or one of its angles):
+    import_take of its file, the sidecar saying where it came from. Not
+    picked. RefError across kinds (only a picture into a picture ref)."""
+    view = check_view(src, view, required=True, allow_sheet=True)
+    t = get_take(src, view, take)
+    if not t.usable:
+        raise RefError(f"{src.id}{' ' + view if view else ''} t{take:02d} is {t.status}")
+    if src.is_audio or dest.is_audio:
+        raise RefError("only a picture can be copied into a picture ref")
+    if dest.has_views:
+        raise RefError(f"{dest.id} is a character: copy into one of its views")
+    sc = t.sidecar or {}
+    note = f"from {src.id}{' ' + view if view else ''} t{take:02d}"
+    if sc.get("source") == "tour":
+        note += f" (tour t{sc.get('tour', 0):02d} hold {sc.get('hold')})"
+    out = import_take(s, dest, None, os.path.abspath(t.paths.image), note=note)
+    out.sidecar = T.update_sidecar(out.paths.sidecar, copied_from={
+        "ref": src.id, "view": view, "take": take, "source": sc.get("source")})
+    return out
+
+
 # ---------------------------------------------------------------------------
 # keyframes from a video take's frame (continuity)
 # ---------------------------------------------------------------------------
@@ -1974,7 +2112,62 @@ def refresh_continuity(s: Series, pass_: str, shots=None, dry_run: bool = False)
         except (NotUsable, RefError, UnknownRef, FfmpegMissing, OSError) as e:
             out["live"].pop(shot, None)
             out["errors"].append({"shot": shot, "error": str(e)})
+    chains_before_render(s, pass_, batch, out)
     return out
+
+
+def chains_before_render(s: Series, pass_: str, batch: set | None, out: dict) -> None:
+    """refresh_continuity's part for `continuous: latent` shots (a built entry
+    with `hold`): each is `live` (queued in cut order, behind the shot it
+    continues); `wait` (`chain`: true) when that shot's take is in this batch
+    or still rendering, the previous take found as the render starts
+    (H3ChainLatent, chain_source); an error when there is nothing to continue,
+    now or coming. Nothing is cut: the take itself is read when it runs."""
+    try:
+        shots = J.episode_shots(s.ep, pass_)
+    except (FileNotFoundError, ValueError):
+        return
+    for doc, i in shots:
+        shot = doc["shots"][i]["id"]
+        if not doc["shots"][i].get("hold") or (batch is not None and shot not in batch):
+            continue
+        try:
+            prev = E.cut_neighbour(s.ep, pass_, shot, -1)
+        except KeyError:
+            continue                                    # not in this pass's cut
+        if prev is None:
+            out["errors"].append({"shot": shot, "error": f"continuous: latent, but {shot} is the "
+                                  f"first shot of the {pass_} cut: nothing to continue"})
+            continue
+        out["live"][shot] = {"after": prev.shot, "pass": pass_}
+        if batch is not None and prev.shot in batch:
+            out["wait"].append({"shot": shot, "after": prev.shot, "chain": True})
+            continue
+        busy = [t for t in T.list_takes(s.ep, prev.pass_, prev.shot) if t.status == "queued"]
+        if busy:
+            out["wait"].append({"shot": shot, "after": prev.shot, "take": busy[-1].take,
+                                "chain": True})
+            continue
+        try:
+            keyframe_source(s, shot, "first", pass_)
+        except (NotUsable, RefError, UnknownRef) as e:
+            out["live"].pop(shot, None)
+            out["errors"].append({"shot": shot, "error": f"continuous: latent: {e}"})
+
+
+def chain_source(ep: str, shot: str, pass_: str) -> dict:
+    """When a `continuous: latent` shot starts rendering (H3ChainLatent): the
+    take the cut uses NOW for the shot before it (keyframe_source's rule; a
+    take queued ahead of it in the same run has just become it).
+    {"from": {shot, take, pass, sha1 (of its mp4: a re-render shows)},
+    "latent": its kept latent or None, "video": its mp4}. Raises when there is
+    none."""
+    t, src_pass = keyframe_source(load_series(ep), shot, "first", pass_)
+    lat = t.paths.latent if os.path.isfile(t.paths.latent) else None
+    return {"from": {"shot": t.shot, "take": t.take, "pass": src_pass,
+                     "sha1": T.file_sha1(t.paths.mp4)}, "latent": lat, "video": t.paths.mp4}
+
+
 
 
 def continuity_at_start(ep: str, shot: str, pass_: str, sidecar: str = "") -> dict:
@@ -2040,6 +2233,14 @@ class GenRequest:
     pass_: str = "final"             # a keyframe's size: this pass's render size
     negative_source: str = "request"  # what an explicit `negative` is (kreagen: "file")
     seconds: float | None = None     # a voice ref's length (None: the audio target's default)
+    size: str | None = None          # "WxH" (None: the override's, else the target's)
+    params: dict | None = None       # TUNABLE_PARAMS (None: the override's, else the preset's)
+    # a 360 panorama of a location (plan_pano): {"with": [location ids]}
+    pano: dict | None = None
+    # an edit of a picture this ref already has (plan_edit): {"take": n | None
+    # (the live picture), "with": [{"ref", "view"?, "take"?}], "wrap": bool};
+    # `prompt` is then the instruction
+    edit: dict | None = None
 
 
 @dataclass
@@ -2077,6 +2278,7 @@ class GenJob:
     fps: float | None = None
     line: str = ""
     line_source: str = ""            # script | neutral | request
+    edit: dict = field(default_factory=dict)     # an edit: what it started from (plan_edit)
 
     @property
     def is_audio(self) -> bool:
@@ -2131,6 +2333,10 @@ def plan_generate(s: Series, req: GenRequest, overrides: dict | None = None,
     target preset's.
     """
     ref = find_ref(s, req.ref)
+    if req.edit is not None:
+        return plan_edit(s, ref, req, overrides, rng, ready, defaults)
+    if req.pano is not None:
+        return plan_pano(s, ref, req, rng)
     why = can_generate(s, ref)
     if why:
         raise RefError(why)
@@ -2235,8 +2441,30 @@ def plan_generate(s: Series, req: GenRequest, overrides: dict | None = None,
             else:
                 # a variant's view edits the base's SAME view, so its reference
                 # -- and so its wording -- is per view, not per ref
-                vrefs = variant_reference_images(s, ref, v, target) or refs
+                vrefs = (variant_reference_images(s, ref, v, target)
+                         or angle_reference_images(s, ref, target) or refs)
                 base_prompt = built_prompt(s, ref, v, view_size, target, vrefs)
+            # P4: the picture's size, cfg, negative and sampler knobs, each
+            # the request's, else the override's, else what the target says
+            vw, vh = w, h
+            size = pick("size", None, req.size) if ref.kind not in ("voice", "keyframe") else None
+            if size:
+                vw, vh = parse_override_size(size)
+            vcfg = float(pick("cfg", cfg, req.cfg))
+            vneg, vneg_source = negative, neg_source
+            if neg_source != "none" and req.negative is None and ov.get("negative") is not None:
+                used.append("negative")
+                vneg, vneg_source = ov["negative"], "override"
+            vals = _preset_values(target)
+            vnotes = list(notes)
+            for k, x in (pick("params", None, req.params) or {}).items():
+                if target.binding.specs(k):
+                    vals[k] = x
+                else:
+                    vnotes.append(f"{target.short} has no {k} setting: params.{k} ignored")
+            if size:                     # a view's prompt names its size
+                base_prompt = built_prompt(s, ref, v, (vw, vh) if ref.has_views else view_size,
+                                           target, vrefs)
             prompt = pick("prompt", base_prompt, req.prompt)
             stale = ("prompt" in used and bool(ov.get("base_hash"))
                      and ov["base_hash"] != prompt_hash(base_prompt))
@@ -2246,14 +2474,382 @@ def plan_generate(s: Series, req: GenRequest, overrides: dict | None = None,
                 ref=ref, view=v, candidate=c, prompt=prompt, seed=seed, seed_source=source,
                 model=pick("model", "", req.model) or "",
                 loras=pick("loras", None, req.loras),
-                steps=int(pick("steps", default_steps, req.steps)), cfg=cfg,
-                negative=negative, width=w, height=h,
+                steps=int(pick("steps", default_steps, req.steps)), cfg=vcfg,
+                negative=vneg, width=vw, height=vh,
                 note=req.note or "", overridden=sorted(set(used)), override_stale=stale,
-                target=target, negative_source=neg_source, values=_preset_values(target),
+                target=target, negative_source=vneg_source, values=vals,
                 references=[dict(r) for r in vrefs], render_size=render_size,
-                video_target=video_target, notes=list(notes),
+                video_target=video_target, notes=vnotes,
                 seconds=seconds, frames=frames, fps=fps, line=line,
                 line_source=line_source))
+    return jobs
+
+
+def is_edit_target(t) -> bool:
+    """Can this image target edit a picture (it reads reference images)?"""
+    c = t.capabilities() if t is not None else {}
+    return c.get("mode") == "edit" and int(c.get("max_refs") or 0) >= 1
+
+
+def edit_target_ids() -> list[str]:
+    return [t.id for t in TG.list_targets("image") if is_edit_target(t)]
+
+
+def edit_target_for(s: Series, ref: Ref, requested: str | None = None,
+                    ov_data: dict | None = None, ready=None, defaults: dict | None = None):
+    """The image target an edit uses: the request's, else the first of the
+    ref's own target, the episode's keyframe target and its refs target that
+    can edit (is_edit_target). RefError when it is none of them, or the
+    requested one only draws from text."""
+    if requested:
+        try:
+            t = TG.load_target(requested, "image")
+        except (TG.TargetError, ValueError) as e:
+            raise RefError(str(e)) from None
+        if not is_edit_target(t):
+            raise RefError(f"{t.short} draws from text only and can't edit a picture: "
+                           f"choose an edit target ({', '.join(edit_target_ids())})")
+        return t
+    d = defaults if defaults is not None else image_defaults(s, ready)
+    ov = ref_override(ov_data if ov_data is not None else load_overrides(ref.home), ref.id)
+    for tid in (ov.get("target"), d.get("keyframe_target"), d.get("target")):
+        if not tid:
+            continue
+        try:
+            t = TG.load_target(tid, "image")
+        except (TG.TargetError, ValueError):
+            continue
+        if is_edit_target(t):
+            return t
+    raise RefError(f"no edit target is chosen for this episode: pick one for the edit "
+                   f"({', '.join(edit_target_ids())})")
+
+
+def _picture_of(s: Series, ref: Ref, view: str | None, take: int | None,
+                what: str) -> dict:
+    """One picture an edit reads, shaped as reference_images gives them:
+    `take` of (ref, view), else the ref's live picture (a character's picked
+    view)."""
+    if ref.is_audio:
+        raise RefError(f"{what}: {ref.id} is a voice, not a picture")
+    if take is not None:
+        t = get_take(ref, view, take)
+        if not t.usable:
+            raise RefError(f"{what}: {ref.id}{' ' + view if view else ''} t{take:02d} is "
+                           f"{t.status}, not a finished picture")
+        path = t.paths.image
+    elif view:
+        path = picked_view_file(s, ref.subject, view) if ref.subject else None
+        if not path:
+            raise RefError(f"{what}: {ref.id} {view} has no picked take: name a take")
+    else:
+        path = ref.file
+        if not path or not os.path.isfile(path):
+            raise RefError(f"{what}: {ref.id} has no picture yet: name a take")
+    role = "plate" if ref.kind == "location" else "subject"
+    d = {"role": role, "name": ref.name, "kind": ref.kind, "ref": ref.id, "path": path}
+    if ref.subject:
+        d["subject"] = ref.subject
+    if ref.kind == "location":
+        d["location"] = ref.id.split(":", 1)[1]
+    if view:
+        d["view"] = view
+    if take is not None:
+        d["take"] = take
+    if members(ref.entry):
+        d["members"] = members(ref.entry)
+    return d
+
+
+EDIT_FIELDS = ("take", "with", "wrap", "from_view", "turn")
+
+# P5: a character's missing view drawn from one it has, by the Qwen-Image 2.1
+# Multiple-Angles LoRA (`<mva> {azimuth}, {elevation}[ close-up]`): it turns
+# the camera round a single figure well (and makes a diorama of a whole scene,
+# so it is for subjects, not plates). The phrase per sheet view, the camera
+# orbiting the subject: the three-quarter view faces the viewer's left, the
+# side view the viewer's right (krea2 VIEWS).
+TURN_TARGET = "qwen_image_21"
+TURN_LORA = "angles_v2_full_qwen21_multiple_angles_v2_qwen21_multiple_angles_v2_000001500.safetensors"
+TURN_STRENGTH = 0.9
+VIEW_TURNS = {
+    "01_threequarter": "<mva> front-left view, eye-level shot",
+    "02_side": "<mva> left side view, eye-level shot",
+    "03_back": "<mva> back view, eye-level shot",
+    "04_face": "<mva> front view, eye-level shot close-up",
+}
+
+
+def plan_edit(s: Series, ref: Ref, req: GenRequest, overrides: dict | None = None,
+              rng: random.Random | None = None, ready=None,
+              defaults: dict | None = None) -> list[GenJob]:
+    """The jobs of an edit: a picture this ref already has (`req.edit["take"]`
+    of `req.view`, or None: the live picture) changed as `req.prompt` says,
+    on an edit target (edit_target_for), as a new take of the same ref and
+    view. Other refs' pictures can come along (`with`: [{"ref", "view"?,
+    "take"?}]), as image 2 onward.
+
+    The instruction is wrapped (targets/image/common.edit_prompt: the rest of
+    the picture named as fixed) unless `wrap` is false, which sends it as
+    typed -- what a LoRA with its own trigger syntax wants. The picture keeps
+    its size, on the target's grid and above its minimum (scaled_size). Every
+    candidate gets a new seed unless one is typed. The ref's overrides are
+    for generating it from its description, so an edit doesn't read them."""
+    from targets.image.common import edit_prompt
+    e = req.edit
+    if not isinstance(e, dict):
+        raise RefError('edit must be an object: {"take": n or null, "with": [...]}')
+    unknown = set(e) - set(EDIT_FIELDS)
+    if unknown:
+        raise RefError(f"edit takes {', '.join(EDIT_FIELDS)}, not {', '.join(sorted(unknown))}")
+    take = e.get("take")
+    if take is not None and (isinstance(take, bool) or not isinstance(take, int) or take < 1):
+        raise RefError("edit.take must be a take number, or null for the live picture")
+    wrap = e.get("wrap", True)
+    if not isinstance(wrap, bool):
+        raise RefError("edit.wrap must be true or false")
+    if ref.is_audio:
+        raise RefError(f"{ref.id} is a voice: only pictures can be edited")
+    view = check_view(ref, req.view)
+    if ref.has_views and view is None:
+        raise RefError(f"{ref.id} is a character: an edit is of one view at a time")
+    # the picture can come from ANOTHER view of the same character (its new
+    # take still lands on `view`): a missing view drawn from one it has
+    from_view = e.get("from_view")
+    if from_view is not None:
+        if not ref.has_views:
+            raise RefError(f"{ref.id} has no views: from_view is for a character")
+        from_view = check_view(ref, from_view)
+    turn = e.get("turn", False)
+    if not isinstance(turn, bool):
+        raise RefError("edit.turn must be true or false")
+    loras = req.loras
+    if turn:
+        if not ref.has_views or view not in VIEW_TURNS:
+            raise RefError("edit.turn draws one of a character's views from another")
+        req = dataclasses.replace(req, target=req.target or TURN_TARGET,
+                                  prompt=req.prompt or VIEW_TURNS[view])
+        wrap = False
+        if loras is None:
+            loras = [{"name": TURN_LORA, "strength": TURN_STRENGTH}]
+    instruction = (req.prompt or "").strip()
+    if not instruction:
+        raise RefError("an edit needs an instruction (prompt): what to change")
+    if not isinstance(req.count, int) or isinstance(req.count, bool) or not 1 <= req.count <= 16:
+        raise RefError("count must be a whole number from 1 to 16")
+    ov_data = overrides if overrides is not None else load_overrides(ref.home)
+    target = edit_target_for(s, ref, req.target, ov_data, ready, defaults)
+    refs = [_picture_of(s, ref, from_view or view, take, "the picture to edit")]
+    refs[0]["role"] = "source"
+    withs = e.get("with") or []
+    if not isinstance(withs, list):
+        raise RefError('edit.with must be a list of {"ref", "view"?, "take"?}')
+    for i, w in enumerate(withs):
+        if not isinstance(w, dict) or not isinstance(w.get("ref"), str):
+            raise RefError(f'edit.with[{i}] must be {{"ref": id, "view"?, "take"?}}')
+        other = find_ref(s, w["ref"])
+        oview = check_view(other, w.get("view"))
+        if other.has_views and oview is None:
+            oview = VIEW_TAGS[0]            # a character comes as its three-quarter body
+        wt = w.get("take")
+        if wt is not None and (isinstance(wt, bool) or not isinstance(wt, int) or wt < 1):
+            raise RefError(f"edit.with[{i}].take must be a take number")
+        refs.append(_picture_of(s, other, oview, wt, f"image {i + 2}"))
+    limit = int(target.capabilities().get("max_refs") or 0)
+    if len(refs) > limit:
+        raise RefError(f"{target.short} reads at most {limit} picture"
+                       f"{'s' if limit != 1 else ''}; this edit has {len(refs)} "
+                       f"(the one being edited and {len(refs) - 1} more)")
+    wh = image_size(refs[0]["path"])
+    if wh is None:
+        raise RefError(f"can't read the size of {os.path.basename(refs[0]['path'])}: "
+                       f"a PNG or JPEG is needed")
+    w, h = parse_override_size(req.size) if req.size else scaled_size(target, *wh)
+    word = target.recipe.get("ref_word") or "image"
+    try:
+        prompt = edit_prompt(instruction, refs, word) if wrap else instruction
+    except ValueError as ex:
+        raise RefError(str(ex)) from None
+    preset = target.presets.get("final")
+    cfg = float(req.cfg if req.cfg is not None
+                else (preset.extra.get("cfg", CFG) if preset is not None else CFG))
+    steps = int(req.steps if req.steps is not None
+                else (preset.steps if (preset is not None and preset.steps) else STEPS))
+    if target.binding.specs("negative"):
+        negative, neg_source = J.negative_for(
+            s.ep, preset.extra.get("negative") if preset is not None else "",
+            requested=req.negative, series_cfg=s.series_cfg)
+        if req.negative is not None:
+            neg_source = req.negative_source or "request"
+    else:
+        negative, neg_source = "", "none"
+    record = {"take": take, "view": from_view or view, "instruction": instruction, "wrap": wrap,
+              "with": [{k: r[k] for k in ("ref", "view", "take") if k in r} for r in refs[1:]],
+              **({"turn": True} if turn else {})}
+    notes = []
+    if (w, h) != tuple(wh):
+        notes.append(f"edited at {w}x{h}: the picture is {wh[0]}x{wh[1]}, put on "
+                     f"{target.short}'s size grid")
+    vals = _preset_values(target)
+    for k, x in (check_override_value("params", req.params) or {}).items():
+        if target.binding.specs(k):
+            vals[k] = x
+        else:
+            notes.append(f"{target.short} has no {k} setting: params.{k} ignored")
+    rng = rng or random.SystemRandom()
+    jobs = []
+    for c in range(req.count):
+        if c == 0 and req.seed is not None:
+            seed, source = int(req.seed), "typed"
+        else:
+            seed, source = rng.getrandbits(NEW_SEED_BITS), "new"
+        jobs.append(GenJob(
+            ref=ref, view=view, candidate=c, prompt=prompt, seed=seed, seed_source=source,
+            model=req.model or "", loras=loras, steps=steps, cfg=cfg,
+            negative=negative, width=w, height=h, note=req.note or "",
+            target=target, negative_source=neg_source, values=dict(vals),
+            references=[dict(r) for r in refs], notes=list(notes), edit=dict(record)))
+    return jobs
+
+
+PANO_TARGET = "qwen_image_21"
+PANO_LORA = "pano360_qwen21_edit_v1.safetensors"
+PANO_SIZE = (2048, 1024)      # the card's larger 2:1 size: a third more detail per view than 1536x768
+PANO_WORDS = 35             # the LoRA's card: a one-sentence scene of 15-35 words
+
+
+def pano_prompt(description: str) -> str:
+    """The pano360 LoRA's own wording: its trigger sentence, then the scene in
+    one sentence (the description's first, cut to PANO_WORDS words)."""
+    first = re.split(r"(?<=[.;])\s", description.strip(), maxsplit=1)[0].rstrip(".;")
+    words = first.split()
+    scene = " ".join(words[:PANO_WORDS])
+    return f"Transform this set of images into an equirectangular 360 panorama. Scene: {scene}."
+
+
+# The other way to a 360 (`pano: {"engine": "klein"}`): nomadoor's FLUX.2 Klein
+# 9B 360 ERP outpaint LoRA fills a green 2:1 canvas round the plate, which
+# comfy_nodes/h3_erp.py places on it with a pinhole camera of KLEIN_PANO_FOV.
+# Its own workflow's settings: the BASE Klein 9B (the distilled one draws it
+# badly), LoRA 0.9, 20 steps, cfg 5, euler, the canvas as a reference latent.
+KLEIN_PANO_TARGET = "klein_erp_360"     # the author's own graph (targets/image/klein_erp_360)
+KLEIN_PANO_LORA = "flux-2-klein-9B-360-erp-outpaint-lora_V1.safetensors"
+KLEIN_PANO_STRENGTH = 0.9
+KLEIN_PANO_FOV = 70.0
+KLEIN_PANO_PROMPT = ("Fill the green spaces according to the image. Outpaint as a seamless 360 "
+                     "equirectangular panorama (2:1). Keep the horizon level. Match left and "
+                     "right edges.")
+ERP_HELPER = os.path.join(os.path.dirname(os.path.abspath(__file__)), "comfy_nodes", "h3_erp.py")
+PANO_ENGINES = ("qwen", "klein")
+
+
+def erp_canvas(ref: Ref, plate: str, width: int, fov: float = KLEIN_PANO_FOV) -> str:
+    """The plate on a green 2:1 canvas (h3_erp.py, run with this Python), kept
+    in refs/_takes/<key>/_erp/ by the plate's sha1, the width and the fov."""
+    import subprocess
+    d = os.path.join(takes_dir(ref), "_erp")
+    os.makedirs(d, exist_ok=True)
+    out = os.path.join(d, f"{T.file_sha1(plate)}_{width}_f{int(fov)}.png")
+    if not os.path.isfile(out):
+        r = subprocess.run([sys.executable, ERP_HELPER, plate, out, "--width", str(width),
+                            "--fov", str(fov)], capture_output=True, text=True, timeout=300)
+        if r.returncode != 0 or not os.path.isfile(out):
+            raise RefError(f"couldn't place the plate on a 360 canvas: "
+                           f"{(r.stderr or r.stdout).strip()[-400:]}")
+    return out
+
+
+def plan_pano(s: Series, ref: Ref, req: GenRequest,
+              rng: random.Random | None = None) -> list[GenJob]:
+    """The jobs of a 360 panorama of location `ref`: its live plate, then the
+    live plates of `req.pano["with"]` (other angles of the same place, the most
+    important first), made one 2:1 equirectangular picture by the Qwen-Image
+    2.1 pano360 edit LoRA (PANO_LORA) on PANO_TARGET, sampled from an empty
+    latent at PANO_SIZE as its card says. Each lands as a take of the location's
+    PANO_VIEW; the editor's viewer cuts plate candidates out of it."""
+    if ref.kind != "location":
+        raise RefError(f"{ref.id} is not a location: only a place has a 360")
+    p = req.pano
+    if not isinstance(p, dict) or set(p) - {"with", "engine"}:
+        raise RefError('pano must be {"with": [location ids], "engine": "qwen" | "klein"}')
+    engine = p.get("engine") or "qwen"
+    if engine not in PANO_ENGINES:
+        raise RefError(f"pano.engine must be {' or '.join(PANO_ENGINES)}, not {engine!r}")
+    if engine == "klein":
+        return _plan_klein_pano(s, ref, req, rng)
+    withs = p.get("with") or []
+    if not isinstance(withs, list) or not all(isinstance(x, str) for x in withs):
+        raise RefError("pano.with must be a list of location ids")
+    if not isinstance(req.count, int) or isinstance(req.count, bool) or not 1 <= req.count <= 16:
+        raise RefError("count must be a whole number from 1 to 16")
+    target = TG.load_target(req.target or PANO_TARGET, "image")
+    refs = [_picture_of(s, ref, None, None, "the 360's first picture")]
+    for lid in withs[:2]:                        # the LoRA reads 1-3 pictures
+        other = find_ref(s, lid if lid.startswith("location:") else f"location:{lid}")
+        refs.append(_picture_of(s, other, None, None, f"the 360's picture {len(refs) + 1}"))
+    if len(refs) > int(target.capabilities().get("max_refs") or 0):
+        raise RefError(f"{target.short} can't read {len(refs)} pictures")
+    desc = ref.entry.get("description") or ""
+    prompt = req.prompt.strip() if req.prompt else pano_prompt(desc)
+    preset = target.presets.get("final")
+    steps = int(req.steps or (preset.steps if preset is not None and preset.steps else STEPS))
+    cfg = float(req.cfg if req.cfg is not None
+                else (preset.extra.get("cfg", CFG) if preset is not None else CFG))
+    w, h = parse_override_size(req.size) if req.size else PANO_SIZE
+    vals = _preset_values(target)
+    # the card's settings: the text encoded at 1088, and an empty latent
+    # rather than the references' (qwen_image_21's patch_graph reads `latent`)
+    vals.update(resolution=1088, latent="empty")
+    loras = req.loras if req.loras is not None else [{"name": PANO_LORA, "strength": 1.0}]
+    rng = rng or random.SystemRandom()
+    record = {"take": None, "view": PANO_VIEW, "instruction": prompt, "wrap": False,
+              "with": [{"ref": r["ref"]} for r in refs[1:]], "pano": True}
+    jobs = []
+    for c in range(req.count):
+        seed, source = ((int(req.seed), "typed") if c == 0 and req.seed is not None
+                        else (rng.getrandbits(NEW_SEED_BITS), "new"))
+        jobs.append(GenJob(
+            ref=ref, view=PANO_VIEW, candidate=c, prompt=prompt, seed=seed, seed_source=source,
+            model=req.model or "", loras=[dict(lo) for lo in loras], steps=steps, cfg=cfg,
+            negative="", width=w, height=h, note=req.note or "360", target=target,
+            negative_source="none", values=dict(vals), references=[dict(r) for r in refs],
+            edit=dict(record)))
+    return jobs
+
+
+def _plan_klein_pano(s: Series, ref: Ref, req: GenRequest,
+                     rng: random.Random | None = None) -> list[GenJob]:
+    """plan_pano's Klein way: the live plate on a green canvas (erp_canvas),
+    outpainted by the ERP LoRA on the base Klein 9B at PANO_SIZE."""
+    target = TG.load_target(req.target or KLEIN_PANO_TARGET, "image")
+    src = _picture_of(s, ref, None, None, "the 360's picture")
+    w, h = parse_override_size(req.size) if req.size else PANO_SIZE
+    if w != 2 * h:
+        raise RefError(f"a 360 is 2:1, not {w}x{h}")
+    canvas = erp_canvas(ref, src["path"], w)
+    refs = [dict(src, role="source", path=canvas, name=f"{ref.name} on a 360 canvas")]
+    preset = target.presets.get("final")
+    model = req.model or (preset.model if preset is not None else "")
+    steps = int(req.steps or (preset.steps if preset is not None and preset.steps else 20))
+    cfg = float(req.cfg if req.cfg is not None
+                else (preset.extra.get("cfg", 5.0) if preset is not None else 5.0))
+    loras = (req.loras if req.loras is not None
+             else [{"name": KLEIN_PANO_LORA, "strength": KLEIN_PANO_STRENGTH}])
+    prompt = req.prompt.strip() if req.prompt else KLEIN_PANO_PROMPT
+    vals = _preset_values(target)
+    record = {"take": None, "view": PANO_VIEW, "instruction": prompt, "wrap": False, "with": [],
+              "pano": True, "engine": "klein", "fov": KLEIN_PANO_FOV}
+    rng = rng or random.SystemRandom()
+    jobs = []
+    for c in range(req.count):
+        seed, source = ((int(req.seed), "typed") if c == 0 and req.seed is not None
+                        else (rng.getrandbits(NEW_SEED_BITS), "new"))
+        jobs.append(GenJob(
+            ref=ref, view=PANO_VIEW, candidate=c, prompt=prompt, seed=seed, seed_source=source,
+            model=model, loras=[dict(lo) for lo in loras], steps=steps, cfg=cfg,
+            negative="", width=w, height=h, note=req.note or "360 (Klein)", target=target,
+            negative_source="none", values=dict(vals), references=[dict(r) for r in refs],
+            edit=dict(record)))
     return jobs
 
 
@@ -2302,6 +2898,8 @@ def start_gen(s: Series, job: GenJob) -> RefTake:
         extra["base"] = True
     if job.notes:
         extra["notes"] = list(job.notes)
+    if job.edit:
+        extra["edit"] = dict(job.edit)
     if job.is_audio:
         # a voice sample: no picture, a length and the line it was asked to say
         extra.update(seconds=job.seconds, frames=job.frames, fps=job.fps,
@@ -2309,7 +2907,8 @@ def start_gen(s: Series, job: GenJob) -> RefTake:
                      width=None, height=None)
     return reserve_take(job.ref, job.view, {
         "status": "queued", "queued": T.now(), "ep": s.ep, "comfy_prompt_id": None,
-        "source": "generated", "seed": job.seed, "seed_source": job.seed_source,
+        "source": ("pano" if job.edit.get("pano") else "edited") if job.edit else "generated",
+        "seed": job.seed, "seed_source": job.seed_source,
         "prompt": job.prompt, "model": job.model, "loras": job.loras, "steps": job.steps,
         "cfg": job.cfg, "width": job.width, "height": job.height,
         "overrides": job.overridden, "override_stale": job.override_stale,
@@ -3115,6 +3714,9 @@ def take_json(ep: str, ref: Ref, t: RefTake) -> dict:
             "source": sc.get("source", "generated"), "note": sc.get("note", ""),
             "prompt": sc.get("prompt"), "model": sc.get("model"), "loras": sc.get("loras"),
             "steps": sc.get("steps"), "width": sc.get("width"), "height": sc.get("height"),
+            # P4: what else it was drawn with, so a good take's settings can be reused
+            "cfg": sc.get("cfg"),
+            "params": {k: v for k, v in (sc.get("values") or {}).items() if k in TUNABLE_PARAMS},
             "overrides": sc.get("overrides", []),
             # what this take was generated FROM: [] when nothing was fed, which
             # is the only way to tell an edit from a text-to-image generate on a
@@ -3122,6 +3724,8 @@ def take_json(ep: str, ref: Ref, t: RefTake) -> dict:
             "references": [{"id": r.get("id"), "name": r.get("name"),
                             "view": r.get("view"), "path": r.get("path")}
                            for r in (sc.get("references") or [])],
+            # an edit (source "edited"): the take it started from and the instruction
+            **({"edit": sc["edit"], "target": sc.get("target")} if sc.get("edit") else {}),
             "queued": sc.get("queued"), "finished": sc.get("finished"),
             "comfy_prompt_id": sc.get("comfy_prompt_id"),
             "save_notes": sc.get("save_notes", ""),
@@ -3157,7 +3761,12 @@ def effective(s: Series, ref: Ref, view: str | None, ov_data: dict,
     out = {"prompt": job.prompt, "seed": job.seed if job.seed_source != "new" else None,
            "seed_source": job.seed_source, "model": job.model, "loras": job.loras,
            "steps": job.steps, "width": job.width, "height": job.height,
-           "target": job.target.id if job.target is not None else None}
+           "target": job.target.id if job.target is not None else None,
+           # P4: the sampler settings a generate would use, as overrides set them
+           "cfg": job.cfg, "params": {k: v for k, v in job.values.items()
+                                      if k in TUNABLE_PARAMS},
+           **({"negative": job.negative, "negative_source": job.negative_source}
+              if job.negative_source != "none" else {})}
     if job.is_audio:
         out.update(width=None, height=None, seconds=job.seconds, line=job.line,
                    line_source=job.line_source,
@@ -3247,6 +3856,16 @@ def ref_json(s: Series, ref: Ref, usage: dict | None = None,
     else:
         out["takes"] = [take_json(s.ep, ref, t) for t in list_takes(ref)]
         out["picked"] = picked_take(picks, ref.id)
+        if ref.kind == "location":
+            # P5: its 360 panoramas (PANO_VIEW), apart from the plate's candidates
+            out["panos"] = [take_json(s.ep, ref, t) for t in list_takes(ref, PANO_VIEW)]
+            # ...and its camera tours (h3tour.py): each run, and their held frames
+            import h3tour
+            out["tours"] = [{k: d.get(k) for k in ("tour", "status", "move", "seconds", "seed",
+                                                   "holds", "error", "queued", "finished",
+                                                   "video")}
+                            for d in h3tour.list_tours(ref)]
+            out["tour_holds"] = [take_json(s.ep, ref, t) for t in list_takes(ref, TOUR_VIEW)]
         out["effective"] = effective(s, ref, None, ov_data, view_size, ready, defaults)
         if out["effective"]:
             out["prompt"] = out["effective"]["prompt"]

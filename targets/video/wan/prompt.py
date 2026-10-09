@@ -20,7 +20,7 @@ Stdlib only.
 from __future__ import annotations
 
 from h3core import framing
-from targets.video.ltx2.prompt import _and, _article, _sentence
+from targets.video.ltx2.prompt import _and, _article, _sentence, _subject_sentence
 
 
 def acting(shot, book: dict) -> list[str]:
@@ -75,7 +75,7 @@ def build_prompt(shot, seq, series_cfg: dict) -> str:
     for s in on_screen:
         design = ((book.get(s) or {}).get("design") or "").strip().rstrip(".")
         if design:
-            parts.append(_sentence(f"{name_of(s)} is {design}"))
+            parts.append(_sentence(_subject_sentence(name_of(s), design, book.get(s) or {})))
         else:
             plain.append(name_of(s))
     if plain:

@@ -98,8 +98,10 @@ queued takes whose ComfyUI job is gone (`h3takes.sweep_queued`, with `as_of` tak
  }]}
 ```
 - `status` is `queued` | `ok` | `failed`.
-- `stale` holds any of `script`, `ref`, `preset`; `unknown` means a take from before
-  sidecars.
+- `stale` holds any of `script`, `ref`, `preset` (and `target`, `chain`: a
+  `continuous: latent` take whose previous shot in the cut now uses another take, or that
+  take was rendered again, or the cut puts another shot before it); `unknown` means a
+  take from before sidecars.
 - `thumb`, `strip` and `mp4` are null when the file is missing.
 - `length` / `seconds` are the build's. A take's `frames` is its real frame count, from
   the saver (its sidecar's `frames`), or null (not rendered, or a take from before the
@@ -271,13 +273,26 @@ Queues takes on ComfyUI's own queue and returns without waiting.
   of `h3pipe`, from an executor, and then calls `mark_queued`.
 - A failure while queueing marks that take failed (`mark_failed`) and is reported
   for that shot. The other shots still queue.
-- Continuity (`h3refs.refresh_continuity`): each `first: continuity` shot's first frame
+- Continuity (`h3refs.refresh_continuity`): each `continuous: first` shot's first frame
   is cut again when its render starts (H3ContinuityFrame replaces the LoadImage of its
   `first` input; `h3refs.continuity_at_start`), from the take the cut uses then, so a chain
   queues in one request, in cut order. Before queueing, a missing or stale keyframe is cut
   from the current take (`continuity`: `[{shot, from, why}]`); the shots cut at start are in
   `continuity_at_start` (`[{shot, after}]`). One with nothing to start from, now or coming,
   is an error and isn't queued.
+- Latent chains (`h3refs.chains_before_render`): a `continuous: latent` shot (its built
+  entry's `hold`) queues the same way, in cut order behind the shot it continues, and is in
+  `continuity_at_start` while that shot's take is in the request or still rendering. Its
+  graph has H3ChainLatent before the sampler, which finds the previous take as it runs
+  (`h3refs.chain_source`: its kept latent, else its last frames through the VAEs) and
+  hands what it held to the saver, which records it in the take's sidecar when the job
+  ends (`continued_from`: `{shot, take, pass, via, overlap,
+  video_steps, audio_steps}`), and H3ChainTrim before the saver. The sidecar's `hold` is
+  the frames held; `length` is the take's own.
+- Its upscale (h3upscale.set_chain) holds the previous take's upscaled latent tail; the
+  upscale record's `recipe.held_from` names that take, and `chain_hold` (`{file, held,
+  why?, video_steps, ...}`) says whether it was held when it ran. An upscale whose next
+  shot in the cut is chained keeps `<stem>.up.latent.safetensors`.
 ```json
 {"queued": [{"shot": "sh020", "take": 3, "prompt_id": "…", "seed": "…",
              "seed_source": "new"}],
@@ -840,6 +855,99 @@ Queues one candidate per call. It returns without waiting, like `/render`.
   `h3pipe.ref` `{"ep", "ref", "view", "take", "status"}`.
 - Returns `{"queued": [{"ref", "view", "take", "prompt_id", "seed"}], "errors": [...]}`.
 
+**An edit (2026-10-08).** `"edit": {"take": n | null, "with": [{"ref", "view"?, "take"?}],
+"wrap": true}` changes a picture the ref already has instead of drawing one
+(`h3refs.plan_edit`):
+- The picture is `take` of (`ref`, `view`), or with `take: null` the live picture. That
+  includes a plate dropped into `refs/_bg` by hand, which has no take. A character is
+  edited one view at a time.
+- `prompt` is the instruction, and it is required. It is wrapped by
+  `targets/image/common.edit_prompt`, which names whatever the instruction doesn't change
+  as fixed. `wrap: false` sends it exactly as typed, for a LoRA with its own trigger
+  words (`<mva> left side view, eye-level shot`).
+- `with` adds other refs' pictures as image 2 onward. A character comes as its picked
+  three-quarter view unless `view` says otherwise.
+- The target must be an edit target (`capabilities.mode: "edit"`; 400 otherwise). It is
+  the request's, else the first of the ref's own target, the episode's keyframe target
+  and its refs target that can edit. The pictures must fit its `max_refs`.
+- The picture keeps its size, scaled onto the target's grid and minimum.
+- Each candidate gets a new seed unless `seed` is typed.
+- The ref's overrides are not read: they are for generating it from its description.
+- The take is an ordinary new candidate of the same ref and view, with `source:
+  "edited"`. Its sidecar records `edit` (`take`, `view`, `instruction`, `wrap`, `with`)
+  and `references`, and `/refs` lists `edit` and `target` on it.
+- The CLI is `h3.py refs <ep> --edit REF[:VIEW][:TAKE] --instruction "…"` (`--with`,
+  `--as-typed`, `--target`, `--lora`, `--count`).
+
+**A 360 (P5, 2026-10-08).** `"pano": {"with": [location ids]}` on a location makes
+360 panoramas instead of a plate (`h3refs.plan_pano`):
+- **What goes in:** the live plate, then up to two more locations' plates, the most
+  important first.
+- **How it's made:** Qwen-Image 2.1 (`qwen_image_21`) with the
+  `pano360_qwen21_edit_v1.safetensors` LoRA at 1.0. The prompt is the LoRA's trigger
+  sentence plus the location's description, cut to one sentence of at most 35 words. The
+  text is encoded at 1088, and sampling starts from an empty 2048x1024 latent (`size` can ask for another 2:1 size, e.g. 1536x768, which is faster and softer): the
+  `latent: "empty"` value makes the target's switch skip the references' latent.
+- **`engine: "klein"`** (the editor's default) is the other way. `comfy_nodes/h3_erp.py`
+  places the plate on a green 2:1 canvas: a pinhole camera looking straight ahead, 70°
+  wide. nomadoor's FLUX.2 Klein 9B 360 ERP outpaint LoRA then paints the 360 round it on
+  `klein_erp_360`, which is the author's own graph: the base Klein 9B, LoRA 0.9, 20 steps,
+  cfg 5, the canvas as reference and latent. The plate stays where it was taken, where
+  Qwen tends to pull the camera back. It takes about a minute. That target's
+  `mode: "pano"` keeps it out of the model pickers.
+- **Where it lands:** takes of the location's `pano` pseudo-view, listed as `panos`, with
+  `source: "pano"`. `PUT /refs/pick` refuses them (400): a 360 is never the plate.
+- **In the editor:** the 360 viewer aims a camera into one and saves the view through
+  `/refs/import` as an unpicked plate candidate of the location or one of its angles.
+  **Save and sharpen** then queues an edit of that candidate with the Sharpen preset, on
+  Rapid AIO when installed. A cut view holds only `width × fov/360` panorama pixels
+  across, so it comes out soft.
+
+**Turning a character's view (P5).** An edit can start from another of the same character's
+views and land on `view`: `edit.from_view`. Add `edit.turn: true` to draw the view by
+turning the camera round the figure:
+- It runs on Qwen-Image 2.1 with the Multiple-Angles LoRA (`h3refs.TURN_LORA` at 0.9).
+- The prompt is that view's `<mva> …` phrase (`h3refs.VIEW_TURNS`), sent as typed.
+- The editor's ↻ on a view column turns it from the picked three-quarter view, else from
+  the first picked view.
+- The LoRA renders a whole scene as a diorama, so turning is for characters, not plates.
+
+### `POST /h3pipe/refs/tour` (P5)
+Body `{"ep", "ref", "move", "seconds"?: 2–10 (6), "count"?: 1–4, "seed"?}`. A camera tour of
+a location on MiniMax H3 (`h3tour.py`, ported from h3sets):
+- **The video:** `workflows/h3_tour.json` (H3 FL2VA image-to-video, the 4-step turbo LoRA)
+  starts from the live plate. The `move` says where the camera goes and where it holds,
+  and `h3tour.TAIL` (only the camera moves, and it holds still) is added to it.
+- **The answer:** sent as soon as the videos are queued: `{"queued": [{"tour",
+  "comfy_prompt_id"}]}`.
+- **After that:** a background thread waits for each video and keeps it in
+  `refs/_takes/<key>/_tours/`. It finds the video's held moments with
+  `comfy_nodes/h3_stills.py`: runs of frames whose motion is below half the median,
+  keeping the sharpest frame of each run, with the opening frame always first. That
+  helper runs under the running Python and needs numpy, PIL and ffmpeg.
+- **The holds:** each becomes a take of the location's `tour` pseudo-view, `source:
+  "tour"`, with `h3pipe.ref` sent as each one lands. `/refs` lists the runs as `tours`
+  (`status`, `move`, `holds`, `error`) and the frames as `tour_holds`. `PUT /refs/pick`
+  refuses a hold where it is (400).
+- **The CLI:** `python h3tour.py EPISODE location:<id> "<move>"`.
+- **Turning points:** the stills step also keeps the moments a pan reverses or settles
+  without holding still (`turning_points`: a short dip in motion, under 0.35× the most
+  within half a second either side). H3 often turns straight back from "turn and hold",
+  so these are views a tour does reach.
+
+### `POST /h3pipe/refs/tour-frame` (P5)
+Body `{"ep", "ref", "tour", "seconds"}`. Adds any moment of a finished tour's video as a
+hold (`h3tour.grab_frame`). The frame is cut exactly, by index, with ffmpeg; the take is
+`source: "tour"` with `hold: null`, and it is added to the run's `holds`. The answer is
+the new take. The editor's Tour section has a player for each recent tour, with **Grab
+frame**.
+
+### `POST /h3pipe/refs/copy-take` (P5)
+Body `{"ep", "ref", "view"?, "take", "to"}`. Copies a finished picture take (a tour's hold,
+for example) into another ref as a new, unpicked candidate (`h3refs.copy_take`). The new
+take's sidecar records `copied_from`. The answer is the new take. A character is copied
+into one of its views, not into the character itself (400).
+
 ### `PUT /h3pipe/refs/pick`
 Body `{"ep", "ref", "view"?, "take"}`. Copies the take into place, stitching the
 sheet when all four views are picked. Returns the ref as `/refs` lists it. 409 if the
@@ -853,6 +961,23 @@ take.
 
 ### `PUT /h3pipe/refs/override` and `DELETE /h3pipe/refs/override`
 Same shape as the shot override routes, keyed by `ref` (and `view`).
+
+**More settings (P4, 2026-10-08).** Besides `prompt`, `seed`, `model`, `loras`, `steps`,
+`note` and `target`, a ref's override takes:
+- `size`: `"WxH"`, 256–4096 a side. Not for a keyframe (its size is its shot's) or a voice.
+  A character view's prompt names it.
+- `cfg`: 0–30.
+- `negative`: text. It only applies on a target with a `negative` param, where it beats
+  negative.txt, the series config and the preset, as source `override`.
+- `params`: `{sampler, scheduler, denoise, shift, guidance}`
+  (`h3refs.TUNABLE_PARAMS`). Each is sent only where the image target's binding has that
+  param; one it lacks is skipped, with a note on the take.
+
+`null`, `""` or `{}` clears a field. `POST /h3pipe/refs/generate` takes `size`, `cfg` and
+`params` too; the request's value beats the override's. `/refs` lists `cfg`, `params` and
+the negative in `effective`, and `cfg` and `params` on every take. The editor's **Use
+these settings** saves a take's seed, model, LoRAs, steps, cfg, params and size (but not
+its prompt) as the ref's override.
 
 **A view's overrides, and whose they are (P9, 2026-09-23).** A character's fields are inherited
 by all four views (`ref_override` merges the character's under the view's), which left the
@@ -1476,7 +1601,7 @@ left it open).
   - `none` means "don't use one", even when the target could.
 - **`GET /h3pipe/refs`** lists keyframe refs for every shot that needs one, or whose script asks for one, even before any take exists. Each carries:
   - `need: "required" | "optional"`;
-  - `method`: the script's, else `continuity` for a shot with a previous shot, else `generate`;
+  - `method`: the script's (a `continuous: first` shot's first is `continuity`), else `generate`;
   - `shot`, `which`, and the `target` that will read it.
   
   The Refs tab's "this episode" filter includes them; "missing" includes only required ones plus any whose script asks.
@@ -1563,9 +1688,10 @@ here too) or **[settled]** (the contract left it open).
 - **[settled]** Script lines `first:` / `last:` on a shot or a `#` header; IR `first` /
   `last` on shots and sequences, omitted when unset. `none` removes an optional keyframe
   from the built entry's `keyframes` (a required one stays: the shot stays blocked).
-- **[settled]** `method` defaults to `continuity` only for a **first** frame whose shot has a
-  previous shot **in the same sequence** (across sequences the location changes); else
-  `generate`. A path in the script is `method: "import"` with `import_path`.
+- **[settled, changed 2026-10-09]** `method` is `continuity` only for the **first** frame of
+  a `continuous: first` shot (docs/CONTINUOUS.md: the shot says it continues; it no longer
+  follows from having a previous shot); else `generate`. A path in the script is
+  `method: "import"` with `import_path`.
 - **[added]** Keyframe refs carry `shot`, `which`, `need`, `method`, `target` (the video
   target), `requested` (the script asks for one), `script` (the raw line), `reads` (whether
   the target reads that end), `import_path`, `cleared`, and with an edit keyframe target

@@ -25,7 +25,7 @@ from .speech import SPEECH_RATE
 META_KEYS = {"who", "cast", "with", "props", "size", "audio", "dur", "duration",
              "camera", "sound", "music", "policy", "continuous", "text",
              "pace", "plate", "retention", "model", "lora", "steps", "extras",
-             "target", "profile", "first", "last"}
+             "target", "profile", "first", "last", "overlap"}
 SIZES = framing.ALIASES          # every name `size:` takes (h3core/framing.py)
 
 # Voice-only delivery markers. A speaker tagged with one of these is NOT added
@@ -37,8 +37,13 @@ OS_TOKENS = {"os", "offscreen"}
 
 # `first:` / `last:` (a shot's keyframes, or a sequence's default): how each is
 # filled, or a path to an image to use. `none`: no keyframe, even when the
-# shot's video target could read one.
+# shot's video target could read one. `continuity` is what `continuous: first`
+# means for the first keyframe; written as `first: continuity` it is the old
+# form, read as `continuous: first` (docs/CONTINUOUS.md).
 KEYFRAME_METHODS = ("continuity", "generate", "import", "none")
+CONTINUOUS_VALUES = ("first", "latent", "none")
+LEGACY_TRUE = ("yes", "true", "1", "on")
+MAX_OVERLAP = 360
 KEYFRAME_EXTS = (".png", ".jpg", ".jpeg", ".webp")
 
 # The script's `retention:` words -> the IR's neutral `preserve`.
@@ -138,7 +143,7 @@ def _parse(text: str, subject_ids: set[str], character_ids: set[str],
             if len(parts) < 2:
                 raise ScriptError(n, line, "sequence needs an id and a location: `# sq01 street`")
             seq = {"id": parts[0], "location_key": parts[1],
-                   "continuous": False, "shots": []}
+                   "continuous": None, "shots": [], "_legacy": []}
             ep["sequences"].append(seq)
             seq_lines.append(n)
             continue
@@ -210,9 +215,33 @@ def _parse(text: str, subject_ids: set[str], character_ids: set[str],
             target = shot if shot is not None else seq
 
             if key == "continuous":
-                if shot is not None:
-                    raise ScriptError(n, line, "`continuous:` belongs under `# sequence`, not a shot")
-                seq["continuous"] = val.lower() in ("yes", "true", "1", "on")
+                v = val.strip().lower()
+                if shot is None and v in LEGACY_TRUE:
+                    # the old sequence flag: the chaining `latent` now names
+                    seq["continuous"] = "latent"
+                    seq["_legacy"].append(
+                        f"line {n}: `continuous: {val.strip()}` under # {seq['id']} is the old "
+                        f"form: write `continuous: latent` (it chains each shot onto the one "
+                        f"before), or `continuous: first` (each opens on the previous shot's "
+                        f"last frame, on H3 FL2VA)")
+                elif v not in CONTINUOUS_VALUES:
+                    raise ScriptError(
+                        n, line,
+                        f"`continuous: {val.strip()}` must be first (open on the previous "
+                        f"shot's last frame), latent (hold the previous take's latent) or none")
+                elif shot is not None:
+                    shot["continuous"] = v      # a real line beats an old `first: continuity`
+                else:
+                    seq["continuous"] = None if v == "none" else v
+            elif key == "overlap":
+                try:
+                    ov = int(val.strip())
+                except ValueError:
+                    ov = 0
+                if not 1 <= ov <= MAX_OVERLAP:
+                    raise ScriptError(n, line, f"`overlap: {val.strip()}` must be a whole number "
+                                               f"of frames, 1 to {MAX_OVERLAP}")
+                target["overlap"] = ov
             elif key in ("size", "audio", "dur", "duration", "pace") and shot is None:
                 raise ScriptError(n, line, f"`{key}:` outside a `## shot`")
             elif key in ("who", "cast", "with", "props"):
@@ -258,7 +287,17 @@ def _parse(text: str, subject_ids: set[str], character_ids: set[str],
                             n, line,
                             f"duration '{val}' is not a number, `auto` or `model`")
             elif key in ("first", "last"):
-                target[key] = _keyframe_method(key, val, n, line)
+                method = _keyframe_method(key, val, n, line)
+                if key == "first" and method == "continuity":
+                    # the old form of `continuous: first`
+                    where = f"shot {shot['id']}" if shot is not None else f"# {seq['id']}"
+                    target.setdefault("_legacy", []).append(
+                        f"line {n}: `first: continuity` on {where} is the old form: write "
+                        f"`continuous: first`")
+                    if target.get("continuous") is None:
+                        target["continuous"] = "first"
+                else:
+                    target[key] = method
             elif key == "pace":
                 if val.strip().lower() not in SPEECH_RATE:
                     raise ScriptError(n, line,
@@ -337,8 +376,9 @@ def _keyframe_method(key: str, val: str, n: int, line: str) -> str:
         return v.lower()
     if v and v.lower().endswith(KEYFRAME_EXTS):
         return v
-    raise ScriptError(n, line, f"`{key}: {v}` must be continuity, generate, import, none "
-                               f"or a path to an image ({', '.join(KEYFRAME_EXTS)})")
+    raise ScriptError(n, line, f"`{key}: {v}` must be generate, import, none or a path to "
+                               f"an image ({', '.join(KEYFRAME_EXTS)}); a shot that opens on the "
+                               f"previous shot's last frame says `continuous: first`")
 
 
 def _model_clamp(spec: str, n: int, line: str) -> dict:
@@ -408,7 +448,8 @@ def _shot_ir(ep_id: str, seq: dict, sh: dict, span: tuple[int, int]) -> Shot:
         overrides=overrides, source={"line": span[0], "end_line": span[1]},
         unparsed=unparsed, target=sh.get("target") or None,
         profile=sh.get("profile") or None, first=sh.get("first") or None,
-        last=sh.get("last") or None)
+        last=sh.get("last") or None, continuous=sh.get("continuous") or None,
+        overlap=sh.get("overlap"), legacy=list(sh.get("_legacy") or []))
 
 
 def episode_from_parsed(ep: dict, seq_lines: list[int],
@@ -419,7 +460,8 @@ def episode_from_parsed(ep: dict, seq_lines: list[int],
         unparsed: dict = {}
         overrides = _overrides(seq, unparsed)
         sequences.append(Sequence(
-            id=seq["id"], location=seq["location_key"], continuous=seq["continuous"],
+            id=seq["id"], location=seq["location_key"], continuous=seq["continuous"] or None,
+            overlap=seq.get("overlap"), legacy=list(seq.get("_legacy") or []),
             overrides=overrides, source={"line": line},
             shots=[_shot_ir(ep["id"], seq, sh, spans[sh["id"]]) for sh in seq["shots"]],
             unparsed=unparsed, target=seq.get("target") or None,

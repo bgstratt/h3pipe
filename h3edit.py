@@ -33,7 +33,7 @@ cut, set per-shot overrides. The command-line face of what the editor does;
     python h3.py targets  [Shows\\ep05] [--json]               # readiness of every target
 
 `takes` shows every take with its status, why it is stale (script / ref /
-preset / target), and which take the cut uses. `pick` writes cut.json; `latest` puts a
+preset / target / chain), and which take the cut uses. `pick` writes cut.json; `latest` puts a
 shot back on its newest usable take. `override` writes overrides.json: the
 next render or redo of that shot uses it (see h3render.py). Prompt, model,
 LoRAs and steps are per pass (final unless --proxy; --both sets both); seed
@@ -260,7 +260,31 @@ def take_stale(root: str, pass_: str, doc: dict, shot: dict, sidecar: dict | Non
     out = J.stale_reasons(root, cur[0], cur[1], sidecar) if cur else []
     if tt != target:
         out.append("target")
+    if sidecar.get("continued_from") and chain_changed(root, pass_, shot["id"],
+                                                       sidecar["continued_from"], cache):
+        out.append("chain")
     return out
+
+
+def chain_changed(root: str, pass_: str, shot_id: str, held: dict, cache: dict) -> bool:
+    """Whether a `continuous: latent` take (its sidecar's `continued_from`)
+    continued something other than what the cut puts before it now: another
+    shot (the cut moved), another take of it (a pick, a newer take), or that
+    take rendered again since."""
+    key = ("cut entries", pass_)
+    if key not in cache:
+        cache[key] = [e for e in cut_entries(root, pass_) if not e.orphan]
+    entries = cache[key]
+    idx = next((i for i, e in enumerate(entries) if e.shot == shot_id), None)
+    if idx is None:
+        return False                                    # not in this cut: nothing to compare
+    prev = next((e for e in reversed(entries[:idx]) if not e.out), None)
+    if prev is None or prev.shot != held.get("shot"):
+        return True
+    t, n, ok = cut_take(root, prev)
+    if not ok or n != held.get("take") or prev.pass_ != held.get("pass", prev.pass_):
+        return True
+    return bool(held.get("sha1")) and T.file_sha1(t.paths.mp4) != held["sha1"]
 
 
 def cut_take(root: str, e: T.CutEntry,

@@ -289,7 +289,7 @@
     {
       "id": "sq02",
       "location": "street",
-      "continuous": true,
+      "continuous": false,
       "overrides": {
         "model": "seq_model.safetensors",
         "lora": null,
@@ -349,8 +349,8 @@
             "steps": null
           },
           "source": {
-            "line": 80,
-            "end_line": 90
+            "line": 79,
+            "end_line": 89
           }
         },
         {
@@ -389,8 +389,8 @@
             "steps": null
           },
           "source": {
-            "line": 93,
-            "end_line": 100
+            "line": 92,
+            "end_line": 99
           }
         },
         {
@@ -429,8 +429,8 @@
             "steps": null
           },
           "source": {
-            "line": 103,
-            "end_line": 110
+            "line": 102,
+            "end_line": 109
           }
         },
         {
@@ -467,8 +467,8 @@
             "steps": null
           },
           "source": {
-            "line": 113,
-            "end_line": 118
+            "line": 112,
+            "end_line": 117
           }
         },
         {
@@ -499,8 +499,8 @@
             "steps": null
           },
           "source": {
-            "line": 121,
-            "end_line": 124
+            "line": 120,
+            "end_line": 123
           }
         }
       ]
@@ -515,7 +515,7 @@
         "steps": null
       },
       "source": {
-        "line": 126
+        "line": 125
       },
       "shots": [
         {
@@ -572,8 +572,8 @@
             "steps": null
           },
           "source": {
-            "line": 130,
-            "end_line": 137
+            "line": 129,
+            "end_line": 136
           }
         }
       ]
@@ -588,7 +588,7 @@
         "steps": null
       },
       "source": {
-        "line": 139
+        "line": 138
       },
       "profile": "quick",
       "shots": [
@@ -620,8 +620,8 @@
             "steps": null
           },
           "source": {
-            "line": 143,
-            "end_line": 146
+            "line": 142,
+            "end_line": 145
           }
         },
         {
@@ -659,8 +659,8 @@
             "steps": null
           },
           "source": {
-            "line": 150,
-            "end_line": 157
+            "line": 149,
+            "end_line": 156
           },
           "target": "minimax_h3_ref2va",
           "profile": "dialogue_close"
@@ -700,8 +700,8 @@
             "steps": 9
           },
           "source": {
-            "line": 161,
-            "end_line": 168
+            "line": 160,
+            "end_line": 167
           },
           "profile": "dialogue_close"
         },
@@ -746,8 +746,8 @@
             "steps": null
           },
           "source": {
-            "line": 173,
-            "end_line": 179
+            "line": 172,
+            "end_line": 178
           }
         }
       ]

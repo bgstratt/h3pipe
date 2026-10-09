@@ -157,6 +157,11 @@ def story_warnings(story: ir.Episode, series_cfg: dict | None = None) -> list[st
                 f"the cut reads as a single camera rather than a reverse angle. Give the "
                 f"location an angle per speaker and name it with `plate:`.")
     out += jump_cuts(story, person, name)
+    # the old forms of `continuous:` (docs/CONTINUOUS.md), read as the new ones
+    for sq in story.sequences:
+        out += list(getattr(sq, "legacy", None) or [])
+        for sh in sq.shots:
+            out += list(getattr(sh, "legacy", None) or [])
     mode = ((series_cfg or {}).get("upscale") or {}).get("save_latents")
     if mode is not None and mode not in ("final", "always", "never"):
         out.append(f"series.json upscale.save_latents is {mode!r}: it takes \"final\" (the "

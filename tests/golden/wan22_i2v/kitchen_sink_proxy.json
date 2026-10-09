@@ -494,7 +494,7 @@
       "sh140: CRAMMED — 12 syllables in 1.88s forces 9.8 syl/s (ceiling 5.8). `dur: 3.38` gives it room.",
       "Wan I2V makes no sound: 16 shot(s) render silent (asked for dub x2, dub_keep_foley x2, generate x12); lay the soundtrack in at the edit",
       "13 dialogue shot(s): no audio or lip-sync on Wan (the lines are acted silently): sh020, sh030, sh040, sh050, sh060, sh110, sh120, sh130 …",
-      "Wan I2V renders from a first frame: each of these 16 shot(s) is blocked until its refs/shots/<shot>/first.png exists (generate one or use continuity (or import one), or retarget to wan22_ti2v)",
+      "Wan I2V renders from a first frame: each of these 16 shot(s) is blocked until its refs/shots/<shot>/first.png exists (generate one, import one, give the shot `continuous: first` (the previous shot's last frame), or retarget to wan22_ti2v)",
       "2 shot(s) are longer than Wan I2V's trained 81 frames (motion may loop or drift; shot, frames): sh020 89, sh210 89",
       "sh040 overrides model: shot_model.safetensors",
       "sh040 overrides lora: none",

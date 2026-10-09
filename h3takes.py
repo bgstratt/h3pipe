@@ -129,6 +129,14 @@ class TakePaths:
     def up_mp4(self) -> str: return self._p(".up.mp4")
     @property
     def up_sidecar(self) -> str: return self._p(".up.json")
+    # the upscale's last frame at the size it was made (before the delivery
+    # crop): what a continuity shot's upscale starts from (h3upscale)
+    @property
+    def up_last(self) -> str: return self._p(".up_last.png")
+    # the upscale's re-sampled latent, kept when the next shot in the cut is
+    # `continuous: latent`: that shot's upscale holds its tail (h3upscale)
+    @property
+    def up_latent(self) -> str: return self._p(".up.latent.safetensors")
     # the post pass (h3post): a version of the upscale, made from its .up.mp4
     @property
     def post_mp4(self) -> str: return self._p(".post.mp4")

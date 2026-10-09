@@ -26,6 +26,7 @@ import { SourceWindows } from "./components/SourceWindow";
 import { Timeline } from "./components/Timeline";
 import { TrackWindow } from "./components/Track";
 import { VoiceClipWindow } from "./components/VoiceRef";
+import { PanoWindow } from "./components/PanoViewer";
 import { Viewer } from "./components/Viewer";
 import type { Surface } from "./host";
 import { useApp } from "./store";
@@ -152,6 +153,7 @@ export const OVERLAY_WINDOWS: [string, ComponentType][] = [
   ["Script / series config", SourceWindows],
   ["Dialogue track", TrackWindow],
   ["Voice clip", VoiceClipWindow],
+  ["360 viewer", PanoWindow],
   ["Clip audio", ClipAudioWindow],
   ["Context menu", ContextMenu],
   ["Cut menu", CutMenu],

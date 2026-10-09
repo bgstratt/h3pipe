@@ -1,0 +1,80 @@
+{
+  "id": "qwen_rapid_aio",
+  "kind": "image",
+  "label": "Qwen-Image-Edit Rapid AIO (edit from up to 3 reference images, 4 steps)",
+  "short": "Rapid AIO",
+  "code": "target.py",
+
+  "capabilities": {
+    "_note": "Image edit with up to 3 reference images (the stock TextEncodeQwenImageEditPlus's image1..image3, on the positive and the negative alike); with none it is text to image. Phr00t's merge of Qwen-Image-Edit-2511 with its accelerator LoRAs: four steps at cfg 1, so the negative prompt is inert and is not offered. Its use is composing: characters from their own pictures put into a plate with their faces kept.",
+    "mode": "edit",
+    "max_refs": 3,
+    "negative_prompt": false
+  },
+
+  "template": {
+    "_note": "Sizes a series ref is generated at (as krea2's). An edit or keyframe is generated at its own size, on a 16 grid and scaled up to about 1 MP (the model's training size): EmptySD3LatentImage sets the output, and the encoder scales each reference itself.",
+    "view_size": [1024, 1024],
+    "plate_size": [1344, 768],
+    "object_size": [1024, 1024],
+    "size_multiple": 16,
+    "min_pixels": 786432
+  },
+
+  "recipe": {
+    "_note": "The prompt names each reference by its number ('image 1', 'image 2', ...), as the Qwen edit models read them.",
+    "ref_word": "image"
+  },
+
+  "binding": {
+    "_note": "An API graph written by hand from Phr00t's README (Load Checkpoint -> TextEncodeQwenImageEditPlus -> KSampler, er_sde/beta, 4 steps, cfg 1) and ComfyUI's image_qwen_image_edit_2511.json: the checkpoint gives model, CLIP and VAE; the positive and negative encoders both read the reference images (graph code wires image1..image3 and repeats the 'Reference 1' LoadImage); the output size is the job's EmptySD3LatentImage. No ModelSamplingAuraFlow: the merge carries its own tuning and its author's workflow has none. No LoRA loader: `insert_after` puts one after the checkpoint's MODEL when a job has LoRAs. H3SaveRefTake takes the place of SaveImage.",
+    "workflow": "workflow.json",
+    "workflow_name": "h3pipe_qwen_rapid_aio.json",
+    "env": "H3_QWEN_RAPID_AIO_WORKFLOW",
+    "saver": {"class_type": "H3SaveRefTake",
+              "replace": {"class_type": "SaveImage", "inputs": {"images": "images"}}},
+    "prune": true,
+    "params": {
+      "model": {"class_type": "CheckpointLoaderSimple", "field": "ckpt_name"},
+      "loras": {"class_type": "LoraLoaderModelOnly", "name": "lora_name", "strength": "strength_model",
+                "input": "model", "chain": true,
+                "insert_after": {"class_type": "CheckpointLoaderSimple", "output": 0}},
+      "prompt": {"class_type": "TextEncodeQwenImageEditPlus", "field": "prompt", "title": "Positive prompt"},
+      "width": {"class_type": "EmptySD3LatentImage", "field": "width"},
+      "height": {"class_type": "EmptySD3LatentImage", "field": "height"},
+      "steps": {"class_type": "KSampler", "field": "steps"},
+      "seed": {"class_type": "KSampler", "field": "seed"},
+      "cfg": {"class_type": "KSampler", "field": "cfg"},
+      "sampler": {"class_type": "KSampler", "field": "sampler_name"},
+      "scheduler": {"class_type": "KSampler", "field": "scheduler"},
+      "denoise": {"class_type": "KSampler", "field": "denoise"}
+    }
+  },
+
+  "models": {
+    "_note": "One all-in-one checkpoint (model, text encoder and VAE). Name-based identification only. v19 is the author's pick for consistency in edits, v23 for prompt adherence; either matches.",
+    "model": {"family": "qwen-rapid-aio", "patterns": ["*qwen*rapid*aio*", "*rapid*aio*"],
+              "tier": "required"}
+  },
+
+  "presets": {
+    "_note": "Phr00t's settings for v19/v23: 4 steps (4-8 work), cfg 1, er_sde/beta (euler_ancestral/beta also recommended), denoise 1.",
+    "final": {
+      "model": "Qwen-Rapid-AIO-SFW-v19.safetensors",
+      "steps": 4,
+      "cfg": 1.0,
+      "sampler": "er_sde",
+      "scheduler": "beta",
+      "denoise": 1.0
+    }
+  },
+
+  "downloads": {
+    "_note": "Where to get each file this target names (docs/API.md 'Downloads').",
+    "Qwen-Rapid-AIO-SFW-v19.safetensors": {
+      "folder": "checkpoints",
+      "url": "https://huggingface.co/Phr00t/Qwen-Image-Edit-Rapid-AIO/resolve/main/v19/Qwen-Rapid-AIO-SFW-v19.safetensors",
+      "source": "the Hugging Face repo Phr00t/Qwen-Image-Edit-Rapid-AIO (v19, SFW: the author's pick for consistency in edits)"
+    }
+  }
+}

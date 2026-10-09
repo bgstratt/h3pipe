@@ -750,6 +750,8 @@ def wait_reason(w: dict) -> str:
     """Where a chained continuity shot's first frame will come from (refresh_continuity's `wait`)."""
     what = (f"{w['after']} t{w['take']:02d}, still rendering" if w.get("take")
             else f"{w['after']}'s new take in this run")
+    if w.get("chain"):
+        return f"it continues {what} (its latent, else its last frames)"
     return f"its first frame is cut from {what} when its render starts"
 
 
@@ -2250,14 +2252,39 @@ def post_refs_generate(ctx: Context, body):
         if kind != "audio":
             raise ApiError(400, f"seconds is only for a voice ref, not {ref.id}")
     pass_ = check_pass(body.get("pass"), "final")
+    # an edit of a picture the ref already has (h3refs.plan_edit): `prompt` is
+    # the instruction, `edit` says which picture and what else comes along
+    cfg = body.get("cfg")
+    if cfg is not None and (isinstance(cfg, bool) or not isinstance(cfg, (int, float))):
+        raise ApiError(400, "cfg must be a number or null")
+    size = body.get("size")
+    if size is not None:
+        try:
+            R.parse_override_size(size)
+        except R.RefError as e:
+            raise ApiError(400, str(e))
+    params = body.get("params")
+    if params is not None:
+        try:
+            R.check_override_value("params", params)
+        except R.RefError as e:
+            raise ApiError(400, str(e))
+    pano = body.get("pano")
+    if pano is not None and not isinstance(pano, dict):
+        raise ApiError(400, 'pano must be {"with": [location ids]} or null')
+    edit = body.get("edit")
+    if edit is not None and not isinstance(edit, dict):
+        raise ApiError(400, 'edit must be {"take": n or null, "with": [...], "wrap": bool} '
+                            'or null')
     req = R.GenRequest(ref=ref.id, view=view, count=count, seed_mode=seed_mode,
                        seed=seed_in(body.get("seed")), prompt=prompt or None,
                        model=_opt_str(body, "model") or None,
                        loras=_opt_loras(body.get("loras")),
                        steps=_opt_steps(body.get("steps")), note=_opt_str(body, "note") or "",
                        target=target or None, negative=negative, pass_=pass_,
-                       seconds=seconds)
-    why = R.can_generate(s, ref)
+                       seconds=seconds, edit=edit, cfg=cfg, size=size or None,
+                       params=params or None, pano=pano)
+    why = None if (edit is not None or pano is not None) else R.can_generate(s, ref)
     if why:
         raise ApiError(400, why)
     try:
@@ -2281,6 +2308,86 @@ def post_refs_generate(ctx: Context, body):
     if result["queued"] or any(e.get("take") for e in result["errors"]):
         episode_event(ctx, ep)
     return 200, seeds_out(result)
+
+
+_TOUR_THREADS: dict = {}
+
+
+@handler
+def post_refs_tour(ctx: Context, body):
+    """P5: a camera tour of a location on H3 (h3tour.py), from its live plate:
+    `{ep, ref, move, seconds?, count?}`. Queues the videos and answers at once;
+    a background thread waits for each, finds its held frames and adds them as
+    the location's `tour` takes, sending `h3pipe.ref` as each lands. Returns
+    {"queued": [{tour, comfy_prompt_id}]}."""
+    import h3tour
+    body = body_dict(body)
+    ep = check_ep(ctx, body.get("ep"))
+    s = _series(ep)
+    ref = _ref(s, body.get("ref"))
+    seconds = body.get("seconds", h3tour.DEFAULT_SECONDS)
+    count = body.get("count", 1)
+    try:
+        sides = h3tour.start_tour(s, ref, body.get("move") or "", ctx.comfy, seconds, count,
+                                  seed_in(body.get("seed")) if body.get("seed") else None)
+    except (h3tour.TourError, R.RefError) as e:
+        raise ApiError(400, str(e))
+
+    def finish():
+        for side in sides:
+            h3tour.finish_tour(s, ref, side, ctx.comfy,
+                               on_hold=lambda t: ref_event(ctx, ep, ref.id, R.TOUR_VIEW,
+                                                           t.take, "ok"))
+            episode_event(ctx, ep)
+
+    th = threading.Thread(target=finish, name=f"h3tour {ref.id}", daemon=True)
+    _TOUR_THREADS[(ep, ref.id)] = th
+    th.start()
+    episode_event(ctx, ep)
+    return 200, {"queued": [{"tour": d["tour"], "comfy_prompt_id": d["comfy_prompt_id"]}
+                            for d in sides]}
+
+
+@handler
+def post_refs_tour_frame(ctx: Context, body):
+    """P5: any moment of a finished tour's video as a hold: `{ep, ref, tour,
+    seconds}` (h3tour.grab_frame). Returns the new take."""
+    import h3tour
+    body = body_dict(body)
+    ep = check_ep(ctx, body.get("ep"))
+    s = _series(ep)
+    ref = _ref(s, body.get("ref"))
+    tour = check_take(body.get("tour"), "tour")
+    try:
+        t = h3tour.grab_frame(s, ref, tour, body.get("seconds"))
+    except (h3tour.TourError, R.RefError) as e:
+        raise ApiError(400, str(e))
+    ref_event(ctx, ep, ref.id, R.TOUR_VIEW, t.take, "ok")
+    episode_event(ctx, ep)
+    return 200, R.take_json(ep, ref, t)
+
+
+@handler
+def post_refs_copy_take(ctx: Context, body):
+    """P5: copy a finished take into another ref as a new candidate (a tour's
+    hold into a location or an angle of it): `{ep, ref, view?, take, to}`.
+    Returns the new take."""
+    body = body_dict(body)
+    ep = check_ep(ctx, body.get("ep"))
+    s = _series(ep)
+    src = _ref(s, body.get("ref"))
+    dest = _ref(s, body.get("to"))
+    take = check_take(body.get("take"))
+    view = body.get("view")
+    try:
+        t = R.copy_take(s, src, view, take, dest)
+    except R.RefError as e:
+        raise ApiError(400, str(e))
+    except R.UnknownRef as e:
+        raise ApiError(404, str(e))
+    ref_event(ctx, ep, dest.id, None, t.take, "ok")
+    episode_event(ctx, ep)
+    return 200, R.take_json(ep, dest, t)
 
 
 @handler
@@ -2600,7 +2707,8 @@ def post_refs_voice_from_take(ctx: Context, body):
     return 200, out
 
 
-REF_OVERRIDE_FIELDS = ("prompt", "seed", "model", "loras", "steps", "note", "target")
+REF_OVERRIDE_FIELDS = ("prompt", "seed", "model", "loras", "steps", "note", "target",
+                       "size", "cfg", "negative", "params")
 
 
 def _ref_override_json(s, ref, view) -> dict:
@@ -2647,6 +2755,12 @@ def put_refs_override(ctx: Context, body):
         if t is not None and not isinstance(t, str):
             raise ApiError(400, "target must be an image target id or null")
         clean["target"] = t or None
+    # P4: size ("WxH"), cfg, negative and params (sampler knobs) are checked
+    # by h3refs.set_ref_override
+    for k in ("size", "cfg", "negative", "params"):
+        if k in fields:
+            v = fields[k]
+            clean[k] = None if v in ("", {}) else v
     ov = R.load_overrides(ref.home)
     try:
         R.set_ref_override(ov, ref, view, clean,
@@ -2970,6 +3084,9 @@ ROUTES = [
     ("DELETE", "/h3pipe/workflow/install", delete_workflow_install, "query"),
     ("GET", "/h3pipe/refs", get_refs, "query"),
     ("POST", "/h3pipe/refs/generate", post_refs_generate, "body"),
+    ("POST", "/h3pipe/refs/tour", post_refs_tour, "body"),
+    ("POST", "/h3pipe/refs/copy-take", post_refs_copy_take, "body"),
+    ("POST", "/h3pipe/refs/tour-frame", post_refs_tour_frame, "body"),
     ("PUT", "/h3pipe/refs/pick", put_refs_pick, "body"),
     ("DELETE", "/h3pipe/refs/pick", delete_refs_pick, "query"),
     ("PUT", "/h3pipe/refs/defaults", put_refs_defaults, "body"),

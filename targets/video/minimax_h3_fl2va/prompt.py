@@ -40,6 +40,16 @@ from __future__ import annotations
 import re
 
 from h3core import framing
+from h3core.series_config import members
+
+
+def _subject_sentence(name: str, design: str, entry: dict) -> str:
+    """"<Name> is <design>", or for a group (`members: N`) "<Name> are N
+    different people, each appearing once: <design>"."""
+    n = members(entry)
+    if n:
+        return f"{name} are {n} different people, each appearing once: {design}"
+    return f"{name} is {design}"
 
 
 FIELDS = ("integrated_multimodal_description:", "overall_soundscape:", "non_diegetic_music:")
@@ -96,7 +106,7 @@ def build_prompt(shot, seq, series_cfg: dict, policy: str = "generate") -> str:
     for s in on_screen:
         design = ((book.get(s) or {}).get("design") or "").strip().rstrip(".")
         if design:
-            parts.append(_sentence(f"{name(s)} is {design}"))
+            parts.append(_sentence(_subject_sentence(name(s), design, book.get(s) or {})))
     if shot.extras:
         named = _and([name(s) for s in shot.cast]) or "anyone named"
         parts.append(_sentence(f"Also in frame are {shot.extras.strip().rstrip('.')}: unnamed "

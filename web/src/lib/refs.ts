@@ -30,8 +30,14 @@ export const VIEWS: { view: string; label: string }[] = [
  */
 export const SHEET_VIEW = "sheet";
 
+/** P5: a location's pseudo-views (h3refs.PANO_VIEW / TOUR_VIEW): never picked where they are. */
+export const PANO_VIEW = "pano";
+export const TOUR_VIEW = "tour";
+
 export function viewLabel(view: string | null | undefined): string {
   if (view === SHEET_VIEW) return "sheet";
+  if (view === PANO_VIEW) return "360";
+  if (view === TOUR_VIEW) return "tour holds";
   if (!view) return "";
   return VIEWS.find((v) => v.view === view)?.label ?? view.replace(/^\d+_/, "");
 }
@@ -86,9 +92,16 @@ export function passesFilter(r: Ref, filter: RefFilter, pass: Pass): boolean {
 export function groupRefs(refs: Ref[], filter: RefFilter, pass: Pass): RefGroup[] {
   return REF_GROUPS.map(({ id, label }) => {
     const all = refs.filter((r) => groupOf(r) === id);
+    // a location's angles (`of`) sort right after their master
+    const masterName = (r: Ref) => {
+      if (r.kind !== "location" || !r.of) return r.name;
+      return all.find((x) => x.id === `location:${r.of}`)?.name ?? r.of;
+    };
     const shown = all
       .filter((r) => passesFilter(r, filter, pass))
-      .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }) || a.id.localeCompare(b.id));
+      .sort((a, b) => masterName(a).localeCompare(masterName(b), undefined, { sensitivity: "base" })
+        || Number(!!(a.kind === "location" && a.of)) - Number(!!(b.kind === "location" && b.of))
+        || a.name.localeCompare(b.name, undefined, { sensitivity: "base" }) || a.id.localeCompare(b.id));
     return { id, label, refs: shown, total: all.length };
   });
 }
@@ -109,6 +122,9 @@ export function viewOf(r: Ref, view: string | null | undefined): RefView | undef
  */
 export function takesOf(r: Ref, view: string | null | undefined): RefTake[] {
   if (!view || view === SHEET_VIEW) return r.takes;
+  // P5: a location's 360s and tour holds, kept apart from the plate's candidates
+  if (view === PANO_VIEW) return r.panos ?? [];
+  if (view === TOUR_VIEW) return r.tour_holds ?? [];
   return viewOf(r, view)?.takes ?? [];
 }
 

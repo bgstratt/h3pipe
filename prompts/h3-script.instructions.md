@@ -145,8 +145,9 @@ shot 93. So:
   `series.target`, so a whole episode can be moved to another model without touching the
   script.
 - **Name it** (`target:` on a shot, or under a `#` header for its sequence) when a shot
-  needs something only one model does: a silent insert on Wan, a continuity shot on
-  `minimax_h3_fl2va`, a shot whose length you want LTX to choose (`dur: model`).
+  needs something only one model does: a silent insert on Wan, a shot whose length you want
+  LTX to choose (`dur: model`). A `continuous: first` shot moves to H3 FL2VA by itself (see
+  **Continuous shots**).
 - **Dialogue needs a target with sound**, and lip sync to a recording needs an H3 target.
   Wan acts the lines silently.
 - **On a target that takes no reference pictures** (`ltx2`, `minimax_h3_fl2va`, `wan22_i2v`,
@@ -203,6 +204,8 @@ which ones your ComfyUI can render.
   close-up. A picture you supply that is **one image** of the character (a portrait, a
   full-length shot on white) needs `"sheet_panels": 1`, or it is cut into quarters and the
   model gets a strip from its left edge. With it the picture is sent whole on H3 Ref2VA.
+- `members` makes a character a **group**: one picture of that many people (2–12), cast
+  like any character and costing one slot. See **A group: the same extras every shot**.
 - `of` makes the subject a **wardrobe variant** of another one — the same character in
   different clothes, the same prop in a different state. See **A wardrobe change is a new
   subject**.
@@ -384,6 +387,24 @@ The series config says how, once, in `upscale.master` (the **recipe**):
   picks, per take, the smallest scale on the target's grid that covers `deliver`: 2x for a
   960×544 take, 1.5x for a 1344×768 one (2016×1152, scaled down to 1920 and cropped), so an
   episode that renders some shots at 1344×768 masters with no wasted pixels.
+- `window` (seconds) is for a long H3 re-sample. A take longer than one window is sampled
+  in overlapping windows along time (5.5 s with 1.25 s of overlap by default: a usual 4–5 s
+  shot still re-samples in one pass), so a 2x
+  re-sample of 1344×768 (2688×1536) fits a 32 GB card at any length. Shorter takes are
+  sampled in one pass, as before. Set a longer window if your card holds it, or `0` to
+  turn windowing off. It needs the `comfyui-obvpm-timeline` node pack (its H3 Context
+  Windowing); without it, a long shot's upscale says so instead of running out of memory.
+- A **continuity shot** (its first keyframe the previous shot's last frame) starts its
+  upscale from the previous shot's *upscaled* last frame, so the two meet on one picture.
+  Re-sampling each from the same low-res frame gave two different 2x pictures of it, which
+  shows as a colour jump at a cut that should be seamless. Every upscale keeps its last
+  frame (`<take>.up_last.png`). The master queues a source before the shot that continues
+  it, and makes either upscale again when it was made before this (never a Keep).
+- A **`continuous: latent` shot** does the same in latent space: its re-sample holds its
+  first frames on the previous shot's upscaled latent, which that upscale keeps
+  (`<take>.up.latent.safetensors`, about 60 MB for 5 s at 2x) only when the next shot in
+  the cut is such a shot. The master queues the source first and makes an upscale again
+  when the source kept no latent, or the chained shot wasn't held (it ran first).
 - A shot can have its own recipe over its target's (a dialogue close-up kept light, a wide
   given `detail: 1`, a shot SeedVR2 got wrong sent to the pixel method): the editor's
   Upscale dialog, **Choose for this run**, then **Save as sh020's recipe**.
@@ -812,6 +833,32 @@ the hallway door, sink under the window on the left, the living-room arch behind
 *"the kitchen from the sink, the hallway door on the right, the arch beyond it"*. That is what
 makes the geography hold together across a cut.
 
+**Tie the angles to one master with `of`.** Words alone still give each angle its own
+walls and furniture. Give one entry the plate you like (the master) and mark the others as
+angles of it:
+
+```json
+"ambulance_bay_night":    {"description": "the ambulance bay of a county hospital at night ...",
+                           "plate": "../refs/_bg/ambulance_bay_night.png"},
+"ambulance_bay_on_drive": {"of": "ambulance_bay_night",
+                           "description": "looking back down the covered drive from the doors ...",
+                           "plate": "../refs/_bg/ambulance_bay_on_drive.png"}
+```
+
+- An angle inherits nothing. It keeps its own `description` and `plate`, and shots still name
+  it with `plate:`.
+- On an edit model (Klein, Qwen, Rapid AIO, H3 still), an angle's plate is generated **from
+  the master's plate**: the same building, materials and light, with only the camera moved.
+  On a text-to-image model (Krea 2) it is drawn from its words as before.
+- The Refs tab lists the angles under their master.
+- An angle's master must be a location that isn't itself an angle.
+- The Refs tab can also make an angle's picture from the master's plate in two other ways:
+  a **360 panorama** of it (Make 360), whose viewer saves any view you turn to; or an H3
+  **camera tour** through it, whose held frames (and any frame you stop on) become
+  candidates. Both keep the master's room exactly, and a picture made this way is picked
+  into the angle like any other. Qwen's multi-angle LoRA (a character's **Turn**) isn't
+  used on plates: it turns a room into a diorama.
+
 ### Two people talking need an angle each
 
 This is the one that spoils scenes most often, and the build warns about it:
@@ -1022,13 +1069,14 @@ sound: running footsteps on grass, fabric movement
 | `model:`, `lora:`, `steps:` | per-shot render overrides; also valid under a `#` header |
 | `profile: dialogue_close` | a render profile from the series config; also valid under a `#` header |
 | `target: ltx2` | the video model for this shot or sequence (`minimax_h3_ref2va`, `ltx2`, `ltx2_ingredients`, `minimax_h3_fl2va`, `wan22_i2v`, `wan22_ti2v` or `wan22_vace`); see below |
-| `first: continuity` / `last: generate` | how this shot's first / last keyframe is made: `continuity`, `generate`, `import`, `none`, or a path to an image; also valid under a `#` header (the default of its shots); see **Keyframes** |
+| `first: generate` / `last: refs/x.png` | how this shot's first / last keyframe is made: `generate`, `import`, `none`, or a path to an image; also valid under a `#` header (the default of its shots); see **Keyframes** |
+| `continuous: first` | this shot carries straight on from the previous one in the cut: `first` (open on its last frame) or `latent` (hold the previous take's last frames and carry on from them); under a `#` header, every shot after the sequence's first; `none` breaks the chain; see **Continuous shots** |
+| `overlap: 39` | frames of the previous take a `continuous: latent` shot holds (39, the default, is right almost always; any other number rounds up to 22, 39, 56, 73, ...); also valid under a `#` header |
 | `NAME: line` | dialogue from someone on screen (the name is a character's key, in capitals) |
 | `NAME (breathless): line` | a delivery direction, written into the prompt |
 | `NAME (V.O.): line` | voiceover: speaks, is not drawn, costs no reference slot |
 | `NAME (O.S.): line` | off-screen: in the space, outside the frame |
 | `NAME (V.O., on the truck radio): line` | a voice marker and a delivery together; the note describes the voice and is never spoken |
-| `continuous: yes` | under a `#` header: the sequence is one unbroken take |
 | `// text` | comment |
 
 Any other line is action prose. Prose under a `#` header before its first shot is a
@@ -1132,9 +1180,10 @@ pictures**: what pins the look is the shot's keyframes. What changes for such a 
 
 - **Keyframes instead of sheets.** `refs/shots/<shot>/first.png` is the first frame and
   `last.png` the last. Both are optional; with neither the shot is text-to-video. They come
-  from **continuity** (`python h3.py keyframe <ep> <shot>`: the previous shot's last frame
-  as this one's first, or `--last` for the next shot's first frame as this one's last; the
-  editor's Refs tab does the same) or from an **import** in the Refs tab. The render adds
+  from the previous shot (`continuous: first`, see **Continuous shots**; or by hand,
+  `python h3.py keyframe <ep> <shot>`, or `--last` for the next shot's first frame as this
+  one's last; the editor's Refs tab does the same), from a still (`first: generate`) or from
+  an **import** in the Refs tab. The render adds
   the model's alignment line for whichever it has, so there is nothing to write for them.
 - **Subjects in words.** No `<Picture N>` slots: everyone in `who:` / `with:` is described
   from their `design`, and the place from the location's `description` (all of it on a
@@ -1151,8 +1200,8 @@ pictures**: what pins the look is the shot's keyframes. What changes for such a 
   this model: those shots render with `generate` (each speaker's `voice` line shapes the
   voice), and the build and the take say so.
 - **Length:** H3's `17k + 5` grid. The model is trained on about 5 to 15 seconds (124 to
-  362 frames); longer shots render with a warning. No `continuous: yes` chaining: continue
-  a shot from the one before with its first keyframe instead.
+  362 frames); longer shots render with a warning. A shot continues the one before by its
+  first keyframe: `continuous: first`.
 - **Size** comes from the series config's pass blocks (multiples of 32). Model, LoRA and
   steps are the target's own unless it is the series target.
 
@@ -1166,10 +1215,10 @@ Three Wan 2.2 targets, for pictures without sound:
 - **`wan22_i2v`** (label "Wan 2.2 14B I2V"): the 14B image-to-video pair (a high noise model,
   then a low noise one, each with its 4-step turbo LoRA). It animates a picture you give
   it: **a first frame is required** (`refs/shots/<shot>/first.png`: generated from the
-  shot's description, cut from the previous shot by continuity, or imported; see
+  shot's description, cut from the previous shot with `continuous: first`, or imported; see
   **Keyframes**). A shot without one is blocked, and rendering anyway can't help: "Wan 14B
-  I2V needs a first frame: generate one or use continuity (or import one), or retarget to
-  wan22_ti2v". A `last.png` too makes it a first/last-frame shot.
+  I2V needs a first frame: generate one, import one, give the shot `continuous: first` (the
+  previous shot's last frame), or retarget to wan22_ti2v". A `last.png` too makes it a first/last-frame shot.
 - **`wan22_ti2v`** ("Wan 2.2 5B TI2V"): the small 5B model, text-to-video, or from a first
   frame when there is one. Nothing blocks it: the fast, cheap choice for proxies, and
   where an I2V shot without a first frame can go.
@@ -1229,7 +1278,7 @@ made. You choose that with a line on the shot, or under a `#` header for all its
 
 ```
 # sq02  workshop
-first: continuity
+first: generate
 
 ## sh030
 last: generate
@@ -1238,14 +1287,17 @@ first: refs/stills/sh030_open.png
 
 | value | meaning |
 |---|---|
-| `continuity` | the previous shot's last frame (the default for a shot with a previous shot in its sequence) |
-| `generate` | a still made from the shot's own description (the default otherwise) |
+| `generate` | a still made from the shot's own description (the default) |
 | `import` | you'll import one (the Refs tab) |
 | a path | this image is imported as the keyframe (relative to the episode) |
 | `none` | no keyframe, even where the target could use one (a required one stays required) |
 
+A first frame cut from the previous shot isn't a `first:` value: the shot says
+`continuous: first` (see **Continuous shots**). The old `first: continuity` still reads that
+way, and `h3.py check` says how to write it.
+
 **A render keeps continuity current, and a whole chain queues at once.** A
-`first: continuity` shot's first frame is cut when its render **starts**, from the take
+`continuous: first` shot's first frame is cut when its render **starts**, from the take
 the cut uses at that moment for the shot before it (the H3ContinuityFrame node in its
 graph). ComfyUI runs its queue in order, so queue sh080, sh090 and sh110 together and each
 starts on the new last frame of the one ahead of it; the model swaps between targets on the
@@ -1260,9 +1312,58 @@ neighbour.
 
 **Continuity is for a shot that picks up the previous one's picture**: the same framing
 carrying on, or a match on action. After a real cut (a new subject, a new angle, a
-different size) the previous shot's last frame is the wrong opening picture, so write
-`first: generate` on that shot. A good pattern is `first: generate` under the `#` header and
-`first: continuity` on the shots that continue.
+different size) the previous shot's last frame is the wrong opening picture: leave
+`continuous:` off that shot (or write `continuous: none` under a header that sets it).
+
+### Continuous shots: `continuous:`
+
+A shot that carries straight on from the one before it (the same moment, the camera still
+running) says so, and how:
+
+```
+## sh090
+continuous: first
+```
+
+- `first`: it opens on the previous shot's last frame, as its first keyframe. That needs a
+  target that reads a first frame (`minimax_h3_fl2va`, `ltx2`, the Wan targets). A shot on
+  H3 Ref2VA (which doesn't) builds on **H3 FL2VA instead**, by itself, unless the shot names
+  its own `target:` (then it's an error that says which targets can).
+- `latent`: it carries on from the previous take's last frames and their sound, on H3
+  Ref2VA, keeping its own reference sheets. The render holds the end of the previous take
+  at its head and generates the rest from there, so motion, sound and the camera carry
+  across the join; the held frames are cut off again, and the take starts where the
+  previous one ended. Use it for one action running across a cut in framing that the
+  same reference sheets can draw (a camera that keeps moving, someone walking into the
+  frame of the next shot). See **How much a latent shot holds** below.
+- Only the shot that continues says it. "Previous" is the previous shot in the cut, so
+  moving a shot on the timeline changes what it continues from.
+- Under a `#` header, `continuous:` covers every shot after the first **in that sequence**
+  (it stops at the next `#`). A shot breaks the chain with `continuous: none`. A shot can
+  also say it on the first shot of a sequence, continuing the last shot of the one before.
+- Old scripts: `first: continuity` reads as `continuous: first`, and `continuous: yes` under
+  a header as `continuous: latent`. `h3.py check` says how to write each.
+
+**How much a latent shot holds: `overlap:`.** The number of frames of the previous take
+held at the head of the render. Leave it alone: **39 frames (1.6 s), the default**, is what
+was tested. Fewer frames give H3 too little motion to carry on: at 22, with the sound not
+held, someone walking in popped into frame and was then drawn twice. More frames cost
+render time without a better join. H3 can only hold certain lengths (22, 39, 56, 73, ...:
+17 more each time), so any other number is **rounded up** to the next one, and
+`h3.py check` says so (`overlap: 30` holds 39). Set it on a shot, under a `#` header for its
+shots, or for the whole series in the series config:
+
+```
+"continuous": { "overlap": 39 }
+```
+
+The held frames are rendered and thrown away, so a latent shot costs about 40% more render
+time than the same shot cut fresh, and its take can run up to 16 frames (0.7 s) longer than
+its `dur:` asks, like any H3 length. It continues whichever take the cut uses for the
+previous shot when its render **starts**: a whole chain can be queued at once, each shot
+behind the one it continues. The previous take's kept latent is used when it has one (the
+final pass keeps them, `upscale.save_latents`); otherwise its last frames and sound are read
+back through H3's VAEs, which works for any take, even one from another target.
 
 **Generating a keyframe** writes a still from the shot: the look, the framing and the
 location, who is in frame (their `design`), and the action at that moment: for `first` how
@@ -1275,7 +1376,8 @@ props and **the plate** as reference images, so the characters look like their s
 prompt names each one ("image 1 is Ada: draw this character exactly as in image 1").
 
 `python h3.py keyframe Shows\ep05 --missing` fills every required keyframe and every one the
-script asks for (continuity when the previous shot has a usable take, else a still);
+script asks for (a `continuous: first` shot's from the previous shot's take when it has a
+usable one, else a still);
 `h3.py keyframe Shows\ep05 sh030 --generate` makes one still; `--clear` takes a keyframe away
 (the shot renders without one, and nothing puts it back until you pick one).
 
@@ -1466,16 +1568,15 @@ between them:
    not at rest: movement across the cut hides the change of pose. It helps the other three;
    on its own it seldom saves a cut.
 5. **Continue the picture** when the second shot really is the same moment carrying on:
-   `first: continuity` on H3 FL2VA (`target: minimax_h3_fl2va`) opens the shot on the
-   previous shot's last frame, so nothing re-poses (see **Rendering a shot on H3 from
-   keyframes** and **Keyframes**). On H3 Ref2VA, `continuous: yes` under the `#` header chains
-   a whole sequence instead, at 22 frames a shot after the first. Either way, each take is
-   upscaled on its own, so the frame where one hands off to the next can differ slightly
-   between the two upscales.
+   `continuous: first` opens the shot on the previous shot's last frame, so nothing
+   re-poses (on H3 FL2VA, which the shot moves to by itself; see **Continuous shots**). Its
+   upscale starts from the previous shot's upscaled last frame, so the two meet on one
+   picture. When the action itself runs across the cut (someone walking into the next
+   framing), `continuous: latent` carries the motion and sound too, on H3 Ref2VA.
 
 `h3.py check` warns about consecutive shots that do none of the first two and don't continue:
 the same people, the same plate, sizes less than two steps apart, the second not
-`first: continuity` and the sequence not `continuous`. It can't see a cutaway or a cut on
+continuing the first (`continuous:`). It can't see a cutaway or a cut on
 action in the action text, so treat it as a question to answer, not an error.
 
 Worked through: Ada at the counter, then closer for her line. As written, a jump cut:
@@ -1586,7 +1687,8 @@ plate.**
 That caps you at **three subjects on screen**, and a fourth is an error, not a silent drop.
 When a scene has four characters, stage one out of frame, split the shot, or describe the
 extra in the action text without referencing it. Crowds cost nothing that way — they just
-won't look the same from shot to shot.
+won't look the same from shot to shot, unless they are a group (one slot for all of them;
+see **A group: the same extras every shot**).
 
 A `(V.O.)` or `(O.S.)` speaker costs no slot, is never drawn, and needs no sheet — only a
 `voice` in the series config. A shot may have no `who:` at all: an establishing plate with narration
@@ -1610,6 +1712,43 @@ extras: one masked man in black tails, his back mostly to camera, and far-off da
 Eleanor circles a masked man in black tails, one hand in his, laughing as she turns around him.
 camera: arcs around Eleanor with small amplitude at slow speed
 ```
+
+### A group: the same extras every shot
+
+`extras:` people are invented fresh every shot, so they change sex, size and colour from
+cut to cut. When the same few people recur — the ladies watching from the edge of the
+ballroom, a family at the next table — make them one **group** subject: a character with
+`members`, whose picture holds all of them.
+
+```json
+"ladies": {
+  "kind": "character",
+  "name": "the ladies",
+  "members": 4,
+  "design": "four young women in Regency ball gowns: one in pale blue with dark curls, one in rose with a feathered headband, one in white with red hair, one in green silk with long gloves",
+  "sheet": "../refs/ladies/ladies.png"
+}
+```
+
+Cast it like anyone else (`who:` or `with:`). It takes one slot however many people it
+holds, which is how a shot gets more than three people who stay the same: two named
+characters and a group of four is three subjects. The prompt defines it as a picture of N
+different people and counts its members in the shot's headcount ("Exactly six characters
+appear in this shot: <Subject 1>, <Subject 2> and the four members of <Subject 3>"), which
+is what keeps H3 from drawing the same woman twice. Put where they are in the action text
+("the ladies watch from the far wall, soft in the background").
+
+- **The picture is one whole image** of all of them (`sheet_panels: 1` is implied; a group is
+  never a four-panel sheet). Generated, it is a row of everyone head to feet, apart and facing
+  the viewer, at the plate's size. A picture you supply works the same way; keep every face
+  and outfit visible, since a person half-hidden in the reference is one the model invents.
+- **Describe each member** in `design`, with differences in age, build, hair and colour. A group
+  of four identical gowns is read as one person four times.
+- It works on every target. H3 Ref2VA defines it in the headcount. LTX-2, Wan and H3 from
+  keyframes call it "N different people, each appearing once" in their prose, and their
+  reference sheets carry its picture whole, never cut to one panel.
+- A group can speak (`voice` is one voice for all of them: a murmur, children giggling).
+- Twelve is the limit. A crowd bigger than that belongs in `extras:`.
 
 Two habits go with it. **Keep people out of the plate**: a location described as "full of
 masked dancers" is rebuilt as figures that compete with the subject and feed the duplication
@@ -1640,8 +1779,8 @@ kitchen`, `# sq04 phone_room`, `# sq05 kitchen`.
 Keep a sequence intact and vary the shots with `plate:` rather than splitting a scene into
 one-shot sequences, which re-seeds every shot in it.
 
-`continuous: yes` chains a sequence into one unbroken take on H3 Ref2VA, carrying motion
-across the joins. Use it rarely: it costs 22 frames per shot after the first, which is 30% of a 3-second shot.
+`continuous:` under the `#` header makes every shot after the first carry straight on from
+the one before (see **Continuous shots**).
 
 ## What goes on which line
 

@@ -21,6 +21,7 @@ music: a plucky ukulele sting
 // speaker; props; extras; the series' clone mode falls back to generate
 ## sh020
 target: ltx2
+continuous: first
 cast: ada, bo
 props: kettle
 size: ms

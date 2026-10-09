@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import copy
 
+from h3core.series_config import members
 from targets.video.ltx2.prompt import _sentence
 from targets.video.ltx2.prompt import build_prompt as prose
 
@@ -37,6 +38,9 @@ def panel_text(panel: dict, series_cfg: dict) -> str:
     e = series_cfg.get("subjects", {}).get(panel["subject"], {})
     name = e.get("name", panel["subject"])
     design = (e.get("design") or "").strip().rstrip(".")
+    n = members(e)
+    if n:                       # a group: N different people in one picture
+        name = f"{name}, a group of {n} different people, each appearing once"
     parts = [name] + ([design] if design else [])
     if panel.get("view") in VIEW_WORDS:
         parts.append(VIEW_WORDS[panel["view"]])

@@ -38,13 +38,13 @@
   },
 
   "recipe": {
-    "_note": "Image to video: shot:<id>:first is REQUIRED (it is the picture Wan animates; WanImageToVideo's start_image). A shot without it is blocked, like a missing ref, and can't be rendered anyway: make one with continuity (h3.py keyframe, or the editor), import one, or retarget the shot to wan22_ti2v. shot:<id>:last is optional; with it the graph uses WanFirstLastFrameToVideo instead. No identity references: subjects are written in words from the series config's `design`. No sound: every policy renders silent and says so.",
+    "_note": "Image to video: shot:<id>:first is REQUIRED (it is the picture Wan animates; WanImageToVideo's start_image). A shot without it is blocked, like a missing ref, and can't be rendered anyway: make one (generate it, cut it from the previous shot with `continuous: first`, h3.py keyframe or the editor), import one, or retarget the shot to wan22_ti2v. shot:<id>:last is optional; with it the graph uses WanFirstLastFrameToVideo instead. No identity references: subjects are written in words from the series config's `design`. No sound: every policy renders silent and says so.",
     "policies": ["silent"],
     "policy_fallback": {"to": "silent", "why": "Wan 2.2 makes no sound (lay the soundtrack in at the edit)"},
     "keyframes": ["first", "last"],
     "keyframe_path": "refs/shots/{shot}/{end}.png",
     "keyframe_required": {
-      "first": "Wan 14B I2V needs a first frame: generate one or use continuity (or import one), or retarget to wan22_ti2v"
+      "first": "Wan 14B I2V needs a first frame: generate one, import one, give the shot `continuous: first` (the previous shot's last frame), or retarget to wan22_ti2v"
     },
     "prompt": "prose",
     "size_hints": {

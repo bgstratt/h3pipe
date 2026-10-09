@@ -31,6 +31,20 @@ What a variant inherits, and what it must not:
 to bind a base's dialogue to the variant on screen (h3core.story), and the refs
 listing uses it to give a variant its own sheet but no voice of its own
 (h3refs.series_refs).
+
+A character with `members: N` (2 or more) is a **group**: N distinct people in
+one reference picture -- the ladies at the edge of the ballroom, the same four
+every scene, instead of extras who change from shot to shot. It is cast like
+any character (`who:`/`with:`) and costs one reference slot however many people
+it holds. Its picture is one whole image, never a model sheet, so loading gives
+it `sheet_panels: 1` (`members()` reads the count).
+
+A location with `of: <another location>` is an **angle** of it: the same place
+from another camera (the bay from the drive, from inside the SUV). Nothing is
+inherited -- an angle has its own `description` and `plate`, and a shot still
+names it with `plate:` -- but an edit target generates its plate from the
+master's, so every angle is visibly the same place (h3refs.angle_reference_images),
+and the editor lists the angles under their master.
 """
 
 from __future__ import annotations
@@ -59,7 +73,86 @@ def series_config_from(series_cfg: dict) -> dict:
         raise ValueError("series.json has no `subjects` block")
     series_cfg["subjects"] = _resolve_variants(series_cfg["subjects"])
     _check_required(series_cfg)
+    _check_groups(series_cfg["subjects"])
+    _check_angles(series_cfg["locations"])
+    _check_continuous(series_cfg)
     return series_cfg
+
+
+def _check_continuous(cfg: dict) -> None:
+    """The top-level `continuous` block (docs/CONTINUOUS.md): {"overlap": N},
+    the frames of the previous clip a `continuous: latent` shot holds by
+    default (a shot's `overlap:` beats it)."""
+    c = cfg.get("continuous")
+    if c is None:
+        return
+    if not isinstance(c, dict):
+        raise ValueError('series.json `continuous` must be an object, e.g. {"overlap": 39}')
+    bad = set(k for k in c if not k.startswith("_")) - {"overlap"}
+    if bad:
+        raise ValueError(f"series.json `continuous` takes overlap, not {', '.join(sorted(bad))}")
+    ov = c.get("overlap")
+    if ov is not None and (isinstance(ov, bool) or not isinstance(ov, int) or not 1 <= ov <= 360):
+        raise ValueError(f"series.json `continuous.overlap` {ov!r}: a whole number of frames, "
+                         f"1 to 360")
+
+
+def _check_angles(locations: dict) -> None:
+    """A location's `of` names another location, which is not itself an angle."""
+    for lid, e in locations.items():
+        of = e.get("of")
+        if of is None:
+            continue
+        if not isinstance(of, str) or not of:
+            raise ValueError(f"location '{lid}' has `of: {of!r}`: `of` names the location "
+                             f"this one is an angle of")
+        if of == lid:
+            raise ValueError(f"location '{lid}' has `of: {lid}`: `of` names the location this "
+                             f"one is an angle OF, not itself")
+        master = locations.get(of)
+        if master is None:
+            raise ValueError(f"location '{lid}' has `of: {of}`, which is not a location in "
+                             f"series.json")
+        if master.get("of"):
+            raise ValueError(f"location '{lid}' is an angle of '{of}', which is itself an angle "
+                             f"(of '{master['of']}'): name the master, '{master['of']}'")
+
+
+def location_master(series_cfg: dict, lid: str) -> str:
+    """The location an angle is of (`of`), or the location itself."""
+    e = (series_cfg.get("locations") or {}).get(lid) or {}
+    return e.get("of") or lid
+
+
+MAX_MEMBERS = 12            # past this it is a crowd: write it as `extras:` or put it in the plate
+
+
+def members(entry: dict) -> int:
+    """How many people a group subject's picture holds (`members:`); 0 for
+    anyone else. Safe on an entry that hasn't been through the loader."""
+    n = entry.get("members") if isinstance(entry, dict) else None
+    return n if isinstance(n, int) and not isinstance(n, bool) and n >= 2 else 0
+
+
+def _check_groups(subjects: dict) -> None:
+    """A group (`members: N`) is a character whose picture is one whole image
+    of N people: give it `sheet_panels: 1`, and refuse what can't be one."""
+    for sid, e in subjects.items():
+        if "members" not in e:
+            continue
+        n = e["members"]
+        if not members(e) or n > MAX_MEMBERS:
+            raise ValueError(f"subject '{sid}' has `members: {n!r}`: a group is 2 to "
+                             f"{MAX_MEMBERS} people, given as a whole number. A bigger crowd "
+                             f"belongs in `extras:` or in the plate")
+        if e.get("kind", "character") != "character":
+            raise ValueError(f"subject '{sid}' is a {e['kind']} with `members`: only a "
+                             f"character can be a group of people")
+        if int(e.get("sheet_panels") or 1) != 1:
+            raise ValueError(f"subject '{sid}' is a group (`members: {n}`) with "
+                             f"`sheet_panels: {e['sheet_panels']}`: a group's picture is one "
+                             f"whole image of all {n}, never a model sheet")
+        e["sheet_panels"] = 1
 
 
 def _check_required(cfg: dict) -> None:

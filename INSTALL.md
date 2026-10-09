@@ -57,9 +57,10 @@ Everything else the targets' workflows use ships with core ComfyUI or with h3pip
 
 | Pack | Provides | Needed by |
 |---|---|---|
-| [ComfyUI-PlagueKind-Nodes](https://github.com/PlagueKind/ComfyUI-PlagueKind-Nodes) | `H3SLAAttention` (sparse attention the H3 turbo LoRAs were distilled against) | `minimax_h3_ref2va` (the default video target) and `minimax_h3_still` |
+| [ComfyUI-PlagueKind-Nodes](https://github.com/PlagueKind/ComfyUI-PlagueKind-Nodes) | `H3SLAAttention` (sparse attention the H3 turbo LoRAs were distilled against) | `minimax_h3_ref2va` (the default video target), `minimax_h3_still`, and the editor's location tours (`workflows/h3_tour.json`) |
 | [ComfyUI-LTXVideo](https://github.com/Lightricks/ComfyUI-LTXVideo) | `LTXVAudioOnlyModel`, `LTXVAudioOnlyEmptyVideoLatent`; `LTXICLoRALoaderModelOnly`, `LTXAddVideoICLoRAGuide` | `ltx2_voice` (the default voice target); `ltx2` only for reference sheets |
 | [Comfyui_Minimax_h3_latent_Upscaler](https://github.com/LBH-123-AI/Comfyui_Minimax_h3_latent_Upscaler) | `MinimaxH3LatentUpscaler3D` | `h3.py upscale` on H3 takes only — see **The upscaler**, below |
+| [comfyui-obvpm-timeline](https://github.com/chanon/comfyui-obvpm-timeline) | `H3ContextWindows` (H3 Context Windowing: sampling along time in overlapping windows) | an H3 upscale of a take longer than 5.5 s, so it fits a 32 GB card — see **The upscaler**. Its README also asks for [comfyui-obvpm](https://github.com/chanon/comfyui-obvpm); that's for its own timeline workflows, not this node |
 
 Install them with ComfyUI-Manager or by cloning into `custom_nodes`, then restart ComfyUI.
 
@@ -73,6 +74,8 @@ Install them with ComfyUI-Manager or by cloning into `custom_nodes`, then restar
 | `pip install pytest` | `python -m pytest` for the test suite. Optional: `python -m unittest discover -s tests` runs the same tests with nothing installed |
 | Node.js 20.19+ (or 22.12+) and `npm install` in `web/` | rebuilding the editor UI. Only if you change `web/`; the built bundle is committed |
 | The Comfyui_Minimax_h3_latent_Upscaler node pack and its model (**The upscaler**, below) | `h3.py upscale` and the editor's Upscale: a final H3 take at 2x, so the final pass can render at 960×544 |
+| The comfyui-obvpm-timeline node pack (**The upscaler**) | upscaling H3 takes longer than 5.5 s without running out of memory |
+| Three LoRAs (**For the editor's 360s and turned views**, section 4) | the Refs tab's **Make 360** and a character's **Turn** |
 
 **Which Python runs what.** There is no global "try ComfyUI's, fall back to system". Each
 part picks deliberately:
@@ -231,14 +234,22 @@ Manager installs them too. They load with core ComfyUI nodes; no pack is needed.
    **Not its "Plus" fork**: that registers the same node without temporal chunking, and the
    re-sample then invents detail (sparkles on hair, marks on faces). Only one of the two can
    be installed.
-2. Put `minimax_h3_latent_upscaler_3d_fp16.safetensors` in `models/latent_upscale_models/`
-   (the pack's README links its Hugging Face repo; section 4, **For upscaling**).
+2. Put `minimax_h3_latent_upscaler_3d_fp16.safetensors` in `models/latent_upscale_models/`.
+   Its Hugging Face repo, LBH-123-AI/Minimax_h3_latent_Upscaler, now publishes it as
+   `minimax_h3_latent_upscaler_3d_conv_v1_fp16.safetensors` (the same file): download that
+   and save it under the old name (section 4, **For upscaling**, has the link).
 3. Restart ComfyUI. `python h3.py targets` then prints `upscale  ready` under
    `minimax_h3_ref2va`, or names what's missing.
+4. For takes longer than 5.5 s, clone **chanon/comfyui-obvpm-timeline** into `custom_nodes`
+   too. Its H3 Context Windowing node samples the re-sample in overlapping windows along
+   time, so a long shot at 2x (2688×1536) fits a 32 GB card; without it such an upscale says
+   it needs the pack instead of running out of memory. The series' upscale recipe's
+   `window` changes the length (0: off).
 
-The other nodes an upscale uses (H3 Load Take Latent, Load Take Video, Hold Audio, Pixel
-Upscale, Finish Upscale, Save Upscale) are h3pipe's own and come with its node pack (section 2); after updating h3pipe,
-restart ComfyUI so it loads them.
+The other nodes an upscale uses (H3 Load Take Latent, Load Take Video, Load Take Frame,
+Hold Audio, Pixel Upscale, Finish Upscale, Save Upscale, Chain Latent, Chain Trim) are
+h3pipe's own and come with its node pack (section 2); after updating h3pipe, restart
+ComfyUI so it loads them.
 
 ---
 
@@ -263,6 +274,8 @@ workflows (`<ComfyUI>/user/default/workflows/`):
 | `flux_kontext` | `h3pipe_flux_kontext.json` | `$H3_FLUX_KONTEXT_WORKFLOW` |
 | `minimax_h3_still` | `h3pipe_minimax_h3_still.json` | `$H3_STILL_WORKFLOW` |
 | `qwen_image_21` | `h3pipe_qwen_image_21.json` | `$H3_QWEN_IMAGE_21_WORKFLOW` |
+| `qwen_rapid_aio` | `h3pipe_qwen_rapid_aio.json` | `$H3_QWEN_RAPID_AIO_WORKFLOW` |
+| `klein_erp_360` | `h3pipe_klein_erp_360.json` | `$H3_KLEIN_ERP_360_WORKFLOW` |
 | `ltx2_voice` | `h3pipe_ltx2_voice.json` | `$H3_LTX2_VOICE_WORKFLOW` |
 
 **You usually need to do nothing.** The lookup order is:
@@ -290,6 +303,9 @@ Two targets bend the order slightly:
 - **`ltx2_voice`** (and any audio target) puts the repo copy *ahead* of `$COMFYUI_PATH`,
   because no saved canvas is likely to hold an audio-only LTX graph and one of that name
   would be somebody's experiment. The running ComfyUI's saved copy still wins.
+
+The editor's location **tour** isn't a target: it runs `workflows/h3_tour.json` (H3 FL2VA
+from the plate) from the repo, and needs H3 FL2VA's models and the PlagueKind pack.
 
 `python h3render.py --dry-run --check-nodes <episode>` asks the running ComfyUI whether it
 knows every node and input in the graph it would send — worth running once after a
@@ -349,7 +365,7 @@ Plus, for those two targets:
 | File | ComfyUI folder | Tier | Targets | Download |
 |---|---|---|---|---|
 | `minimax_h3_ref2v_lightx2v_turbo_4step_v0.1_resized_avg_rank_20_bf16.safetensors` | `models/loras/` | accelerator | `minimax_h3_ref2va` | [Kijai/MiniMax-H3_comfy](https://huggingface.co/Kijai/MiniMax-H3_comfy/resolve/main/loras/minimax_h3_ref2v_lightx2v_turbo_4step_v0.1_resized_avg_rank_20_bf16.safetensors) |
-| `minimax_h3_ref2v_turbo_8step_v1.0_768p_comfyui_bf16.safetensors` | `models/loras/` | accelerator | `minimax_h3_ref2va` | **none recorded** |
+| `minimax_h3_ref2v_turbo_8step_v1.0_768p_comfyui_bf16.safetensors` | `models/loras/` | accelerator | `minimax_h3_ref2va` | [lightx2v/Minimax-h3-Turbo](https://huggingface.co/lightx2v/Minimax-h3-Turbo/resolve/main/minimax_h3_ref2v_turbo_8step_v1.0_768p_comfyui_bf16.safetensors) |
 
 An **accelerator** is a turbo/distilled LoRA or checkpoint: without it the pass still renders, on its slower `base` preset (more steps, no LoRA), and the take's sidecar says so. A **required** file missing skips the shot. An **optional** file only switches off the feature named beside it.
 
@@ -429,7 +445,7 @@ Every file any target names. `python h3.py targets` tells you which of these you
 
 | File | ComfyUI folder | Tier | Targets | Download |
 |---|---|---|---|---|
-| `minimax_h3_fl2v_lightx2v_turbo_4step_v0.1_comfy.safetensors` | `models/loras/` | accelerator | `minimax_h3_fl2va` | **none recorded** |
+| `minimax_h3_fl2v_lightx2v_turbo_4step_v0.1_comfy.safetensors` | `models/loras/` | accelerator | `minimax_h3_fl2va` | [Kijai/MiniMax-H3_comfy](https://huggingface.co/Kijai/MiniMax-H3_comfy/resolve/main/loras/minimax_h3_fl2v_lightx2v_turbo_4step_v0.1_comfy.safetensors) |
 | `minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors` | `models/loras/` | accelerator | `minimax_h3_fl2va` | [lightx2v/Minimax-h3-Turbo](https://huggingface.co/lightx2v/Minimax-h3-Turbo/resolve/main/minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors) |
 
 **Qwen3-VL 32B (MiniMax H3's text encoder)** (`qwen3vl-32b`)
@@ -461,7 +477,7 @@ Every file any target names. `python h3.py targets` tells you which of these you
 | File | ComfyUI folder | Tier | Targets | Download |
 |---|---|---|---|---|
 | `minimax_h3_ref2v_lightx2v_turbo_4step_v0.1_resized_avg_rank_20_bf16.safetensors` | `models/loras/` | accelerator | `minimax_h3_ref2va` | [Kijai/MiniMax-H3_comfy](https://huggingface.co/Kijai/MiniMax-H3_comfy/resolve/main/loras/minimax_h3_ref2v_lightx2v_turbo_4step_v0.1_resized_avg_rank_20_bf16.safetensors) |
-| `minimax_h3_ref2v_turbo_8step_v1.0_768p_comfyui_bf16.safetensors` | `models/loras/` | accelerator | `minimax_h3_ref2va`, `minimax_h3_still` | **none recorded** |
+| `minimax_h3_ref2v_turbo_8step_v1.0_768p_comfyui_bf16.safetensors` | `models/loras/` | accelerator | `minimax_h3_ref2va`, `minimax_h3_still` | [lightx2v/Minimax-h3-Turbo](https://huggingface.co/lightx2v/Minimax-h3-Turbo/resolve/main/minimax_h3_ref2v_turbo_8step_v1.0_768p_comfyui_bf16.safetensors) |
 
 **Wan 2.2 I2V 14B high-noise** (`wan2.2-i2v-14b-high`)
 
@@ -510,13 +526,13 @@ Every file any target names. `python h3.py targets` tells you which of these you
 
 | File | ComfyUI folder | Tier | Targets | Download |
 |---|---|---|---|---|
-| `wan2.2_fun_vace_high_noise_14B_fp8_scaled.safetensors` | `models/diffusion_models/` | required | `wan22_vace` | **none recorded** |
+| `wan2.2_fun_vace_high_noise_14B_fp8_scaled.safetensors` | `models/diffusion_models/` | required | `wan22_vace` | [Comfy-Org/Wan_2.2_ComfyUI_Repackaged](https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/diffusion_models/wan2.2_fun_vace_high_noise_14B_fp8_scaled.safetensors) |
 
 **Wan 2.2 Fun VACE 14B low-noise** (`wan2.2-vace-14b-low`)
 
 | File | ComfyUI folder | Tier | Targets | Download |
 |---|---|---|---|---|
-| `wan2.2_fun_vace_low_noise_14B_fp8_scaled.safetensors` | `models/diffusion_models/` | required | `wan22_vace` | **none recorded** |
+| `wan2.2_fun_vace_low_noise_14B_fp8_scaled.safetensors` | `models/diffusion_models/` | required | `wan22_vace` | [Comfy-Org/Wan_2.2_ComfyUI_Repackaged](https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/diffusion_models/wan2.2_fun_vace_low_noise_14B_fp8_scaled.safetensors) |
 
 **Wan 2.2 T2V lightx2v 4-step LoRA** (`wan2.2-t2v-lightx2v-lora`)
 
@@ -529,20 +545,20 @@ Every file any target names. `python h3.py targets` tells you which of these you
 
 | File | ComfyUI folder | Tier | Targets | Download |
 |---|---|---|---|---|
-| `flux-2-klein-9b-kv.safetensors` | `models/diffusion_models/` | accelerator | `flux2_klein`, `flux2_klein_edit` | **none recorded** |
+| `flux-2-klein-9b-kv.safetensors` | `models/diffusion_models/` | accelerator | `flux2_klein`, `flux2_klein_edit` | [black-forest-labs/FLUX.2-klein-9b-kv](https://huggingface.co/black-forest-labs/FLUX.2-klein-9b-kv/resolve/main/flux-2-klein-9b-kv.safetensors) |
 | `flux-2-klein-base-9b-fp8.safetensors` | `models/diffusion_models/` | accelerator | `flux2_klein`, `flux2_klein_edit` | [black-forest-labs/FLUX.2-klein-base-9b-fp8](https://huggingface.co/black-forest-labs/FLUX.2-klein-base-9b-fp8/resolve/main/flux-2-klein-base-9b-fp8.safetensors) |
 
 **Qwen3 8B (FLUX.2 Klein 9B's text encoder)** (`qwen3-8b`)
 
 | File | ComfyUI folder | Tier | Targets | Download |
 |---|---|---|---|---|
-| `qwen_3_8b_fp8mixed.safetensors` | `models/text_encoders/` | required | `flux2_klein`, `flux2_klein_edit` | [Comfy-Org/flux2-klein-9B](https://huggingface.co/Comfy-Org/flux2-klein-9B/resolve/main/split_files/text_encoders/qwen_3_8b_fp8mixed.safetensors) |
+| `qwen_3_8b_fp8mixed.safetensors` | `models/text_encoders/` | required | `flux2_klein`, `flux2_klein_edit`, `klein_erp_360` | [Comfy-Org/flux2-klein-9B](https://huggingface.co/Comfy-Org/flux2-klein-9B/resolve/main/split_files/text_encoders/qwen_3_8b_fp8mixed.safetensors) |
 
 **FLUX.2 VAE** (`flux2-vae`)
 
 | File | ComfyUI folder | Tier | Targets | Download |
 |---|---|---|---|---|
-| `flux2-vae.safetensors` | `models/vae/` | required | `flux2_klein_edit` | [Comfy-Org/flux2-dev](https://huggingface.co/Comfy-Org/flux2-dev/resolve/main/split_files/vae/flux2-vae.safetensors) |
+| `flux2-vae.safetensors` | `models/vae/` | required | `flux2_klein_edit`, `klein_erp_360` | [Comfy-Org/flux2-dev](https://huggingface.co/Comfy-Org/flux2-dev/resolve/main/split_files/vae/flux2-vae.safetensors) |
 | `full_encoder_small_decoder.safetensors` | `models/vae/` | required | `flux2_klein` | [black-forest-labs/FLUX.2-small-decoder](https://huggingface.co/black-forest-labs/FLUX.2-small-decoder/resolve/main/full_encoder_small_decoder.safetensors) |
 
 **FLUX.1 Kontext dev** (`flux1-kontext-dev`)
@@ -568,6 +584,12 @@ Every file any target names. `python h3.py targets` tells you which of these you
 | File | ComfyUI folder | Tier | Targets | Download |
 |---|---|---|---|---|
 | `ae.safetensors` | `models/vae/` | required | `flux_kontext`, `z_image_turbo` | [Comfy-Org/Lumina_Image_2.0_Repackaged](https://huggingface.co/Comfy-Org/Lumina_Image_2.0_Repackaged/resolve/main/split_files/vae/ae.safetensors) |
+
+**FLUX.2 Klein 9B base** (`flux2-klein-9b-base`)
+
+| File | ComfyUI folder | Tier | Targets | Download |
+|---|---|---|---|---|
+| `flux-2-klein-base-9b-fp8.safetensors` | `models/diffusion_models/` | required | `klein_erp_360` | [black-forest-labs/FLUX.2-klein-base-9b-fp8](https://huggingface.co/black-forest-labs/FLUX.2-klein-base-9b-fp8/resolve/main/flux-2-klein-base-9b-fp8.safetensors) |
 
 **Krea 2** (`krea2`)
 
@@ -599,6 +621,12 @@ Every file any target names. `python h3.py targets` tells you which of these you
 |---|---|---|---|---|
 | `qwen_image_2.1_vae_bf16.safetensors` | `models/vae/` | required | `qwen_image_21` | [Comfy-Org/Qwen-Image-2.1](https://huggingface.co/Comfy-Org/Qwen-Image-2.1/resolve/main/vae/qwen_image_2.1_vae_bf16.safetensors) |
 
+**Qwen-Image-Edit Rapid AIO** (`qwen-rapid-aio`)
+
+| File | ComfyUI folder | Tier | Targets | Download |
+|---|---|---|---|---|
+| `Qwen-Rapid-AIO-SFW-v19.safetensors` | `models/checkpoints/` | required | `qwen_rapid_aio` | [Phr00t/Qwen-Image-Edit-Rapid-AIO](https://huggingface.co/Phr00t/Qwen-Image-Edit-Rapid-AIO/resolve/main/v19/Qwen-Rapid-AIO-SFW-v19.safetensors) |
+
 **Z-Image Turbo** (`z-image-turbo`)
 
 | File | ComfyUI folder | Tier | Targets | Download |
@@ -616,7 +644,7 @@ Every file any target names. `python h3.py targets` tells you which of these you
 Only to upscale takes (`python h3.py upscale`), never to render. H3's MinimaxH3LatentUpscaler3D comes from the Comfyui_Minimax_h3_latent_Upscaler pack (LBH-123-AI) — not its "Plus" fork, which has the same node without temporal chunking; LTX's LTXVLatentUpsampler is ComfyUI's own. `python h3.py targets` says whether this ComfyUI can upscale.
 
 - `ltx-2.3-spatial-upscaler-x2-1.1.safetensors` → `models/latent_upscale_models/` (LTXVLatentUpsampler, for `ltx2_ingredients`) — [download](https://huggingface.co/Lightricks/LTX-2.3/resolve/main/ltx-2.3-spatial-upscaler-x2-1.1.safetensors) (ComfyUI-Manager model list (model-list.json; ComfyUI's blueprint Image to Video (LTX-2.3).json has the same URL). Only needed to upscale, never to render.)
-- `minimax_h3_latent_upscaler_3d_fp16.safetensors` → `models/latent_upscale_models/` (MinimaxH3LatentUpscaler3D, for `minimax_h3_fl2va`, `minimax_h3_ref2va`) — no URL: no ComfyUI template, saved workflow or ComfyUI-Manager model list known to h3pipe records this file. Search Hugging Face for its exact name: the Comfyui_Minimax_h3_latent_Upscaler pack's README points to the LBH-123-AI/Minimax_h3_latent_Upscaler repo. Only needed to upscale, never to render.
+- `minimax_h3_latent_upscaler_3d_fp16.safetensors` → `models/latent_upscale_models/` (MinimaxH3LatentUpscaler3D, for `minimax_h3_fl2va`, `minimax_h3_ref2va`) — [download](https://huggingface.co/LBH-123-AI/Minimax_h3_latent_Upscaler/resolve/main/minimax_h3_latent_upscaler_3d_conv_v1/minimax_h3_latent_upscaler_3d_conv_v1_fp16.safetensors) (the Hugging Face repo LBH-123-AI/Minimax_h3_latent_Upscaler, which now publishes it as minimax_h3_latent_upscaler_3d_conv_v1/minimax_h3_latent_upscaler_3d_conv_v1_fp16.safetensors (the same file: sha256 043e5a48e161..., checked 2026-10-09): save it under this name. Only needed to upscale, never to render.)
 
 **SeedVR2** (any take; ComfyUI's own nodes, the models Apache 2.0): the VAE and at least one model.
 
@@ -629,17 +657,19 @@ Only to upscale takes (`python h3.py upscale`), never to render. H3's MinimaxH3L
 - `wan22_ti2v`: an upscale model from `models/upscale_models/` (RealESRGAN_x2.pth by default), then its own sampler
 - `wan22_vace`: an upscale model from `models/upscale_models/` (RealESRGAN_x2.pth by default), then its own sampler
 
-#### Files with no recorded download URL
-
-h3pipe only records a URL it can trace to a ComfyUI template, a saved workflow or ComfyUI-Manager's model list, so these are listed without one rather than with a guess:
-
-- `flux-2-klein-9b-kv.safetensors` → `models/diffusion_models/` — no URL: no ComfyUI template, saved workflow or ComfyUI-Manager model list known to h3pipe records this file (the templates name BFL's fp8 file, below, which stands in for it by family). Search Hugging Face for its exact name (black-forest-labs FLUX.2 Klein 9B KV).
-- `minimax_h3_fl2v_lightx2v_turbo_4step_v0.1_comfy.safetensors` → `models/loras/` — no URL: no ComfyUI template, saved workflow or ComfyUI-Manager model list known to h3pipe records this file. Search Hugging Face for its exact name (lightx2v's MiniMax H3 FL2V 4-step turbo LoRA v0.1, ComfyUI conversion).
-- `minimax_h3_ref2v_turbo_8step_v1.0_768p_comfyui_bf16.safetensors` → `models/loras/` — no URL: no ComfyUI template, saved workflow or ComfyUI-Manager model list known to h3pipe records this file. Search Hugging Face for its exact name (lightx2v's MiniMax H3 Ref2V 8-step turbo LoRA v1.0, ComfyUI conversion).
-- `wan2.2_fun_vace_high_noise_14B_fp8_scaled.safetensors` → `models/diffusion_models/` — no URL: no ComfyUI template, saved workflow or ComfyUI-Manager model list known to h3pipe records this file. Search Hugging Face for its exact name (Wan 2.2 Fun VACE A14B high-noise expert, fp8 scaled ComfyUI repack).
-- `wan2.2_fun_vace_low_noise_14B_fp8_scaled.safetensors` → `models/diffusion_models/` — no URL: no ComfyUI template, saved workflow or ComfyUI-Manager model list known to h3pipe records this file. Search Hugging Face for its exact name (Wan 2.2 Fun VACE A14B low-noise expert, fp8 scaled ComfyUI repack).
-
 <!-- END MODELS -->
+
+### For the editor's 360s and turned views (optional)
+
+Three LoRAs the Refs tab uses, outside any target's list above. Each goes in
+`models/loras/`. Only the button that uses one needs it; without it, that job fails on the
+missing file.
+
+| File | Used by | Download |
+|---|---|---|
+| `flux-2-klein-9B-360-erp-outpaint-lora_V1.safetensors` | **Make 360** on Klein (the default engine; the `klein_erp_360` target, with FLUX.2 Klein 9B base) | [nomadoor/flux-2-klein-9B-360-erp-outpaint-lora](https://huggingface.co/nomadoor/flux-2-klein-9B-360-erp-outpaint-lora/resolve/main/flux-2-klein-9B-360-erp-outpaint-lora_V1.safetensors) |
+| `pano360_qwen21_edit_v1.safetensors` | **Make 360** on Qwen-Image 2.1 | [Gogodr/qwen-image-2.1-edit-pano360-lora](https://huggingface.co/Gogodr/qwen-image-2.1-edit-pano360-lora/resolve/main/pano360_qwen21_edit_v1.safetensors) |
+| `angles_v2_full_qwen21_multiple_angles_v2_qwen21_multiple_angles_v2_000001500.safetensors` | a character view's **Turn** (Qwen-Image 2.1's multi-angle LoRA; characters only: it turns a location into a diorama) | [akhaliq/Qwen-Image-2.1-Multiple-Angles-LoRA](https://huggingface.co/akhaliq/Qwen-Image-2.1-Multiple-Angles-LoRA/resolve/main/checkpoints_v2/angles_v2_full_qwen21_multiple_angles_v2_qwen21_multiple_angles_v2_000001500.safetensors) (`checkpoints_v2/`) |
 
 ---
 

@@ -177,7 +177,10 @@ def continuity_before_render(root: str, pass_: str, only, dry_run: bool = False,
     for w in res["wait"]:
         what = (f"{w['after']} t{w['take']:02d}, still rendering" if w.get("take")
                 else f"{w['after']}'s new take in this run")
-        print(f"  .. {w['shot']}: its first frame is cut from {what} when its render starts")
+        if w.get("chain"):
+            print(f"  .. {w['shot']}: continues {what} (its latent, else its last frames)")
+        else:
+            print(f"  .. {w['shot']}: its first frame is cut from {what} when its render starts")
     for e in res["errors"]:
         print(f"  !! {e['shot']}: {e['error']}")
     live.update(res["live"])

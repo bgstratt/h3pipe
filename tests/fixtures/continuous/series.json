@@ -1,0 +1,20 @@
+{
+  "_README": "Golden-test fixture for continuous shots (docs/CONTINUOUS.md): `continuous: first` under a # header (every shot after the first continues), `continuous: none` breaking the chain, the old `first: continuity` (read as `continuous: first`, with a warning), a shot continuing across a sequence boundary, and `continuous: latent` under a header (sq03: the default hold of 39 frames, and `overlap: 30` rounding up to 39). The series target is H3 Ref2VA, so each `first` shot builds on H3 FL2VA, its partner for `first`; the latent shots stay on Ref2VA, their entries carrying `hold`.",
+  "series": {"id": "cont", "title": "Continuous", "fps": 24, "width": 960, "height": 544},
+  "style": {"look": "a naturalistic live-action drama shot on 35mm film"},
+  "audio": {"mode": "generate"},
+  "subjects": {
+    "ada": {"kind": "character", "name": "Ada", "pronoun": "her",
+            "design": "a tall woman in her thirties with short black hair and a green raincoat",
+            "sheet": "refs/ada/ada_sheet_4panel.png", "voice": "dry, low and quick"},
+    "bo": {"kind": "character", "name": "Bo", "pronoun": "his",
+           "design": "a stocky man in his forties with a grey beard and a brown work jacket",
+           "sheet": "refs/bo/bo_sheet_4panel.png", "voice": "warm and slow"}
+  },
+  "locations": {
+    "kitchen": {"description": "a cramped diner kitchen at night, steel counters, a ticket rail",
+                "plate": "refs/_bg/kitchen.png"},
+    "street": {"description": "a wet street outside the diner at night, neon reflected in puddles",
+               "plate": "refs/_bg/street.png"}
+  }
+}

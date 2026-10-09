@@ -35,12 +35,45 @@ export function PassToggle() {
   );
 }
 
+/**
+ * The episode picker: every episode under the project roots, and Browse….
+ * Shared by the Shots tab, the Refs tab and the timeline, which all follow
+ * the one selected episode. `compact` keeps it to a width that fits a bar.
+ */
+export function EpisodeSelect({ compact }: { compact?: boolean }) {
+  const episodes = useApp((s) => s.episodes);
+  const episodesError = useApp((s) => s.episodesError);
+  const ep = useApp((s) => s.ep);
+  useEffect(() => {
+    // the Refs tab or the timeline may be opened before the Shots tab
+    if (episodes == null && !episodesError) void loadEpisodes();
+  }, [episodes, episodesError]);
+  return (
+    <select
+      className={compact ? "h3-in" : "h3-in h3-grow"}
+      style={compact ? { maxWidth: 280, minWidth: 0 } : undefined}
+      value={ep ?? ""}
+      onChange={(e) => (e.target.value === BROWSE ? openBrowse({ purpose: "roots" }) : selectEpisode(e.target.value || null))}
+      title={ep ? `${ep}
+Switch episode (the Shots tab, Refs and the timeline follow it)` : "Pick an episode"}
+    >
+      {!ep && <option value="">{episodes?.length ? "Pick an episode…" : episodes ? "No episodes found" : "Loading…"}</option>}
+      {episodes?.map((e) => (
+        <option key={e.ep} value={e.ep} title={e.ep}>
+          {e.series ? `${e.series} · ` : ""}{e.name}{e.title && e.title !== e.series ? ` — ${e.title}` : ""}
+          {!e.built.proxy && !e.built.final ? " (not built)" : ""}
+        </option>
+      ))}
+      <option value={BROWSE}>Browse…</option>
+    </select>
+  );
+}
+
 function EpisodeHeader() {
   const episodes = useApp((s) => s.episodes);
   const episodesError = useApp((s) => s.episodesError);
   const config = useApp((s) => s.config);
   const configError = useApp((s) => s.configError);
-  const ep = useApp((s) => s.ep);
 
   if (configError && !config) {
     return (
@@ -70,21 +103,7 @@ function EpisodeHeader() {
   return (
     <div className="h3-pad h3-col" style={{ gap: 4 }}>
       <div className="h3-row">
-        <select
-          className="h3-in h3-grow"
-          value={ep ?? ""}
-          onChange={(e) => (e.target.value === BROWSE ? openBrowse({ purpose: "roots" }) : selectEpisode(e.target.value || null))}
-          title={ep ?? ""}
-        >
-          {!episodes?.length && <option value="">{episodes ? "No episodes found" : "Loading…"}</option>}
-          {episodes?.map((e) => (
-            <option key={e.ep} value={e.ep} title={e.ep}>
-              {e.series ? `${e.series} · ` : ""}{e.name}{e.title && e.title !== e.series ? ` — ${e.title}` : ""}
-              {!e.built.proxy && !e.built.final ? " (not built)" : ""}
-            </option>
-          ))}
-          <option value={BROWSE}>Browse…</option>
-        </select>
+        <EpisodeSelect />
         <button className="h3-btn h3-icon" title="Rescan the project roots" onClick={() => void loadEpisodes()}>
           <i className="pi pi-refresh" />
         </button>

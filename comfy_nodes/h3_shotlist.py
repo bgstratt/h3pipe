@@ -406,7 +406,11 @@ class H3ShotListLoader:
                 raise ValueError(f"shot {shot.get('id')}: audio_out must follow audio_in")
         else:
             duration = float(shot.get("duration", defaults.get("duration", 3.04)))
-        length = snap_up(max(1, round(duration * fps)))
+        # continuous: latent (docs/CONTINUOUS.md): `hold` more frames, the
+        # previous take's last ones held at the head (H3ChainLatent) and
+        # trimmed off after decoding (H3ChainTrim)
+        hold = int(shot.get("hold") or 0)
+        length = snap_up(max(1, round(duration * fps)) + hold)
 
         # ---- references --------------------------------------------------
         # Slots 1-3 are the shot's subjects (characters first, then props and
@@ -575,10 +579,12 @@ class H3ShotListLoader:
             if not src:
                 audio_note = f"{policy} <- recording MISSING (no audio reference)"
             elif "audio_in" in shot and not shot.get("audio_file"):
-                audio_refs[0] = load_audio(src, float(shot["audio_in"]),
-                                           float(shot["audio_out"]))
+                # a held head starts the window that much earlier on the
+                # recording, so the voices land where the shot's own frames are
+                a_in = max(0.0, float(shot["audio_in"]) - hold / fps)
+                audio_refs[0] = load_audio(src, a_in, float(shot["audio_out"]))
                 audio_note = (f"{policy} <- {os.path.basename(src)} "
-                              f"[{shot['audio_in']:.2f}..{shot['audio_out']:.2f}]")
+                              f"[{a_in:.2f}..{shot['audio_out']:.2f}]")
             else:
                 audio_refs[0] = load_audio(src)
                 audio_note = f"{policy} <- {os.path.basename(src)}"
@@ -596,7 +602,7 @@ class H3ShotListLoader:
         # scheduler widget happens to say.
         steps = int(shot.get("steps", defaults.get("steps", 4)))
 
-        pad = length - round(duration * fps)
+        pad = length - hold - round(duration * fps)
         # 1-based, and stated as "of N" rather than "/ N-1". The Shot Index
         # widget is NOT a progress readout: ComfyUI serializes the whole batch
         # up front, incrementing the widget once per prompt at queue time, so it
@@ -606,7 +612,8 @@ class H3ShotListLoader:
         info = "\n".join([
             f"shot {pos + 1} of {len(shots)}   —   {shot.get('id', '?')}",
             f"{width}x{height}   {length} frames   {length / fps:.2f}s   {steps} steps"
-            f"   (asked {duration:.2f}s, pad {pad}f)",
+            f"   (asked {duration:.2f}s, pad {pad}f)"
+            + (f"   holding {hold}f of the previous take" if hold else ""),
             f"subjects: {', '.join(subject_ids) if subject_ids else '- (plate only)'}   size: {size}",
             f"voices: {', '.join(shot.get('voices', [])) or '-'}",
             f"audio: {audio_note}",
@@ -665,6 +672,15 @@ def loaded_refs(info: str) -> list[str]:
         elif inside:
             inside = False
     return out
+
+
+def chain_record(text: str) -> dict | None:
+    """H3ChainLatent's `record` (JSON) as a dict, else None."""
+    try:
+        rec = json.loads(text) if text else None
+    except ValueError:
+        return None
+    return rec if isinstance(rec, dict) else None
 
 
 def _write_json_atomic(path: str, data) -> None:
@@ -791,6 +807,9 @@ class H3SaveShot:
                 # the loader's `info`: its reference lines (each picture, how
                 # it was cut, its size, its slot) go into the take's record
                 "ref_info": ("STRING", {"forceInput": True}),
+                # continuous: latent: what H3ChainLatent held (its `record`,
+                # JSON), written into the take's record as `continued_from`
+                "chain": ("STRING", {"forceInput": True}),
             },
         }
 
@@ -829,7 +848,8 @@ class H3SaveShot:
     # -- main --------------------------------------------------------------
 
     def save(self, images, shot_id, audio_policy, project_root, subfolder,
-             take, fps, save_frames, audio=None, sidecar="", latent=None, ref_info=""):
+             take, fps, save_frames, audio=None, sidecar="", latent=None, ref_info="",
+             chain=""):
         from PIL import Image
 
         safe = re.sub(r"[^A-Za-z0-9_.-]", "_", shot_id) or "shot"
@@ -928,7 +948,7 @@ class H3SaveShot:
                     frames=int(images.shape[0]), fps=float(fps),
                     mp4=os.path.basename(mp4) if mp4_ok else None,
                     thumb=thumb, strip=strip, save_ms=ms, latent=latent_file,
-                    loaded_refs=loaded_refs(ref_info))
+                    loaded_refs=loaded_refs(ref_info), continued_from=chain_record(chain))
             except Exception as exc:
                 notes.append(f"sidecar update failed: {exc}")
             else:
@@ -966,7 +986,8 @@ class H3SaveShot:
                         notes: list[str], *, stem: str, status: str, frames: int,
                         mp4, thumb, strip, fps: float | None = None,
                         save_ms: dict | None = None, latent: str | None = None,
-                        loaded_refs: list | None = None) -> None:
+                        loaded_refs: list | None = None,
+                        continued_from: dict | None = None) -> None:
         """Close the take's record: set the saver's fields, leave the rest alone.
 
         Warnings go into `notes` first, so they reach both save_notes and the
@@ -1002,6 +1023,9 @@ class H3SaveShot:
         if loaded_refs:
             # what the loader fed the model: each picture, how it was cut, its size
             data["loaded_refs"] = loaded_refs
+        if continued_from:
+            # continuous: latent: the take whose tail the render held
+            data["continued_from"] = continued_from
         if save_ms:
             # what this node spent, in milliseconds, per step (frames, audio,
             # mp4, thumb, strip, total). ComfyUI only reports the whole graph's

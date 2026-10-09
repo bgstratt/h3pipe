@@ -27,6 +27,7 @@ import re
 import targets as TG
 from h3core import framing, ir
 from h3core.ir import stable_seed
+from h3core.series_config import members
 from h3core.speech import RATE_CEILING, SPEECH_RATE, forced_rate, pacing, speech_seconds
 
 from .prompt import build_prompt
@@ -116,13 +117,39 @@ def legacy_shot(s: ir.Shot) -> dict:
     return sh
 
 
+def legacy_shots(sq: ir.Sequence) -> list[dict]:
+    """The sequence's shots, parser-shaped. A `continuous: latent` shot (its
+    own line or its sequence's, docs/CONTINUOUS.md) carries `_latent`: the
+    overlap the script gives it (its own, else its sequence's; None: the
+    series config's, else the target's default)."""
+    out = []
+    for s in sq.shots:
+        sh = legacy_shot(s)
+        if s.continues(sq) == "latent":
+            sh["_latent"] = s.overlap if s.overlap is not None else sq.overlap
+        out.append(sh)
+    return out
+
+
 def legacy_episode(story: ir.Episode) -> dict:
     ep = {"id": story.id, "title": story.title, "sequences": []}
     for sq in story.sequences:
         seq = legacy_sequence(sq)
-        seq["shots"] = [legacy_shot(s) for s in sq.shots]
+        seq["shots"] = legacy_shots(sq)
         ep["sequences"].append(seq)
     return ep
+
+
+def hold_frames(target, series_cfg: dict, overlap: int | None) -> int:
+    """The frames a `continuous: latent` shot holds of the previous take: its
+    overlap (the script's, else the series config's `continuous.overlap`, else
+    the target's `continuous.latent.overlap`), rounded up onto the frame grid
+    (H3 holds 17j+5 frames: 22, 39, 56, ...)."""
+    if overlap is None:
+        overlap = (series_cfg.get("continuous") or {}).get("overlap")
+    if overlap is None:
+        overlap = ((target.spec.get("continuous") or {}).get("latent") or {}).get("overlap", 39)
+    return target.template.snap(int(overlap))
 
 
 # ---------------------------------------------------------------------------
@@ -256,7 +283,11 @@ def plate_request(key: str, entry: dict) -> TG.RefRequest:
 
 def subject_request(sid: str, entry: dict, slot: str | None = None) -> TG.RefRequest:
     kind = entry.get("kind", "character")
-    if kind == "character":
+    if kind == "character" and members(entry):
+        # a group: one whole picture of all of them (krea2's group_prompt)
+        r = _refs("character")
+        label, views = "group picture", 1
+    elif kind == "character":
         r = _refs("character")
         label, views = r["kind"], int(r.get("views", 1))
     else:
@@ -352,6 +383,20 @@ def _compile_shot(ctx: Ctx, seq: dict, i: int, shot: dict, seq_loc: dict) -> dic
             f"shot {shot['id']}: needs `audio: 3.10-7.40`, `dur: 3.04`, or `dur: auto`")
     req = max(1, round(dur * fps))
     raw = template.snap(req)
+    hold = 0
+    if "_latent" in shot:
+        # continuous: latent. The render is `hold` frames longer, the previous
+        # take's last ones held at its head; they're trimmed off after
+        # decoding and the take keeps the end of the render, so its tail is
+        # its latent's (a shot after it holds that). The render is on the
+        # grid, so the take is `raw`: up to 16 frames over what was asked.
+        hold = hold_frames(ctx.target, series_cfg, shot["_latent"])
+        asked = shot["_latent"] if shot["_latent"] is not None else \
+            (series_cfg.get("continuous") or {}).get("overlap")
+        if asked is not None and asked != hold:
+            warnings.append(f"{shot['id']}: overlap {asked} holds {hold} frames "
+                            f"({ctx.target.short} holds 17j+5: 22, 39, 56, 73, ...)")
+        raw = template.snap(req + hold) - hold
 
     # Does the dialogue actually fit the window H3 will render?
     if shot["dialogue"]:
@@ -418,7 +463,6 @@ def _compile_shot(ctx: Ctx, seq: dict, i: int, shot: dict, seq_loc: dict) -> dic
         policy, retention = "generate", ""
         shot["_policy"], shot["_audio_ref"] = policy, False
     shot["_retention"] = retention
-    shot["_continuation"] = seq["continuous"] and i > 0
 
     # Always one panel. A 2- or 4-panel strip is a multi-figure image,
     # and H3 renders it as multiple people -- worst on wides. The face
@@ -433,10 +477,6 @@ def _compile_shot(ctx: Ctx, seq: dict, i: int, shot: dict, seq_loc: dict) -> dic
         r = subject_request(s, book[s])
         need(r.path, r.kind, ctx.wording(r), shot["id"])
 
-    if seq["continuous"] and i > 0:
-        w = template.continuous_warning(shot["id"], raw)
-        if w:
-            warnings.append(w)
     pad = raw - req
     if ("audio_in" not in shot and not shot.get("duration_auto")
             and shot.get("duration_model") is None and pad / raw > 0.15):
@@ -470,6 +510,7 @@ def _compile_shot(ctx: Ctx, seq: dict, i: int, shot: dict, seq_loc: dict) -> dic
         "panels": panels,
         "panel_view": panel_view,
         "length": raw,
+        **({"hold": hold} if hold else {}),
         "seed": stable_seed(ctx.ep_id, seq["id"], shot["id"]),
         # the shot beats its profile beats the sequence beats its profile
         # beats the pass
@@ -621,7 +662,7 @@ def compile_shot(target, shot_ir: ir.Shot, series_cfg: dict, preset, ctx=None) -
     sq, i = _find(story, shot_ir.id)
     c = Ctx(target, story.id, series_cfg, pass_, ctx.get("absent"))
     seq = legacy_sequence(sq)
-    seq["shots"] = [legacy_shot(s) for s in sq.shots]
+    seq["shots"] = legacy_shots(sq)
     seq_loc = c.register_sequence(seq)
     return _compile_shot(c, seq, i, seq["shots"][i], seq_loc)
 
