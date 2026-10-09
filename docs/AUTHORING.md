@@ -808,6 +808,26 @@ the hallway door, sink under the window on the left, the living-room arch behind
 *"the kitchen from the sink, the hallway door on the right, the arch beyond it"*. That is what
 makes the geography hold together across a cut.
 
+**Tie the angles to one master with `of`.** Words alone still give each angle its own
+walls and furniture. Give one entry the plate you like (the master) and mark the others as
+angles of it:
+
+```json
+"ambulance_bay_night":    {"description": "the ambulance bay of a county hospital at night ...",
+                           "plate": "../refs/_bg/ambulance_bay_night.png"},
+"ambulance_bay_on_drive": {"of": "ambulance_bay_night",
+                           "description": "looking back down the covered drive from the doors ...",
+                           "plate": "../refs/_bg/ambulance_bay_on_drive.png"}
+```
+
+- An angle inherits nothing. It keeps its own `description` and `plate`, and shots still name
+  it with `plate:`.
+- On an edit model (Klein, Qwen, Rapid AIO, H3 still), an angle's plate is generated **from
+  the master's plate**: the same building, materials and light, with only the camera moved.
+  On a text-to-image model (Krea 2) it is drawn from its words as before.
+- The Refs tab lists the angles under their master.
+- An angle's master must be a location that isn't itself an angle.
+
 ### Two people talking need an angle each
 
 This is the one that spoils scenes most often, and the build warns about it:

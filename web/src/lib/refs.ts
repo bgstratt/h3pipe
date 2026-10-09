@@ -86,9 +86,16 @@ export function passesFilter(r: Ref, filter: RefFilter, pass: Pass): boolean {
 export function groupRefs(refs: Ref[], filter: RefFilter, pass: Pass): RefGroup[] {
   return REF_GROUPS.map(({ id, label }) => {
     const all = refs.filter((r) => groupOf(r) === id);
+    // a location's angles (`of`) sort right after their master
+    const masterName = (r: Ref) => {
+      if (r.kind !== "location" || !r.of) return r.name;
+      return all.find((x) => x.id === `location:${r.of}`)?.name ?? r.of;
+    };
     const shown = all
       .filter((r) => passesFilter(r, filter, pass))
-      .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }) || a.id.localeCompare(b.id));
+      .sort((a, b) => masterName(a).localeCompare(masterName(b), undefined, { sensitivity: "base" })
+        || Number(!!(a.kind === "location" && a.of)) - Number(!!(b.kind === "location" && b.of))
+        || a.name.localeCompare(b.name, undefined, { sensitivity: "base" }) || a.id.localeCompare(b.id));
     return { id, label, refs: shown, total: all.length };
   });
 }

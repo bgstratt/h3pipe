@@ -38,6 +38,13 @@ every scene, instead of extras who change from shot to shot. It is cast like
 any character (`who:`/`with:`) and costs one reference slot however many people
 it holds. Its picture is one whole image, never a model sheet, so loading gives
 it `sheet_panels: 1` (`members()` reads the count).
+
+A location with `of: <another location>` is an **angle** of it: the same place
+from another camera (the bay from the drive, from inside the SUV). Nothing is
+inherited -- an angle has its own `description` and `plate`, and a shot still
+names it with `plate:` -- but an edit target generates its plate from the
+master's, so every angle is visibly the same place (h3refs.angle_reference_images),
+and the editor lists the angles under their master.
 """
 
 from __future__ import annotations
@@ -67,7 +74,35 @@ def series_config_from(series_cfg: dict) -> dict:
     series_cfg["subjects"] = _resolve_variants(series_cfg["subjects"])
     _check_required(series_cfg)
     _check_groups(series_cfg["subjects"])
+    _check_angles(series_cfg["locations"])
     return series_cfg
+
+
+def _check_angles(locations: dict) -> None:
+    """A location's `of` names another location, which is not itself an angle."""
+    for lid, e in locations.items():
+        of = e.get("of")
+        if of is None:
+            continue
+        if not isinstance(of, str) or not of:
+            raise ValueError(f"location '{lid}' has `of: {of!r}`: `of` names the location "
+                             f"this one is an angle of")
+        if of == lid:
+            raise ValueError(f"location '{lid}' has `of: {lid}`: `of` names the location this "
+                             f"one is an angle OF, not itself")
+        master = locations.get(of)
+        if master is None:
+            raise ValueError(f"location '{lid}' has `of: {of}`, which is not a location in "
+                             f"series.json")
+        if master.get("of"):
+            raise ValueError(f"location '{lid}' is an angle of '{of}', which is itself an angle "
+                             f"(of '{master['of']}'): name the master, '{master['of']}'")
+
+
+def location_master(series_cfg: dict, lid: str) -> str:
+    """The location an angle is of (`of`), or the location itself."""
+    e = (series_cfg.get("locations") or {}).get(lid) or {}
+    return e.get("of") or lid
 
 
 MAX_MEMBERS = 12            # past this it is a crowd: write it as `extras:` or put it in the plate

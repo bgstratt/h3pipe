@@ -95,8 +95,8 @@ from targets.image.krea2.graph import (  # noqa: E402,F401
     REFS_WORKFLOW, SAMPLER, SAVER, SCHED, STEPS, UNET, VAE, VIEW_SIZE, _one, _splice_lora,
     build_graph, patch_workflow, take_graph)
 from targets.image.krea2.prompt import (  # noqa: E402,F401
-    VIEW_DESC, VIEW_TAGS, VIEW_TMPL, VIEWS, group_prompt, object_prompt, plate_prompt,
-    sheet_prompt, view_edit_prompt, view_prompt)
+    VIEW_DESC, VIEW_TAGS, VIEW_TMPL, VIEWS, angle_prompt, group_prompt, object_prompt,
+    plate_prompt, sheet_prompt, view_edit_prompt, view_prompt)
 from h3core.series_config import members  # noqa: E402
 
 IMAGE_TARGET = TG.load_target(TG.DEFAULT_IMAGE_TARGET, "image")
@@ -643,6 +643,25 @@ def variant_reference_images(s: Series, ref: Ref, view: str | None,
     return [d]
 
 
+def angle_reference_images(s: Series, ref: Ref, target=None,
+                           limit: int | None = None) -> list[dict]:
+    """The reference image an edit target reads to generate an angle of a
+    location (`of:`): the master's live plate, so the angle is the same place
+    seen from elsewhere. Same shape as reference_images' plate. [] when the
+    ref is no angle, the target reads no references, or the master has no
+    plate yet."""
+    if limit is None:
+        limit = target.capabilities().get("max_refs", 0) if target is not None else 0
+    of = ref.entry.get("of")
+    if not limit or ref.kind != "location" or not of:
+        return []
+    master = (s.series_cfg.get("locations") or {}).get(of) or {}
+    if not (master.get("plate") and os.path.isfile(ref_file(s.home, master["plate"]))):
+        return []
+    return [{"role": "plate", "location": of, "name": master.get("name", of), "kind": "plate",
+             "path": ref_file(s.home, master["plate"])}]
+
+
 COMPOSITE_FIGURES = 4       # at most this many figures in a composed reference
 
 
@@ -765,7 +784,16 @@ def built_prompt(s: Series, ref: Ref, view: str | None = None,
     if ref.kind == "voice":
         return voice_brief(s, ref, target)[0]
     if ref.kind == "location":
-        return plate_prompt(s.look, e["description"]) if e.get("description") else None
+        if not e.get("description"):
+            return None
+        if refs and e.get("of"):
+            # an angle generated as an edit of its master's plate
+            master = (s.series_cfg.get("locations") or {}).get(e["of"]) or {}
+            word = ((target.recipe.get("ref_word") if target is not None else None)
+                    or "reference image")
+            return angle_prompt(s.look, e["description"], e["of"].replace("_", " "),
+                                master.get("description", ""), word)
+        return plate_prompt(s.look, e["description"])
     if not e.get("design"):
         return None
     if ref.kind == "character" and members(e):
@@ -2309,7 +2337,8 @@ def plan_generate(s: Series, req: GenRequest, overrides: dict | None = None,
             else:
                 # a variant's view edits the base's SAME view, so its reference
                 # -- and so its wording -- is per view, not per ref
-                vrefs = variant_reference_images(s, ref, v, target) or refs
+                vrefs = (variant_reference_images(s, ref, v, target)
+                         or angle_reference_images(s, ref, target) or refs)
                 base_prompt = built_prompt(s, ref, v, view_size, target, vrefs)
             # P4: the picture's size, cfg, negative and sampler knobs, each
             # the request's, else the override's, else what the target says

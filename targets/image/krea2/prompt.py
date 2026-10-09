@@ -150,6 +150,21 @@ def group_prompt(design: str, look: str, n: int, w: int = 1344, h: int = 768) ->
             f"the {n} is a distinct individual. Drawn as {look}. Output {w}x{h}.")
 
 
+def angle_prompt(look: str, description: str, master: str, master_description: str,
+                 word: str = "image") -> str:
+    """An angle of a location (`of:`), generated as an EDIT of its master's
+    plate: the same place, built of the same things in the same light, seen
+    from where the angle's description puts the camera. The brief is what
+    stays (the place) and what moves (the camera), so the model redraws the
+    view rather than the room."""
+    return (f"The {word} is {master}: {master_description.rstrip('.')}. Draw that same place "
+            f"from another camera position: {description.rstrip('.')}. Keep the place exactly "
+            f"as it is in the {word} -- the same building, walls, doors, windows, furniture and "
+            f"materials, the same colours, light and weather -- and move only the camera. A "
+            f"background plate drawn as {look}: no characters, no figures, the environment "
+            f"only.")
+
+
 def plate_prompt(look: str, description: str) -> str:
     """A location's background plate."""
     return (f"A background plate drawn as {look}. An empty establishing "

@@ -911,9 +911,11 @@ function RefRow({ ep, r }: { ep: string; r: Ref }) {
             {r.of && (
               <span
                 className="h3-muted h3-small h3-ell"
-                title={`A wardrobe variant of ${r.of}: same character, own sheet. Its views are generated from ${r.of}'s, and it shares ${r.of}'s voice.`}
+                title={r.kind === "location"
+                  ? `An angle of ${r.of}: the same place from another camera, with its own plate. An edit model generates it from ${r.of}'s plate.`
+                  : `A wardrobe variant of ${r.of}: same character, own sheet. Its views are generated from ${r.of}'s, and it shares ${r.of}'s voice.`}
               >
-                variant of {r.of}
+                {r.kind === "location" ? `↳ angle of ${r.of}` : `variant of ${r.of}`}
               </span>
             )}
             <span className="h3-muted h3-small h3-ell">{r.id}</span>
