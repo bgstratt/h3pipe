@@ -30,5 +30,7 @@ describe("edit a ref's picture", () => {
     expect(html).toContain("Ada (character)");          // another ref's picture to bring in
     expect(html).not.toContain(">ambulance bay (location)");  // not itself
     expect(html).toContain("LoRAs");
+    expect(html).toContain("Relight:");
+    expect(html).toContain("Golden hour");
   });
 });

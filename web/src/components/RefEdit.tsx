@@ -21,6 +21,22 @@ const EXAMPLES = [
   "same place at dawn, low warm sunlight from the left",
 ];
 
+/**
+ * Relight presets (h3sets' relight.py, folded in): the same picture at another
+ * time of day or weather. Only the light and the sky change; the edit wrapper
+ * names the rest as fixed. A preset fills the instruction, which can then be
+ * edited like any other.
+ */
+export const RELIGHTS: { label: string; text: string }[] = [
+  { label: "Dawn", text: "Change only the time of day and the light: it is dawn, the cool blue light just before sunrise, a pale sky, lamps still faintly lit" },
+  { label: "Day", text: "Change only the time of day and the light: it is midday under a clear sky, bright neutral daylight with crisp shadows, lamps off" },
+  { label: "Golden hour", text: "Change only the time of day and the light: it is late afternoon golden hour, low warm sunlight raking in from one side, long soft shadows" },
+  { label: "Dusk", text: "Change only the time of day and the light: it is dusk, a deep blue sky with the last orange at the horizon, practical lamps just coming on" },
+  { label: "Night", text: "Change only the time of day and the light: it is night, dark sky, the space lit only by its own lamps and signs, deep shadows" },
+  { label: "Overcast", text: "Change only the light: a flat overcast day, soft shadowless grey light, a white sky" },
+  { label: "Rain", text: "Change only the weather: it is raining steadily, wet reflective surfaces, rain streaks in the air, a dark wet sky" },
+];
+
 /** "t03 of Ada (side)" / "the live picture" */
 export function editSourceText(e: RefEditRecord): string {
   const what = e.take != null ? tn(e.take) : "the live picture";
@@ -78,6 +94,12 @@ export function EditForm({ r, view: view0, take, viewChoices, onDone }: {
           {viewChoices.map((v) => <option key={v} value={v}>{`${viewLabel(v)} (live)`}</option>)}
         </select>
       )}
+      <div className="h3-row h3-wrap" style={{ gap: 3 }}>
+        <span className="h3-small h3-muted" title="The same picture at another time of day or weather: fills the instruction, which you can still edit">Relight:</span>
+        {RELIGHTS.map((x) => (
+          <button key={x.label} className={`h3-btn h3-small${text === x.text ? " h3-on" : ""}`} title={x.text} onClick={() => setText(x.text)}>{x.label}</button>
+        ))}
+      </div>
       <textarea
         className="h3-in"
         rows={3}
