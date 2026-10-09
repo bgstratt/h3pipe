@@ -409,7 +409,15 @@ export interface Override {
   model_low?: string | null;
   /** "WxH": the pass renders at this size, not the shotlist's (per pass). */
   size?: string | null;
+  /** P4, a ref's override: cfg and the sampler knobs the image target has */
+  cfg?: number | null;
+  params?: RefParams | null;
 }
+
+/** P4: the sampler knobs a ref override may set (h3refs.TUNABLE_PARAMS), each
+ * only where the image target has that widget. */
+export type RefParams = Partial<Record<"sampler" | "scheduler" | "denoise" | "shift" | "guidance", string | number>>;
+export const TUNABLE_PARAMS = ["sampler", "scheduler", "denoise", "shift", "guidance"] as const;
 
 /**
  * Where a negative prompt comes from (API.md "Phase 8.5 as built"): the request,
@@ -653,6 +661,9 @@ export interface OverrideFields {
   model_low?: string | null;
   /** "WxH", per pass; null clears (back to the shotlist's size) */
   size?: string | null;
+  /** P4, a ref override only: cfg, and the sampler knobs; null clears */
+  cfg?: number | null;
+  params?: RefParams | null;
 }
 
 export interface OverrideRequest {
@@ -1046,6 +1057,9 @@ export interface RefTake {
   from?: RefFrameSource;
   /** an "edited" take: the picture it started from and the instruction */
   edit?: RefEditRecord;
+  /** P4: what else it was drawn with */
+  cfg?: number | null;
+  params?: RefParams;
   note: string;
   prompt?: string | null;
   model?: string | null;
@@ -1124,6 +1138,11 @@ export interface RefEffective {
   height?: number | null;
   /** the image target a generate uses now (an audio one for a voice) */
   target?: string | null;
+  /** P4: cfg, the sampler knobs and the negative a generate would use */
+  cfg?: number | null;
+  params?: RefParams;
+  negative?: string;
+  negative_source?: NegativeSource;
   // ---- Phase 9c-B, a voice ref ----
   /** how long a generate would be, after the target's grid snapped it */
   seconds?: number | null;

@@ -2252,6 +2252,21 @@ def post_refs_generate(ctx: Context, body):
     pass_ = check_pass(body.get("pass"), "final")
     # an edit of a picture the ref already has (h3refs.plan_edit): `prompt` is
     # the instruction, `edit` says which picture and what else comes along
+    cfg = body.get("cfg")
+    if cfg is not None and (isinstance(cfg, bool) or not isinstance(cfg, (int, float))):
+        raise ApiError(400, "cfg must be a number or null")
+    size = body.get("size")
+    if size is not None:
+        try:
+            R.parse_override_size(size)
+        except R.RefError as e:
+            raise ApiError(400, str(e))
+    params = body.get("params")
+    if params is not None:
+        try:
+            R.check_override_value("params", params)
+        except R.RefError as e:
+            raise ApiError(400, str(e))
     edit = body.get("edit")
     if edit is not None and not isinstance(edit, dict):
         raise ApiError(400, 'edit must be {"take": n or null, "with": [...], "wrap": bool} '
@@ -2262,7 +2277,8 @@ def post_refs_generate(ctx: Context, body):
                        loras=_opt_loras(body.get("loras")),
                        steps=_opt_steps(body.get("steps")), note=_opt_str(body, "note") or "",
                        target=target or None, negative=negative, pass_=pass_,
-                       seconds=seconds, edit=edit)
+                       seconds=seconds, edit=edit, cfg=cfg, size=size or None,
+                       params=params or None)
     why = None if edit is not None else R.can_generate(s, ref)
     if why:
         raise ApiError(400, why)
@@ -2606,7 +2622,8 @@ def post_refs_voice_from_take(ctx: Context, body):
     return 200, out
 
 
-REF_OVERRIDE_FIELDS = ("prompt", "seed", "model", "loras", "steps", "note", "target")
+REF_OVERRIDE_FIELDS = ("prompt", "seed", "model", "loras", "steps", "note", "target",
+                       "size", "cfg", "negative", "params")
 
 
 def _ref_override_json(s, ref, view) -> dict:
@@ -2653,6 +2670,12 @@ def put_refs_override(ctx: Context, body):
         if t is not None and not isinstance(t, str):
             raise ApiError(400, "target must be an image target id or null")
         clean["target"] = t or None
+    # P4: size ("WxH"), cfg, negative and params (sampler knobs) are checked
+    # by h3refs.set_ref_override
+    for k in ("size", "cfg", "negative", "params"):
+        if k in fields:
+            v = fields[k]
+            clean[k] = None if v in ("", {}) else v
     ov = R.load_overrides(ref.home)
     try:
         R.set_ref_override(ov, ref, view, clean,

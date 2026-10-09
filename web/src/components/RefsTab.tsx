@@ -2,7 +2,7 @@
 // file, its candidates (takes), pick / generate / import / compare, and the
 // ref's prompt and settings override.
 
-import { memo, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
+import { Fragment, memo, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import {
   clearRef, copyText, discardRefTake, dismissMissingResult, dropFilesFromDrag, generateMissing, generateRef, keyframeFromTake, loadRefs, openBrowse,
   openImageCompare, openRefFile, pickRef, revertRefOverride, saveRefOverride, selectRefTake, setRefDefault, setRefsFilter, toggleRefOpen,
@@ -30,7 +30,9 @@ import {
 } from "../lib/refs";
 import { findTarget, targetLabel, targetShort } from "../lib/targets";
 import { store, useApp } from "../store";
-import type { Ref, RefTake, SeedMode } from "../types";
+import { TUNABLE_PARAMS, type OverrideFields as OverrideFieldValues, type Ref, type RefEffective, type RefParams, type RefTake, type SeedMode, type Target } from "../types";
+import { sizeRule } from "../lib/size";
+import { knobFields, knobsOf, takeSettings, type Knobs } from "../lib/refSettings";
 import { useStatus } from "./hooks";
 import { useTargets } from "./Targets";
 import { OverrideFields } from "./OverrideFields";
@@ -358,6 +360,7 @@ function Selection({ r }: { r: Ref }) {
   const busy = useApp((s) => !!s.busy[`refpick|${r.id}`]);
   const busyDiscard = useApp((s) => !!sel && !!s.busy[`refdiscard|${r.id}|${sel.view ?? ""}|${sel.take}`]);
   const [editing, setEditing] = useState<string | null>(null);
+  const busySettings = useApp((s) => !!s.busy[`refoverride|${r.id}`]);
   if (!sel) return null;
   const t = takesOf(r, sel.view).find((x) => x.take === sel.take);
   if (!t) return null;
@@ -382,6 +385,16 @@ function Selection({ r }: { r: Ref }) {
             onClick={() => openImageCompare(r.id, sel.view, t.take, picked != null && !live ? picked : null)}
           >
             <i className="pi pi-clone" /> {picked != null && !live ? "Compare with live" : "View"}
+          </button>
+        )}
+        {!isAudioRef(r) && (t.source === "generated" || t.source === "edited") && t.status === "ok" && (
+          <button
+            className="h3-btn"
+            disabled={busySettings}
+            title={`Make ${tn(t.take)}'s seed, model, LoRAs, steps, cfg, sampler and size ${sel.view ? `${viewLabel(sel.view)}'s` : "this ref's"} settings, for the next Generate (the prompt stays as it is)`}
+            onClick={() => void saveRefOverride(r.id, takeSettings(t, isKeyframeRef(r)), sel.view)}
+          >
+            <i className="pi pi-replay" /> Use these settings
           </button>
         )}
         {!isAudioRef(r) && sel.view !== SHEET_VIEW && (
@@ -446,7 +459,7 @@ function Selection({ r }: { r: Ref }) {
           {t.target && <><span>model</span><span>{t.target}</span></>}
           {t.note && <><span>note</span><span>{t.note}</span></>}
           {t.model && <><span>file</span><span title={t.model}>{shortName(t.model, 40)}</span></>}
-          {t.steps != null && <><span>steps</span><span>{t.steps}</span></>}
+          {t.steps != null && <><span>steps</span><span>{t.steps}{t.cfg != null ? ` · cfg ${t.cfg}` : ""}{t.params && Object.keys(t.params).length ? ` · ${Object.entries(t.params).map(([k, v]) => `${k} ${v}`).join(" · ")}` : ""}{t.width && t.height ? ` · ${t.width}x${t.height}` : ""}</span></>}
           {t.status === "failed" && t.save_notes && <><span>error</span><span className="h3-err">{t.save_notes}</span></>}
           {t.prompt && <><span>prompt</span><span className="h3-small" title={t.prompt}>{t.prompt.length > 180 ? t.prompt.slice(0, 179) + "…" : t.prompt}</span></>}
         </div>
@@ -637,23 +650,35 @@ function RefSettingsForm({ r, view }: { r: Ref; view: string | null }) {
   const initial = useMemo(() => formFromDetail(src), [src]);
   const [form, setForm] = useState<OverrideForm>(initial);
   const [base, setBase] = useState<OverrideForm>(initial);
+  // P4: cfg and the sampler knobs, where the image target has them
+  const { list: targetList } = useTargets();
+  const refDefaultsNow = useRefDefaults();
+  const tgt = findTarget(targetList, eff?.target ?? refTargetOf(r, refDefaultsNow).target);
+  const initialKnobs = useMemo(() => knobsOf(src.override), [src]);
+  const [knobs, setKnobs] = useState<Knobs>(initialKnobs);
+  const [baseKnobs, setBaseKnobs] = useState<Knobs>(initialKnobs);
   const [showDiff, setShowDiff] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const dirty = isDirty(form, base);
+  const knobsDirty = JSON.stringify(knobs) !== JSON.stringify(baseKnobs);
+  const dirty = isDirty(form, base) || knobsDirty;
   const dirtyRef = useRef(dirty);
   dirtyRef.current = dirty;
   useEffect(() => {
-    if (!dirtyRef.current) setForm(initial);
+    if (!dirtyRef.current) {
+      setForm(initial);
+      setKnobs(initialKnobs);
+    }
     setBase(initial);
-  }, [initial]);
+    setBaseKnobs(initialKnobs);
+  }, [initial, initialKnobs]);
   const set = (p: Partial<OverrideForm>) => {
     setErr(null);
     setForm((f) => ({ ...f, ...p }));
   };
   const save = async () => {
-    let fields;
+    let fields: OverrideFieldValues;
     try {
-      fields = overrideFields(form, base, src);
+      fields = { ...overrideFields(form, base, src), ...knobFields(knobs, baseKnobs) };
     } catch (e) {
       setErr(errText(e));
       return;
@@ -692,11 +717,17 @@ function RefSettingsForm({ r, view }: { r: Ref; view: string | null }) {
         stepsPlaceholder={`${ov.steps == null && eff?.steps != null ? eff.steps : ""} (series config)`}
         effLoras={eff?.loras ?? null}
         lorasOverridden={ov.loras != null || ovFields.includes("loras")}
+        negative={tgt?.widgets?.negative && !isAudioRef(r) ? { effective: eff?.negative ?? "", source: eff?.negative_source ?? "" } : null}
+        size={isAudioRef(r) || isKeyframeRef(r) || noPrompt ? null : {
+          built: ov.size == null && eff?.width && eff?.height ? `${eff.width}x${eff.height}` : "",
+          rule: sizeRule(tgt?.template),
+        }}
       />
+      {!isAudioRef(r) && !noPrompt && <KnobFields knobs={knobs} set={(k) => setKnobs((x) => ({ ...x, ...k }))} eff={eff} target={tgt} />}
       {err && <div className="h3-note h3-note-err">{err}</div>}
       <div className="h3-row h3-wrap">
         <button className="h3-btn h3-primary" disabled={!dirty || busy} onClick={() => void save()}>{busy ? "Saving…" : "Save"}</button>
-        <button className="h3-btn" disabled={!dirty || busy} onClick={() => setForm(base)}>Discard edits</button>
+        <button className="h3-btn" disabled={!dirty || busy} onClick={() => { setForm(base); setKnobs(baseKnobs); }}>Discard edits</button>
         <span className="h3-grow" />
         <button
           className="h3-btn h3-danger"
@@ -708,6 +739,42 @@ function RefSettingsForm({ r, view }: { r: Ref; view: string | null }) {
         </button>
       </div>
       <div className="h3-muted h3-small">Used by the next Generate. Candidates already made keep their settings.</div>
+    </div>
+  );
+}
+
+const KNOB_TITLES: Record<string, string> = {
+  cfg: "Guidance scale. 1 on a distilled or turbo model (the negative prompt is inert there); higher follows the prompt harder",
+  sampler: "The sampler (ComfyUI's sampler_name), e.g. euler, er_sde, euler_ancestral",
+  scheduler: "The noise schedule, e.g. simple, beta, karras",
+  denoise: "How much of the picture is redrawn, 0 to 1 (1: all of it)",
+  shift: "The model's sampling shift (flow models)",
+  guidance: "Flux-style distilled guidance",
+};
+
+/** P4: cfg and the image target's sampler knobs, each only if it has that widget. */
+function KnobFields({ knobs, set, eff, target }: { knobs: Knobs; set: (k: Partial<Knobs>) => void; eff: RefEffective | null; target: Target | undefined }) {
+  const shown = (["cfg", ...TUNABLE_PARAMS] as const).filter((k) => !!target?.widgets?.[k]);
+  if (!shown.length) return null;
+  const now = (k: string) => (k === "cfg" ? eff?.cfg : eff?.params?.[k as keyof RefParams]);
+  return (
+    <div className="h3-field">
+      {shown.map((k) => (
+        <Fragment key={k}>
+          <label title={KNOB_TITLES[k]}>{k === "cfg" ? "CFG" : k[0].toUpperCase() + k.slice(1)}</label>
+          <div className="h3-row">
+            <input
+              className="h3-in h3-grow h3-mono"
+              value={knobs[k]}
+              inputMode={k === "sampler" || k === "scheduler" ? "text" : "decimal"}
+              placeholder={`${now(k) ?? ""} (${target?.short ?? "the target"}'s)`}
+              title={KNOB_TITLES[k]}
+              onChange={(e) => set({ [k]: e.target.value } as Partial<Knobs>)}
+            />
+            {knobs[k] && <button className="h3-btn h3-icon" title="Clear" onClick={() => set({ [k]: "" } as Partial<Knobs>)}>✕</button>}
+          </div>
+        </Fragment>
+      ))}
     </div>
   );
 }

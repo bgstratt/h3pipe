@@ -1097,7 +1097,61 @@ def _atomic_copy(src: str, dst: str) -> None:
 
 OVERRIDES_FILE = os.path.join("refs", "_overrides.json")
 PICKS_FILE = os.path.join("refs", "_picks.json")
-OVERRIDE_FIELDS = ("prompt", "seed", "model", "loras", "steps", "note", "target")
+OVERRIDE_FIELDS = ("prompt", "seed", "model", "loras", "steps", "note", "target",
+                   "size", "cfg", "negative", "params")
+# The sampler knobs a ref override (`params`) may set, each only where the
+# image target's binding has it: everything else a target exposes is a model
+# file (`model`, the preset's text encoder / VAE) or set by the job itself.
+TUNABLE_PARAMS = ("sampler", "scheduler", "denoise", "shift", "guidance")
+SIZE_RANGE = (256, 4096)
+
+
+def parse_override_size(v) -> tuple[int, int]:
+    """A `size` override ("1344x768") as (w, h). RefError when it isn't one."""
+    m = re.fullmatch(r"\s*(\d+)\s*[x\u00d7]\s*(\d+)\s*", v) if isinstance(v, str) else None
+    if not m:
+        raise RefError(f"size must be WIDTHxHEIGHT, e.g. 1344x768, not {v!r}")
+    w, h = int(m.group(1)), int(m.group(2))
+    lo, hi = SIZE_RANGE
+    if not (lo <= w <= hi and lo <= h <= hi):
+        raise RefError(f"size must be {lo} to {hi} pixels a side, not {w}x{h}")
+    return w, h
+
+
+def check_override_value(name: str, v):
+    """The new fields' shapes (the API checks the older ones). None clears."""
+    if v is None:
+        return None
+    if name == "size":
+        w, h = parse_override_size(v)
+        return f"{w}x{h}"
+    if name == "cfg":
+        if isinstance(v, bool) or not isinstance(v, (int, float)) or not 0 <= v <= 30:
+            raise RefError(f"cfg must be a number from 0 to 30, not {v!r}")
+        return float(v)
+    if name == "negative":
+        if not isinstance(v, str):
+            raise RefError("negative must be text or null")
+        return v
+    if name == "params":
+        if not isinstance(v, dict):
+            raise RefError(f"params must be an object of {', '.join(TUNABLE_PARAMS)}")
+        bad = set(v) - set(TUNABLE_PARAMS)
+        if bad:
+            raise RefError(f"params takes {', '.join(TUNABLE_PARAMS)}, not "
+                           f"{', '.join(sorted(bad))}")
+        out = {}
+        for k, x in v.items():
+            if x is None or x == "":
+                continue
+            if k in ("sampler", "scheduler"):
+                if not isinstance(x, str):
+                    raise RefError(f"params.{k} must be a name, e.g. euler")
+            elif isinstance(x, bool) or not isinstance(x, (int, float)):
+                raise RefError(f"params.{k} must be a number")
+            out[k] = x
+        return out or None
+    return v
 
 
 def load_overrides(home: str) -> dict:
@@ -1136,6 +1190,9 @@ def set_ref_override(data: dict, ref: Ref, view: str | None, fields: dict,
     if unknown:
         raise RefError(f"unknown override field(s) {', '.join(sorted(unknown))}: "
                        f"one of {', '.join(OVERRIDE_FIELDS)}")
+    fields = {k: check_override_value(k, v) for k, v in fields.items()}
+    if ref.is_audio and any(fields.get(k) is not None for k in ("size", "params")):
+        raise RefError(f"{ref.id} is a voice: it has no picture size or sampler settings")
     if ref.has_views and view is None and fields.get("prompt") is not None:
         raise RefError(f"{ref.id} is a character: a prompt override is per view")
     if fields.get("target") is not None:
@@ -2048,6 +2105,8 @@ class GenRequest:
     pass_: str = "final"             # a keyframe's size: this pass's render size
     negative_source: str = "request"  # what an explicit `negative` is (kreagen: "file")
     seconds: float | None = None     # a voice ref's length (None: the audio target's default)
+    size: str | None = None          # "WxH" (None: the override's, else the target's)
+    params: dict | None = None       # TUNABLE_PARAMS (None: the override's, else the preset's)
     # an edit of a picture this ref already has (plan_edit): {"take": n | None
     # (the live picture), "with": [{"ref", "view"?, "take"?}], "wrap": bool};
     # `prompt` is then the instruction
@@ -2252,6 +2311,27 @@ def plan_generate(s: Series, req: GenRequest, overrides: dict | None = None,
                 # -- and so its wording -- is per view, not per ref
                 vrefs = variant_reference_images(s, ref, v, target) or refs
                 base_prompt = built_prompt(s, ref, v, view_size, target, vrefs)
+            # P4: the picture's size, cfg, negative and sampler knobs, each
+            # the request's, else the override's, else what the target says
+            vw, vh = w, h
+            size = pick("size", None, req.size) if ref.kind not in ("voice", "keyframe") else None
+            if size:
+                vw, vh = parse_override_size(size)
+            vcfg = float(pick("cfg", cfg, req.cfg))
+            vneg, vneg_source = negative, neg_source
+            if neg_source != "none" and req.negative is None and ov.get("negative") is not None:
+                used.append("negative")
+                vneg, vneg_source = ov["negative"], "override"
+            vals = _preset_values(target)
+            vnotes = list(notes)
+            for k, x in (pick("params", None, req.params) or {}).items():
+                if target.binding.specs(k):
+                    vals[k] = x
+                else:
+                    vnotes.append(f"{target.short} has no {k} setting: params.{k} ignored")
+            if size:                     # a view's prompt names its size
+                base_prompt = built_prompt(s, ref, v, (vw, vh) if ref.has_views else view_size,
+                                           target, vrefs)
             prompt = pick("prompt", base_prompt, req.prompt)
             stale = ("prompt" in used and bool(ov.get("base_hash"))
                      and ov["base_hash"] != prompt_hash(base_prompt))
@@ -2261,12 +2341,12 @@ def plan_generate(s: Series, req: GenRequest, overrides: dict | None = None,
                 ref=ref, view=v, candidate=c, prompt=prompt, seed=seed, seed_source=source,
                 model=pick("model", "", req.model) or "",
                 loras=pick("loras", None, req.loras),
-                steps=int(pick("steps", default_steps, req.steps)), cfg=cfg,
-                negative=negative, width=w, height=h,
+                steps=int(pick("steps", default_steps, req.steps)), cfg=vcfg,
+                negative=vneg, width=vw, height=vh,
                 note=req.note or "", overridden=sorted(set(used)), override_stale=stale,
-                target=target, negative_source=neg_source, values=_preset_values(target),
+                target=target, negative_source=vneg_source, values=vals,
                 references=[dict(r) for r in vrefs], render_size=render_size,
-                video_target=video_target, notes=list(notes),
+                video_target=video_target, notes=vnotes,
                 seconds=seconds, frames=frames, fps=fps, line=line,
                 line_source=line_source))
     return jobs
@@ -2416,7 +2496,7 @@ def plan_edit(s: Series, ref: Ref, req: GenRequest, overrides: dict | None = Non
     if wh is None:
         raise RefError(f"can't read the size of {os.path.basename(refs[0]['path'])}: "
                        f"a PNG or JPEG is needed")
-    w, h = scaled_size(target, *wh)
+    w, h = parse_override_size(req.size) if req.size else scaled_size(target, *wh)
     word = target.recipe.get("ref_word") or "image"
     try:
         prompt = edit_prompt(instruction, refs, word) if wrap else instruction
@@ -2441,6 +2521,12 @@ def plan_edit(s: Series, ref: Ref, req: GenRequest, overrides: dict | None = Non
     if (w, h) != tuple(wh):
         notes.append(f"edited at {w}x{h}: the picture is {wh[0]}x{wh[1]}, put on "
                      f"{target.short}'s size grid")
+    vals = _preset_values(target)
+    for k, x in (check_override_value("params", req.params) or {}).items():
+        if target.binding.specs(k):
+            vals[k] = x
+        else:
+            notes.append(f"{target.short} has no {k} setting: params.{k} ignored")
     rng = rng or random.SystemRandom()
     jobs = []
     for c in range(req.count):
@@ -2452,7 +2538,7 @@ def plan_edit(s: Series, ref: Ref, req: GenRequest, overrides: dict | None = Non
             ref=ref, view=view, candidate=c, prompt=prompt, seed=seed, seed_source=source,
             model=req.model or "", loras=req.loras, steps=steps, cfg=cfg,
             negative=negative, width=w, height=h, note=req.note or "",
-            target=target, negative_source=neg_source, values=_preset_values(target),
+            target=target, negative_source=neg_source, values=dict(vals),
             references=[dict(r) for r in refs], notes=list(notes), edit=dict(record)))
     return jobs
 
@@ -3317,6 +3403,9 @@ def take_json(ep: str, ref: Ref, t: RefTake) -> dict:
             "source": sc.get("source", "generated"), "note": sc.get("note", ""),
             "prompt": sc.get("prompt"), "model": sc.get("model"), "loras": sc.get("loras"),
             "steps": sc.get("steps"), "width": sc.get("width"), "height": sc.get("height"),
+            # P4: what else it was drawn with, so a good take's settings can be reused
+            "cfg": sc.get("cfg"),
+            "params": {k: v for k, v in (sc.get("values") or {}).items() if k in TUNABLE_PARAMS},
             "overrides": sc.get("overrides", []),
             # what this take was generated FROM: [] when nothing was fed, which
             # is the only way to tell an edit from a text-to-image generate on a
@@ -3361,7 +3450,12 @@ def effective(s: Series, ref: Ref, view: str | None, ov_data: dict,
     out = {"prompt": job.prompt, "seed": job.seed if job.seed_source != "new" else None,
            "seed_source": job.seed_source, "model": job.model, "loras": job.loras,
            "steps": job.steps, "width": job.width, "height": job.height,
-           "target": job.target.id if job.target is not None else None}
+           "target": job.target.id if job.target is not None else None,
+           # P4: the sampler settings a generate would use, as overrides set them
+           "cfg": job.cfg, "params": {k: v for k, v in job.values.items()
+                                      if k in TUNABLE_PARAMS},
+           **({"negative": job.negative, "negative_source": job.negative_source}
+              if job.negative_source != "none" else {})}
     if job.is_audio:
         out.update(width=None, height=None, seconds=job.seconds, line=job.line,
                    line_source=job.line_source,

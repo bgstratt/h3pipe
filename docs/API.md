@@ -878,6 +878,23 @@ take.
 ### `PUT /h3pipe/refs/override` and `DELETE /h3pipe/refs/override`
 Same shape as the shot override routes, keyed by `ref` (and `view`).
 
+**More settings (P4, 2026-10-08).** Besides `prompt`, `seed`, `model`, `loras`, `steps`,
+`note` and `target`, a ref's override takes:
+- `size`: `"WxH"`, 256–4096 a side. Not for a keyframe (its size is its shot's) or a voice.
+  A character view's prompt names it.
+- `cfg`: 0–30.
+- `negative`: text. It only applies on a target with a `negative` param, where it beats
+  negative.txt, the series config and the preset, as source `override`.
+- `params`: `{sampler, scheduler, denoise, shift, guidance}`
+  (`h3refs.TUNABLE_PARAMS`). Each is sent only where the image target's binding has that
+  param; one it lacks is skipped, with a note on the take.
+
+`null`, `""` or `{}` clears a field. `POST /h3pipe/refs/generate` takes `size`, `cfg` and
+`params` too; the request's value beats the override's. `/refs` lists `cfg`, `params` and
+the negative in `effective`, and `cfg` and `params` on every take. The editor's **Use
+these settings** saves a take's seed, model, LoRAs, steps, cfg, params and size (but not
+its prompt) as the ref's override.
+
 **A view's overrides, and whose they are (P9, 2026-09-23).** A character's fields are inherited
 by all four views (`ref_override` merges the character's under the view's), which left the
 editor unable to say where a value came from or what an edited prompt had replaced. Two
