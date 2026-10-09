@@ -1,0 +1,80 @@
+{
+  "id": "klein_erp_360",
+  "kind": "image",
+  "label": "FLUX.2 Klein 9B base + 360 ERP outpaint (a location's 360)",
+  "short": "Klein 360",
+  "code": "target.py",
+
+  "capabilities": {
+    "_note": "One job: a location's 360 panorama (h3refs.plan_pano, engine klein). Its one reference is the plate placed on a green 2:1 canvas (comfy_nodes/h3_erp.py); the LoRA fills the green. `pano` mode keeps it out of the refs, keyframe and edit pickers.",
+    "mode": "pano",
+    "max_refs": 1,
+    "negative_prompt": true
+  },
+
+  "template": {
+    "_note": "The output is the canvas's size (the KSampler samples the encoded canvas), 2:1.",
+    "view_size": [1024, 1024],
+    "plate_size": [2048, 1024],
+    "object_size": [1024, 1024],
+    "size_multiple": 16
+  },
+
+  "recipe": {"ref_word": "image"},
+
+  "binding": {
+    "_note": "nomadoor's own workflow (flux-2-klein-9B-360-erp-outpaint.json, on the LoRA's Hugging Face page) as an API graph, with PanoramaStickers replaced by a LoadImage of the canvas h3_erp.py makes and PanoramaCutout/Preview left out: the canvas is VAE-encoded and read both as a ReferenceLatent on the positive and negative and as the sampler's latent; KSampler euler/simple, 20 steps, cfg 5; a real negative prompt. Running the same LoRA through flux2_klein_edit's graph (Flux2Scheduler, the reference scaled to 1 MP, an empty latent, a zeroed negative) gave an over-cooked green field, so this graph is kept as the author ships it. H3SaveRefTake takes the place of SaveImage.",
+    "workflow": "workflow.json",
+    "workflow_name": "h3pipe_klein_erp_360.json",
+    "env": "H3_KLEIN_ERP_360_WORKFLOW",
+    "saver": {"class_type": "H3SaveRefTake",
+              "replace": {"class_type": "SaveImage", "inputs": {"images": "images"}}},
+    "prune": true,
+    "params": {
+      "model": {"class_type": "UNETLoader", "field": "unet_name"},
+      "text_encoder": {"class_type": "CLIPLoader", "field": "clip_name"},
+      "vae": {"class_type": "VAELoader", "field": "vae_name"},
+      "loras": {"class_type": "LoraLoaderModelOnly", "name": "lora_name", "strength": "strength_model",
+                "input": "model", "chain": true},
+      "prompt": {"class_type": "CLIPTextEncode", "field": "text", "title": "Positive prompt"},
+      "negative": {"class_type": "CLIPTextEncode", "field": "text", "title": "Negative prompt"},
+      "steps": {"class_type": "KSampler", "field": "steps"},
+      "seed": {"class_type": "KSampler", "field": "seed"},
+      "cfg": {"class_type": "KSampler", "field": "cfg"},
+      "sampler": {"class_type": "KSampler", "field": "sampler_name"},
+      "scheduler": {"class_type": "KSampler", "field": "scheduler"}
+    }
+  },
+
+  "models": {
+    "_note": "The BASE Klein 9B: the LoRA was trained on it, and its author says the distilled model draws it badly.",
+    "model": {"family": "flux2-klein-9b-base", "patterns": ["flux-2-klein-base-9b*", "*klein*base*9b*"],
+              "tier": "required"},
+    "text_encoder": {"family": "qwen3-8b", "patterns": ["qwen_3_8b*", "*qwen*3*8b*"],
+                     "tier": "required", "exclude": ["*vl*"]},
+    "vae": {"family": "flux2-vae", "patterns": ["flux2-vae*", "full_encoder_small_decoder*", "*flux*2*vae*"],
+            "tier": "required"}
+  },
+
+  "presets": {
+    "_note": "The author's workflow: 20 steps, cfg 5, euler/simple, LoRA 0.9 (in the graph), negative 'text, worst quality, blurry, ugly'.",
+    "final": {
+      "model": "flux-2-klein-base-9b-fp8.safetensors",
+      "text_encoder": "qwen_3_8b_fp8mixed.safetensors",
+      "vae": "flux2-vae.safetensors",
+      "steps": 20,
+      "cfg": 5.0,
+      "sampler": "euler",
+      "scheduler": "simple",
+      "negative": "text, worst quality, blurry, ugly"
+    }
+  },
+
+  "downloads": {
+    "_note": "Where to get each file this target names (docs/API.md 'Downloads').",
+    "flux-2-klein-base-9b-fp8.safetensors": {"folder": "diffusion_models", "url": "https://huggingface.co/black-forest-labs/FLUX.2-klein-base-9b-fp8/resolve/main/flux-2-klein-base-9b-fp8.safetensors", "source": "the LoRA author's workflow (and saved workflow image_flux2_klein_image_edit_9b_base.json)"},
+    "qwen_3_8b_fp8mixed.safetensors": {"folder": "text_encoders", "url": "https://huggingface.co/Comfy-Org/flux2-klein-9B/resolve/main/split_files/text_encoders/qwen_3_8b_fp8mixed.safetensors", "source": "ComfyUI template image_flux2_klein_9b_kv_image_edit.json (properties.models)"},
+    "flux2-vae.safetensors": {"folder": "vae", "url": "https://huggingface.co/Comfy-Org/flux2-dev/resolve/main/split_files/vae/flux2-vae.safetensors", "source": "ComfyUI's FLUX.2 templates"},
+    "flux-2-klein-9B-360-erp-outpaint-lora_V1.safetensors": {"folder": "loras", "url": "https://huggingface.co/nomadoor/flux-2-klein-9B-360-erp-outpaint-lora/resolve/main/flux-2-klein-9B-360-erp-outpaint-lora_V1.safetensors", "source": "the Hugging Face repo nomadoor/flux-2-klein-9B-360-erp-outpaint-lora"}
+  }
+}

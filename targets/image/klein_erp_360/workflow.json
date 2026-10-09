@@ -1,0 +1,15 @@
+{
+ "1": {"class_type": "UNETLoader", "inputs": {"unet_name": "flux-2-klein-base-9b-fp8.safetensors", "weight_dtype": "default"}, "_meta": {"title": "Load base Klein 9B"}},
+ "2": {"class_type": "LoraLoaderModelOnly", "inputs": {"model": ["1", 0], "lora_name": "flux-2-klein-9B-360-erp-outpaint-lora_V1.safetensors", "strength_model": 0.9}, "_meta": {"title": "360 ERP outpaint LoRA"}},
+ "3": {"class_type": "CLIPLoader", "inputs": {"clip_name": "qwen_3_8b_fp8mixed.safetensors", "type": "flux2", "device": "default"}, "_meta": {"title": "Load text encoder"}},
+ "4": {"class_type": "VAELoader", "inputs": {"vae_name": "flux2-vae.safetensors"}, "_meta": {"title": "Load VAE"}},
+ "5": {"class_type": "LoadImage", "inputs": {"image": "canvas.png"}, "_meta": {"title": "Reference 1"}},
+ "6": {"class_type": "VAEEncode", "inputs": {"pixels": ["5", 0], "vae": ["4", 0]}, "_meta": {"title": "Encode the canvas"}},
+ "7": {"class_type": "CLIPTextEncode", "inputs": {"clip": ["3", 0], "text": "Fill the green spaces according to the image. Outpaint as a seamless 360 equirectangular panorama (2:1). Keep the horizon level. Match left and right edges."}, "_meta": {"title": "Positive prompt"}},
+ "8": {"class_type": "CLIPTextEncode", "inputs": {"clip": ["3", 0], "text": "text, worst quality, blurry, ugly"}, "_meta": {"title": "Negative prompt"}},
+ "9": {"class_type": "ReferenceLatent", "inputs": {"conditioning": ["7", 0], "latent": ["6", 0]}, "_meta": {"title": "Reference on the positive"}},
+ "10": {"class_type": "ReferenceLatent", "inputs": {"conditioning": ["8", 0], "latent": ["6", 0]}, "_meta": {"title": "Reference on the negative"}},
+ "11": {"class_type": "KSampler", "inputs": {"model": ["2", 0], "positive": ["9", 0], "negative": ["10", 0], "latent_image": ["6", 0], "seed": 12345, "steps": 20, "cfg": 5.0, "sampler_name": "euler", "scheduler": "simple", "denoise": 1.0}, "_meta": {"title": "KSampler"}},
+ "12": {"class_type": "VAEDecode", "inputs": {"samples": ["11", 0], "vae": ["4", 0]}, "_meta": {"title": "VAE Decode"}},
+ "13": {"class_type": "SaveImage", "inputs": {"images": ["12", 0], "filename_prefix": "h3pipe_erp360"}, "_meta": {"title": "Save Image"}}
+}

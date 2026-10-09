@@ -17,7 +17,8 @@ export const REFS_DEFAULT = "krea2";
 export type RefTargetKind = "refs" | "keyframes" | "voices";
 
 export function imageTargets(list: TargetList | null | undefined): Target[] {
-  return (list?.targets ?? []).filter((t) => t.kind === "image");
+  // a one-job target (`mode: "pano"`, klein_erp_360: a location's 360) is never offered
+  return (list?.targets ?? []).filter((t) => t.kind === "image" && t.capabilities?.mode !== "pano");
 }
 
 export function isEditTarget(t: Pick<Target, "capabilities"> | undefined): boolean {

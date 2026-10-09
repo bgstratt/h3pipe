@@ -98,3 +98,53 @@ class PanoTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+try:
+    import numpy  # noqa: F401
+    import PIL  # noqa: F401
+    HAVE_NUMPY = True
+except ImportError:
+    HAVE_NUMPY = False
+
+
+@unittest.skipUnless(HAVE_NUMPY, "the canvas helper needs numpy and PIL")
+class KleinPanoTest(PanoTest):
+    """`pano: {"engine": "klein"}`: the plate on a green canvas, outpainted by
+    the ERP LoRA on the author's own graph (klein_erp_360)."""
+
+    def test_the_plate_goes_on_a_green_canvas(self):
+        (job,) = R.plan_generate(self.s, R.GenRequest("location:kitchen", pano={"engine": "klein"}),
+                                 rng=random.Random(0))
+        self.assertEqual(job.target.id, R.KLEIN_PANO_TARGET)
+        self.assertEqual(job.view, R.PANO_VIEW)
+        self.assertEqual((job.width, job.height), R.PANO_SIZE)
+        self.assertEqual((job.steps, job.cfg), (20, 5.0))
+        self.assertIn("base", job.model)
+        self.assertEqual(job.loras, [{"name": R.KLEIN_PANO_LORA, "strength": R.KLEIN_PANO_STRENGTH}])
+        self.assertEqual(job.prompt, R.KLEIN_PANO_PROMPT)
+        canvas = job.references[0]["path"]
+        self.assertEqual(R.image_size(canvas), R.PANO_SIZE)
+        from PIL import Image
+        im = Image.open(canvas).convert("RGB")
+        self.assertEqual(im.getpixel((5, 5)), (0, 255, 0))          # a corner is green
+        self.assertNotEqual(im.getpixel((1024, 512)), (0, 255, 0))   # the middle is the plate
+
+    def test_the_graph_loads_the_canvas(self):
+        (job,) = R.plan_generate(self.s, R.GenRequest("location:kitchen", pano={"engine": "klein"}),
+                                 rng=random.Random(0))
+        job.inputs = {"references": ["h3pipe/canvas.png"]}
+        with open(os.path.join(ROOT, "targets", "image", "klein_erp_360", "workflow.json"),
+                  encoding="utf-8") as fh:
+            g = R.image_graph(J.graph_from(json.load(fh)), job, None)
+        self.assertEqual(next(v for v in g.values() if v["class_type"] == "LoadImage")
+                         ["inputs"]["image"], "h3pipe/canvas.png")
+        ks = next(v for v in g.values() if v["class_type"] == "KSampler")["inputs"]
+        self.assertEqual((ks["steps"], ks["cfg"], ks["sampler_name"]), (20, 5.0, "euler"))
+        lo = [v for v in g.values() if v["class_type"] == "LoraLoaderModelOnly"]
+        self.assertEqual([v["inputs"]["lora_name"] for v in lo], [R.KLEIN_PANO_LORA])
+
+    def test_a_360_is_two_to_one(self):
+        with self.assertRaisesRegex(R.RefError, "2:1"):
+            R.plan_generate(self.s, R.GenRequest("location:kitchen", pano={"engine": "klein"},
+                                                 size="1344x768"))

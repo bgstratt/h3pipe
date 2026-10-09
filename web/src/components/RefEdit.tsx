@@ -155,7 +155,7 @@ export function EditForm({ r, view: view0, take, viewChoices, onDone }: {
       </div>
       <details>
         <summary className="h3-small h3-muted">LoRAs {loras.length ? `(${loras.length})` : ""}</summary>
-        <LoraEditor rows={loras} onChange={setLoras} />
+        <LoraEditor rows={loras} onChange={setLoras} empty="None added: the edit model runs as it is" />
       </details>
       {err && <div className="h3-err h3-small">{err}</div>}
       <div className="h3-row" style={{ gap: 6 }}>

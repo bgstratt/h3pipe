@@ -63,8 +63,10 @@ export function ModelSelect({ value, onChange, placeholder, choices, grouped }: 
   );
 }
 
-/** A stack of LoRA rows with strength. */
-export function LoraEditor({ rows, onChange, choices }: { rows: LoraRow[]; onChange: (rows: LoraRow[]) => void; choices?: string[] }) {
+/** A stack of LoRA rows with strength. `empty` says what no rows means where it is
+ * shown: an override's custom list of none bypasses the workflow's LoRA, while
+ * an edit with none simply adds nothing. */
+export function LoraEditor({ rows, onChange, choices, empty }: { rows: LoraRow[]; onChange: (rows: LoraRow[]) => void; choices?: string[]; empty?: string }) {
   const loras = useApp((s) => s.loras);
   useEffect(() => {
     void loadModels();
@@ -95,7 +97,7 @@ export function LoraEditor({ rows, onChange, choices }: { rows: LoraRow[]; onCha
       ))}
       <div className="h3-row">
         <button className="h3-btn" onClick={() => onChange([...rows, { name: "", strength: "1" }])}>+ LoRA</button>
-        {!rows.length && <span className="h3-muted h3-small">No LoRAs (the workflow's LoRA is bypassed)</span>}
+        {!rows.length && <span className="h3-muted h3-small">{empty ?? "No LoRAs (the workflow's LoRA is bypassed)"}</span>}
       </div>
     </div>
   );

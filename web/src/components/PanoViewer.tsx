@@ -35,6 +35,7 @@ const PANO_SIZES = ["2048x1024", "1536x768"];
 export function PanoSection({ ep, r }: { ep: string; r: Ref }) {
   const busy = useApp((s) => !!s.busy[`refgen|${r.id}`]);
   const [psize, setPsize] = useState(PANO_SIZES[0]);
+  const [engine, setEngine] = useState<"klein" | "qwen">("klein");
   const panos = r.panos ?? [];
   return (
     <div className="h3-col" style={{ gap: 3 }}>
@@ -46,11 +47,15 @@ export function PanoSection({ ep, r }: { ep: string; r: Ref }) {
           title={r.exists ? "Turn the live plate into a 360 panorama (Qwen 2.1 + the pano360 LoRA). Open it to aim a camera and save a view as a new angle." : "Pick or import a plate first"}
           onClick={() => void generateRef({
             ref: r.id, view: null, count: 1, seed_mode: "new", seed: null, prompt: null, model: null,
-            loras: null, steps: null, note: "360", pano: {}, size: psize,
+            loras: null, steps: null, note: "360", pano: { engine }, size: psize,
           })}
         >
           <i className={busy ? "pi pi-spin pi-spinner" : "pi pi-globe"} /> Make 360
         </button>
+        <select className="h3-in" value={engine} onChange={(e) => setEngine(e.target.value as "klein" | "qwen")} title="Klein: the plate stays where it is and the 360 is painted round it (base Klein 9B + the ERP outpaint LoRA, about a minute). Qwen: the pano360 edit LoRA redraws the place as a 360 from the plate (faster; it tends to pull the camera back).">
+          <option value="klein">Klein (outpaint)</option>
+          <option value="qwen">Qwen (pano360)</option>
+        </select>
         <select className="h3-in" value={psize} onChange={(e) => setPsize(e.target.value)} title="The 360's size: 2048x1024 has a third more detail in every view; 1536x768 is about twice as fast">
           {PANO_SIZES.map((x) => <option key={x} value={x}>{x}</option>)}
         </select>

@@ -873,6 +873,13 @@ Queues one candidate per call. It returns without waiting, like `/render`.
   sentence plus the location's description, cut to one sentence of at most 35 words. The
   text is encoded at 1088, and sampling starts from an empty 2048x1024 latent (`size` can ask for another 2:1 size, e.g. 1536x768, which is faster and softer): the
   `latent: "empty"` value makes the target's switch skip the references' latent.
+- **`engine: "klein"`** (the editor's default) is the other way. `comfy_nodes/h3_erp.py`
+  places the plate on a green 2:1 canvas: a pinhole camera looking straight ahead, 70°
+  wide. nomadoor's FLUX.2 Klein 9B 360 ERP outpaint LoRA then paints the 360 round it on
+  `klein_erp_360`, which is the author's own graph: the base Klein 9B, LoRA 0.9, 20 steps,
+  cfg 5, the canvas as reference and latent. The plate stays where it was taken, where
+  Qwen tends to pull the camera back. It takes about a minute. That target's
+  `mode: "pano"` keeps it out of the model pickers.
 - **Where it lands:** takes of the location's `pano` pseudo-view, listed as `panos`, with
   `source: "pano"`. `PUT /refs/pick` refuses them (400): a 360 is never the plate.
 - **In the editor:** the 360 viewer aims a camera into one and saves the view through

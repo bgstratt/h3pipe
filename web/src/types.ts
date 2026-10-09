@@ -1317,7 +1317,7 @@ export interface RefGenerateRequest {
   /** an edit of a picture the ref already has (`prompt` is the instruction) */
   edit?: RefEditRequest | null;
   /** P5: a 360 panorama of a location (its live plate, then `with`'s) */
-  pano?: { with?: string[] } | null;
+  pano?: { with?: string[]; engine?: "qwen" | "klein" } | null;
   /** P4: the picture's size, "WxH" (a 360's: 2:1) */
   size?: string | null;
 }

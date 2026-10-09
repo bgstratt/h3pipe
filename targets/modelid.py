@@ -117,6 +117,8 @@ FAMILIES: dict[str, dict] = {
     # Phr00t's Qwen-Image-Edit Rapid AIO (one checkpoint, targets/image/qwen_rapid_aio)
     "qwen-rapid-aio": {"label": "Qwen-Image-Edit Rapid AIO"},
     "flux2-klein-9b": {"label": "FLUX.2 Klein 9B"},
+    # the undistilled Klein 9B (targets/image/klein_erp_360: the 360 ERP LoRA's base)
+    "flux2-klein-9b-base": {"label": "FLUX.2 Klein 9B base"},
     "qwen3-8b": {"label": "Qwen3 8B (FLUX.2 Klein 9B's text encoder)"},
     "flux2-vae": {"label": "FLUX.2 VAE"},
     "flux1": {"label": "FLUX.1"},

@@ -536,13 +536,13 @@ Every file any target names. `python h3.py targets` tells you which of these you
 
 | File | ComfyUI folder | Tier | Targets | Download |
 |---|---|---|---|---|
-| `qwen_3_8b_fp8mixed.safetensors` | `models/text_encoders/` | required | `flux2_klein`, `flux2_klein_edit` | [Comfy-Org/flux2-klein-9B](https://huggingface.co/Comfy-Org/flux2-klein-9B/resolve/main/split_files/text_encoders/qwen_3_8b_fp8mixed.safetensors) |
+| `qwen_3_8b_fp8mixed.safetensors` | `models/text_encoders/` | required | `flux2_klein`, `flux2_klein_edit`, `klein_erp_360` | [Comfy-Org/flux2-klein-9B](https://huggingface.co/Comfy-Org/flux2-klein-9B/resolve/main/split_files/text_encoders/qwen_3_8b_fp8mixed.safetensors) |
 
 **FLUX.2 VAE** (`flux2-vae`)
 
 | File | ComfyUI folder | Tier | Targets | Download |
 |---|---|---|---|---|
-| `flux2-vae.safetensors` | `models/vae/` | required | `flux2_klein_edit` | [Comfy-Org/flux2-dev](https://huggingface.co/Comfy-Org/flux2-dev/resolve/main/split_files/vae/flux2-vae.safetensors) |
+| `flux2-vae.safetensors` | `models/vae/` | required | `flux2_klein_edit`, `klein_erp_360` | [Comfy-Org/flux2-dev](https://huggingface.co/Comfy-Org/flux2-dev/resolve/main/split_files/vae/flux2-vae.safetensors) |
 | `full_encoder_small_decoder.safetensors` | `models/vae/` | required | `flux2_klein` | [black-forest-labs/FLUX.2-small-decoder](https://huggingface.co/black-forest-labs/FLUX.2-small-decoder/resolve/main/full_encoder_small_decoder.safetensors) |
 
 **FLUX.1 Kontext dev** (`flux1-kontext-dev`)
@@ -568,6 +568,12 @@ Every file any target names. `python h3.py targets` tells you which of these you
 | File | ComfyUI folder | Tier | Targets | Download |
 |---|---|---|---|---|
 | `ae.safetensors` | `models/vae/` | required | `flux_kontext`, `z_image_turbo` | [Comfy-Org/Lumina_Image_2.0_Repackaged](https://huggingface.co/Comfy-Org/Lumina_Image_2.0_Repackaged/resolve/main/split_files/vae/ae.safetensors) |
+
+**FLUX.2 Klein 9B base** (`flux2-klein-9b-base`)
+
+| File | ComfyUI folder | Tier | Targets | Download |
+|---|---|---|---|---|
+| `flux-2-klein-base-9b-fp8.safetensors` | `models/diffusion_models/` | required | `klein_erp_360` | [black-forest-labs/FLUX.2-klein-base-9b-fp8](https://huggingface.co/black-forest-labs/FLUX.2-klein-base-9b-fp8/resolve/main/flux-2-klein-base-9b-fp8.safetensors) |
 
 **Krea 2** (`krea2`)
 

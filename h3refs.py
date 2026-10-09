@@ -2669,6 +2669,38 @@ def pano_prompt(description: str) -> str:
     return f"Transform this set of images into an equirectangular 360 panorama. Scene: {scene}."
 
 
+# The other way to a 360 (`pano: {"engine": "klein"}`): nomadoor's FLUX.2 Klein
+# 9B 360 ERP outpaint LoRA fills a green 2:1 canvas round the plate, which
+# comfy_nodes/h3_erp.py places on it with a pinhole camera of KLEIN_PANO_FOV.
+# Its own workflow's settings: the BASE Klein 9B (the distilled one draws it
+# badly), LoRA 0.9, 20 steps, cfg 5, euler, the canvas as a reference latent.
+KLEIN_PANO_TARGET = "klein_erp_360"     # the author's own graph (targets/image/klein_erp_360)
+KLEIN_PANO_LORA = "flux-2-klein-9B-360-erp-outpaint-lora_V1.safetensors"
+KLEIN_PANO_STRENGTH = 0.9
+KLEIN_PANO_FOV = 70.0
+KLEIN_PANO_PROMPT = ("Fill the green spaces according to the image. Outpaint as a seamless 360 "
+                     "equirectangular panorama (2:1). Keep the horizon level. Match left and "
+                     "right edges.")
+ERP_HELPER = os.path.join(os.path.dirname(os.path.abspath(__file__)), "comfy_nodes", "h3_erp.py")
+PANO_ENGINES = ("qwen", "klein")
+
+
+def erp_canvas(ref: Ref, plate: str, width: int, fov: float = KLEIN_PANO_FOV) -> str:
+    """The plate on a green 2:1 canvas (h3_erp.py, run with this Python), kept
+    in refs/_takes/<key>/_erp/ by the plate's sha1, the width and the fov."""
+    import subprocess
+    d = os.path.join(takes_dir(ref), "_erp")
+    os.makedirs(d, exist_ok=True)
+    out = os.path.join(d, f"{T.file_sha1(plate)}_{width}_f{int(fov)}.png")
+    if not os.path.isfile(out):
+        r = subprocess.run([sys.executable, ERP_HELPER, plate, out, "--width", str(width),
+                            "--fov", str(fov)], capture_output=True, text=True, timeout=300)
+        if r.returncode != 0 or not os.path.isfile(out):
+            raise RefError(f"couldn't place the plate on a 360 canvas: "
+                           f"{(r.stderr or r.stdout).strip()[-400:]}")
+    return out
+
+
 def plan_pano(s: Series, ref: Ref, req: GenRequest,
               rng: random.Random | None = None) -> list[GenJob]:
     """The jobs of a 360 panorama of location `ref`: its live plate, then the
@@ -2680,8 +2712,13 @@ def plan_pano(s: Series, ref: Ref, req: GenRequest,
     if ref.kind != "location":
         raise RefError(f"{ref.id} is not a location: only a place has a 360")
     p = req.pano
-    if not isinstance(p, dict) or set(p) - {"with"}:
-        raise RefError('pano must be {"with": [location ids]}')
+    if not isinstance(p, dict) or set(p) - {"with", "engine"}:
+        raise RefError('pano must be {"with": [location ids], "engine": "qwen" | "klein"}')
+    engine = p.get("engine") or "qwen"
+    if engine not in PANO_ENGINES:
+        raise RefError(f"pano.engine must be {' or '.join(PANO_ENGINES)}, not {engine!r}")
+    if engine == "klein":
+        return _plan_klein_pano(s, ref, req, rng)
     withs = p.get("with") or []
     if not isinstance(withs, list) or not all(isinstance(x, str) for x in withs):
         raise RefError("pano.with must be a list of location ids")
@@ -2717,6 +2754,42 @@ def plan_pano(s: Series, ref: Ref, req: GenRequest,
             ref=ref, view=PANO_VIEW, candidate=c, prompt=prompt, seed=seed, seed_source=source,
             model=req.model or "", loras=[dict(lo) for lo in loras], steps=steps, cfg=cfg,
             negative="", width=w, height=h, note=req.note or "360", target=target,
+            negative_source="none", values=dict(vals), references=[dict(r) for r in refs],
+            edit=dict(record)))
+    return jobs
+
+
+def _plan_klein_pano(s: Series, ref: Ref, req: GenRequest,
+                     rng: random.Random | None = None) -> list[GenJob]:
+    """plan_pano's Klein way: the live plate on a green canvas (erp_canvas),
+    outpainted by the ERP LoRA on the base Klein 9B at PANO_SIZE."""
+    target = TG.load_target(req.target or KLEIN_PANO_TARGET, "image")
+    src = _picture_of(s, ref, None, None, "the 360's picture")
+    w, h = parse_override_size(req.size) if req.size else PANO_SIZE
+    if w != 2 * h:
+        raise RefError(f"a 360 is 2:1, not {w}x{h}")
+    canvas = erp_canvas(ref, src["path"], w)
+    refs = [dict(src, role="source", path=canvas, name=f"{ref.name} on a 360 canvas")]
+    preset = target.presets.get("final")
+    model = req.model or (preset.model if preset is not None else "")
+    steps = int(req.steps or (preset.steps if preset is not None and preset.steps else 20))
+    cfg = float(req.cfg if req.cfg is not None
+                else (preset.extra.get("cfg", 5.0) if preset is not None else 5.0))
+    loras = (req.loras if req.loras is not None
+             else [{"name": KLEIN_PANO_LORA, "strength": KLEIN_PANO_STRENGTH}])
+    prompt = req.prompt.strip() if req.prompt else KLEIN_PANO_PROMPT
+    vals = _preset_values(target)
+    record = {"take": None, "view": PANO_VIEW, "instruction": prompt, "wrap": False, "with": [],
+              "pano": True, "engine": "klein", "fov": KLEIN_PANO_FOV}
+    rng = rng or random.SystemRandom()
+    jobs = []
+    for c in range(req.count):
+        seed, source = ((int(req.seed), "typed") if c == 0 and req.seed is not None
+                        else (rng.getrandbits(NEW_SEED_BITS), "new"))
+        jobs.append(GenJob(
+            ref=ref, view=PANO_VIEW, candidate=c, prompt=prompt, seed=seed, seed_source=source,
+            model=model, loras=[dict(lo) for lo in loras], steps=steps, cfg=cfg,
+            negative="", width=w, height=h, note=req.note or "360 (Klein)", target=target,
             negative_source="none", values=dict(vals), references=[dict(r) for r in refs],
             edit=dict(record)))
     return jobs
