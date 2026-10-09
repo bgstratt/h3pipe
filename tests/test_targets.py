@@ -49,7 +49,7 @@ class LoadingTest(unittest.TestCase):
                                ("image", "z_image_turbo"), ("image", "flux2_klein"),
                                ("image", "flux2_klein_edit"), ("image", "flux_kontext"),
                                ("image", "minimax_h3_still"), ("image", "qwen_image_21"),
-                               ("audio", "ltx2_voice")})
+                               ("image", "qwen_rapid_aio"), ("audio", "ltx2_voice")})
         self.assertEqual([t.id for t in TG.list_targets("video")],
                          ["ltx2", "ltx2_ingredients", "minimax_h3_fl2va", H3, "wan22_i2v",
                           "wan22_ti2v", "wan22_vace"])
@@ -402,7 +402,8 @@ class TargetsRouteTest(ApiTest):
         self.assertEqual(set(by), {H3, "ltx2", "ltx2_ingredients", "minimax_h3_fl2va", "krea2",
                                    "wan22_i2v", "wan22_ti2v", "wan22_vace", "z_image_turbo",
                                    "flux2_klein", "flux2_klein_edit", "flux_kontext",
-                                   "minimax_h3_still", "qwen_image_21", "ltx2_voice"})
+                                   "minimax_h3_still", "qwen_image_21", "qwen_rapid_aio",
+                                   "ltx2_voice"})
         for tid, label, short in (("wan22_i2v", "Wan 2.2 14B I2V", "Wan I2V"),
                                   ("wan22_ti2v", "Wan 2.2 5B TI2V", "Wan 5B"),
                                   ("wan22_vace", "Wan 2.2 14B VACE (refs)", "Wan+refs")):
@@ -460,7 +461,7 @@ class TargetsRouteTest(ApiTest):
         images = self.ok(A.get_targets(self.ctx, {"kind": "image"}))["targets"]
         self.assertEqual([t["id"] for t in images],
                          ["flux2_klein", "flux2_klein_edit", "flux_kontext", "krea2",
-                          "minimax_h3_still", "qwen_image_21", "z_image_turbo"])
+                          "minimax_h3_still", "qwen_image_21", "qwen_rapid_aio", "z_image_turbo"])
         caps = {t["id"]: t["capabilities"] for t in images}
         self.assertEqual(caps["krea2"], {"mode": "t2i", "max_refs": 0, "negative_prompt": False})
         self.assertEqual(caps["flux2_klein_edit"],

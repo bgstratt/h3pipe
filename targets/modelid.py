@@ -114,6 +114,8 @@ FAMILIES: dict[str, dict] = {
     "qwen-image-2.1": {"label": "Qwen-Image 2.1"},
     "qwen-image-2.1-vae": {"label": "Qwen-Image 2.1 VAE"},
     "qwen3vl-8b": {"label": "Qwen3-VL 8B (Qwen-Image 2.1's text encoder)"},
+    # Phr00t's Qwen-Image-Edit Rapid AIO (one checkpoint, targets/image/qwen_rapid_aio)
+    "qwen-rapid-aio": {"label": "Qwen-Image-Edit Rapid AIO"},
     "flux2-klein-9b": {"label": "FLUX.2 Klein 9B"},
     "qwen3-8b": {"label": "Qwen3 8B (FLUX.2 Klein 9B's text encoder)"},
     "flux2-vae": {"label": "FLUX.2 VAE"},

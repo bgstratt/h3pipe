@@ -599,6 +599,12 @@ Every file any target names. `python h3.py targets` tells you which of these you
 |---|---|---|---|---|
 | `qwen_image_2.1_vae_bf16.safetensors` | `models/vae/` | required | `qwen_image_21` | [Comfy-Org/Qwen-Image-2.1](https://huggingface.co/Comfy-Org/Qwen-Image-2.1/resolve/main/vae/qwen_image_2.1_vae_bf16.safetensors) |
 
+**Qwen-Image-Edit Rapid AIO** (`qwen-rapid-aio`)
+
+| File | ComfyUI folder | Tier | Targets | Download |
+|---|---|---|---|---|
+| `Qwen-Rapid-AIO-SFW-v19.safetensors` | `models/checkpoints/` | required | `qwen_rapid_aio` | [Phr00t/Qwen-Image-Edit-Rapid-AIO](https://huggingface.co/Phr00t/Qwen-Image-Edit-Rapid-AIO/resolve/main/v19/Qwen-Rapid-AIO-SFW-v19.safetensors) |
+
 **Z-Image Turbo** (`z-image-turbo`)
 
 | File | ComfyUI folder | Tier | Targets | Download |
