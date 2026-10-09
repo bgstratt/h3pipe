@@ -37,6 +37,7 @@ import { OverrideFields } from "./OverrideFields";
 import { PassToggle } from "./ShotsTab";
 import { Progress } from "./Thumb";
 import { DropSlot, SupplyPicker, UploadButton } from "./Upload";
+import { EditForm, editSourceText } from "./RefEdit";
 
 const FILTERS: { id: RefFilter; label: string; title: string }[] = [
   { id: "episode", label: "this episode", title: "Refs used by this episode's shots (this pass)" },
@@ -321,7 +322,7 @@ const Candidate = memo(function Candidate({ ep, r, view, t, live, selected }: {
         }}
       >
         {!(url && t.status === "ok") && <span className={t.status === "failed" ? "h3-err" : ""}>{t.status}</span>}
-        <span className="h3-thumb-label">{tn(t.take)}{t.source === "imported" ? " ⤓" : t.source === "frame" && t.from ? ` ← ${t.from.shot}` : ""}</span>
+        <span className="h3-thumb-label">{tn(t.take)}{t.source === "imported" ? " ⤓" : t.source === "edited" ? ` ✎${t.edit?.take != null ? ` ← ${tn(t.edit.take)}` : ""}` : t.source === "frame" && t.from ? ` ← ${t.from.shot}` : ""}</span>
         {live && <span className="h3-cand-live">live</span>}
       </div>
       {prog && <Progress value={prog.value} max={prog.max} />}
@@ -356,6 +357,7 @@ function Selection({ r }: { r: Ref }) {
   const sel = useApp((s) => (s.refSel && s.refSel.ref === r.id ? s.refSel : null));
   const busy = useApp((s) => !!s.busy[`refpick|${r.id}`]);
   const busyDiscard = useApp((s) => !!sel && !!s.busy[`refdiscard|${r.id}|${sel.view ?? ""}|${sel.take}`]);
+  const [editing, setEditing] = useState<string | null>(null);
   if (!sel) return null;
   const t = takesOf(r, sel.view).find((x) => x.take === sel.take);
   if (!t) return null;
@@ -382,6 +384,16 @@ function Selection({ r }: { r: Ref }) {
             <i className="pi pi-clone" /> {picked != null && !live ? "Compare with live" : "View"}
           </button>
         )}
+        {!isAudioRef(r) && sel.view !== SHEET_VIEW && (
+          <button
+            className={`h3-btn${editing === `${sel.view}|${t.take}` ? " h3-on" : ""}`}
+            disabled={!usable}
+            title={`Change ${tn(t.take)} with an edit model (“remove the people”, “a red coat”): the result is a new candidate`}
+            onClick={() => setEditing(editing === `${sel.view}|${t.take}` ? null : `${sel.view}|${t.take}`)}
+          >
+            <i className="pi pi-pencil" /> Edit…
+          </button>
+        )}
         {live && (
           <button
             className="h3-btn h3-danger"
@@ -404,8 +416,18 @@ function Selection({ r }: { r: Ref }) {
           <i className={busyDiscard ? "pi pi-spin pi-spinner" : "pi pi-trash"} /> Discard
         </button>
       </div>
+      {editing === `${sel.view}|${t.take}` && <EditForm r={r} view={sel.view} take={t.take} onDone={() => setEditing(null)} />}
       {(t.prompt || t.model || t.note || t.original_name || keyframeSource(t) || (t.source === "generated") || (t.status === "failed" && t.save_notes)) && (
         <div className="h3-kv">
+          {t.source === "edited" && t.edit && (
+            <>
+              <span>edited</span>
+              <span title={t.edit.wrap === false ? "Sent as typed" : "The instruction, with the rest of the picture named as fixed"}>
+                {editSourceText(t.edit)}: “{t.edit.instruction}”
+                {t.edit.with?.length ? ` · with ${t.edit.with.map((w) => `${w.ref}${w.view ? ` (${viewLabel(w.view)})` : ""}`).join(", ")}` : ""}
+              </span>
+            </>
+          )}
           {keyframeSource(t) && <><span>from</span><span>{keyframeSource(t)}</span></>}
           {t.source === "generated" && (
             <>
@@ -444,7 +466,12 @@ function GenerateBar({ r }: { r: Ref }) {
   const gen = canGenerate(r) && !isAudioRef(r);
   const importView = isChar ? view || null : null;
   const kind = isAudioRef(r) ? "audio" : "image";
+  const [editing, setEditing] = useState(false);
+  // the live picture: a character's picked view, else the ref's file (one
+  // dropped in by hand has no take to select, and this is how it gets edited)
+  const live = isChar ? !!view && pickedOf(r, view) != null : r.exists;
   return (
+    <>
     <div className="h3-row h3-wrap h3-genbar">
       {isChar && (
         <select className="h3-in" value={view} onChange={(e) => setView(e.target.value)} title="Which view to generate or import into">
@@ -483,6 +510,16 @@ function GenerateBar({ r }: { r: Ref }) {
       >
         <i className="pi pi-download" /> Import…
       </button>
+      {!isAudioRef(r) && (
+        <button
+          className={`h3-btn${editing ? " h3-on" : ""}`}
+          disabled={!live}
+          title={live ? "Change the live picture with an edit model: the result is a new candidate" : isChar && !view ? "Choose a view to edit its live picture" : "Nothing is live yet: pick or import a picture first"}
+          onClick={() => setEditing(!editing)}
+        >
+          <i className="pi pi-pencil" /> Edit live…
+        </button>
+      )}
       {!isChar ? (
         <UploadButton refId={r.id} view={null} kind={kind} title={`Upload ${kind === "audio" ? "an audio file" : "an image"} from this computer as a new candidate, live at once (or drop one on this row)`} />
       ) : (
@@ -496,6 +533,8 @@ function GenerateBar({ r }: { r: Ref }) {
         />
       )}
     </div>
+    {editing && live && <EditForm r={r} view={isChar ? view : null} take={null} onDone={() => setEditing(false)} />}
+    </>
   );
 }
 

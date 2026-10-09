@@ -2250,14 +2250,20 @@ def post_refs_generate(ctx: Context, body):
         if kind != "audio":
             raise ApiError(400, f"seconds is only for a voice ref, not {ref.id}")
     pass_ = check_pass(body.get("pass"), "final")
+    # an edit of a picture the ref already has (h3refs.plan_edit): `prompt` is
+    # the instruction, `edit` says which picture and what else comes along
+    edit = body.get("edit")
+    if edit is not None and not isinstance(edit, dict):
+        raise ApiError(400, 'edit must be {"take": n or null, "with": [...], "wrap": bool} '
+                            'or null')
     req = R.GenRequest(ref=ref.id, view=view, count=count, seed_mode=seed_mode,
                        seed=seed_in(body.get("seed")), prompt=prompt or None,
                        model=_opt_str(body, "model") or None,
                        loras=_opt_loras(body.get("loras")),
                        steps=_opt_steps(body.get("steps")), note=_opt_str(body, "note") or "",
                        target=target or None, negative=negative, pass_=pass_,
-                       seconds=seconds)
-    why = R.can_generate(s, ref)
+                       seconds=seconds, edit=edit)
+    why = None if edit is not None else R.can_generate(s, ref)
     if why:
         raise ApiError(400, why)
     try:

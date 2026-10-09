@@ -185,6 +185,70 @@ def parse_discard(spec: str) -> tuple[str, str | None, int]:
     return rid, view, int(tk.lstrip("tT"))
 
 
+def parse_ref_spec(spec: str, flag: str) -> tuple[str, str | None, int | None]:
+    """REF[:VIEW][:TAKE] -> (ref id, view or None, take or None: the live
+    picture). ValueError if malformed."""
+    rid, take = spec, None
+    head, _, tk = spec.rpartition(":")
+    if head and re.fullmatch(r"[tT]\d+|\d+", tk) and not re.fullmatch(r"shot:[^:]+", head):
+        rid, take = head, int(tk.lstrip("tT"))
+    view = None
+    m = re.fullmatch(r"(subject:[^:]+):(\d\d_[a-z]+)", rid)
+    if m:
+        rid, view = m.group(1), m.group(2)
+    if not re.match(r"(subject|location|shot):", rid):
+        raise ValueError(f"{flag} takes REF[:VIEW][:TAKE] (e.g. location:kitchen:3, "
+                         f"subject:ada:02_side), not {spec!r}")
+    return rid, view, take
+
+
+def edit(s, ep: str, args) -> int:
+    """kreagen --edit: change a picture a ref already has (a take, or the live
+    one) as --instruction says, on an edit target, into new candidates."""
+    try:
+        rid, view, take = parse_ref_spec(args.edit, "--edit")
+        withs = []
+        for w in args.with_ or []:
+            wr, wv, wt = parse_ref_spec(w, "--with")
+            withs.append({"ref": wr, **({"view": wv} if wv else {}),
+                          **({"take": wt} if wt else {})})
+    except ValueError as e:
+        print(f"  !! {e}")
+        return 2
+    if not (args.instruction or "").strip():
+        print("  !! --edit needs --instruction: what to change")
+        return 2
+    loras = None
+    if args.lora:
+        loras = [{"name": args.lora, "strength": args.lora_strength}]
+    req = R.GenRequest(ref=rid, view=view, count=args.count, seed=args.seed,
+                       prompt=args.instruction, loras=loras, steps=args.steps, cfg=args.cfg,
+                       target=args.target or None, note=args.instruction[:80],
+                       edit={"take": take, "with": withs, "wrap": not args.as_typed})
+    try:
+        jobs = R.plan_generate(s, req)
+    except (R.RefError, R.UnknownRef) as e:
+        print(f"  !! {args.edit}: {e}")
+        return 1
+    job = jobs[0]
+    print(f"  {args.edit}: edit on {job.target.short} at {job.width}x{job.height}, "
+          f"{len(job.references)} picture(s): {R.references_text(job.references)}")
+    if args.dry_run:
+        print(f"\n{job.prompt}\n")
+        return 0
+    comfy = J.Comfy(args.comfy, client_id="kreagen")
+    listing = J.model_lister(comfy)
+    try:
+        done = R.generate_and_wait(s, req, comfy, timeout=args.timeout, listing=listing,
+                                   cache=R.TG.modelid.temp_cache(), pick=bool(args.pick))
+    except (R.RefError, R.UnknownRef, RuntimeError) as e:
+        print(f"  !! {args.edit}: {e}")
+        return 1
+    for t in done:
+        print(f"  <- {R.ep_rel(ep, t.paths.image)}")
+    return 0 if done else 1
+
+
 def discard(s, ep: str, specs: list[str]) -> int:
     """kreagen --discard: move each candidate to refs/_takes/_trash/."""
     failed = 0
@@ -258,6 +322,19 @@ def main() -> int:
                     help="move a candidate to refs/_takes/_trash/ (e.g. location:kitchen:3, "
                          "subject:ada:02_side:2, shot:sh020:first:1); nothing is deleted, and "
                          "if it was the pick the ref is cleared as --clear does; repeatable")
+    ap.add_argument("--edit", metavar="REF[:VIEW][:TAKE]",
+                    help="change a picture the ref already has (that take, else the live "
+                         "picture) as --instruction says, on an edit target, into new "
+                         "candidates: location:ambulance_bay_night, subject:ada:02_side:3")
+    ap.add_argument("--instruction", metavar="TEXT", help="with --edit: what to change")
+    ap.add_argument("--with", dest="with_", metavar="REF[:VIEW][:TAKE]", action="append",
+                    help="with --edit: another ref's picture to bring in (image 2 onward); "
+                         "repeatable")
+    ap.add_argument("--as-typed", action="store_true",
+                    help="with --edit: send the instruction exactly as typed (a LoRA's "
+                         "trigger syntax), with nothing added around it")
+    ap.add_argument("--count", type=int, default=1, help="with --edit: how many candidates")
+    ap.add_argument("--seed", type=int, default=None, help="with --edit: the first one's seed")
     ap.add_argument("--yes", action="store_true",
                     help="don't stop when --clear would remove a live file other episodes "
                          "read (they are blocked until something is picked again)")
@@ -293,6 +370,8 @@ def main() -> int:
         return 1
     if args.discard:
         return discard(s, ep, args.discard)
+    if args.edit:
+        return edit(s, ep, args)
 
     voices = bool(args.voices or args.from_take)
     todo = None

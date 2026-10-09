@@ -840,6 +840,30 @@ Queues one candidate per call. It returns without waiting, like `/render`.
   `h3pipe.ref` `{"ep", "ref", "view", "take", "status"}`.
 - Returns `{"queued": [{"ref", "view", "take", "prompt_id", "seed"}], "errors": [...]}`.
 
+**An edit (2026-10-08).** `"edit": {"take": n | null, "with": [{"ref", "view"?, "take"?}],
+"wrap": true}` changes a picture the ref already has instead of drawing one
+(`h3refs.plan_edit`):
+- The picture is `take` of (`ref`, `view`), or with `take: null` the live picture. That
+  includes a plate dropped into `refs/_bg` by hand, which has no take. A character is
+  edited one view at a time.
+- `prompt` is the instruction, and it is required. It is wrapped by
+  `targets/image/common.edit_prompt`, which names whatever the instruction doesn't change
+  as fixed. `wrap: false` sends it exactly as typed, for a LoRA with its own trigger
+  words (`<mva> left side view, eye-level shot`).
+- `with` adds other refs' pictures as image 2 onward. A character comes as its picked
+  three-quarter view unless `view` says otherwise.
+- The target must be an edit target (`capabilities.mode: "edit"`; 400 otherwise). It is
+  the request's, else the first of the ref's own target, the episode's keyframe target
+  and its refs target that can edit. The pictures must fit its `max_refs`.
+- The picture keeps its size, scaled onto the target's grid and minimum.
+- Each candidate gets a new seed unless `seed` is typed.
+- The ref's overrides are not read: they are for generating it from its description.
+- The take is an ordinary new candidate of the same ref and view, with `source:
+  "edited"`. Its sidecar records `edit` (`take`, `view`, `instruction`, `wrap`, `with`)
+  and `references`, and `/refs` lists `edit` and `target` on it.
+- The CLI is `h3.py refs <ep> --edit REF[:VIEW][:TAKE] --instruction "…"` (`--with`,
+  `--as-typed`, `--target`, `--lora`, `--count`).
+
 ### `PUT /h3pipe/refs/pick`
 Body `{"ep", "ref", "view"?, "take"}`. Copies the take into place, stitching the
 sheet when all four views are picked. Returns the ref as `/refs` lists it. 409 if the

@@ -2048,6 +2048,10 @@ class GenRequest:
     pass_: str = "final"             # a keyframe's size: this pass's render size
     negative_source: str = "request"  # what an explicit `negative` is (kreagen: "file")
     seconds: float | None = None     # a voice ref's length (None: the audio target's default)
+    # an edit of a picture this ref already has (plan_edit): {"take": n | None
+    # (the live picture), "with": [{"ref", "view"?, "take"?}], "wrap": bool};
+    # `prompt` is then the instruction
+    edit: dict | None = None
 
 
 @dataclass
@@ -2085,6 +2089,7 @@ class GenJob:
     fps: float | None = None
     line: str = ""
     line_source: str = ""            # script | neutral | request
+    edit: dict = field(default_factory=dict)     # an edit: what it started from (plan_edit)
 
     @property
     def is_audio(self) -> bool:
@@ -2139,6 +2144,8 @@ def plan_generate(s: Series, req: GenRequest, overrides: dict | None = None,
     target preset's.
     """
     ref = find_ref(s, req.ref)
+    if req.edit is not None:
+        return plan_edit(s, ref, req, overrides, rng, ready, defaults)
     why = can_generate(s, ref)
     if why:
         raise RefError(why)
@@ -2265,6 +2272,191 @@ def plan_generate(s: Series, req: GenRequest, overrides: dict | None = None,
     return jobs
 
 
+def is_edit_target(t) -> bool:
+    """Can this image target edit a picture (it reads reference images)?"""
+    c = t.capabilities() if t is not None else {}
+    return c.get("mode") == "edit" and int(c.get("max_refs") or 0) >= 1
+
+
+def edit_target_ids() -> list[str]:
+    return [t.id for t in TG.list_targets("image") if is_edit_target(t)]
+
+
+def edit_target_for(s: Series, ref: Ref, requested: str | None = None,
+                    ov_data: dict | None = None, ready=None, defaults: dict | None = None):
+    """The image target an edit uses: the request's, else the first of the
+    ref's own target, the episode's keyframe target and its refs target that
+    can edit (is_edit_target). RefError when it is none of them, or the
+    requested one only draws from text."""
+    if requested:
+        try:
+            t = TG.load_target(requested, "image")
+        except (TG.TargetError, ValueError) as e:
+            raise RefError(str(e)) from None
+        if not is_edit_target(t):
+            raise RefError(f"{t.short} draws from text only and can't edit a picture: "
+                           f"choose an edit target ({', '.join(edit_target_ids())})")
+        return t
+    d = defaults if defaults is not None else image_defaults(s, ready)
+    ov = ref_override(ov_data if ov_data is not None else load_overrides(ref.home), ref.id)
+    for tid in (ov.get("target"), d.get("keyframe_target"), d.get("target")):
+        if not tid:
+            continue
+        try:
+            t = TG.load_target(tid, "image")
+        except (TG.TargetError, ValueError):
+            continue
+        if is_edit_target(t):
+            return t
+    raise RefError(f"no edit target is chosen for this episode: pick one for the edit "
+                   f"({', '.join(edit_target_ids())})")
+
+
+def _picture_of(s: Series, ref: Ref, view: str | None, take: int | None,
+                what: str) -> dict:
+    """One picture an edit reads, shaped as reference_images gives them:
+    `take` of (ref, view), else the ref's live picture (a character's picked
+    view)."""
+    if ref.is_audio:
+        raise RefError(f"{what}: {ref.id} is a voice, not a picture")
+    if take is not None:
+        t = get_take(ref, view, take)
+        if not t.usable:
+            raise RefError(f"{what}: {ref.id}{' ' + view if view else ''} t{take:02d} is "
+                           f"{t.status}, not a finished picture")
+        path = t.paths.image
+    elif view:
+        path = picked_view_file(s, ref.subject, view) if ref.subject else None
+        if not path:
+            raise RefError(f"{what}: {ref.id} {view} has no picked take: name a take")
+    else:
+        path = ref.file
+        if not path or not os.path.isfile(path):
+            raise RefError(f"{what}: {ref.id} has no picture yet: name a take")
+    role = "plate" if ref.kind == "location" else "subject"
+    d = {"role": role, "name": ref.name, "kind": ref.kind, "ref": ref.id, "path": path}
+    if ref.subject:
+        d["subject"] = ref.subject
+    if ref.kind == "location":
+        d["location"] = ref.id.split(":", 1)[1]
+    if view:
+        d["view"] = view
+    if take is not None:
+        d["take"] = take
+    if members(ref.entry):
+        d["members"] = members(ref.entry)
+    return d
+
+
+EDIT_FIELDS = ("take", "with", "wrap")
+
+
+def plan_edit(s: Series, ref: Ref, req: GenRequest, overrides: dict | None = None,
+              rng: random.Random | None = None, ready=None,
+              defaults: dict | None = None) -> list[GenJob]:
+    """The jobs of an edit: a picture this ref already has (`req.edit["take"]`
+    of `req.view`, or None: the live picture) changed as `req.prompt` says,
+    on an edit target (edit_target_for), as a new take of the same ref and
+    view. Other refs' pictures can come along (`with`: [{"ref", "view"?,
+    "take"?}]), as image 2 onward.
+
+    The instruction is wrapped (targets/image/common.edit_prompt: the rest of
+    the picture named as fixed) unless `wrap` is false, which sends it as
+    typed -- what a LoRA with its own trigger syntax wants. The picture keeps
+    its size, on the target's grid and above its minimum (scaled_size). Every
+    candidate gets a new seed unless one is typed. The ref's overrides are
+    for generating it from its description, so an edit doesn't read them."""
+    from targets.image.common import edit_prompt
+    e = req.edit
+    if not isinstance(e, dict):
+        raise RefError('edit must be an object: {"take": n or null, "with": [...]}')
+    unknown = set(e) - set(EDIT_FIELDS)
+    if unknown:
+        raise RefError(f"edit takes {', '.join(EDIT_FIELDS)}, not {', '.join(sorted(unknown))}")
+    take = e.get("take")
+    if take is not None and (isinstance(take, bool) or not isinstance(take, int) or take < 1):
+        raise RefError("edit.take must be a take number, or null for the live picture")
+    wrap = e.get("wrap", True)
+    if not isinstance(wrap, bool):
+        raise RefError("edit.wrap must be true or false")
+    if ref.is_audio:
+        raise RefError(f"{ref.id} is a voice: only pictures can be edited")
+    view = check_view(ref, req.view)
+    if ref.has_views and view is None:
+        raise RefError(f"{ref.id} is a character: an edit is of one view at a time")
+    instruction = (req.prompt or "").strip()
+    if not instruction:
+        raise RefError("an edit needs an instruction (prompt): what to change")
+    if not isinstance(req.count, int) or isinstance(req.count, bool) or not 1 <= req.count <= 16:
+        raise RefError("count must be a whole number from 1 to 16")
+    ov_data = overrides if overrides is not None else load_overrides(ref.home)
+    target = edit_target_for(s, ref, req.target, ov_data, ready, defaults)
+    refs = [_picture_of(s, ref, view, take, "the picture to edit")]
+    refs[0]["role"] = "source"
+    withs = e.get("with") or []
+    if not isinstance(withs, list):
+        raise RefError('edit.with must be a list of {"ref", "view"?, "take"?}')
+    for i, w in enumerate(withs):
+        if not isinstance(w, dict) or not isinstance(w.get("ref"), str):
+            raise RefError(f'edit.with[{i}] must be {{"ref": id, "view"?, "take"?}}')
+        other = find_ref(s, w["ref"])
+        oview = check_view(other, w.get("view"))
+        if other.has_views and oview is None:
+            oview = VIEW_TAGS[0]            # a character comes as its three-quarter body
+        wt = w.get("take")
+        if wt is not None and (isinstance(wt, bool) or not isinstance(wt, int) or wt < 1):
+            raise RefError(f"edit.with[{i}].take must be a take number")
+        refs.append(_picture_of(s, other, oview, wt, f"image {i + 2}"))
+    limit = int(target.capabilities().get("max_refs") or 0)
+    if len(refs) > limit:
+        raise RefError(f"{target.short} reads at most {limit} picture"
+                       f"{'s' if limit != 1 else ''}; this edit has {len(refs)} "
+                       f"(the one being edited and {len(refs) - 1} more)")
+    wh = image_size(refs[0]["path"])
+    if wh is None:
+        raise RefError(f"can't read the size of {os.path.basename(refs[0]['path'])}: "
+                       f"a PNG or JPEG is needed")
+    w, h = scaled_size(target, *wh)
+    word = target.recipe.get("ref_word") or "image"
+    try:
+        prompt = edit_prompt(instruction, refs, word) if wrap else instruction
+    except ValueError as ex:
+        raise RefError(str(ex)) from None
+    preset = target.presets.get("final")
+    cfg = float(req.cfg if req.cfg is not None
+                else (preset.extra.get("cfg", CFG) if preset is not None else CFG))
+    steps = int(req.steps if req.steps is not None
+                else (preset.steps if (preset is not None and preset.steps) else STEPS))
+    if target.binding.specs("negative"):
+        negative, neg_source = J.negative_for(
+            s.ep, preset.extra.get("negative") if preset is not None else "",
+            requested=req.negative, series_cfg=s.series_cfg)
+        if req.negative is not None:
+            neg_source = req.negative_source or "request"
+    else:
+        negative, neg_source = "", "none"
+    record = {"take": take, "view": view, "instruction": instruction, "wrap": wrap,
+              "with": [{k: r[k] for k in ("ref", "view", "take") if k in r} for r in refs[1:]]}
+    notes = []
+    if (w, h) != tuple(wh):
+        notes.append(f"edited at {w}x{h}: the picture is {wh[0]}x{wh[1]}, put on "
+                     f"{target.short}'s size grid")
+    rng = rng or random.SystemRandom()
+    jobs = []
+    for c in range(req.count):
+        if c == 0 and req.seed is not None:
+            seed, source = int(req.seed), "typed"
+        else:
+            seed, source = rng.getrandbits(NEW_SEED_BITS), "new"
+        jobs.append(GenJob(
+            ref=ref, view=view, candidate=c, prompt=prompt, seed=seed, seed_source=source,
+            model=req.model or "", loras=req.loras, steps=steps, cfg=cfg,
+            negative=negative, width=w, height=h, note=req.note or "",
+            target=target, negative_source=neg_source, values=_preset_values(target),
+            references=[dict(r) for r in refs], notes=list(notes), edit=dict(record)))
+    return jobs
+
+
 def reference_record(s: Series, r: dict) -> dict:
     """A reference image as a ref take's sidecar records it: its path relative
     to the episode and its sha1 (a composite's parts too; a composite not
@@ -2310,6 +2502,8 @@ def start_gen(s: Series, job: GenJob) -> RefTake:
         extra["base"] = True
     if job.notes:
         extra["notes"] = list(job.notes)
+    if job.edit:
+        extra["edit"] = dict(job.edit)
     if job.is_audio:
         # a voice sample: no picture, a length and the line it was asked to say
         extra.update(seconds=job.seconds, frames=job.frames, fps=job.fps,
@@ -2317,7 +2511,7 @@ def start_gen(s: Series, job: GenJob) -> RefTake:
                      width=None, height=None)
     return reserve_take(job.ref, job.view, {
         "status": "queued", "queued": T.now(), "ep": s.ep, "comfy_prompt_id": None,
-        "source": "generated", "seed": job.seed, "seed_source": job.seed_source,
+        "source": "edited" if job.edit else "generated", "seed": job.seed, "seed_source": job.seed_source,
         "prompt": job.prompt, "model": job.model, "loras": job.loras, "steps": job.steps,
         "cfg": job.cfg, "width": job.width, "height": job.height,
         "overrides": job.overridden, "override_stale": job.override_stale,
@@ -3130,6 +3324,8 @@ def take_json(ep: str, ref: Ref, t: RefTake) -> dict:
             "references": [{"id": r.get("id"), "name": r.get("name"),
                             "view": r.get("view"), "path": r.get("path")}
                            for r in (sc.get("references") or [])],
+            # an edit (source "edited"): the take it started from and the instruction
+            **({"edit": sc["edit"], "target": sc.get("target")} if sc.get("edit") else {}),
             "queued": sc.get("queued"), "finished": sc.get("finished"),
             "comfy_prompt_id": sc.get("comfy_prompt_id"),
             "save_notes": sc.get("save_notes", ""),

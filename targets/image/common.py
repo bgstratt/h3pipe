@@ -147,6 +147,33 @@ def reference_intro(refs: list[dict], word: str = "image") -> str:
     return " ".join(out)
 
 
+def edit_prompt(instruction: str, refs: list[dict], word: str = "image") -> str:
+    """A free edit of a picture you already have (h3refs.plan_edit): the
+    first reference is the picture being edited, any after it are other refs
+    brought in for the change ("put her in the coat from image 2"). The
+    instruction is the person's own words; around it, the rest of the picture
+    is named as fixed, since an edit model left alone redraws whatever it
+    likes. The instruction is what a person reads back in the take's record,
+    so it is kept whole and goes first."""
+    instruction = instruction.strip()
+    if not instruction:
+        raise ValueError("an edit needs an instruction: what to change")
+    many = len(refs) > 1
+    first = f"{word} 1" if many else f"the {word}"
+    parts = [f"Edit {first}: {instruction.rstrip('.')}."]
+    for i, r in enumerate(refs[1:], 2):
+        parts.append(f"{word.capitalize()} {i} is {ref_label(r)}: use it as the reference for "
+                     f"what the change brings in, drawn exactly as it is there.")
+    # "everything the instruction doesn't change", not a fixed list: a relight
+    # ("make it dawn") changes the light, and a list that says keep the light
+    # would argue with it
+    parts.append(f"Change only what is asked. Keep everything the instruction doesn't change "
+                 f"exactly as it is in {first}: the people and their faces and clothes, the "
+                 f"objects, the layout and framing, and the drawing style, at the same size "
+                 f"and composition.")
+    return " ".join(parts)
+
+
 def keyframe_prompt(shot, seq, series_cfg: dict, which: str,
                     refs: list[dict] | None = None, word: str = "image") -> str:
     """The still for `shot`'s `which` ("first" | "last") keyframe, from its

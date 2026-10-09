@@ -1041,9 +1041,11 @@ export interface RefTake {
   audio?: string | null;
   /** "frame": a keyframe cut out of a video take (POST /h3pipe/refs/keyframe);
    * "from_take" (Phase 9c): a voice sample cut out of a take's sound */
-  source: "generated" | "imported" | "frame" | "from_take";
+  source: "generated" | "imported" | "frame" | "from_take" | "edited";
   /** where a "frame" or "from_take" take came from */
   from?: RefFrameSource;
+  /** an "edited" take: the picture it started from and the instruction */
+  edit?: RefEditRecord;
   note: string;
   prompt?: string | null;
   model?: string | null;
@@ -1288,6 +1290,33 @@ export interface RefGenerateRequest {
   /** Phase 9c-B: how many seconds of voice (a voice ref only; 400 on anything
    * else, or outside the audio target's range). Only sent when set. */
   seconds?: number | null;
+  /** an edit of a picture the ref already has (`prompt` is the instruction) */
+  edit?: RefEditRequest | null;
+}
+
+/** A picture brought into an edit (image 2 onward): a ref's live picture, or one take. */
+export interface RefEditWith {
+  ref: string;
+  view?: string | null;
+  take?: number | null;
+}
+
+/** POST /h3pipe/refs/generate `edit`: change a picture the ref already has.
+ * `take` null edits the live picture; `wrap` false sends the instruction
+ * (the request's `prompt`) exactly as typed, for a LoRA's trigger syntax. */
+export interface RefEditRequest {
+  take: number | null;
+  with?: RefEditWith[];
+  wrap?: boolean;
+}
+
+/** What an edited take's sidecar records. */
+export interface RefEditRecord {
+  take: number | null;
+  view?: string | null;
+  instruction: string;
+  wrap?: boolean;
+  with?: RefEditWith[];
 }
 
 export interface RefGenerateResult {
