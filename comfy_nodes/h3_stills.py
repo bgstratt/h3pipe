@@ -73,6 +73,27 @@ def holds(motion, still: float, min_len: int) -> list[tuple[int, int]]:
     return out
 
 
+def turning_points(motion, fps: float, taken: list[tuple[int, int]],
+                   window: float = 0.5, depth: float = 0.35) -> list[tuple[int, int]]:
+    """Moments the camera all but stops without holding: where a pan reverses
+    or settles, motion dips for a few frames, too briefly for `holds`. A frame
+    whose (3-frame smoothed) motion is the least within `window` seconds either
+    side and under `depth` x the most there, outside any hold already found,
+    gives a short run round it. H3 often turns straight back from "turn left
+    and hold", so these are the views a tour actually reaches."""
+    n = len(motion)
+    sm = [sum(motion[max(0, i - 1):i + 2]) / len(motion[max(0, i - 1):i + 2]) for i in range(n)]
+    w = max(2, round(window * fps))
+    inside = lambda i: any(s - w <= i < e + w for s, e in taken)
+    out = []
+    for i in range(w, n - w):
+        near = sm[i - w:i + w + 1]
+        if sm[i] == min(near) and sm[i] < depth * max(near) and not inside(i):
+            if not out or i - out[-1][1] > w:
+                out.append((max(0, i - 1), min(n, i + 2)))
+    return out
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("video")
@@ -107,6 +128,7 @@ def main(argv=None) -> int:
     found = holds(m, still, max(2, round(a.min_hold * fps)))
     if not found or found[0][0] > 0:
         found.insert(0, (0, 1))
+    found = sorted(found + turning_points(list(m), fps, found))
     best = [max(range(s, e), key=lambda i: sharp[i]) for s, e in found]
     want = {i: k for k, i in enumerate(best, 1)}
     for i, f in enumerate(frames(a.ffmpeg, a.video, w, h)):

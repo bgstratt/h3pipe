@@ -5,7 +5,7 @@
 // candidate, optionally sharpened. Unlike a 360, a tour can move the camera to
 // a new spot, and its holds are full-size video frames.
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { generateRef, loadRefs, openImageCompare, refLabel, selectRefTake } from "../actions";
 import { api, host } from "../host";
 import { tn } from "../lib/format";
@@ -15,14 +15,17 @@ import type { Ref } from "../types";
 import { SHARPEN } from "./RefEdit";
 import { useTargets } from "./Targets";
 
-const MOVES: { label: string; text: string }[] = [
-  { label: "Turn left", text: "The camera turns slowly to the left, about a quarter turn, and stops and holds" },
-  { label: "Turn right", text: "The camera turns slowly to the right, about a quarter turn, and stops and holds" },
-  { label: "Look both ways", text: "The camera turns slowly to the left and holds; then it turns back past the start to the right and holds" },
-  { label: "Turn around", text: "The camera turns slowly all the way around to face the opposite direction, and stops and holds" },
-  { label: "Walk in", text: "The camera moves slowly forward into the space, toward the far side, and stops and holds" },
-  { label: "Pull back", text: "The camera moves slowly backward, revealing more of the space around, and stops and holds" },
-  { label: "Look up", text: "The camera tilts slowly up to the ceiling or sky, and stops and holds" },
+// H3 tends to turn straight back from "turn and hold": each move says how far,
+// and that the camera stops dead and stays still, and a two-stop move gets
+// the time for both holds
+const MOVES: { label: string; text: string; seconds: number }[] = [
+  { label: "Turn left", text: "The camera pans to the left, a quarter turn, then stops completely and stays perfectly still for two seconds", seconds: 6 },
+  { label: "Turn right", text: "The camera pans to the right, a quarter turn, then stops completely and stays perfectly still for two seconds", seconds: 6 },
+  { label: "Look both ways", text: "The camera pans to the left, a quarter turn, then stops completely and stays still for two seconds; then it pans all the way back to the right, a half turn, then stops completely and stays still for two seconds", seconds: 8 },
+  { label: "Turn around", text: "The camera pans slowly all the way around to face the opposite direction, then stops completely and stays perfectly still for two seconds", seconds: 8 },
+  { label: "Walk in", text: "The camera moves forward into the space, toward the far side, then stops completely and stays perfectly still for two seconds", seconds: 6 },
+  { label: "Pull back", text: "The camera moves backward, revealing more of the space around, then stops completely and stays perfectly still for two seconds", seconds: 6 },
+  { label: "Look up", text: "The camera tilts up to the ceiling or sky, then stops completely and stays perfectly still for two seconds", seconds: 6 },
 ];
 const SHARPEN_TARGET = "qwen_rapid_aio";
 
@@ -54,7 +57,7 @@ export function TourSection({ ep, r }: { ep: string; r: Ref }) {
       <div className="h3-row h3-wrap" style={{ gap: 3 }}>
         <span className="h3-h h3-small" title="A camera move through this place on H3, from its live plate: every place the camera holds becomes a hold, a full-size new angle of the same place">Tour</span>
         {MOVES.map((m) => (
-          <button key={m.label} className={`h3-btn h3-small${move === m.text ? " h3-on" : ""}`} title={m.text} onClick={() => setMove(m.text)}>{m.label}</button>
+          <button key={m.label} className={`h3-btn h3-small${move === m.text ? " h3-on" : ""}`} title={m.text} onClick={() => { setMove(m.text); setSeconds(m.seconds); }}>{m.label}</button>
         ))}
       </div>
       <textarea
@@ -99,6 +102,9 @@ export function TourSection({ ep, r }: { ep: string; r: Ref }) {
         </div>
       )}
       {hold && <HoldUseBar ep={ep} r={r} take={hold.take} />}
+      {tours.filter((t) => t.status === "ok" && t.video).slice(-3).reverse().map((t) => (
+        <TourVideo key={t.tour} ep={ep} r={r} tour={t.tour} video={t.video!} />
+      ))}
     </div>
   );
 }
@@ -152,5 +158,44 @@ export function HoldUseBar({ ep, r, take }: { ep: string; r: Ref; take: number }
         <i className="pi pi-sparkles" /> Use and sharpen
       </button>
     </div>
+  );
+}
+
+/**
+ * A finished tour's video, to scrub: "Grab frame" keeps the moment showing as
+ * a hold (POST /h3pipe/refs/tour-frame). The camera passes through views it
+ * never stops on, and those are as good as the holds.
+ */
+function TourVideo({ ep, r, tour, video }: { ep: string; r: Ref; tour: number; video: string }) {
+  const el = useRef<HTMLVideoElement>(null);
+  const [busy, setBusy] = useState(false);
+  const grab = async () => {
+    const v = el.current;
+    if (!v) return;
+    v.pause();
+    setBusy(true);
+    try {
+      const t = await api().refsTourFrame({ ep, ref: r.id, tour, seconds: v.currentTime });
+      host().toast("success", `${refLabel(r.id, null)}: hold ${tn(t.take)}`, `tour t${String(tour).padStart(2, "0")} at ${v.currentTime.toFixed(2)}s`);
+      await loadRefs(ep);
+    } catch (e) {
+      host().toast("error", "Couldn't grab the frame", e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <details className="h3-small">
+      <summary className="h3-muted">tour t{String(tour).padStart(2, "0")}: scrub the video, grab any frame</summary>
+      <div className="h3-col" style={{ gap: 3 }}>
+        <video ref={el} src={api().fileUrl(ep, video)} controls preload="metadata" style={{ width: "100%", background: "#000" }} />
+        <div className="h3-row" style={{ gap: 6 }}>
+          <button className="h3-btn" disabled={busy} title="Keep the frame showing as a hold" onClick={() => void grab()}>
+            <i className={busy ? "pi pi-spin pi-spinner" : "pi pi-camera"} /> Grab frame
+          </button>
+          <span className="h3-muted">pause where the view is best (arrow keys step), then grab</span>
+        </div>
+      </div>
+    </details>
   );
 }

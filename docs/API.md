@@ -908,6 +908,17 @@ a location on MiniMax H3 (`h3tour.py`, ported from h3sets):
   (`status`, `move`, `holds`, `error`) and the frames as `tour_holds`. `PUT /refs/pick`
   refuses a hold where it is (400).
 - **The CLI:** `python h3tour.py EPISODE location:<id> "<move>"`.
+- **Turning points:** the stills step also keeps the moments a pan reverses or settles
+  without holding still (`turning_points`: a short dip in motion, under 0.35× the most
+  within half a second either side). H3 often turns straight back from "turn and hold",
+  so these are views a tour does reach.
+
+### `POST /h3pipe/refs/tour-frame` (P5)
+Body `{"ep", "ref", "tour", "seconds"}`. Adds any moment of a finished tour's video as a
+hold (`h3tour.grab_frame`). The frame is cut exactly, by index, with ffmpeg; the take is
+`source: "tour"` with `hold: null`, and it is added to the run's `holds`. The answer is
+the new take. The editor's Tour section has a player for each recent tour, with **Grab
+frame**.
 
 ### `POST /h3pipe/refs/copy-take` (P5)
 Body `{"ep", "ref", "view"?, "take", "to"}`. Copies a finished picture take (a tour's hold,

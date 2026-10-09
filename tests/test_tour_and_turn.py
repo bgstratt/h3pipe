@@ -167,3 +167,46 @@ class TurnTest(Base):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TurningPointTest(unittest.TestCase):
+    """h3_stills.turning_points: a pan that reverses without holding still
+    dips in motion for a few frames, too briefly for a hold."""
+
+    def setUp(self):
+        sys.path.insert(0, os.path.join(ROOT, "comfy_nodes"))
+        import h3_stills
+        self.H = h3_stills
+
+    def test_a_reversal_is_found(self):
+        motion = [1, 1] + [8] * 50 + [1.5, 1.5] + [12] * 50 + [0.2] * 40
+        found = self.H.holds(motion, 3.0, 6)
+        turns = self.H.turning_points(motion, 24.0, found)
+        self.assertEqual(len(turns), 1)
+        self.assertTrue(50 <= turns[0][0] <= 53, turns)
+
+    def test_a_steady_pan_has_none(self):
+        motion = [1, 1] + [8] * 100 + [0.2] * 40
+        found = self.H.holds(motion, 3.0, 6)
+        self.assertEqual(self.H.turning_points(motion, 24.0, found), [])
+
+
+@unittest.skipUnless(shutil.which("ffmpeg") and shutil.which("ffprobe"), "needs ffmpeg")
+class GrabFrameTest(Base):
+    def test_any_moment_becomes_a_hold(self):
+        import subprocess
+        comfy = FakeComfy()
+        ref = R.find_ref(self.s, "location:kitchen")
+        (side,) = TOUR.start_tour(self.s, ref, "turn left and hold", comfy)
+        mp4 = TOUR._tour_file(ref, side["tour"], ".mp4")
+        subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i",
+                        "testsrc=size=320x180:rate=24:duration=2", "-pix_fmt", "yuv420p", mp4],
+                       check=True)
+        side.update(status="ok", video=R.ep_rel(self.s.ep, mp4), fps=24)
+        TOUR.T.write_json(TOUR._tour_file(ref, side["tour"], ".json"), side)
+        t = TOUR.grab_frame(self.s, ref, side["tour"], 1.0)
+        self.assertEqual(t.sidecar["frame"], 24)
+        self.assertEqual((t.sidecar["width"], t.sidecar["height"]), (320, 180))
+        self.assertIn(t.take, TOUR.list_tours(ref)[0]["holds"])
+        with self.assertRaisesRegex(TOUR.TourError, "no finished tour"):
+            TOUR.grab_frame(self.s, ref, 9, 1.0)

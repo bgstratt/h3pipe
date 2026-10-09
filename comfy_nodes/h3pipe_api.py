@@ -2347,6 +2347,25 @@ def post_refs_tour(ctx: Context, body):
 
 
 @handler
+def post_refs_tour_frame(ctx: Context, body):
+    """P5: any moment of a finished tour's video as a hold: `{ep, ref, tour,
+    seconds}` (h3tour.grab_frame). Returns the new take."""
+    import h3tour
+    body = body_dict(body)
+    ep = check_ep(ctx, body.get("ep"))
+    s = _series(ep)
+    ref = _ref(s, body.get("ref"))
+    tour = check_take(body.get("tour"), "tour")
+    try:
+        t = h3tour.grab_frame(s, ref, tour, body.get("seconds"))
+    except (h3tour.TourError, R.RefError) as e:
+        raise ApiError(400, str(e))
+    ref_event(ctx, ep, ref.id, R.TOUR_VIEW, t.take, "ok")
+    episode_event(ctx, ep)
+    return 200, R.take_json(ep, ref, t)
+
+
+@handler
 def post_refs_copy_take(ctx: Context, body):
     """P5: copy a finished take into another ref as a new candidate (a tour's
     hold into a location or an angle of it): `{ep, ref, view?, take, to}`.
@@ -3065,6 +3084,7 @@ ROUTES = [
     ("POST", "/h3pipe/refs/generate", post_refs_generate, "body"),
     ("POST", "/h3pipe/refs/tour", post_refs_tour, "body"),
     ("POST", "/h3pipe/refs/copy-take", post_refs_copy_take, "body"),
+    ("POST", "/h3pipe/refs/tour-frame", post_refs_tour_frame, "body"),
     ("PUT", "/h3pipe/refs/pick", put_refs_pick, "body"),
     ("DELETE", "/h3pipe/refs/pick", delete_refs_pick, "query"),
     ("PUT", "/h3pipe/refs/defaults", put_refs_defaults, "body"),

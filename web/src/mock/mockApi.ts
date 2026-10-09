@@ -1596,6 +1596,11 @@ export function createMockApi(emit: Emit, opts: MockOptions = {}): Api & { outsi
       need(req.ep);
       return { queued: [{ tour: 1, comfy_prompt_id: "mock-tour" }] };
     },
+    async refsTourFrame(req) {
+      await wait();
+      need(req.ep);
+      throw new Error(`the mock has no tour video for ${req.ref}`);
+    },
     async refsCopyTake(req) {
       await wait();
       need(req.ep);

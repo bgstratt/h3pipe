@@ -158,6 +158,34 @@ def find_holds(video: str, out_dir: str, python: str | None = None, timeout: int
     return json.loads(r.stdout.strip().splitlines()[-1])
 
 
+def grab_frame(s: R.Series, ref: R.Ref, tour: int, seconds: float) -> R.RefTake:
+    """Any moment of a finished tour's video as a hold (a take of TOUR_VIEW):
+    the views a camera passes through without stopping are as good as the ones
+    it holds on. RefError / TourError when the tour or the time is wrong."""
+    side = next((d for d in list_tours(ref) if d.get("tour") == tour), None)
+    if side is None or side.get("status") != "ok" or not side.get("video"):
+        raise TourError(f"{ref.id} has no finished tour t{tour:02d}")
+    mp4 = R.ref_file(s.ep, side["video"])
+    if isinstance(seconds, bool) or not isinstance(seconds, (int, float)) or seconds < 0:
+        raise TourError("seconds must be a time in the video")
+    fps = float(side.get("fps") or 24)
+    count = R.video_frames(mp4)
+    index = min(max(0, round(seconds * fps)), max(0, count - 1))
+    out = os.path.join(tours_dir(ref), f"tour_t{tour:02d}_holds", f"grab_{index:05d}.png")
+    os.makedirs(os.path.dirname(out), exist_ok=True)
+    R.extract_frame(mp4, index, out)
+    take = R.reserve_take(ref, R.TOUR_VIEW, {
+        "status": "queued", "queued": T.now(), "ep": s.ep, "source": "tour", "tour": tour,
+        "hold": None, "start": round(index / fps, 2), "end": round(index / fps, 2),
+        "frame": index, "prompt": side.get("prompt"), "seed": side.get("seed"),
+        "note": f"tour t{tour:02d} frame at {index / fps:.2f}s (grabbed)"})
+    with open(out, "rb") as fh:
+        R.close_take(take, fh.read())
+    side["holds"] = list(side.get("holds") or []) + [take.take]
+    T.write_json(_tour_file(ref, tour, ".json"), side)
+    return take
+
+
 def finish_tour(s: R.Series, ref: R.Ref, side: dict, comfy, timeout: int = 1800,
                 on_hold=None) -> dict:
     """Wait for a queued tour, keep its video, find its holds and add each as a

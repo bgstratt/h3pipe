@@ -102,6 +102,8 @@ export interface Api {
   refsTour(req: { ep: string; ref: string; move: string; seconds?: number; count?: number }): Promise<{ queued: { tour: number; comfy_prompt_id: string }[] }>;
   /** P5: POST /h3pipe/refs/copy-take, a finished take copied into another ref as a candidate */
   refsCopyTake(req: { ep: string; ref: string; view?: string | null; take: number; to: string }): Promise<RefTake>;
+  /** P5: POST /h3pipe/refs/tour-frame, any moment of a finished tour as a hold */
+  refsTourFrame(req: { ep: string; ref: string; tour: number; seconds: number }): Promise<RefTake>;
   /** POST /h3pipe/refs/generate-missing: one candidate for every missing series
    * ref, and every needed keyframe filled (continuity, a still, or the script's file). */
   refsGenerateMissing(req: RefGenerateMissingRequest): Promise<RefGenerateMissingResult>;
@@ -455,6 +457,7 @@ export function createHttpApi(t: Transport): Api {
     },
     refsTour: (req) => call("POST", "/h3pipe/refs/tour", req),
     refsCopyTake: (req) => call("POST", "/h3pipe/refs/copy-take", req),
+    refsTourFrame: (req) => call("POST", "/h3pipe/refs/tour-frame", req),
     refsGenerateMissing: (req) => {
       // only what's set: the server's defaults apply to the rest
       const body: Record<string, unknown> = { ep: req.ep };
