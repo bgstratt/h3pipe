@@ -102,6 +102,7 @@
     "scale": 2,
     "start": 0.875,
     "size": "params",
+    "windows": {"_note": "A re-sample of a take longer than `seconds` is sampled in windows (h3upscale.windowed): obvpm's H3 Context Windowing (comfyui-obvpm-timeline), MultiDiffusion along time with pyramid weights over each overlap, so 1344x768 x2 (2688x1536, about twice the pixels of the 1920x1088 the pack measured at ~7 GB of activations per 5 s window) fits 32 GB. The series' upscale recipe's `window` overrides the length (0: off).", "class_type": "H3ContextWindows", "pack": "comfyui-obvpm-timeline", "seconds": 4.0, "overlap": 1.0},
     "upscaler": {"class_type": "MinimaxH3LatentUpscaler3D", "latent": "latent", "scale": "mode.scale", "align": 32,
                  "inputs": {"model_name": "minimax_h3_latent_upscaler_3d_fp16.safetensors",
                             "mode": "scale by multiplier", "align": 32, "enable_temporal_chunking": true,

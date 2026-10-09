@@ -94,6 +94,11 @@ class UpscaleJob:
     fit: str = "crop"
     # how the .up.mp4 is encoded: review, or master (Phase 13e3: for delivery)
     quality: str = "review"
+    # a long re-sample sampled in windows of `window` seconds overlapping by
+    # `window_overlap` (the target's `windows`: H3ContextWindows), so a take
+    # longer than a window fits the card; 0: one pass however long
+    window: float = 0.0
+    window_overlap: float = 0.0
 
     def finish_inputs(self, grain: bool = True) -> dict:
         """The finishing inputs of an H3PixelUpscale node (`grain` False: before a
@@ -453,7 +458,8 @@ RECIPE_GLOBAL = ("deliver", "fit", "quality", "encoder")
 # a target section's, or a shot's
 RECIPE_FIELDS = ("method", "scale", "detail", "start_step", "vae", "pixel_model",
                  "seedvr2_model", "then", "then_scale", "precision",
-                 "frequency_split", "keep_soft", "grain")
+                 "frequency_split", "keep_soft", "grain", "window")
+WINDOW_RANGE = (2.0, 30.0)          # a re-sample window, seconds (0: off)
 QUALITIES = ("review", "master")
 
 
@@ -527,7 +533,8 @@ def recipe_kwargs(fields: dict, recipe: dict | None = None) -> dict:
     g = recipe or {}
     kw = {k: fields[k] for k in ("method", "scale", "detail", "start_step", "pixel_model",
                                  "seedvr2_model", "then_scale", "precision",
-                                 "frequency_split", "keep_soft", "grain") if k in fields}
+                                 "frequency_split", "keep_soft", "grain", "window")
+          if k in fields}
     if fields.get("vae"):
         kw["route"] = "vae"
     then = fields.get("then")
@@ -546,7 +553,7 @@ def recipe_from_request(body: dict) -> dict:
     per-shot recipe (RECIPE_FIELDS): what the dialog saves for one shot."""
     out = {}
     for k in ("method", "scale", "detail", "start_step", "pixel_model", "seedvr2_model",
-              "then_scale", "precision", "frequency_split", "keep_soft", "grain"):
+              "then_scale", "precision", "frequency_split", "keep_soft", "grain", "window"):
         if body.get(k) is not None:
             out[k] = body[k]
     if body.get("vae"):
@@ -645,13 +652,17 @@ def check_fields(sec: dict) -> list[str]:
             out.append(f"{k} {v!r}: 0 to {hi:g}")
     if sec.get("then") and sec.get("method", "latent") != "latent":
         out.append("then: only after a re-sample (method latent)")
+    w = sec.get("window")
+    if w is not None and (isinstance(w, bool) or not isinstance(w, (int, float))
+                          or not (w == 0 or WINDOW_RANGE[0] <= w <= WINDOW_RANGE[1])):
+        out.append(f"window {w!r}: 0 (off), or {WINDOW_RANGE[0]:g} to {WINDOW_RANGE[1]:g} seconds")
     return out
 
 
 def plan_upscale(root: str, take: T.Take, *, encoder: str = "auto", precision: str = "fp16",
                  frequency_split: bool = True, keep_soft: float = 0.0, grain: float = 0.0,
                  deliver=None, fit: str = "crop", respect_keep: bool = False,
-                 quality: str = "review", **kw) -> UpscaleJob:
+                 quality: str = "review", window: float | None = None, **kw) -> UpscaleJob:
     """_plan (below), with how the result is encoded (`encoder`) and the upscale
     model run (`precision`), both checked, and sized to `deliver` (see
     deliver_to). A `scale` of "auto" is worked out here, per take (auto_scale)."""
@@ -684,7 +695,39 @@ def plan_upscale(root: str, take: T.Take, *, encoder: str = "auto", precision: s
     job.quality = quality or "review"
     if job.action != "error" and job.quality not in QUALITIES:
         job.action, job.why = "error", f"quality {quality!r}: it's review or master"
+    if job.method == "latent" and job.action != "error":
+        problems = check_fields({"window": window}) if window is not None else []
+        if problems:
+            job.action, job.why = "error", problems[0]
+        else:
+            set_window(job, window)
     return job
+
+
+def take_seconds(take: T.Take) -> float:
+    """How long a take is, from its sidecar's frames and rate (0: unknown)."""
+    sc = take.sidecar or {}
+    n, fps = int(sc.get("length") or 0), float(sc.get("fps") or 24)
+    return n / fps if n and fps else 0.0
+
+
+def set_window(job: UpscaleJob, window: float | None = None) -> None:
+    """Window the job's re-sample when its take is longer than one window: the
+    recipe's `window` (seconds, 0: off), else the target's `windows.seconds`.
+    A re-sample at 2x holds four times the tokens of the take: 1344x768 x2 is
+    2688x1536, about twice the pixels of the 1920x1088 obvpm measured at ~7 GB
+    of activations per 5 s window, so a long shot runs out of memory on one
+    pass. The target says how (its `windows`); the job only says how long."""
+    spec = job.spec.get("windows") or {}
+    if not spec or job.spec.get("mode", RESAMPLE) != RESAMPLE:
+        return
+    w = float(spec.get("seconds", 0) if window is None else window)
+    if w <= 0 or take_seconds(job.take) <= w:
+        return
+    job.window = w
+    job.window_overlap = min(float(spec.get("overlap", w / 4)), w / 2)
+    job.notes.append(f"sampled in {w:g}s windows overlapping by {job.window_overlap:g}s "
+                     f"({take_seconds(job.take):.1f}s take)")
 
 
 def resolve_auto_scale(root: str, take: T.Take, deliver, fit: str, kw: dict) -> float | None:
@@ -1049,6 +1092,28 @@ def resample(g: dict, up: UpscaleJob, sampler: str) -> None:
         si["sigmas"] = ["up_sigmas", 1]
     else:
         sampler_tail(g, sampler, up.start_step)
+    if up.window:
+        windowed(g, up, sampler)
+
+
+def windowed(g: dict, up: UpscaleJob, sampler: str) -> None:
+    """The re-sample's model sampled in windows along time (the target's
+    `windows`: obvpm's H3 Context Windowing, MultiDiffusion with pyramid
+    weights over each overlap, every step): the model that feeds the sampler,
+    or its guider, goes through it first. One window's worth of memory, the
+    same work per step."""
+    spec = up.spec["windows"]
+    si = g[sampler]["inputs"]
+    host, field = sampler, "model"
+    if "model" not in si and isinstance(si.get("guider"), list):
+        host = si["guider"][0]
+    if not isinstance(g[host]["inputs"].get(field), list):
+        raise UpscaleError(f"{up.target.short}'s re-sample has no model input to window")
+    g["up_windows"] = {"class_type": spec.get("class_type", "H3ContextWindows"), "inputs": {
+        "model": g[host]["inputs"][field],
+        spec.get("seconds_input", "window_seconds"): up.window,
+        spec.get("overlap_input", "overlap_seconds"): up.window_overlap}}
+    g[host]["inputs"][field] = ["up_windows", 0]
 
 
 def pixel_refine(g: dict, up: UpscaleJob, sampler: str) -> None:
@@ -1227,6 +1292,13 @@ def not_ready(jobs: list[UpscaleJob], object_info: dict | None) -> list[str]:
               if j.method == "latent" and j.then_model and j.then_method == "pixel"}
     wants |= {j.pixel_model for j in jobs
               if j.method == "latent" and j.spec.get("mode") == PIXEL_REFINE}
+    for j in jobs:
+        ct = (j.spec.get("windows") or {}).get("class_type", "H3ContextWindows")
+        if j.window and object_info is not None and ct not in object_info:
+            out.append(f"{j.label} is {take_seconds(j.take):.1f}s, longer than one "
+                       f"{j.window:g}s window, and windowing it needs {ct} "
+                       f"({(j.spec.get('windows') or {}).get('pack', 'comfyui-obvpm-timeline')}); "
+                       f"install it, or set the recipe's window to 0 to try one pass")
     sv2 = {j.seedvr2_model for j in jobs if j.method == "seedvr2"}
     sv2 |= {j.then_model for j in jobs if j.method == "latent" and j.then_method == "seedvr2"}
     for want in sorted(sv2):
@@ -1314,6 +1386,8 @@ def settings_of(up: UpscaleJob) -> dict:
         d["fit"] = up.fit
     if up.quality != "review":
         d["quality"] = up.quality
+    if up.window:
+        d["window"] = [up.window, up.window_overlap]
     return d
 
 

@@ -388,6 +388,12 @@ The series config says how, once, in `upscale.master` (the **recipe**):
   picks, per take, the smallest scale on the target's grid that covers `deliver`: 2x for a
   960×544 take, 1.5x for a 1344×768 one (2016×1152, scaled down to 1920 and cropped), so an
   episode that renders some shots at 1344×768 masters with no wasted pixels.
+- `window` (seconds) is for a long H3 re-sample. A take longer than one window is sampled
+  in overlapping windows along time (4 s with 1 s of overlap by default), so a 2x
+  re-sample of 1344×768 (2688×1536) fits a 32 GB card at any length. Shorter takes are
+  sampled in one pass, as before. Set a longer window if your card holds it, or `0` to
+  turn windowing off. It needs the `comfyui-obvpm-timeline` node pack (its H3 Context
+  Windowing); without it, a long shot's upscale says so instead of running out of memory.
 - A shot can have its own recipe over its target's (a dialogue close-up kept light, a wide
   given `detail: 1`, a shot SeedVR2 got wrong sent to the pixel method): the editor's
   Upscale dialog, **Choose for this run**, then **Save as sh020's recipe**.
