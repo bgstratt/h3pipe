@@ -1052,7 +1052,7 @@ export interface RefTake {
   audio?: string | null;
   /** "frame": a keyframe cut out of a video take (POST /h3pipe/refs/keyframe);
    * "from_take" (Phase 9c): a voice sample cut out of a take's sound */
-  source: "generated" | "imported" | "frame" | "from_take" | "edited" | "pano";
+  source: "generated" | "imported" | "frame" | "from_take" | "edited" | "pano" | "tour";
   /** where a "frame" or "from_take" take came from */
   from?: RefFrameSource;
   /** an "edited" take: the picture it started from and the instruction */
@@ -1229,6 +1229,9 @@ export interface Ref {
   picked: number | null;
   /** P5, a location: its 360 panoramas (never picked into the plate) */
   panos?: RefTake[];
+  /** P5, a location: its camera tours, and their held frames (never picked where they are) */
+  tours?: RefTour[];
+  tour_holds?: RefTake[];
   /** a character: its supplied sheet was cleared */
   sheet_cleared?: boolean;
   /**
@@ -1319,6 +1322,20 @@ export interface RefGenerateRequest {
   size?: string | null;
 }
 
+/** P5: one camera tour of a location (h3tour.py) */
+export interface RefTour {
+  tour: number;
+  status: "queued" | "ok" | "failed" | (string & {});
+  move: string;
+  seconds: number;
+  seed?: number;
+  holds: number[];
+  error?: string;
+  queued?: string;
+  finished?: string | null;
+  video?: string | null;
+}
+
 /** A picture brought into an edit (image 2 onward): a ref's live picture, or one take. */
 export interface RefEditWith {
   ref: string;
@@ -1333,6 +1350,10 @@ export interface RefEditRequest {
   take: number | null;
   with?: RefEditWith[];
   wrap?: boolean;
+  /** P5: the picture comes from another of the character's views (the take lands on `view`) */
+  from_view?: string | null;
+  /** P5: draw the view by turning the camera (Qwen 2.1 + the multi-angle LoRA) */
+  turn?: boolean;
 }
 
 /** What an edited take's sidecar records. */

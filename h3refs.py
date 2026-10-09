@@ -60,6 +60,7 @@ Stdlib only.
 from __future__ import annotations
 
 import copy
+import dataclasses
 import glob
 import hashlib
 import os
@@ -463,13 +464,16 @@ SHEET_VIEW = "sheet"
 # viewer aims a camera into one and saves that view as a plate candidate of the
 # location or one of its angles.
 PANO_VIEW = "pano"
+# ...and the held frames of its camera tours (h3tour.py), the same way
+TOUR_VIEW = "tour"
+LOCATION_VIEWS = (PANO_VIEW, TOUR_VIEW)
 
 
 def check_view(ref: Ref, view, required: bool = False,
                allow_sheet: bool = False) -> str | None:
     """A view for this ref: one of VIEW_TAGS for a character, None otherwise.
     `allow_sheet` also takes SHEET_VIEW (a supplied whole sheet); see there."""
-    if view == PANO_VIEW and ref.kind == "location":
+    if view in LOCATION_VIEWS and ref.kind == "location":
         return view
     if view in (None, ""):
         if required and ref.has_views:
@@ -1399,6 +1403,9 @@ def pick_take(s: Series, ref: Ref, view: str | None, take: int,
     if view == PANO_VIEW:
         raise RefError(f"a 360 isn't a plate: open {ref.id}'s 360 t{take:02d} and save a view "
                        f"from it as a candidate")
+    if view == TOUR_VIEW:
+        raise RefError(f"a tour's hold isn't picked where it is: use {ref.id}'s hold "
+                       f"t{take:02d} for the location or one of its angles (copy_take)")
     t = get_take(ref, view, take)
     if not os.path.isfile(t.paths.image):
         raise NotUsable(f"{ref.id}{' ' + view if view else ''} t{take:02d} has no file")
@@ -1791,6 +1798,29 @@ def import_take(s: Series, ref: Ref, view: str | None, source_path: str,
                                              if original_name
                                              else f"imported from {source_path}"))
     return t
+
+
+def copy_take(s: Series, src: Ref, view: str | None, take: int, dest: Ref) -> RefTake:
+    """A finished take of one ref copied in as a new candidate of another (a
+    tour's hold or a saved 360 view into a location or one of its angles):
+    import_take of its file, the sidecar saying where it came from. Not
+    picked. RefError across kinds (only a picture into a picture ref)."""
+    view = check_view(src, view, required=True, allow_sheet=True)
+    t = get_take(src, view, take)
+    if not t.usable:
+        raise RefError(f"{src.id}{' ' + view if view else ''} t{take:02d} is {t.status}")
+    if src.is_audio or dest.is_audio:
+        raise RefError("only a picture can be copied into a picture ref")
+    if dest.has_views:
+        raise RefError(f"{dest.id} is a character: copy into one of its views")
+    sc = t.sidecar or {}
+    note = f"from {src.id}{' ' + view if view else ''} t{take:02d}"
+    if sc.get("source") == "tour":
+        note += f" (tour t{sc.get('tour', 0):02d} hold {sc.get('hold')})"
+    out = import_take(s, dest, None, os.path.abspath(t.paths.image), note=note)
+    out.sidecar = T.update_sidecar(out.paths.sidecar, copied_from={
+        "ref": src.id, "view": view, "take": take, "source": sc.get("source")})
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -2473,7 +2503,23 @@ def _picture_of(s: Series, ref: Ref, view: str | None, take: int | None,
     return d
 
 
-EDIT_FIELDS = ("take", "with", "wrap")
+EDIT_FIELDS = ("take", "with", "wrap", "from_view", "turn")
+
+# P5: a character's missing view drawn from one it has, by the Qwen-Image 2.1
+# Multiple-Angles LoRA (`<mva> {azimuth}, {elevation}[ close-up]`): it turns
+# the camera round a single figure well (and makes a diorama of a whole scene,
+# so it is for subjects, not plates). The phrase per sheet view, the camera
+# orbiting the subject: the three-quarter view faces the viewer's left, the
+# side view the viewer's right (krea2 VIEWS).
+TURN_TARGET = "qwen_image_21"
+TURN_LORA = "angles_v2_full_qwen21_multiple_angles_v2_qwen21_multiple_angles_v2_000001500.safetensors"
+TURN_STRENGTH = 0.9
+VIEW_TURNS = {
+    "01_threequarter": "<mva> front-left view, eye-level shot",
+    "02_side": "<mva> left side view, eye-level shot",
+    "03_back": "<mva> back view, eye-level shot",
+    "04_face": "<mva> front view, eye-level shot close-up",
+}
 
 
 def plan_edit(s: Series, ref: Ref, req: GenRequest, overrides: dict | None = None,
@@ -2509,6 +2555,25 @@ def plan_edit(s: Series, ref: Ref, req: GenRequest, overrides: dict | None = Non
     view = check_view(ref, req.view)
     if ref.has_views and view is None:
         raise RefError(f"{ref.id} is a character: an edit is of one view at a time")
+    # the picture can come from ANOTHER view of the same character (its new
+    # take still lands on `view`): a missing view drawn from one it has
+    from_view = e.get("from_view")
+    if from_view is not None:
+        if not ref.has_views:
+            raise RefError(f"{ref.id} has no views: from_view is for a character")
+        from_view = check_view(ref, from_view)
+    turn = e.get("turn", False)
+    if not isinstance(turn, bool):
+        raise RefError("edit.turn must be true or false")
+    loras = req.loras
+    if turn:
+        if not ref.has_views or view not in VIEW_TURNS:
+            raise RefError("edit.turn draws one of a character's views from another")
+        req = dataclasses.replace(req, target=req.target or TURN_TARGET,
+                                  prompt=req.prompt or VIEW_TURNS[view])
+        wrap = False
+        if loras is None:
+            loras = [{"name": TURN_LORA, "strength": TURN_STRENGTH}]
     instruction = (req.prompt or "").strip()
     if not instruction:
         raise RefError("an edit needs an instruction (prompt): what to change")
@@ -2516,7 +2581,7 @@ def plan_edit(s: Series, ref: Ref, req: GenRequest, overrides: dict | None = Non
         raise RefError("count must be a whole number from 1 to 16")
     ov_data = overrides if overrides is not None else load_overrides(ref.home)
     target = edit_target_for(s, ref, req.target, ov_data, ready, defaults)
-    refs = [_picture_of(s, ref, view, take, "the picture to edit")]
+    refs = [_picture_of(s, ref, from_view or view, take, "the picture to edit")]
     refs[0]["role"] = "source"
     withs = e.get("with") or []
     if not isinstance(withs, list):
@@ -2560,8 +2625,9 @@ def plan_edit(s: Series, ref: Ref, req: GenRequest, overrides: dict | None = Non
             neg_source = req.negative_source or "request"
     else:
         negative, neg_source = "", "none"
-    record = {"take": take, "view": view, "instruction": instruction, "wrap": wrap,
-              "with": [{k: r[k] for k in ("ref", "view", "take") if k in r} for r in refs[1:]]}
+    record = {"take": take, "view": from_view or view, "instruction": instruction, "wrap": wrap,
+              "with": [{k: r[k] for k in ("ref", "view", "take") if k in r} for r in refs[1:]],
+              **({"turn": True} if turn else {})}
     notes = []
     if (w, h) != tuple(wh):
         notes.append(f"edited at {w}x{h}: the picture is {wh[0]}x{wh[1]}, put on "
@@ -2581,7 +2647,7 @@ def plan_edit(s: Series, ref: Ref, req: GenRequest, overrides: dict | None = Non
             seed, source = rng.getrandbits(NEW_SEED_BITS), "new"
         jobs.append(GenJob(
             ref=ref, view=view, candidate=c, prompt=prompt, seed=seed, seed_source=source,
-            model=req.model or "", loras=req.loras, steps=steps, cfg=cfg,
+            model=req.model or "", loras=loras, steps=steps, cfg=cfg,
             negative=negative, width=w, height=h, note=req.note or "",
             target=target, negative_source=neg_source, values=dict(vals),
             references=[dict(r) for r in refs], notes=list(notes), edit=dict(record)))
@@ -3662,6 +3728,13 @@ def ref_json(s: Series, ref: Ref, usage: dict | None = None,
         if ref.kind == "location":
             # P5: its 360 panoramas (PANO_VIEW), apart from the plate's candidates
             out["panos"] = [take_json(s.ep, ref, t) for t in list_takes(ref, PANO_VIEW)]
+            # ...and its camera tours (h3tour.py): each run, and their held frames
+            import h3tour
+            out["tours"] = [{k: d.get(k) for k in ("tour", "status", "move", "seconds", "seed",
+                                                   "holds", "error", "queued", "finished",
+                                                   "video")}
+                            for d in h3tour.list_tours(ref)]
+            out["tour_holds"] = [take_json(s.ep, ref, t) for t in list_takes(ref, TOUR_VIEW)]
         out["effective"] = effective(s, ref, None, ov_data, view_size, ready, defaults)
         if out["effective"]:
             out["prompt"] = out["effective"]["prompt"]

@@ -41,6 +41,7 @@ import { Progress } from "./Thumb";
 import { DropSlot, SupplyPicker, UploadButton } from "./Upload";
 import { EditForm, editSourceText } from "./RefEdit";
 import { PanoSection } from "./PanoViewer";
+import { TourSection } from "./TourSection";
 
 const FILTERS: { id: RefFilter; label: string; title: string }[] = [
   { id: "episode", label: "this episode", title: "Refs used by this episode's shots (this pass)" },
@@ -783,6 +784,33 @@ function KnobFields({ knobs, set, eff, target }: { knobs: Knobs; set: (k: Partia
   );
 }
 
+/**
+ * P5: draw a character's view from another view it has, by turning the camera
+ * round it (Qwen 2.1 + the multi-angle LoRA): the three-quarter body if that is
+ * picked, else the first picked view. A new candidate, not picked.
+ */
+function TurnButton({ r, view, label }: { r: Ref; view: string; label: string }) {
+  const busy = useApp((s) => !!s.busy[`refgen|${r.id}`]);
+  const picked = VIEWS.map((v) => v.view).filter((v) => v !== view && pickedOf(r, v) != null);
+  const from = picked.includes("01_threequarter") ? "01_threequarter" : picked[0];
+  return (
+    <button
+      className="h3-btn h3-icon"
+      disabled={!from || busy}
+      title={from
+        ? `Draw ${label} from the ${viewLabel(from)} view by turning the camera round ${r.name} (Qwen 2.1 + the multi-angle LoRA): a new candidate`
+        : "Pick another view first: this one is drawn from it"}
+      onClick={() => from && void generateRef({
+        ref: r.id, view, count: 1, seed_mode: "new", seed: null, prompt: null, model: null,
+        loras: null, steps: null, note: `turned from ${viewLabel(from)}`,
+        edit: { take: null, from_view: from, turn: true },
+      })}
+    >
+      ↻
+    </button>
+  );
+}
+
 function RefDetail({ ep, r }: { ep: string; r: Ref }) {
   const pass = useApp((s) => s.pass);
   const st = useStatus();
@@ -822,6 +850,7 @@ function RefDetail({ ep, r }: { ep: string; r: Ref }) {
                     {v.label}
                     <span className={live ? "h3-muted" : "h3-err"}>{live ? ` ${tn(live.take)}` : rv?.cleared ? " cleared" : " —"}</span>
                     <span className="h3-grow" />
+                    <TurnButton r={r} view={v.view} label={v.label} />
                     <UploadButton refId={r.id} view={v.view} kind="image" label="" title={`Upload an image from this computer as ${r.name}'s ${v.label} view, live at once (or drop one on this column)`} />
                   </div>
                   <CandidateGrid ep={ep} r={r} view={v.view} cols />
@@ -846,6 +875,7 @@ function RefDetail({ ep, r }: { ep: string; r: Ref }) {
       )}
       {!isKeyframeRef(r) && <GenerateBar r={r} />}
       {r.kind === "location" && <PanoSection ep={ep} r={r} />}
+      {r.kind === "location" && <TourSection ep={ep} r={r} />}
       {canGenerate(r) && (
         <details className="h3-ref-settings">
           <summary>Prompt and settings{r.override.fields.length ? ` (override: ${r.override.fields.join(", ")})` : ""}</summary>

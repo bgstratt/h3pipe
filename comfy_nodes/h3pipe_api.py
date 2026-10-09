@@ -2308,6 +2308,67 @@ def post_refs_generate(ctx: Context, body):
     return 200, seeds_out(result)
 
 
+_TOUR_THREADS: dict = {}
+
+
+@handler
+def post_refs_tour(ctx: Context, body):
+    """P5: a camera tour of a location on H3 (h3tour.py), from its live plate:
+    `{ep, ref, move, seconds?, count?}`. Queues the videos and answers at once;
+    a background thread waits for each, finds its held frames and adds them as
+    the location's `tour` takes, sending `h3pipe.ref` as each lands. Returns
+    {"queued": [{tour, comfy_prompt_id}]}."""
+    import h3tour
+    body = body_dict(body)
+    ep = check_ep(ctx, body.get("ep"))
+    s = _series(ep)
+    ref = _ref(s, body.get("ref"))
+    seconds = body.get("seconds", h3tour.DEFAULT_SECONDS)
+    count = body.get("count", 1)
+    try:
+        sides = h3tour.start_tour(s, ref, body.get("move") or "", ctx.comfy, seconds, count,
+                                  seed_in(body.get("seed")) if body.get("seed") else None)
+    except (h3tour.TourError, R.RefError) as e:
+        raise ApiError(400, str(e))
+
+    def finish():
+        for side in sides:
+            h3tour.finish_tour(s, ref, side, ctx.comfy,
+                               on_hold=lambda t: ref_event(ctx, ep, ref.id, R.TOUR_VIEW,
+                                                           t.take, "ok"))
+            episode_event(ctx, ep)
+
+    th = threading.Thread(target=finish, name=f"h3tour {ref.id}", daemon=True)
+    _TOUR_THREADS[(ep, ref.id)] = th
+    th.start()
+    episode_event(ctx, ep)
+    return 200, {"queued": [{"tour": d["tour"], "comfy_prompt_id": d["comfy_prompt_id"]}
+                            for d in sides]}
+
+
+@handler
+def post_refs_copy_take(ctx: Context, body):
+    """P5: copy a finished take into another ref as a new candidate (a tour's
+    hold into a location or an angle of it): `{ep, ref, view?, take, to}`.
+    Returns the new take."""
+    body = body_dict(body)
+    ep = check_ep(ctx, body.get("ep"))
+    s = _series(ep)
+    src = _ref(s, body.get("ref"))
+    dest = _ref(s, body.get("to"))
+    take = check_take(body.get("take"))
+    view = body.get("view")
+    try:
+        t = R.copy_take(s, src, view, take, dest)
+    except R.RefError as e:
+        raise ApiError(400, str(e))
+    except R.UnknownRef as e:
+        raise ApiError(404, str(e))
+    ref_event(ctx, ep, dest.id, None, t.take, "ok")
+    episode_event(ctx, ep)
+    return 200, R.take_json(ep, dest, t)
+
+
 @handler
 def put_refs_pick(ctx: Context, body):
     """Make a candidate the live file. A voice whose character has no
@@ -3002,6 +3063,8 @@ ROUTES = [
     ("DELETE", "/h3pipe/workflow/install", delete_workflow_install, "query"),
     ("GET", "/h3pipe/refs", get_refs, "query"),
     ("POST", "/h3pipe/refs/generate", post_refs_generate, "body"),
+    ("POST", "/h3pipe/refs/tour", post_refs_tour, "body"),
+    ("POST", "/h3pipe/refs/copy-take", post_refs_copy_take, "body"),
     ("PUT", "/h3pipe/refs/pick", put_refs_pick, "body"),
     ("DELETE", "/h3pipe/refs/pick", delete_refs_pick, "query"),
     ("PUT", "/h3pipe/refs/defaults", put_refs_defaults, "body"),

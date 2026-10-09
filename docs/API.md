@@ -881,6 +881,40 @@ Queues one candidate per call. It returns without waiting, like `/render`.
   Rapid AIO when installed. A cut view holds only `width × fov/360` panorama pixels
   across, so it comes out soft.
 
+**Turning a character's view (P5).** An edit can start from another of the same character's
+views and land on `view`: `edit.from_view`. Add `edit.turn: true` to draw the view by
+turning the camera round the figure:
+- It runs on Qwen-Image 2.1 with the Multiple-Angles LoRA (`h3refs.TURN_LORA` at 0.9).
+- The prompt is that view's `<mva> …` phrase (`h3refs.VIEW_TURNS`), sent as typed.
+- The editor's ↻ on a view column turns it from the picked three-quarter view, else from
+  the first picked view.
+- The LoRA renders a whole scene as a diorama, so turning is for characters, not plates.
+
+### `POST /h3pipe/refs/tour` (P5)
+Body `{"ep", "ref", "move", "seconds"?: 2–10 (6), "count"?: 1–4, "seed"?}`. A camera tour of
+a location on MiniMax H3 (`h3tour.py`, ported from h3sets):
+- **The video:** `workflows/h3_tour.json` (H3 FL2VA image-to-video, the 4-step turbo LoRA)
+  starts from the live plate. The `move` says where the camera goes and where it holds,
+  and `h3tour.TAIL` (only the camera moves, and it holds still) is added to it.
+- **The answer:** sent as soon as the videos are queued: `{"queued": [{"tour",
+  "comfy_prompt_id"}]}`.
+- **After that:** a background thread waits for each video and keeps it in
+  `refs/_takes/<key>/_tours/`. It finds the video's held moments with
+  `comfy_nodes/h3_stills.py`: runs of frames whose motion is below half the median,
+  keeping the sharpest frame of each run, with the opening frame always first. That
+  helper runs under the running Python and needs numpy, PIL and ffmpeg.
+- **The holds:** each becomes a take of the location's `tour` pseudo-view, `source:
+  "tour"`, with `h3pipe.ref` sent as each one lands. `/refs` lists the runs as `tours`
+  (`status`, `move`, `holds`, `error`) and the frames as `tour_holds`. `PUT /refs/pick`
+  refuses a hold where it is (400).
+- **The CLI:** `python h3tour.py EPISODE location:<id> "<move>"`.
+
+### `POST /h3pipe/refs/copy-take` (P5)
+Body `{"ep", "ref", "view"?, "take", "to"}`. Copies a finished picture take (a tour's hold,
+for example) into another ref as a new, unpicked candidate (`h3refs.copy_take`). The new
+take's sidecar records `copied_from`. The answer is the new take. A character is copied
+into one of its views, not into the character itself (400).
+
 ### `PUT /h3pipe/refs/pick`
 Body `{"ep", "ref", "view"?, "take"}`. Copies the take into place, stitching the
 sheet when all four views are picked. Returns the ref as `/refs` lists it. 409 if the

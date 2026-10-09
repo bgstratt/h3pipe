@@ -43,6 +43,9 @@ docstrings; there is no separate plan file.
   the editor. Face detailing was tried and dropped (`docs/POST_PROCESSING.md`)
 - `h3publish.py` — the series intro + a cut + the outro, the episode title drawn under the
   series title, the cut's picture copied (h3master's titles; `h3.py publish` on a review cut)
+- `h3tour.py` — a camera tour of a location on H3 from its plate (`workflows/h3_tour.json`), its
+  held frames found by `comfy_nodes/h3_stills.py` and kept as the location's `tour` takes
+  (ported from h3sets; the editor's Tour section, `POST /h3pipe/refs/tour`)
 - `h3align.py` — times the script against a dialogue recording
 - `h3assemble.py` — review cut (ffmpeg)
 - `h3peaks.py` — a media file's sound: has it any, duration, waveform peaks (the editor's
