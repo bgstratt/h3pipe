@@ -34,21 +34,21 @@ class WindowTest(ApiTest):
 
     def test_a_long_take_is_sampled_in_windows(self):
         up = U.plan_upscale(self.ep, self.take_of(11.5))
-        self.assertEqual((up.window, up.window_overlap), (4.0, 1.0))
-        self.assertTrue(any("4s windows" in n for n in up.notes))
+        self.assertEqual((up.window, up.window_overlap), (5.5, 1.25))
+        self.assertTrue(any("5.5s windows" in n for n in up.notes))
         g = U.upscale_graph(self.base(), up)
         w = g["up_windows"]
         self.assertEqual(w["class_type"], "H3ContextWindows")
-        self.assertEqual((w["inputs"]["window_seconds"], w["inputs"]["overlap_seconds"]), (4.0, 1.0))
+        self.assertEqual((w["inputs"]["window_seconds"], w["inputs"]["overlap_seconds"]), (5.5, 1.25))
         # the windows go between the model and H3's guider
         sampler = next(v for v in g.values() if v["class_type"] == "SamplerCustomAdvanced")
         guider = g[sampler["inputs"]["guider"][0]]
         self.assertEqual(guider["inputs"]["model"], ["up_windows", 0])
         self.assertNotEqual(w["inputs"]["model"], ["up_windows", 0])
-        self.assertEqual(U.settings_of(up)["window"], [4.0, 1.0])
+        self.assertEqual(U.settings_of(up)["window"], [5.5, 1.25])
 
     def test_a_short_take_is_one_pass(self):
-        up = U.plan_upscale(self.ep, self.take_of(3.5))
+        up = U.plan_upscale(self.ep, self.take_of(5.2))     # a usual shot: one pass
         self.assertEqual(up.window, 0.0)
         self.assertNotIn("up_windows", U.upscale_graph(self.base(), up))
         self.assertNotIn("window", U.settings_of(up))

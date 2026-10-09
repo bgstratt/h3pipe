@@ -99,6 +99,12 @@ class UpscaleJob:
     # longer than a window fits the card; 0: one pass however long
     window: float = 0.0
     window_overlap: float = 0.0
+    # a continuity shot (its first keyframe a frame of the previous shot's
+    # take): that take, whose upscale's last frame this upscale starts from
+    # (continuity_frame), and the staged name of the low-res keyframe it falls
+    # back to when that frame isn't there when it runs
+    first_from: "T.Take | None" = None
+    first_fallback: str = ""
 
     def finish_inputs(self, grain: bool = True) -> dict:
         """The finishing inputs of an H3PixelUpscale node (`grain` False: before a
@@ -701,7 +707,65 @@ def plan_upscale(root: str, take: T.Take, *, encoder: str = "auto", precision: s
             job.action, job.why = "error", problems[0]
         else:
             set_window(job, window)
+            set_continuity(job)
     return job
+
+
+def continuity_source(take: T.Take, root: str) -> "tuple[T.Take, str] | None":
+    """The take a continuity shot's first keyframe was cut from, when it was
+    that take's LAST frame and of the same pass, and the staged name of the
+    keyframe the take rendered with: (source take, input name), else None.
+    The render's sidecar names its first keyframe's sha1 (`refs`, role first);
+    the keyframe candidate with that picture says where it was cut from
+    (h3refs.keyframe_from_take: source shot, take, pass, frame)."""
+    sc = take.sidecar or {}
+    first = (sc.get("inputs") or {}).get("first")
+    ref = next((r for r in sc.get("refs") or [] if r.get("role") == "first"), None)
+    sha = (ref or {}).get("sha1")
+    if not first or not sha:
+        return None
+    import h3refs as R
+    try:
+        kref = R.keyframe_ref(root, take.shot, "first")
+        cands = R.list_takes(kref, None)
+    except Exception:
+        return None
+    for k in cands:
+        ks = k.sidecar or {}
+        if ks.get("source") != "frame" or not os.path.isfile(k.paths.image):
+            continue
+        if T.file_sha1(k.paths.image) != sha:
+            continue
+        n, i = ks.get("source_frames"), ks.get("source_frame")
+        if ks.get("source_pass") != take.pass_ or n is None or i is None or int(i) != int(n) - 1:
+            return None                     # not the previous take's last frame
+        try:
+            src = T.get_take(root, ks["source_pass"], ks["source_shot"], int(ks["source_take"]))
+        except Exception:
+            return None
+        return src, first
+    return None
+
+
+def set_continuity(job: UpscaleJob) -> None:
+    """A continuity shot's upscale starts from the previous shot's upscaled
+    last frame instead of the low-res keyframe its take rendered from. The two
+    upscales then meet on one picture: re-sampling each clip from the same
+    low-res frame made two different 2x pictures of it, a colour jump at a cut
+    that should be seamless. The frame is read when the upscale runs
+    (H3LoadTakeFrame), so the previous shot's upscale only has to be queued
+    first; without it the keyframe is used, as before."""
+    if job.spec.get("mode", RESAMPLE) != RESAMPLE:
+        return
+    found = continuity_source(job.take, job.root)
+    if not found:
+        return
+    job.first_from, job.first_fallback = found
+    src = job.first_from
+    have = os.path.isfile(src.paths.up_last)
+    job.notes.append(f"starts from {src.shot} t{src.take:02d}'s upscaled last frame"
+                     + ("" if have else " (once that upscale has run; the low-res keyframe "
+                                        "if it hasn't when this one runs)"))
 
 
 def take_seconds(take: T.Take) -> float:
@@ -996,6 +1060,8 @@ def upscale_graph(base: dict, up: UpscaleJob) -> dict:
     t, spec, take = up.target, up.spec, up.take
     b = t.binding
     g = J.graph_for(base, take_job(up), take, review_copy=False)
+    if up.first_from is not None:
+        continuity_frame(g, up)
     saver = J.node_of(g, b.saver_class)
     sampler = J.latent_node(g, saver, spec.get("sampler") or b.saver["latent"])
     si = g[sampler]["inputs"]
@@ -1033,6 +1099,20 @@ def upscale_graph(base: dict, up: UpscaleJob) -> dict:
     images = g[saver]["inputs"]["images"]
     del g[saver]
     return finish_graph(g, up, images)
+
+
+def continuity_frame(g: dict, up: UpscaleJob) -> None:
+    """The LoadImage that reads the take's first keyframe becomes an
+    H3LoadTakeFrame of the source take's upscaled last frame (set_continuity),
+    with the keyframe as its fallback."""
+    for v in g.values():
+        if v.get("class_type") == "LoadImage" and v["inputs"].get("image") == up.first_fallback:
+            v["class_type"] = "H3LoadTakeFrame"
+            v["inputs"] = {"project_root": up.root,
+                           "image_file": rel(up.root, up.first_from.paths.up_last),
+                           "fallback": up.first_fallback}
+            return
+    up.notes.append("no first-frame LoadImage to point at the previous upscale")
 
 
 def resample(g: dict, up: UpscaleJob, sampler: str) -> None:
@@ -1169,6 +1249,9 @@ def finish_graph(g: dict, up: UpscaleJob, images: list) -> dict:
         "images": images, "project_root": up.root, "source_mp4": rel(up.root, take.paths.mp4),
         "out_mp4": rel(up.root, take.paths.up_mp4), "fps": float((take.sidecar or {}).get("fps") or 24),
         "sidecar": rel(up.root, take.paths.up_sidecar), "encoder": up.encoder,
+        # the last frame at the size it was made: a continuity shot after this
+        # one starts its upscale from it
+        "last_frame": rel(up.root, take.paths.up_last),
         **up.save_inputs()}}
     if up.then_model and up.then_method == "seedvr2":
         # the re-sample's frames through SeedVR2 before they're saved
@@ -1388,6 +1471,8 @@ def settings_of(up: UpscaleJob) -> dict:
         d["quality"] = up.quality
     if up.window:
         d["window"] = [up.window, up.window_overlap]
+    if up.first_from is not None:
+        d["first_from"] = f"{up.first_from.shot} t{up.first_from.take:02d}"
     return d
 
 

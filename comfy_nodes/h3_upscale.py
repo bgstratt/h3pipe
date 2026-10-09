@@ -24,6 +24,12 @@ from the target's render graph; these are the pieces that graph doesn't have:
     H3PixelUpscale     the pixel method (any target): an upscale model
                        (RealESRGAN, UltraSharp, ...) over the frames a few at a
                        time, each batch resized straight to the target size
+    H3LoadTakeFrame    a picture read from the project when the graph RUNS (not
+                       when it is queued), else a fallback from ComfyUI's input
+                       folder: a continuity shot's upscale starts from the
+                       previous shot's upscaled last frame (H3SaveUpscale's
+                       `last_frame`), which exists once that upscale, queued
+                       before it, has run
 
 Paths are relative to `project_root` (the episode), like H3SaveShot's.
 """
@@ -797,6 +803,10 @@ class H3SaveUpscale:
             # post can be queued behind the upscale it is made from)
             "stamp_source": ("BOOLEAN", {"default": False}),
             "event": ("STRING", {"default": "h3pipe.upscale"}),
+            # the last frame as a PNG at the size it was made (before the
+            # delivery crop): what the next shot's upscale starts from when it
+            # continues this one (H3LoadTakeFrame)
+            "last_frame": ("STRING", {"default": ""}),
         }}
 
     RETURN_TYPES = ("STRING",)
@@ -807,7 +817,7 @@ class H3SaveUpscale:
 
     def save(self, images, project_root, source_mp4, out_mp4, fps, sidecar="", encoder="auto",
              width=0, height=0, fit="crop", quality="review", stamp_source=False,
-             event="h3pipe.upscale"):
+             event="h3pipe.upscale", last_frame=""):
         root = os.path.normpath(project_root)
         out = _abs(root, out_mp4)
         source = _abs(root, source_mp4)
@@ -832,6 +842,12 @@ class H3SaveUpscale:
         finally:
             if os.path.exists(picture):
                 os.remove(picture)
+        if ok and last_frame:
+            try:
+                save_frame(images[-1], _abs(root, last_frame))
+                notes.append(f"last frame kept ({os.path.basename(last_frame)})")
+            except Exception as exc:                        # the upscale itself is fine
+                notes.append(f"last frame not kept: {exc}")
         stem = os.path.basename(out)
         if sidecar:
             ms["total"] = sum(ms.values())
@@ -856,7 +872,57 @@ class H3SaveUpscale:
         return (f"{stem}: " + "; ".join(notes),)
 
 
+def save_frame(image: torch.Tensor, path: str) -> None:
+    """One IMAGE frame [H, W, 3] in 0..1 as a PNG, written atomically."""
+    from PIL import Image
+    arr = (image.clamp(0, 1).cpu().numpy() * 255.0 + 0.5).astype(np.uint8)
+    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+    tmp = path + ".tmp.png"
+    Image.fromarray(arr).save(tmp)
+    os.replace(tmp, path)
+
+
+class H3LoadTakeFrame:
+    """A picture from the project, read when the graph runs; `fallback` (a
+    name in ComfyUI's input folder) when it isn't there. A continuity shot's
+    upscale (h3upscale.continuity_frame) puts this in place of its first-frame
+    LoadImage: the previous shot's upscaled last frame, so the two upscales
+    meet on the same picture rather than on two re-samples of the low-res one
+    (a colour jump at the cut)."""
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {
+            "project_root": ("STRING", {"default": "path/to/project/ep01"}),
+            "image_file": ("STRING", {"default": "renders/sh010/sh010_t01.up_last.png"}),
+            "fallback": ("STRING", {"default": ""}),
+        }}
+
+    RETURN_TYPES = ("IMAGE", "MASK")
+    FUNCTION = "load"
+    CATEGORY = "H3/upscale"
+
+    @classmethod
+    def IS_CHANGED(cls, project_root, image_file, fallback):
+        path = _abs(project_root, image_file)
+        return f"{path}:{os.path.getmtime(path)}" if os.path.isfile(path) else f"fallback:{fallback}"
+
+    def load(self, project_root, image_file, fallback):
+        from PIL import Image
+        path = _abs(project_root, image_file)
+        if not os.path.isfile(path):
+            if not fallback:
+                raise FileNotFoundError(f"{image_file} isn't there yet, and there's no fallback")
+            import folder_paths
+            path = folder_paths.get_annotated_filepath(fallback)
+            print(f"[h3pipe] H3LoadTakeFrame: {image_file} not there yet; using {fallback}")
+        img = np.asarray(Image.open(path).convert("RGB")).astype(np.float32) / 255.0
+        t = torch.from_numpy(img)[None, ...]
+        return (t, torch.zeros((1, t.shape[1], t.shape[2]), dtype=torch.float32))
+
+
 NODE_CLASS_MAPPINGS = {
+    "H3LoadTakeFrame": H3LoadTakeFrame,
     "H3LoadTakeLatent": H3LoadTakeLatent,
     "H3LoadTakeVideo": H3LoadTakeVideo,
     "H3LoadVideo": H3LoadVideo,
@@ -868,6 +934,7 @@ NODE_CLASS_MAPPINGS = {
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
+    "H3LoadTakeFrame": "H3 Load Take Frame",
     "H3LoadTakeLatent": "H3 Load Take Latent",
     "H3LoadTakeVideo": "H3 Load Take Video",
     "H3LoadVideo": "H3 Load Video",
