@@ -72,9 +72,9 @@
 
   "downloads": {
     "_note": "Where to get each file this target names (docs/API.md 'Downloads').",
-    "flux-2-klein-base-9b-fp8.safetensors": {"folder": "diffusion_models", "url": "https://huggingface.co/black-forest-labs/FLUX.2-klein-base-9b-fp8/resolve/main/flux-2-klein-base-9b-fp8.safetensors", "source": "the LoRA author's workflow (and saved workflow image_flux2_klein_image_edit_9b_base.json)"},
+    "flux-2-klein-base-9b-fp8.safetensors": {"folder": "diffusion_models", "url": "https://huggingface.co/black-forest-labs/FLUX.2-klein-base-9b-fp8/resolve/main/flux-2-klein-base-9b-fp8.safetensors", "source": "saved workflow image_flux2_klein_image_edit_9b_base.json (properties.models); also the LoRA author's workflow"},
     "qwen_3_8b_fp8mixed.safetensors": {"folder": "text_encoders", "url": "https://huggingface.co/Comfy-Org/flux2-klein-9B/resolve/main/split_files/text_encoders/qwen_3_8b_fp8mixed.safetensors", "source": "ComfyUI template image_flux2_klein_9b_kv_image_edit.json (properties.models)"},
-    "flux2-vae.safetensors": {"folder": "vae", "url": "https://huggingface.co/Comfy-Org/flux2-dev/resolve/main/split_files/vae/flux2-vae.safetensors", "source": "ComfyUI's FLUX.2 templates"},
+    "flux2-vae.safetensors": {"folder": "vae", "url": "https://huggingface.co/Comfy-Org/flux2-dev/resolve/main/split_files/vae/flux2-vae.safetensors", "source": "ComfyUI template image_flux2_klein_9b_kv_image_edit.json (properties.models)"},
     "flux-2-klein-9B-360-erp-outpaint-lora_V1.safetensors": {"folder": "loras", "url": "https://huggingface.co/nomadoor/flux-2-klein-9B-360-erp-outpaint-lora/resolve/main/flux-2-klein-9B-360-erp-outpaint-lora_V1.safetensors", "source": "the Hugging Face repo nomadoor/flux-2-klein-9B-360-erp-outpaint-lora"}
   }
 }

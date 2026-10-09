@@ -249,7 +249,9 @@ def compile_episode(target, story: ir.Episode, series_cfg: dict, pass_: str,
                      "steps": p.steps, "model": p.model, "lora": p.lora,
                      "audio_policy": "generate", "master_track": ctx.recording, **extra},
         "subjects": {s: {"kind": e.get("kind", "character"), "sheet": e.get("sheet", ""),
-                         "voice_sample": e.get("voice_sample", "")}
+                         "voice_sample": e.get("voice_sample", ""),
+                         # a whole picture (a group, a supplied portrait): never cut
+                         **({"sheet_panels": 1} if int(e.get("sheet_panels") or 0) == 1 else {})}
                      for s, e in series_cfg["subjects"].items()},
         "shots": shots_out,
     }
@@ -321,7 +323,7 @@ def sheet_panels(doc: dict, shot: dict) -> list[dict]:
             continue
         kind = e.get("kind") or "character"
         p = {"subject": s, "kind": kind, "path": e["sheet"]}
-        if kind == "character":
+        if kind == "character" and int(e.get("sheet_panels") or 0) != 1:
             p["view"] = view
         out.append(p)
     if shot.get("background"):

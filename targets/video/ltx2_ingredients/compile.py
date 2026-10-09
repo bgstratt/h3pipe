@@ -158,7 +158,9 @@ def _panels(ctx: Ctx, shot: ir.Shot, loc_key: str) -> list[dict]:
         if s in ctx.absent:
             continue
         p = {"subject": s, "kind": e.get("kind", "character"), "path": e.get("sheet", "")}
-        if p["kind"] == "character":
+        # a whole picture (`sheet_panels: 1`: a group, a supplied portrait) has
+        # no view: it goes on the sheet as it is, never cut to one panel
+        if p["kind"] == "character" and int(e.get("sheet_panels") or 0) != 1:
             p["view"] = view
         out.append(p)
     loc = series_cfg["locations"][loc_key]
@@ -408,8 +410,8 @@ def sheet_spec(job, panels: list[dict], sheet: dict | None = None) -> dict:
     for p in panels:
         d = {"path": os.path.abspath(_abs(job.root, p["path"])),
              "fit": "cover" if p.get("kind") == "plate" else "figure"}
-        if p.get("kind") == "character":
-            d["crop"] = {"panels": n, "index": int(sheet["views"][p.get("view", "body")])}
+        if p.get("kind") == "character" and p.get("view"):
+            d["crop"] = {"panels": n, "index": int(sheet["views"][p["view"]])}
         out.append(d)
     return {"width": job.width, "height": job.height,
             "background": sheet.get("background", "black"),

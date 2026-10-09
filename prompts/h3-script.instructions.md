@@ -1665,6 +1665,9 @@ is what keeps H3 from drawing the same woman twice. Put where they are in the ac
   and outfit visible, since a person half-hidden in the reference is one the model invents.
 - **Describe each member** in `design`, with differences in age, build, hair and colour. A group
   of four identical gowns is read as one person four times.
+- It works on every target. H3 Ref2VA defines it in the headcount. LTX-2, Wan and H3 from
+  keyframes call it "N different people, each appearing once" in their prose, and their
+  reference sheets carry its picture whole, never cut to one panel.
 - A group can speak (`voice` is one voice for all of them: a murmur, children giggling).
 - Twelve is the limit. A crowd bigger than that belongs in `extras:`.
 

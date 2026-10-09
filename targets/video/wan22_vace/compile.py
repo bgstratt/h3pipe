@@ -79,8 +79,8 @@ def reference_spec(job, panels: list[dict]) -> dict:
     for p in panels:
         d = {"path": os.path.abspath(C.abs_path(job.root, p["path"])),
              "fit": "cover" if p.get("kind") == "plate" else "figure"}
-        if p.get("kind") == "character":
-            d["crop"] = {"panels": n, "index": int(REF["views"][p.get("view", "body")])}
+        if p.get("kind") == "character" and p.get("view"):       # a whole picture: uncut
+            d["crop"] = {"panels": n, "index": int(REF["views"][p["view"]])}
         out.append(d)
     return {"width": job.width, "height": job.height,
             "background": REF.get("background", "white"),

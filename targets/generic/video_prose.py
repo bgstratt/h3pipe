@@ -208,7 +208,7 @@ def panels(ctx: Ctx, shot: ir.Shot, loc_key: str) -> list[dict]:
         if s in ctx.absent:
             continue
         p = {"subject": s, "kind": e.get("kind", "character"), "path": e.get("sheet", "")}
-        if p["kind"] == "character":
+        if p["kind"] == "character" and int(e.get("sheet_panels") or 0) != 1:     # a whole picture: no view
             p["view"] = view
         out.append(p)
     loc = series_cfg["locations"][loc_key]
