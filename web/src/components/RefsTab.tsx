@@ -36,7 +36,7 @@ import { knobFields, knobsOf, takeSettings, type Knobs } from "../lib/refSetting
 import { useStatus } from "./hooks";
 import { useTargets } from "./Targets";
 import { OverrideFields } from "./OverrideFields";
-import { PassToggle } from "./ShotsTab";
+import { EpisodeSelect, PassToggle } from "./ShotsTab";
 import { Progress } from "./Thumb";
 import { DropSlot, SupplyPicker, UploadButton } from "./Upload";
 import { EditForm, editSourceText } from "./RefEdit";
@@ -480,9 +480,12 @@ function GenerateBar({ r }: { r: Ref }) {
   const importView = isChar ? view || null : null;
   const kind = isAudioRef(r) ? "audio" : "image";
   const [editing, setEditing] = useState(false);
-  // the live picture: a character's picked view, else the ref's file (one
-  // dropped in by hand has no take to select, and this is how it gets edited)
-  const live = isChar ? !!view && pickedOf(r, view) != null : r.exists;
+  // the live picture: a character's picked views (the form picks which;
+  // the view chosen here first), else the ref's file (one dropped in by hand
+  // has no take to select, and this is how it gets edited)
+  const pickedViews = isChar ? VIEWS.map((v) => v.view).filter((v) => pickedOf(r, v) != null) : [];
+  const live = isChar ? pickedViews.length > 0 : r.exists;
+  const editView = isChar ? (view && pickedViews.includes(view) ? view : pickedViews[0] ?? null) : null;
   return (
     <>
     <div className="h3-row h3-wrap h3-genbar">
@@ -527,7 +530,7 @@ function GenerateBar({ r }: { r: Ref }) {
         <button
           className={`h3-btn${editing ? " h3-on" : ""}`}
           disabled={!live}
-          title={live ? "Change the live picture with an edit model: the result is a new candidate" : isChar && !view ? "Choose a view to edit its live picture" : "Nothing is live yet: pick or import a picture first"}
+          title={live ? "Change the live picture with an edit model: the result is a new candidate" : isChar ? "No view is picked yet: pick or import one first" : "Nothing is live yet: pick or import a picture first"}
           onClick={() => setEditing(!editing)}
         >
           <i className="pi pi-pencil" /> Edit live…
@@ -546,7 +549,7 @@ function GenerateBar({ r }: { r: Ref }) {
         />
       )}
     </div>
-    {editing && live && <EditForm r={r} view={isChar ? view : null} take={null} onDone={() => setEditing(false)} />}
+    {editing && live && <EditForm r={r} view={editView} take={null} viewChoices={isChar ? pickedViews : undefined} onDone={() => setEditing(false)} />}
     </>
   );
 }
@@ -1015,13 +1018,14 @@ export function RefsTab() {
     <div className="h3-surface">
       <div className="h3-bar">
         <span className="h3-title">Refs</span>
-        {refs && <span className="h3-muted h3-small">{refs.length} in the series config</span>}
+        <EpisodeSelect compact />
+        {refs && <span className="h3-muted h3-small h3-nowrap">{refs.length} refs</span>}
         <span className="h3-grow" />
         {loading && <i className="pi pi-spin pi-spinner h3-muted" />}
         <PassToggle />
         <button className="h3-btn h3-icon" title="Refresh" disabled={!ep} onClick={() => void loadRefs()}><i className="pi pi-refresh" /></button>
       </div>
-      {!ep && <div className="h3-empty-state">Pick an episode in the h3 Shots tab.</div>}
+      {!ep && <div className="h3-empty-state">Pick an episode above.</div>}
       {ep && (
         <>
           <div className="h3-pad h3-col" style={{ gap: 4 }}>

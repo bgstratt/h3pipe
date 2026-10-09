@@ -19,7 +19,7 @@ import { targetBadges } from "../lib/targets";
 import { ZOOM_MAX, ZOOM_MIN, renderingTakes, statusKey, store, useApp } from "../store";
 import type { EpisodeStatus, Pass, ShotStatus, TakeSummary, TargetList } from "../types";
 import { aspectOf, useSize, useStatus } from "./hooks";
-import { PassToggle } from "./ShotsTab";
+import { EpisodeSelect, PassToggle } from "./ShotsTab";
 import { useTargets } from "./Targets";
 import { Badges, Progress, mediaStyle, useScrub } from "./Thumb";
 import { AudioBadge } from "./ClipAudio";
@@ -481,7 +481,7 @@ export function Timeline() {
   return (
     <div className="h3-surface h3-timeline" tabIndex={-1} ref={surfaceRef} onKeyDown={onKeyDown} style={{ outline: "none" }}>
       <div className="h3-bar">
-        <span className="h3-title h3-ell" title={ep ?? ""}>{st ? `${st.episode}` : "Timeline"}</span>
+        <EpisodeSelect compact />
         {st && <span className="h3-muted h3-small">{st.shots.length} shots · {fmtSeconds(total)}</span>}
         {st && prog.queued > 0 && (
           // P1: watching a pass is what this window is for, so the rate and the

@@ -27,7 +27,13 @@ export function editSourceText(e: RefEditRecord): string {
   return `${what}${e.view ? ` (${viewLabel(e.view)})` : ""}`;
 }
 
-export function EditForm({ r, view, take, onDone }: { r: Ref; view: string | null; take: number | null; onDone: () => void }) {
+export function EditForm({ r, view: view0, take, viewChoices, onDone }: {
+  r: Ref; view: string | null; take: number | null;
+  /** editing the live picture of a character: the picked views to choose from */
+  viewChoices?: string[];
+  onDone: () => void;
+}) {
+  const [view, setView] = useState<string | null>(view0);
   const { list } = useTargets();
   const refs = useApp((s) => (s.ep ? s.refs[s.ep] : null));
   const busy = useApp((s) => !!s.busy[`refgen|${r.id}`]);
@@ -67,6 +73,11 @@ export function EditForm({ r, view, take, onDone }: { r: Ref; view: string | nul
       <div className="h3-small">
         Edit <b>{editSourceText({ take, view, instruction: "" })}</b> of {r.name}: the result is a new candidate, and the original stays.
       </div>
+      {viewChoices && viewChoices.length > 1 && (
+        <select className="h3-in" value={view ?? ""} onChange={(e) => setView(e.target.value)} title="Which view's live picture to edit">
+          {viewChoices.map((v) => <option key={v} value={v}>{`${viewLabel(v)} (live)`}</option>)}
+        </select>
+      )}
       <textarea
         className="h3-in"
         rows={3}
@@ -121,7 +132,7 @@ export function EditForm({ r, view, take, onDone }: { r: Ref; view: string | nul
       {err && <div className="h3-err h3-small">{err}</div>}
       <div className="h3-row" style={{ gap: 6 }}>
         <button className="h3-btn h3-primary" disabled={busy || !text.trim() || tooMany} onClick={() => void submit()}>
-          <i className={busy ? "pi pi-spin pi-spinner" : "pi pi-pencil"} /> Edit {count > 1 ? `into ${count} takes` : ""}
+          <i className={busy ? "pi pi-spin pi-spinner" : "pi pi-send"} /> Queue Edit{count > 1 ? ` (${count} takes)` : ""}
         </button>
         <button className="h3-btn" onClick={onDone}>Cancel</button>
       </div>
