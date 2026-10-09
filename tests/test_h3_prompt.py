@@ -33,6 +33,8 @@ SERIES = {
         "cy": {"kind": "character", "name": "Cy", "design": "a small girl"},
         "rex": {"name": "Rex", "design": "a scruffy terrier"},      # no kind: a character
         "kettle": {"kind": "prop", "name": "the kettle", "design": "a dented kettle"},
+        "ladies": {"kind": "character", "name": "the ladies", "members": 4,
+                   "sheet_panels": 1, "design": "four women in Regency ball gowns"},
     },
 }
 
@@ -155,3 +157,38 @@ class WholePictureTest(unittest.TestCase):
         img = torch.zeros(1, 40, 80, 3)
         self.assertEqual(tuple(crop_panels(img, 1, [0]).shape), (1, 40, 80, 3))
         self.assertEqual(tuple(crop_panels(img, 4, [0]).shape), (1, 40, 20, 3))
+
+
+class GroupTest(unittest.TestCase):
+    """`members: N`: one picture of N different people, cast like a character
+    and counted as its members, so the extras are the same every shot."""
+
+    def test_the_group_is_defined_as_n_people_in_one_picture(self):
+        line = next(ln for ln in defs_of(["ada", "ladies"]) if ln.startswith("<Subject 2>"))
+        self.assertIn("a GROUP of four different people", line)
+        self.assertIn("Exactly four people appear in that image", line)
+        self.assertNotIn("ONE character", line)
+
+    def test_the_headcount_counts_the_members(self):
+        self.assertEqual(
+            headcount(["ada", "ladies"]),
+            "Exactly five characters appear in this shot: <Subject 1> and the four members "
+            "of <Subject 2>. Each appears exactly once, and none is a duplicate of another.")
+
+    def test_extras_drop_the_count_with_a_group_too(self):
+        line = headcount(["ada", "ladies"], extras="dancers on the floor")
+        self.assertTrue(line.startswith("<Subject 1> and the four members of <Subject 2> "
+                                        "each appear exactly once"), line)
+        self.assertIn("dancers on the floor", line)
+
+    def test_retention_keeps_every_member(self):
+        shot = {"_subjects": ["ladies"], "_policy": "generate", "_audio_ref": False,
+                "_retention": "", "dialogue": [], "action": "They watch.", "size": "wide",
+                "camera": "", "sound": "", "music": "", "extras": "", "text": "",
+                "plate": "kitchen"}
+        ret = build_prompt(shot, {"location_key": "kitchen"}, SERIES, panels=1)[2]
+        self.assertIn("each of the four people keeps", ret)
+        self.assertIn("the group stays exactly four people", ret)
+
+    def test_a_shot_without_a_group_is_unchanged(self):
+        self.assertIn("They are different characters", headcount(["ada", "bo"]))

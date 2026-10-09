@@ -28,6 +28,7 @@ Stdlib only.
 from __future__ import annotations
 
 from h3core import framing
+from h3core.series_config import members
 
 
 COUNT_WORDS = {2: "two", 3: "three", 4: "four", 5: "five", 6: "six"}
@@ -133,9 +134,21 @@ def build_prompt(shot: dict, seq: dict, series_cfg: dict, panels: int,
     # supplied portrait rather than a model sheet) is sent uncropped
     whole = ("a single reference image of ONE character, the whole picture of them. "
              "Exactly one person appears in that image.")
+    # A group (`members: N`) is the one subject whose picture SHOULD hold more
+    # than one figure. Said outright -- N different people, each once -- the
+    # model reads the extra figures as the group rather than as duplicates.
+    group = {s: members(book[s]) for s in subjects if members(book[s])}
     for s in subjects:
         e = book[s]
-        if e.get("kind", "character") == "character":
+        if s in group:
+            n = _count(group[s])
+            defs.append(
+                f"{subj[s]} is {e['name']}, defined by {pic[s]} — a single reference image of "
+                f"a GROUP of {n} different people, the whole picture of them. Exactly {n} "
+                f"people appear in that image, each a distinct individual, and none of them "
+                f"is ever drawn twice. Preserve the exact reference styling: "
+                f"{e['design']}.")
+        elif e.get("kind", "character") == "character":
             clause = whole if int(e.get("sheet_panels") or 0) == 1 else ref_clause
             defs.append(
                 f"{subj[s]} is {e['name']}, defined by {pic[s]} — {clause} "
@@ -162,7 +175,25 @@ def build_prompt(shot: dict, seq: dict, series_cfg: dict, panels: int,
               if book[s].get("kind", "character") == "character"]
     people += [book[s].get("name", s) for s in unref
                if book[s].get("kind", "character") == "character"]
-    if people and extras:
+    if group:
+        # each group counted as its members, so the total is the number of
+        # people actually in frame (extras aside)
+        parts = [f"the {_count(group[s])} members of {subj[s]}" if s in group else subj[s]
+                 for s in subjects if book[s].get("kind", "character") == "character"]
+        parts += [book[s].get("name", s) for s in unref
+                  if book[s].get("kind", "character") == "character"]
+        total = sum(group.get(s, 1) for s in subjects
+                    if book[s].get("kind", "character") == "character")
+        total += sum(1 for s in unref if book[s].get("kind", "character") == "character")
+        if extras:
+            defs.append(f"{_and(parts)} each appear exactly once in this shot. The other "
+                        f"people in frame are {extras}: unnamed background figures who must "
+                        f"look nothing like them and are never duplicates of them.")
+        else:
+            defs.append(f"Exactly {_count(total)} characters appear in this shot: "
+                        f"{_and(parts)}. Each appears exactly once, and none is a duplicate "
+                        f"of another.")
+    elif people and extras:
         defs.append(f"{_and(people)} {'appears' if len(people) == 1 else 'each appear'} "
                     f"exactly once in this shot. The other people in frame are {extras}: "
                     f"unnamed background figures who must look nothing like "
@@ -219,7 +250,14 @@ def build_prompt(shot: dict, seq: dict, series_cfg: dict, panels: int,
     ret = ["retention_analysis:"]
     for s in subjects:
         e = book[s]
-        if e.get("kind", "character") == "character":
+        if s in group:
+            ret.append(
+                f"{subj[s]} (appears in [Shot 1]): fully_preserved - each of the "
+                f"{_count(group[s])} people keeps the facial identity, hairstyle, body "
+                f"proportions, wardrobe and colors they have in {pic[s]}, and the group stays "
+                f"exactly {_count(group[s])} people, while allowing natural poses, positions "
+                f"and expressions.")
+        elif e.get("kind", "character") == "character":
             ret.append(
                 f"{subj[s]} (appears in [Shot 1]): fully_preserved - facial identity, "
                 f"hairstyle, body proportions, wardrobe and colors are retained from "

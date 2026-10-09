@@ -27,6 +27,7 @@ import re
 import targets as TG
 from h3core import framing, ir
 from h3core.ir import stable_seed
+from h3core.series_config import members
 from h3core.speech import RATE_CEILING, SPEECH_RATE, forced_rate, pacing, speech_seconds
 
 from .prompt import build_prompt
@@ -256,7 +257,11 @@ def plate_request(key: str, entry: dict) -> TG.RefRequest:
 
 def subject_request(sid: str, entry: dict, slot: str | None = None) -> TG.RefRequest:
     kind = entry.get("kind", "character")
-    if kind == "character":
+    if kind == "character" and members(entry):
+        # a group: one whole picture of all of them (krea2's group_prompt)
+        r = _refs("character")
+        label, views = "group picture", 1
+    elif kind == "character":
         r = _refs("character")
         label, views = r["kind"], int(r.get("views", 1))
     else:

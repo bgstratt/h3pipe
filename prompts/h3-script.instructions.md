@@ -203,6 +203,8 @@ which ones your ComfyUI can render.
   close-up. A picture you supply that is **one image** of the character (a portrait, a
   full-length shot on white) needs `"sheet_panels": 1`, or it is cut into quarters and the
   model gets a strip from its left edge. With it the picture is sent whole on H3 Ref2VA.
+- `members` makes a character a **group**: one picture of that many people (2–12), cast
+  like any character and costing one slot. See **A group: the same extras every shot**.
 - `of` makes the subject a **wardrobe variant** of another one — the same character in
   different clothes, the same prop in a different state. See **A wardrobe change is a new
   subject**.
@@ -1586,7 +1588,8 @@ plate.**
 That caps you at **three subjects on screen**, and a fourth is an error, not a silent drop.
 When a scene has four characters, stage one out of frame, split the shot, or describe the
 extra in the action text without referencing it. Crowds cost nothing that way — they just
-won't look the same from shot to shot.
+won't look the same from shot to shot, unless they are a group (one slot for all of them;
+see **A group: the same extras every shot**).
 
 A `(V.O.)` or `(O.S.)` speaker costs no slot, is never drawn, and needs no sheet — only a
 `voice` in the series config. A shot may have no `who:` at all: an establishing plate with narration
@@ -1610,6 +1613,40 @@ extras: one masked man in black tails, his back mostly to camera, and far-off da
 Eleanor circles a masked man in black tails, one hand in his, laughing as she turns around him.
 camera: arcs around Eleanor with small amplitude at slow speed
 ```
+
+### A group: the same extras every shot
+
+`extras:` people are invented fresh every shot, so they change sex, size and colour from
+cut to cut. When the same few people recur — the ladies watching from the edge of the
+ballroom, a family at the next table — make them one **group** subject: a character with
+`members`, whose picture holds all of them.
+
+```json
+"ladies": {
+  "kind": "character",
+  "name": "the ladies",
+  "members": 4,
+  "design": "four young women in Regency ball gowns: one in pale blue with dark curls, one in rose with a feathered headband, one in white with red hair, one in green silk with long gloves",
+  "sheet": "../refs/ladies/ladies.png"
+}
+```
+
+Cast it like anyone else (`who:` or `with:`). It takes one slot however many people it
+holds, which is how a shot gets more than three people who stay the same: two named
+characters and a group of four is three subjects. The prompt defines it as a picture of N
+different people and counts its members in the shot's headcount ("Exactly six characters
+appear in this shot: <Subject 1>, <Subject 2> and the four members of <Subject 3>"), which
+is what keeps H3 from drawing the same woman twice. Put where they are in the action text
+("the ladies watch from the far wall, soft in the background").
+
+- **The picture is one whole image** of all of them (`sheet_panels: 1` is implied; a group is
+  never a four-panel sheet). Generated, it is a row of everyone head to feet, apart and facing
+  the viewer, at the plate's size. A picture you supply works the same way; keep every face
+  and outfit visible, since a person half-hidden in the reference is one the model invents.
+- **Describe each member** in `design`, with differences in age, build, hair and colour. A group
+  of four identical gowns is read as one person four times.
+- A group can speak (`voice` is one voice for all of them: a murmur, children giggling).
+- Twelve is the limit. A crowd bigger than that belongs in `extras:`.
 
 Two habits go with it. **Keep people out of the plate**: a location described as "full of
 masked dancers" is rebuilt as figures that compete with the subject and feed the duplication

@@ -11,6 +11,8 @@ Stdlib only.
 """
 from __future__ import annotations
 
+from h3core.series_config import members
+
 # A character sheet is generated as four square views and stitched (a 4096x1024
 # canvas is far outside any image model's training distribution). The views,
 # in sheet order, left to right:
@@ -135,6 +137,19 @@ def object_prompt(design: str, look: str) -> str:
             f"{look}. Output 1024x1024 or larger.")
 
 
+def group_prompt(design: str, look: str, n: int, w: int = 1344, h: int = 768) -> str:
+    """A group subject's one picture (`members: N`): all N side by side,
+    whole, apart and facing the viewer, so every face and outfit is readable
+    and a video model can tell the people apart. A group picture is what keeps
+    the same extras from scene to scene; one figure hidden behind another is
+    one the model will invent fresh."""
+    return (f"A reference picture of a group of {n} different people standing side by "
+            f"side in one row on a plain flat neutral background, no scene and no props, "
+            f"every whole figure from head to feet inside the frame, a little space between "
+            f"each, nobody overlapping or hidden, all facing the viewer. {design}. Each of "
+            f"the {n} is a distinct individual. Drawn as {look}. Output {w}x{h}.")
+
+
 def plate_prompt(look: str, description: str) -> str:
     """A location's background plate."""
     return (f"A background plate drawn as {look}. An empty establishing "
@@ -147,6 +162,8 @@ def ref_prompt(target, req, series_cfg: dict) -> str:
     it. Values are read in the order the build always read them, so a series
     config missing one reports the same key."""
     e = req.entry
+    if members(e):
+        return group_prompt(e['design'], series_cfg['style']['look'], members(e))
     if req.shape == "plate":
         return plate_prompt(look=series_cfg['style']['look'], description=e['description'])
     if req.shape == "sheet":

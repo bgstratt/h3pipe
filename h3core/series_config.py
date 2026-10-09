@@ -31,6 +31,13 @@ What a variant inherits, and what it must not:
 to bind a base's dialogue to the variant on screen (h3core.story), and the refs
 listing uses it to give a variant its own sheet but no voice of its own
 (h3refs.series_refs).
+
+A character with `members: N` (2 or more) is a **group**: N distinct people in
+one reference picture -- the ladies at the edge of the ballroom, the same four
+every scene, instead of extras who change from shot to shot. It is cast like
+any character (`who:`/`with:`) and costs one reference slot however many people
+it holds. Its picture is one whole image, never a model sheet, so loading gives
+it `sheet_panels: 1` (`members()` reads the count).
 """
 
 from __future__ import annotations
@@ -59,7 +66,39 @@ def series_config_from(series_cfg: dict) -> dict:
         raise ValueError("series.json has no `subjects` block")
     series_cfg["subjects"] = _resolve_variants(series_cfg["subjects"])
     _check_required(series_cfg)
+    _check_groups(series_cfg["subjects"])
     return series_cfg
+
+
+MAX_MEMBERS = 12            # past this it is a crowd: write it as `extras:` or put it in the plate
+
+
+def members(entry: dict) -> int:
+    """How many people a group subject's picture holds (`members:`); 0 for
+    anyone else. Safe on an entry that hasn't been through the loader."""
+    n = entry.get("members") if isinstance(entry, dict) else None
+    return n if isinstance(n, int) and not isinstance(n, bool) and n >= 2 else 0
+
+
+def _check_groups(subjects: dict) -> None:
+    """A group (`members: N`) is a character whose picture is one whole image
+    of N people: give it `sheet_panels: 1`, and refuse what can't be one."""
+    for sid, e in subjects.items():
+        if "members" not in e:
+            continue
+        n = e["members"]
+        if not members(e) or n > MAX_MEMBERS:
+            raise ValueError(f"subject '{sid}' has `members: {n!r}`: a group is 2 to "
+                             f"{MAX_MEMBERS} people, given as a whole number. A bigger crowd "
+                             f"belongs in `extras:` or in the plate")
+        if e.get("kind", "character") != "character":
+            raise ValueError(f"subject '{sid}' is a {e['kind']} with `members`: only a "
+                             f"character can be a group of people")
+        if int(e.get("sheet_panels") or 1) != 1:
+            raise ValueError(f"subject '{sid}' is a group (`members: {n}`) with "
+                             f"`sheet_panels: {e['sheet_panels']}`: a group's picture is one "
+                             f"whole image of all {n}, never a model sheet")
+        e["sheet_panels"] = 1
 
 
 def _check_required(cfg: dict) -> None:

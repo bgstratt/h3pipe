@@ -77,9 +77,11 @@ function ImageModelBar() {
     const badge = readinessBadge(t?.readiness);
     const editor = src === "editor";
     const what = kind === "voices" ? voiceModeText(t) || "audio model" : imageModeText(t) || "image model";
+    // what the voice model can and can't do, kept on the label's mouseover
+    const notes = kind === "voices" && t ? `${targetLabel(list, t.id)}: ${voiceModeText(t)}.\n${voiceCapNotes(t).join("\n")}` : "";
     return (
       <span className="h3-row" style={{ gap: 4 }}>
-        <span className="h3-muted h3-small">{label}</span>
+        <span className="h3-muted h3-small" title={notes || undefined} style={notes ? { cursor: "help", textDecoration: "underline dotted" } : undefined}>{label}</span>
         <select
           className="h3-in"
           value={editor ? cur : ""}
@@ -98,7 +100,6 @@ function ImageModelBar() {
       </span>
     );
   };
-  const voiceTarget = findTarget(list, defaults.voices);
   const custom = (["refs", "keyframes", "voices"] as RefTargetKind[]).filter((k) => defaultOf(defaults, k).source === "editor");
   const WHAT: Record<RefTargetKind, string> = { refs: "refs", keyframes: "keyframes", voices: "voice samples" };
   return (
@@ -108,11 +109,6 @@ function ImageModelBar() {
         {row("keyframes", "Keyframes with:")}
         {row("voices", "Voices with:")}
       </div>
-      {voiceTarget && (
-        <span className="h3-small h3-muted" title={voiceCapNotes(voiceTarget).join(" ")}>
-          {targetLabel(list, voiceTarget.id)}: {voiceModeText(voiceTarget)}. {voiceCapNotes(voiceTarget)[0]}
-        </span>
-      )}
       {custom.map((k) => {
         const id = defaultOf(defaults, k).target;
         return (

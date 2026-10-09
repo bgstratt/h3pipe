@@ -29,6 +29,7 @@ import copy
 import re
 
 from h3core import framing as sizes   # this module has its own framing()
+from h3core.series_config import members
 from targets.image.krea2 import prompt as KP
 
 FACE_SIZES = ("cu", "mcu", "ecu")          # h3core/framing.py names; any spelling matches
@@ -134,6 +135,10 @@ def reference_intro(refs: list[dict], word: str = "image") -> str:
         if r.get("role") == "plate":
             out.append(f"{n.capitalize()} is the background plate: use its setting, layout, "
                        f"colours and light for the scene.")
+        elif r.get("members"):
+            out.append(f"{n.capitalize()} is {ref_label(r)}, a group of {r['members']} different "
+                       f"people: draw each of them exactly as in {n} (the same faces, bodies, "
+                       f"clothes and colours), each one once, posed for this shot.")
         else:
             what = "character" if r.get("kind", "character") == "character" else "object"
             out.append(f"{n.capitalize()} is {ref_label(r)}: draw this {what} exactly as in "
@@ -180,7 +185,11 @@ def keyframe_prompt(shot, seq, series_cfg: dict, which: str,
     plain = []
     for s in on_screen:
         design = ((book.get(s) or {}).get("design") or "").strip().rstrip(".")
-        if design:
+        n = members(book.get(s) or {})
+        if design and n:
+            parts.append(_sentence(f"{name_of(s)} are {n} different people, each drawn once: "
+                                   f"{design}"))
+        elif design:
             parts.append(_sentence(f"{name_of(s)} is {design}"))
         else:
             plain.append(name_of(s))

@@ -95,8 +95,9 @@ from targets.image.krea2.graph import (  # noqa: E402,F401
     REFS_WORKFLOW, SAMPLER, SAVER, SCHED, STEPS, UNET, VAE, VIEW_SIZE, _one, _splice_lora,
     build_graph, patch_workflow, take_graph)
 from targets.image.krea2.prompt import (  # noqa: E402,F401
-    VIEW_DESC, VIEW_TAGS, VIEW_TMPL, VIEWS, object_prompt, plate_prompt, sheet_prompt,
-    view_edit_prompt, view_prompt)
+    VIEW_DESC, VIEW_TAGS, VIEW_TMPL, VIEWS, group_prompt, object_prompt, plate_prompt,
+    sheet_prompt, view_edit_prompt, view_prompt)
+from h3core.series_config import members  # noqa: E402
 
 IMAGE_TARGET = TG.load_target(TG.DEFAULT_IMAGE_TARGET, "image")
 NEW_SEED_BITS = 53         # as h3jobs: a browser can hold these as numbers
@@ -207,7 +208,8 @@ class Ref:
 
     @property
     def has_views(self) -> bool:
-        return self.kind == "character"
+        # a group (`members: N`) is one whole picture of all of them, no views
+        return self.kind == "character" and not members(self.entry)
 
     @property
     def views(self) -> list[str | None]:
@@ -703,7 +705,9 @@ def _reference_parts(s: Series, sh, sq) -> list[dict]:
             continue
         kind = e.get("kind", "character")
         d = {"role": "subject", "subject": sid, "name": e.get("name", sid), "kind": kind}
-        if kind == "character":
+        if members(e):
+            d["members"] = members(e)
+        if kind == "character" and not members(e):
             p = picked_view_file(s, sid, view)
             if p:
                 d.update(view=view, path=p)
@@ -764,6 +768,8 @@ def built_prompt(s: Series, ref: Ref, view: str | None = None,
         return plate_prompt(s.look, e["description"]) if e.get("description") else None
     if not e.get("design"):
         return None
+    if ref.kind == "character" and members(e):
+        return group_prompt(e["design"], s.look, members(e), *gen_size(ref, target=target))
     if ref.kind == "character":
         if view is None:
             # a variant's hand-made-sheet description says where to start from
@@ -810,6 +816,8 @@ def gen_size(ref: Ref, view_size: tuple[int, int] | None = None, target=None,
     if ref.kind == "keyframe":
         return keyframe_size(s, ref, target, pass_)[:2]
     tpl = (target.spec.get("template") or {}) if target is not None else {}
+    if ref.kind == "character" and members(ref.entry):
+        return tuple(tpl.get("plate_size") or PLATE_SIZE)     # a row of people is wide
     if ref.kind == "character":
         return tuple(view_size or tpl.get("view_size") or VIEW_SIZE)
     if ref.kind == "location":
