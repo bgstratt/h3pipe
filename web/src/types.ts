@@ -1052,7 +1052,7 @@ export interface RefTake {
   audio?: string | null;
   /** "frame": a keyframe cut out of a video take (POST /h3pipe/refs/keyframe);
    * "from_take" (Phase 9c): a voice sample cut out of a take's sound */
-  source: "generated" | "imported" | "frame" | "from_take" | "edited";
+  source: "generated" | "imported" | "frame" | "from_take" | "edited" | "pano";
   /** where a "frame" or "from_take" take came from */
   from?: RefFrameSource;
   /** an "edited" take: the picture it started from and the instruction */
@@ -1227,6 +1227,8 @@ export interface Ref {
    */
   takes: RefTake[];
   picked: number | null;
+  /** P5, a location: its 360 panoramas (never picked into the plate) */
+  panos?: RefTake[];
   /** a character: its supplied sheet was cleared */
   sheet_cleared?: boolean;
   /**
@@ -1311,6 +1313,8 @@ export interface RefGenerateRequest {
   seconds?: number | null;
   /** an edit of a picture the ref already has (`prompt` is the instruction) */
   edit?: RefEditRequest | null;
+  /** P5: a 360 panorama of a location (its live plate, then `with`'s) */
+  pano?: { with?: string[] } | null;
 }
 
 /** A picture brought into an edit (image 2 onward): a ref's live picture, or one take. */

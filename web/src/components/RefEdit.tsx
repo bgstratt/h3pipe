@@ -37,6 +37,10 @@ export const RELIGHTS: { label: string; text: string }[] = [
   { label: "Rain", text: "Change only the weather: it is raining steadily, wet reflective surfaces, rain streaks in the air, a dark wet sky" },
 ];
 
+/** A soft picture (a view cut out of a 360, a small import) redrawn sharp:
+ * best on Rapid AIO with the picture alone. */
+export const SHARPEN = "Make this blurry low-resolution photograph sharp, detailed and clean at full resolution: the same camera, framing, layout and objects, with crisp natural textures and the same light";
+
 /** "t03 of Ada (side)" / "the live picture" */
 export function editSourceText(e: RefEditRecord): string {
   const what = e.take != null ? tn(e.take) : "the live picture";
@@ -99,6 +103,8 @@ export function EditForm({ r, view: view0, take, viewChoices, onDone }: {
         {RELIGHTS.map((x) => (
           <button key={x.label} className={`h3-btn h3-small${text === x.text ? " h3-on" : ""}`} title={x.text} onClick={() => setText(x.text)}>{x.label}</button>
         ))}
+        <span className="h3-small h3-muted" style={{ marginLeft: 6 }}>Fix:</span>
+        <button className={`h3-btn h3-small${text === SHARPEN ? " h3-on" : ""}`} title={`${SHARPEN}. Best on Rapid AIO, with no other picture brought in`} onClick={() => setText(SHARPEN)}>Sharpen</button>
       </div>
       <textarea
         className="h3-in"

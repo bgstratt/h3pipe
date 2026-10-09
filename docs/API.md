@@ -864,6 +864,23 @@ Queues one candidate per call. It returns without waiting, like `/render`.
 - The CLI is `h3.py refs <ep> --edit REF[:VIEW][:TAKE] --instruction "…"` (`--with`,
   `--as-typed`, `--target`, `--lora`, `--count`).
 
+**A 360 (P5, 2026-10-08).** `"pano": {"with": [location ids]}` on a location makes
+360 panoramas instead of a plate (`h3refs.plan_pano`):
+- **What goes in:** the live plate, then up to two more locations' plates, the most
+  important first.
+- **How it's made:** Qwen-Image 2.1 (`qwen_image_21`) with the
+  `pano360_qwen21_edit_v1.safetensors` LoRA at 1.0. The prompt is the LoRA's trigger
+  sentence plus the location's description, cut to one sentence of at most 35 words. The
+  text is encoded at 1088, and sampling starts from an empty 1536x768 latent: the
+  `latent: "empty"` value makes the target's switch skip the references' latent.
+- **Where it lands:** takes of the location's `pano` pseudo-view, listed as `panos`, with
+  `source: "pano"`. `PUT /refs/pick` refuses them (400): a 360 is never the plate.
+- **In the editor:** the 360 viewer aims a camera into one and saves the view through
+  `/refs/import` as an unpicked plate candidate of the location or one of its angles.
+  **Save and sharpen** then queues an edit of that candidate with the Sharpen preset, on
+  Rapid AIO when installed. A cut view holds only `width × fov/360` panorama pixels
+  across, so it comes out soft.
+
 ### `PUT /h3pipe/refs/pick`
 Body `{"ep", "ref", "view"?, "take"}`. Copies the take into place, stitching the
 sheet when all four views are picked. Returns the ref as `/refs` lists it. 409 if the

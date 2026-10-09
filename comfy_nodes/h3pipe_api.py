@@ -2267,6 +2267,9 @@ def post_refs_generate(ctx: Context, body):
             R.check_override_value("params", params)
         except R.RefError as e:
             raise ApiError(400, str(e))
+    pano = body.get("pano")
+    if pano is not None and not isinstance(pano, dict):
+        raise ApiError(400, 'pano must be {"with": [location ids]} or null')
     edit = body.get("edit")
     if edit is not None and not isinstance(edit, dict):
         raise ApiError(400, 'edit must be {"take": n or null, "with": [...], "wrap": bool} '
@@ -2278,8 +2281,8 @@ def post_refs_generate(ctx: Context, body):
                        steps=_opt_steps(body.get("steps")), note=_opt_str(body, "note") or "",
                        target=target or None, negative=negative, pass_=pass_,
                        seconds=seconds, edit=edit, cfg=cfg, size=size or None,
-                       params=params or None)
-    why = None if edit is not None else R.can_generate(s, ref)
+                       params=params or None, pano=pano)
+    why = None if (edit is not None or pano is not None) else R.can_generate(s, ref)
     if why:
         raise ApiError(400, why)
     try:

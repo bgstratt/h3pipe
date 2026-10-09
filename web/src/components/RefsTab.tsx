@@ -40,6 +40,7 @@ import { EpisodeSelect, PassToggle } from "./ShotsTab";
 import { Progress } from "./Thumb";
 import { DropSlot, SupplyPicker, UploadButton } from "./Upload";
 import { EditForm, editSourceText } from "./RefEdit";
+import { PanoSection } from "./PanoViewer";
 
 const FILTERS: { id: RefFilter; label: string; title: string }[] = [
   { id: "episode", label: "this episode", title: "Refs used by this episode's shots (this pass)" },
@@ -844,6 +845,7 @@ function RefDetail({ ep, r }: { ep: string; r: Ref }) {
         </div>
       )}
       {!isKeyframeRef(r) && <GenerateBar r={r} />}
+      {r.kind === "location" && <PanoSection ep={ep} r={r} />}
       {canGenerate(r) && (
         <details className="h3-ref-settings">
           <summary>Prompt and settings{r.override.fields.length ? ` (override: ${r.override.fields.join(", ")})` : ""}</summary>

@@ -457,11 +457,20 @@ def find_ref(s: Series, ref_id) -> Ref:
 # it, which `live_from` reports as None.
 SHEET_VIEW = "sheet"
 
+# P5: a location's 360 panoramas, a pseudo-view as SHEET_VIEW is for a
+# character: takes `<key>_pano_tNN.png` beside the plate's own, never picked
+# into the plate (a 2:1 equirectangular picture is no plate). The editor's 360
+# viewer aims a camera into one and saves that view as a plate candidate of the
+# location or one of its angles.
+PANO_VIEW = "pano"
+
 
 def check_view(ref: Ref, view, required: bool = False,
                allow_sheet: bool = False) -> str | None:
     """A view for this ref: one of VIEW_TAGS for a character, None otherwise.
     `allow_sheet` also takes SHEET_VIEW (a supplied whole sheet); see there."""
+    if view == PANO_VIEW and ref.kind == "location":
+        return view
     if view in (None, ""):
         if required and ref.has_views:
             raise RefError(f"{ref.id} is a character: give a view "
@@ -1387,6 +1396,9 @@ def pick_take(s: Series, ref: Ref, view: str | None, take: int,
     refs/voices/<id>.wav and the series config gains that line, through the
     Phase 9a save path (set_voice_sample); the result says `series_changed`."""
     view = check_view(ref, view, required=True, allow_sheet=True)
+    if view == PANO_VIEW:
+        raise RefError(f"a 360 isn't a plate: open {ref.id}'s 360 t{take:02d} and save a view "
+                       f"from it as a candidate")
     t = get_take(ref, view, take)
     if not os.path.isfile(t.paths.image):
         raise NotUsable(f"{ref.id}{' ' + view if view else ''} t{take:02d} has no file")
@@ -2135,6 +2147,8 @@ class GenRequest:
     seconds: float | None = None     # a voice ref's length (None: the audio target's default)
     size: str | None = None          # "WxH" (None: the override's, else the target's)
     params: dict | None = None       # TUNABLE_PARAMS (None: the override's, else the preset's)
+    # a 360 panorama of a location (plan_pano): {"with": [location ids]}
+    pano: dict | None = None
     # an edit of a picture this ref already has (plan_edit): {"take": n | None
     # (the live picture), "with": [{"ref", "view"?, "take"?}], "wrap": bool};
     # `prompt` is then the instruction
@@ -2233,6 +2247,8 @@ def plan_generate(s: Series, req: GenRequest, overrides: dict | None = None,
     ref = find_ref(s, req.ref)
     if req.edit is not None:
         return plan_edit(s, ref, req, overrides, rng, ready, defaults)
+    if req.pano is not None:
+        return plan_pano(s, ref, req, rng)
     why = can_generate(s, ref)
     if why:
         raise RefError(why)
@@ -2572,6 +2588,74 @@ def plan_edit(s: Series, ref: Ref, req: GenRequest, overrides: dict | None = Non
     return jobs
 
 
+PANO_TARGET = "qwen_image_21"
+PANO_LORA = "pano360_qwen21_edit_v1.safetensors"
+PANO_SIZE = (1536, 768)
+PANO_WORDS = 35             # the LoRA's card: a one-sentence scene of 15-35 words
+
+
+def pano_prompt(description: str) -> str:
+    """The pano360 LoRA's own wording: its trigger sentence, then the scene in
+    one sentence (the description's first, cut to PANO_WORDS words)."""
+    first = re.split(r"(?<=[.;])\s", description.strip(), maxsplit=1)[0].rstrip(".;")
+    words = first.split()
+    scene = " ".join(words[:PANO_WORDS])
+    return f"Transform this set of images into an equirectangular 360 panorama. Scene: {scene}."
+
+
+def plan_pano(s: Series, ref: Ref, req: GenRequest,
+              rng: random.Random | None = None) -> list[GenJob]:
+    """The jobs of a 360 panorama of location `ref`: its live plate, then the
+    live plates of `req.pano["with"]` (other angles of the same place, the most
+    important first), made one 2:1 equirectangular picture by the Qwen-Image
+    2.1 pano360 edit LoRA (PANO_LORA) on PANO_TARGET, sampled from an empty
+    latent at PANO_SIZE as its card says. Each lands as a take of the location's
+    PANO_VIEW; the editor's viewer cuts plate candidates out of it."""
+    if ref.kind != "location":
+        raise RefError(f"{ref.id} is not a location: only a place has a 360")
+    p = req.pano
+    if not isinstance(p, dict) or set(p) - {"with"}:
+        raise RefError('pano must be {"with": [location ids]}')
+    withs = p.get("with") or []
+    if not isinstance(withs, list) or not all(isinstance(x, str) for x in withs):
+        raise RefError("pano.with must be a list of location ids")
+    if not isinstance(req.count, int) or isinstance(req.count, bool) or not 1 <= req.count <= 16:
+        raise RefError("count must be a whole number from 1 to 16")
+    target = TG.load_target(req.target or PANO_TARGET, "image")
+    refs = [_picture_of(s, ref, None, None, "the 360's first picture")]
+    for lid in withs[:2]:                        # the LoRA reads 1-3 pictures
+        other = find_ref(s, lid if lid.startswith("location:") else f"location:{lid}")
+        refs.append(_picture_of(s, other, None, None, f"the 360's picture {len(refs) + 1}"))
+    if len(refs) > int(target.capabilities().get("max_refs") or 0):
+        raise RefError(f"{target.short} can't read {len(refs)} pictures")
+    desc = ref.entry.get("description") or ""
+    prompt = req.prompt.strip() if req.prompt else pano_prompt(desc)
+    preset = target.presets.get("final")
+    steps = int(req.steps or (preset.steps if preset is not None and preset.steps else STEPS))
+    cfg = float(req.cfg if req.cfg is not None
+                else (preset.extra.get("cfg", CFG) if preset is not None else CFG))
+    w, h = parse_override_size(req.size) if req.size else PANO_SIZE
+    vals = _preset_values(target)
+    # the card's settings: the text encoded at 1088, and an empty latent
+    # rather than the references' (qwen_image_21's patch_graph reads `latent`)
+    vals.update(resolution=1088, latent="empty")
+    loras = req.loras if req.loras is not None else [{"name": PANO_LORA, "strength": 1.0}]
+    rng = rng or random.SystemRandom()
+    record = {"take": None, "view": PANO_VIEW, "instruction": prompt, "wrap": False,
+              "with": [{"ref": r["ref"]} for r in refs[1:]], "pano": True}
+    jobs = []
+    for c in range(req.count):
+        seed, source = ((int(req.seed), "typed") if c == 0 and req.seed is not None
+                        else (rng.getrandbits(NEW_SEED_BITS), "new"))
+        jobs.append(GenJob(
+            ref=ref, view=PANO_VIEW, candidate=c, prompt=prompt, seed=seed, seed_source=source,
+            model=req.model or "", loras=[dict(lo) for lo in loras], steps=steps, cfg=cfg,
+            negative="", width=w, height=h, note=req.note or "360", target=target,
+            negative_source="none", values=dict(vals), references=[dict(r) for r in refs],
+            edit=dict(record)))
+    return jobs
+
+
 def reference_record(s: Series, r: dict) -> dict:
     """A reference image as a ref take's sidecar records it: its path relative
     to the episode and its sha1 (a composite's parts too; a composite not
@@ -2626,7 +2710,8 @@ def start_gen(s: Series, job: GenJob) -> RefTake:
                      width=None, height=None)
     return reserve_take(job.ref, job.view, {
         "status": "queued", "queued": T.now(), "ep": s.ep, "comfy_prompt_id": None,
-        "source": "edited" if job.edit else "generated", "seed": job.seed, "seed_source": job.seed_source,
+        "source": ("pano" if job.edit.get("pano") else "edited") if job.edit else "generated",
+        "seed": job.seed, "seed_source": job.seed_source,
         "prompt": job.prompt, "model": job.model, "loras": job.loras, "steps": job.steps,
         "cfg": job.cfg, "width": job.width, "height": job.height,
         "overrides": job.overridden, "override_stale": job.override_stale,
@@ -3574,6 +3659,9 @@ def ref_json(s: Series, ref: Ref, usage: dict | None = None,
     else:
         out["takes"] = [take_json(s.ep, ref, t) for t in list_takes(ref)]
         out["picked"] = picked_take(picks, ref.id)
+        if ref.kind == "location":
+            # P5: its 360 panoramas (PANO_VIEW), apart from the plate's candidates
+            out["panos"] = [take_json(s.ep, ref, t) for t in list_takes(ref, PANO_VIEW)]
         out["effective"] = effective(s, ref, None, ov_data, view_size, ready, defaults)
         if out["effective"]:
             out["prompt"] = out["effective"]["prompt"]
