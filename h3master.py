@@ -261,6 +261,7 @@ def continuity_rows(plan: Plan, recipe: dict, shots: dict, mode: str | None,
     for r in plan.rows:
         if r.take is None or r.status == "gap":
             continue
+        chain_rows(plan, r, by_take, remake)
         found = U.continuity_source(r.take, plan.root)
         if not found:
             continue
@@ -274,6 +275,27 @@ def continuity_rows(plan: Plan, recipe: dict, shots: dict, mode: str | None,
             if not (rec.get("recipe") or {}).get("first_from"):
                 remake(r, f"made again from {src_take.shot}'s upscaled last frame "
                           f"(it started from the low-res one)")
+
+
+def chain_rows(plan: Plan, r: Row, by_take: dict, remake) -> None:
+    """continuity_rows for a `continuous: latent` take (h3upscale.set_chain):
+    its upscale holds the previous take's upscaled latent tail. That upscale is
+    made again when it kept no latent (made before it was asked to), and this
+    one when it wasn't held (made before, or it ran before that latent
+    existed: its `chain_hold`)."""
+    src_take = U.chain_source(r.take, plan.root)
+    if src_take is None:
+        return
+    src = by_take.get((src_take.shot, src_take.take))
+    if (src is not None and src.status in ("ok", "kept") and not U.kept(src.take)
+            and not os.path.isfile(src_take.paths.up_latent)):
+        remake(src, f"made again keeping its latent, so {r.shot} can hold its tail")
+    if r.status in ("ok", "kept") and not U.kept(r.take):
+        rec = T.upscale_of(r.take) or {}
+        if not (rec.get("recipe") or {}).get("held_from"):
+            remake(r, f"made again holding {src_take.shot}'s upscaled tail")
+        elif not (rec.get("chain_hold") or {}).get("held"):
+            remake(r, f"made again: it ran before {src_take.shot}'s upscaled latent was there")
 
 
 def plan_row_post(plan: Plan, row: Row, post_shots: dict, conform: bool) -> None:
@@ -359,7 +381,8 @@ def in_order(rows: list, order: str = "cut") -> list:
         first.setdefault(load_key(r.job), i)
     out = sorted(rows, key=lambda r: first[load_key(r.job)])
     # a continuity shot's upscale reads the previous shot's upscaled last frame
-    # when it runs (h3upscale.set_continuity): it goes after that upscale
+    # when it runs (h3upscale.set_continuity), a latent chain's that shot's
+    # upscaled latent (set_chain): it goes after that upscale
     def key(take):
         return (take.shot, take.take) if take is not None else None
     moved = True
@@ -367,7 +390,7 @@ def in_order(rows: list, order: str = "cut") -> list:
         moved = False
         at = {key(getattr(r.job, "take", None)): i for i, r in enumerate(out)}
         for i, r in enumerate(out):
-            src = getattr(r.job, "first_from", None)
+            src = getattr(r.job, "first_from", None) or getattr(r.job, "held_from", None)
             j = at.get(key(src)) if src is not None else None
             if j is not None and j > i:
                 out.insert(j, out.pop(i))

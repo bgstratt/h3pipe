@@ -2168,13 +2168,6 @@ def chain_source(ep: str, shot: str, pass_: str) -> dict:
                      "sha1": T.file_sha1(t.paths.mp4)}, "latent": lat, "video": t.paths.mp4}
 
 
-def chain_record(ep: str, sidecar: str, held: dict) -> None:
-    """The take's sidecar (relative to the episode) records what it continued:
-    `continued_from` {shot, take, pass, sha1, via: latent | frames, overlap,
-    video_steps, audio_steps}."""
-    full = sidecar if os.path.isabs(sidecar) else os.path.join(ep, sidecar)
-    if os.path.isfile(full):
-        T.update_sidecar(full, continued_from=held)
 
 
 def continuity_at_start(ep: str, shot: str, pass_: str, sidecar: str = "") -> dict:

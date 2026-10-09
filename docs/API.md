@@ -285,9 +285,14 @@ Queues takes on ComfyUI's own queue and returns without waiting.
   `continuity_at_start` while that shot's take is in the request or still rendering. Its
   graph has H3ChainLatent before the sampler, which finds the previous take as it runs
   (`h3refs.chain_source`: its kept latent, else its last frames through the VAEs) and
-  records it in the take's sidecar (`continued_from`: `{shot, take, pass, via, overlap,
+  hands what it held to the saver, which records it in the take's sidecar when the job
+  ends (`continued_from`: `{shot, take, pass, via, overlap,
   video_steps, audio_steps}`), and H3ChainTrim before the saver. The sidecar's `hold` is
   the frames held; `length` is the take's own.
+- Its upscale (h3upscale.set_chain) holds the previous take's upscaled latent tail; the
+  upscale record's `recipe.held_from` names that take, and `chain_hold` (`{file, held,
+  why?, video_steps, ...}`) says whether it was held when it ran. An upscale whose next
+  shot in the cut is chained keeps `<stem>.up.latent.safetensors`.
 ```json
 {"queued": [{"shot": "sh020", "take": 3, "prompt_id": "…", "seed": "…",
              "seed_source": "new"}],

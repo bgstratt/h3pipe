@@ -807,6 +807,13 @@ class H3SaveUpscale:
             # delivery crop): what the next shot's upscale starts from when it
             # continues this one (H3LoadTakeFrame)
             "last_frame": ("STRING", {"default": ""}),
+            # the re-sampled latent, kept as `latent_file` when the next shot is
+            # `continuous: latent`: its upscale holds this one's tail
+            "latent": ("LATENT",),
+            "latent_file": ("STRING", {"default": ""}),
+            # a continuous: latent take's hold (H3ChainLatent's `record`, JSON):
+            # written into the record as `chain_hold`
+            "chain_hold": ("STRING", {"default": "", "forceInput": True}),
         }}
 
     RETURN_TYPES = ("STRING",)
@@ -817,7 +824,8 @@ class H3SaveUpscale:
 
     def save(self, images, project_root, source_mp4, out_mp4, fps, sidecar="", encoder="auto",
              width=0, height=0, fit="crop", quality="review", stamp_source=False,
-             event="h3pipe.upscale", last_frame=""):
+             event="h3pipe.upscale", last_frame="", latent=None, latent_file="",
+             chain_hold=""):
         root = os.path.normpath(project_root)
         out = _abs(root, out_mp4)
         source = _abs(root, source_mp4)
@@ -848,6 +856,12 @@ class H3SaveUpscale:
                 notes.append(f"last frame kept ({os.path.basename(last_frame)})")
             except Exception as exc:                        # the upscale itself is fine
                 notes.append(f"last frame not kept: {exc}")
+        if ok and latent is not None and latent_file:
+            try:
+                save_latent(latent, _abs(root, latent_file))
+                notes.append(f"latent kept ({os.path.basename(latent_file)})")
+            except Exception as exc:
+                notes.append(f"latent not kept: {exc}")
         stem = os.path.basename(out)
         if sidecar:
             ms["total"] = sum(ms.values())
@@ -866,6 +880,11 @@ class H3SaveUpscale:
                         save_notes=f"{stem}: " + "; ".join(notes))
             if stamp_source and ok:
                 data.update(_stamp(source))
+            if chain_hold:
+                try:
+                    data["chain_hold"] = json.loads(chain_hold)
+                except ValueError:
+                    pass
             _write_json_atomic(path, data)
             _notify(root, data.get("shot"), data.get("take"), "ok" if ok else "failed",
                     event or "h3pipe.upscale")

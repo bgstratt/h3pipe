@@ -2243,7 +2243,9 @@ def chain_latent(g: dict, job: Job, take: T.Take) -> None:
     render (found as it runs: a whole chain queues at once), fed the binding's
     video_vae / audio_vae to encode that take's frames when it kept no latent;
     then H3ChainTrim on what the saver is given (every consumer of it), which
-    cuts the held frames and their sound off again."""
+    cuts the held frames and their sound off again. The saver writes what was
+    held (the node's `record`) into the take's record as `continued_from`:
+    nothing writes it while the job runs, when the queuer may still be."""
     t = job_target(job)
     spec = (t.spec.get("continuous") or {}).get("latent")
     if not spec:
@@ -2263,11 +2265,12 @@ def chain_latent(g: dict, job: Job, take: T.Take) -> None:
         "latent": g[sampler]["inputs"][s["input"]], "project_root": job.root,
         "shot": job.shot["id"], "pass_": job.pass_, "overlap": hold,
         "hold_audio": bool(spec.get("hold_audio", True)),
-        "sidecar": os.path.relpath(take.paths.sidecar, job.root), "fps": float(job.fps),
-        **vaes}, "_meta": {"title": "Chain latent (continuous: latent)"}}
+        "fps": float(job.fps), **vaes},
+        "_meta": {"title": "Chain latent (continuous: latent)"}}
     g[sampler]["inputs"][s["input"]] = [nid, 0]
     saver = node_of(g, b.saver_class)
     si = g[saver]["inputs"]
+    si["chain"] = [nid, 1]
     images, audio = si.get("images"), si.get("audio")
     if not is_link(images):
         raise ValueError(f"{t.short}'s saver has no images input to trim")

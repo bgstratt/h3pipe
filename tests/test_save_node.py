@@ -111,16 +111,17 @@ class SaveNodeTest(unittest.TestCase):
 
     def test_input_is_last_optional_with_empty_default(self):
         """`sidecar` is the last optional *widget*, so saved workflows keep their
-        widget order; `latent` and `ref_info` after it are links (ref_info a
-        forced input), which have no widget value."""
+        widget order; `latent`, `ref_info` and `chain` after it are links
+        (ref_info and chain forced inputs), which have no widget value."""
         opt = N.H3SaveShot.INPUT_TYPES()["optional"]
         widgets = [k for k, v in opt.items() if v[0] in ("STRING", "INT", "FLOAT", "BOOLEAN")
                    and not (len(v) > 1 and v[1].get("forceInput"))]
         self.assertEqual(widgets[-1], "sidecar")
         self.assertEqual(opt["sidecar"], ("STRING", {"default": ""}))
-        self.assertEqual(list(opt)[-2:], ["latent", "ref_info"])
+        self.assertEqual(list(opt)[-3:], ["latent", "ref_info", "chain"])
         self.assertEqual(opt["latent"], ("LATENT",))
         self.assertEqual(opt["ref_info"], ("STRING", {"forceInput": True}))
+        self.assertEqual(opt["chain"], ("STRING", {"forceInput": True}))
 
     def test_loaded_refs_are_the_loaders_reference_lines(self):
         info = "\n".join(["shot 3 of 5   —   sh030", "subjects: ella, cindy   size: cu",

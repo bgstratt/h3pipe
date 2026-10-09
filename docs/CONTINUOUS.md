@@ -241,9 +241,26 @@ Built (2026-10-09). How it fits together:
 ### (c) `continuous: latent` upscales
 
 - [x] A held take's upscale re-samples the whole render and trims it (built with b).
-- [ ] An upscale keeps its re-sampled latent (`<take>.up.latent.safetensors`) when a
-      `continuous: latent` shot follows it.
-- [ ] A `continuous: latent` shot's re-sample holds its head on the previous shot's upscaled
-      latent tail, read when it runs; master queues sources first and remakes upscales
-      made before this.
-- [ ] Docs and tests; a live check on a Porchlights chain, stepping across each join.
+- [x] An upscale keeps its re-sampled latent (`<take>.up.latent.safetensors`) when a
+      `continuous: latent` shot follows it in the cut (h3upscale.set_chain `keep_latent`;
+      H3SaveUpscale's `latent` / `latent_file`).
+- [x] A `continuous: latent` shot's re-sample holds its head on the previous shot's upscaled
+      latent tail, read when it runs (`held_from`, from the take's `continued_from`;
+      H3ChainLatent with `missing_ok`, video only: H3HoldAudio holds the sound), and its
+      upscale record says whether it held (`chain_hold`); master queues sources first
+      (in_order) and remakes a source with no kept latent or a chain that wasn't held
+      (h3master.chain_rows). With a then-step (SeedVR2, a pixel model) after the
+      re-sample, each shot goes through it on its own: the join can drift a little there.
+- [x] Docs and tests (tests/test_latent_chain.py); a live check (scratch copy of ep02,
+      sh520 t02 -> sh530 t06, Porchlights' master recipe, 2026-10-09): sh520's upscale kept
+      its latent (57 MB), sh530's held 12 steps of it (`chain_hold.held`). The upscaled
+      join steps 9.15 held, 9.46 unheld, against sh520's own 9.2-10.9 frame to frame; the
+      colour either side is the same both ways. On this shot the hold changes little: a
+      chained take's latent already opens on the previous take's frames, and the re-sample
+      starts at step 7 of 8. It should count more where an upscale invents detail (faces,
+      texture). Also measured: queueing sh520 and sh530 at once, sh530 waited on and held
+      sh520's new take (join 8.9 against 9.3-10.5).
+- [x] Nothing writes a take's or an upscale's record while its job runs: the chain node's
+      `record` goes to the saver (H3SaveShot `chain`, H3SaveUpscale `chain_hold`). Writing
+      it from the node raced the queuer's prompt id on an idle ComfyUI and lost it (the
+      upscale then read as failed though it ran).

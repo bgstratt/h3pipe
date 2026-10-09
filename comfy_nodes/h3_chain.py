@@ -11,8 +11,9 @@ H3ChainLatent   between the empty joint AV latent (MiniMaxH3ReferenceToVideo's,
                 the graph RUNS, as the cut uses it then (h3refs.chain_source),
                 so a whole chain can be queued at once: its kept
                 <stem>.latent.safetensors, else its last frames and sound
-                through the VAEs. The take's sidecar records which
-                (`continued_from`).
+                through the VAEs. Its `record` output says which; the saver
+                writes it into the take's record (`continued_from`) when the
+                job ends.
 H3ChainTrim     after decoding: the held frames and their sound off the front.
 
 H3's grids (comfy_extras/nodes_minimax_h3.py; comfyui-obvpm-timeline frames.py):
@@ -26,6 +27,7 @@ frames of video alone popped a subject in.
 """
 from __future__ import annotations
 
+import json
 import logging
 import os
 
@@ -162,13 +164,19 @@ class H3ChainLatent:
         }, "optional": {
             "video_vae": ("VAE",),
             "audio_vae": ("VAE",),
-            "sidecar": ("STRING", {"default": ""}),
             "fps": ("FLOAT", {"default": 24.0, "min": 1.0, "max": 120.0}),
             "previous_latent": ("STRING", {"default": "", "tooltip": "Hold this latent "
                                 "instead of the previous shot's take in the cut"}),
+            # an upscale's hold (phase c): no previous_latent there, or one that
+            # doesn't fit, passes the latent through unheld (said in `record`)
+            "missing_ok": ("BOOLEAN", {"default": False}),
         }}
 
-    RETURN_TYPES = ("LATENT",)
+    # `record`: what was held, as JSON, for a saver to write when the job ends
+    # (an upscale's H3SaveUpscale `chain_hold`). Nothing here writes a record
+    # while the job runs: the queuer may still be writing it (its prompt id).
+    RETURN_TYPES = ("LATENT", "STRING")
+    RETURN_NAMES = ("latent", "record")
     FUNCTION = "chain"
     CATEGORY = "H3/continuity"
 
@@ -177,10 +185,13 @@ class H3ChainLatent:
         return float("nan")                              # the previous take may have changed
 
     def chain(self, latent, project_root, shot, pass_, overlap, hold_audio, video_vae=None,
-              audio_vae=None, sidecar="", fps=24.0, previous_latent=""):
+              audio_vae=None, fps=24.0, previous_latent="", missing_ok=False):
         ep = os.path.normpath(project_root)
         overlap, fps = int(overlap), float(fps)
         src, R = None, None
+        if missing_ok:
+            out, rec = upscale_hold(latent, ep, shot, previous_latent, overlap, hold_audio, fps)
+            return (out, json.dumps(rec))
         if previous_latent:
             lat = previous_latent if os.path.isabs(previous_latent) else \
                 os.path.join(ep, previous_latent)
@@ -212,15 +223,37 @@ class H3ChainLatent:
                                         audio_vae if hold_audio else None, fps)
             out, rec = chain(latent, v_old, a_old, overlap, hold_audio, fps)
             via = "frames"
-        if R is not None and sidecar:
-            R.chain_record(ep, sidecar, dict(src["from"], via=via, **rec))
         what = (f"{src['from']['shot']} {src['from']['pass']} t{src['from']['take']:02d}"
                 if src else os.path.basename(lat))
         log.info("h3pipe: %s: held %d video steps%s of %s (%d frames, from its %s)%s", shot,
                  rec["video_steps"],
                  f" and {rec['audio_steps']} audio steps" if rec["audio_steps"] else "",
                  what, overlap, via, f"; {why}" if why else "")
-        return (out,)
+        return (out, json.dumps(dict(src["from"] if src else {}, via=via, **rec)))
+
+
+def upscale_hold(latent, ep: str, shot: str, previous: str, overlap: int, hold_audio: bool,
+                 fps: float):
+    """A `continuous: latent` take's upscale: its re-sample's head held on the
+    previous take's upscaled latent (<stem>.up.latent.safetensors), so the two
+    upscales meet on one picture. Without it, or when it doesn't fit (another
+    scale), the latent goes on unheld. Returns (the latent, a record of which:
+    {file, held, why?, ...}, the upscale's `chain_hold`)."""
+    path = previous if os.path.isabs(previous) else os.path.join(ep, previous)
+    rec = {"file": os.path.basename(previous)}
+    out = latent
+    try:
+        if not previous or not os.path.isfile(path):
+            raise FileNotFoundError("the previous shot's upscale kept no latent")
+        v_old, a_old = kept_latent(path)
+        out, held = chain(latent, v_old, a_old, overlap, hold_audio, fps)
+        rec.update(held=True, **held)
+        log.info("h3pipe: %s: upscale held %d video steps of %s", shot, held["video_steps"],
+                 rec["file"])
+    except Exception as e:
+        rec.update(held=False, why=str(e))
+        log.warning("h3pipe: %s: upscale not held on %s (%s)", shot, rec["file"], e)
+    return out, rec
 
 
 class H3ChainTrim:

@@ -105,6 +105,12 @@ class UpscaleJob:
     # back to when that frame isn't there when it runs
     first_from: "T.Take | None" = None
     first_fallback: str = ""
+    # continuous: latent (phase c): the take this one's render held the tail
+    # of, whose upscaled latent this re-sample holds at its head (set_chain);
+    # and whether this upscale keeps its own re-sampled latent, because the
+    # next shot in the cut holds it
+    held_from: "T.Take | None" = None
+    keep_latent: bool = False
 
     def finish_inputs(self, grain: bool = True) -> dict:
         """The finishing inputs of an H3PixelUpscale node (`grain` False: before a
@@ -708,6 +714,7 @@ def plan_upscale(root: str, take: T.Take, *, encoder: str = "auto", precision: s
         else:
             set_window(job, window)
             set_continuity(job)
+            set_chain(job)
     return job
 
 
@@ -766,6 +773,56 @@ def set_continuity(job: UpscaleJob) -> None:
     job.notes.append(f"starts from {src.shot} t{src.take:02d}'s upscaled last frame"
                      + ("" if have else " (once that upscale has run; the low-res keyframe "
                                         "if it hasn't when this one runs)"))
+
+
+def chain_source(take: T.Take, root: str) -> "T.Take | None":
+    """The take a `continuous: latent` take held the tail of (its sidecar's
+    `hold` and `continued_from`), else None."""
+    sc = take.sidecar or {}
+    cf = sc.get("continued_from") or {}
+    if not sc.get("hold") or not cf.get("shot") or cf.get("take") is None:
+        return None
+    return T.get_take(root, cf.get("pass") or take.pass_, cf["shot"], int(cf["take"]))
+
+
+def holds_next(take: T.Take, root: str) -> str | None:
+    """The shot after this take's in its pass's cut when that shot is
+    `continuous: latent` (its built entry's `hold`), else None."""
+    import h3edit as E
+    try:
+        nxt = E.cut_neighbour(root, take.pass_, take.shot, 1)
+        if nxt is None:
+            return None
+        doc, i = J.find_shot(root, take.pass_, nxt.shot)
+    except (KeyError, FileNotFoundError, ValueError):
+        return None
+    return nxt.shot if doc["shots"][i].get("hold") else None
+
+
+def set_chain(job: UpscaleJob) -> None:
+    """continuous: latent, upscaled. A take whose render held the previous
+    take's tail re-samples with its head held on that take's upscaled latent
+    (`held_from`), read when it runs, so the two upscales meet on one picture;
+    re-sampling each on its own drew the join twice. And an upscale whose next
+    shot in the cut does that keeps its re-sampled latent (`keep_latent`)."""
+    if job.spec.get("mode", RESAMPLE) != RESAMPLE:
+        return
+    nxt = holds_next(job.take, job.root)
+    if nxt:
+        job.keep_latent = True
+        job.notes.append(f"keeps its latent: {nxt} holds its tail")
+    if not (job.take.sidecar or {}).get("hold"):
+        return
+    src = chain_source(job.take, job.root)
+    if src is None:
+        job.notes.append("its render held the shot before it, whose take is gone: the head "
+                         "isn't held")
+        return
+    job.held_from = src
+    have = os.path.isfile(src.paths.up_latent)
+    job.notes.append(f"holds {src.shot} t{src.take:02d}'s upscaled tail"
+                     + ("" if have else " (once that upscale has run keeping its latent; "
+                                        "unheld if it hasn't when this one runs)"))
 
 
 def take_seconds(take: T.Take) -> float:
@@ -1106,10 +1163,35 @@ def upscale_graph(base: dict, up: UpscaleJob) -> dict:
         g[sig]["inputs"][sspec["field"]] = ", ".join(vals[up.start_step:])
     else:
         resample(g, up, sampler)
+        if up.held_from is not None:
+            chain_hold(g, up, sampler)
 
     images = g[saver]["inputs"]["images"]
     del g[saver]
-    return finish_graph(g, up, images)
+    g = finish_graph(g, up, images)
+    if up.keep_latent:
+        g["up_save"]["inputs"].update(latent=[sampler, 0],
+                                      latent_file=rel(up.root, take.paths.up_latent))
+    if "up_chain" in g:
+        g["up_save"]["inputs"]["chain_hold"] = ["up_chain", 1]
+    return g
+
+
+def chain_hold(g: dict, up: UpscaleJob, sampler: str) -> None:
+    """A `continuous: latent` take's re-sample held, at its head, on the
+    previous take's upscaled latent (set_chain): H3ChainLatent in its upscale
+    mode (missing_ok) on the sampler's latent, video only (H3HoldAudio holds
+    the sound). Whether it held goes to the saver (`chain_hold`, linked in
+    upscale_graph), which writes it into the record when the job ends."""
+    si = g[sampler]["inputs"]
+    take = up.take
+    g["up_chain"] = {"class_type": "H3ChainLatent", "inputs": {
+        "latent": si["latent_image"], "project_root": up.root, "shot": take.shot,
+        "pass_": take.pass_, "overlap": int((take.sidecar or {})["hold"]), "hold_audio": False,
+        "previous_latent": rel(up.root, up.held_from.paths.up_latent), "missing_ok": True,
+        "fps": float((take.sidecar or {}).get("fps") or 24)},
+        "_meta": {"title": "Hold the previous upscale's tail (continuous: latent)"}}
+    si["latent_image"] = ["up_chain", 0]
 
 
 def continuity_frame(g: dict, up: UpscaleJob) -> None:
@@ -1484,6 +1566,8 @@ def settings_of(up: UpscaleJob) -> dict:
         d["window"] = [up.window, up.window_overlap]
     if up.first_from is not None:
         d["first_from"] = f"{up.first_from.shot} t{up.first_from.take:02d}"
+    if up.held_from is not None:
+        d["held_from"] = f"{up.held_from.shot} t{up.held_from.take:02d}"
     return d
 
 

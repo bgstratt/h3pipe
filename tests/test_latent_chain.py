@@ -104,6 +104,9 @@ class ChainBuildTest(unittest.TestCase):
         self.assertEqual(t["frames"], 39)
         # the latent the take keeps is the whole render: its tail is the take's
         self.assertEqual(saver["latent"], [sampler, 0])
+        # what was held reaches the record through the saver, at the end
+        self.assertEqual(saver["chain"], [chain[0], 1])
+        self.assertNotIn("sidecar", c)
         sc = json.load(open(take.paths.sidecar, encoding="utf-8"))
         self.assertEqual((sc["hold"], sc["length"]), (39, 102))
 
@@ -160,8 +163,8 @@ class ChainBuildTest(unittest.TestCase):
         self.assertFalse([e for e in out["errors"] if e["shot"] in ("sh080", "sh090")])
 
 
-class ChainStaleTest(unittest.TestCase):
-    """A latent take is stale `chain` when what the cut puts before it changed."""
+class _Episode(unittest.TestCase):
+    """A fresh build of the fixture, and finished takes made by hand."""
 
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
@@ -186,6 +189,11 @@ class ChainStaleTest(unittest.TestCase):
         return E.take_stale(self.root, "final", doc, doc["shots"][i], t.sidecar,
                             "minimax_h3_ref2va", {})
 
+
+
+class ChainStaleTest(_Episode):
+    """A latent take is stale `chain` when what the cut puts before it changed."""
+
     def test_another_take_or_a_re_render_before_it(self):
         a = self.take("sh070")
         held = {"shot": "sh070", "take": a.take, "pass": "final",
@@ -199,6 +207,79 @@ class ChainStaleTest(unittest.TestCase):
         self.assertNotIn("chain", self.stale(b))
         self.take("sh070")                               # a newer take: the cut uses it
         self.assertIn("chain", self.stale(b))
+
+
+class ChainUpscaleTest(_Episode):
+    """Phase c: a latent chain's upscales meet on one picture."""
+
+    def chained(self):
+        a = self.take("sh070")
+        open(a.paths.latent, "wb").close()
+        T.update_sidecar(a.paths.sidecar, latent=os.path.basename(a.paths.latent))
+        held = {"shot": "sh070", "take": a.take, "pass": "final", "via": "latent"}
+        b = self.take("sh080", continued_from=held)
+        open(b.paths.latent, "wb").close()
+        T.update_sidecar(b.paths.sidecar, latent=os.path.basename(b.paths.latent))
+        return (T.get_take(self.root, "final", "sh070", a.take),
+                T.get_take(self.root, "final", "sh080", b.take))
+
+    def graph(self, up):
+        import h3upscale as U
+        base, _ = J.resolve_workflow(None, J.WORKFLOW_NAME, None, prefer_repo=True)
+        return U.upscale_graph(base, up)
+
+    def test_the_source_keeps_its_latent_and_the_chain_holds_it(self):
+        import h3upscale as U
+        a, b = self.chained()
+        up_a = U.plan_upscale(self.root, a)
+        self.assertEqual(up_a.action, "upscale", up_a.why)
+        self.assertTrue(up_a.keep_latent)
+        self.assertIsNone(up_a.held_from)
+        save = self.graph(up_a)["up_save"]["inputs"]
+        self.assertTrue(save["latent_file"].endswith("sh070_t01.up.latent.safetensors"))
+        up_b = U.plan_upscale(self.root, b)
+        self.assertEqual(up_b.action, "upscale", up_b.why)
+        self.assertEqual((up_b.held_from.shot, up_b.held_from.take), ("sh070", a.take))
+        self.assertTrue(up_b.keep_latent)                # sh090 holds sh080 in turn
+        self.assertEqual(U.settings_of(up_b)["held_from"], "sh070 t01")
+        self.assertTrue(any("upscaled tail" in n for n in up_b.notes), up_b.notes)
+        g = self.graph(up_b)
+        sampler = J.node_of(g, "SamplerCustomAdvanced")
+        self.assertEqual(g[sampler]["inputs"]["latent_image"], ["up_chain", 0])
+        c = g["up_chain"]["inputs"]
+        self.assertEqual((c["overlap"], c["hold_audio"], c["missing_ok"]), (39, False, True))
+        self.assertTrue(c["previous_latent"].endswith("sh070_t01.up.latent.safetensors"))
+        self.assertEqual(g[c["latent"][0]]["class_type"], "H3HoldAudio")
+        self.assertNotIn("sidecar", c)              # nothing writes the record mid-job
+        self.assertEqual(g["up_save"]["inputs"]["chain_hold"], ["up_chain", 1])
+
+    def test_a_plain_shot_keeps_nothing_and_holds_nothing(self):
+        import h3upscale as U
+        t = self.take("sh040")
+        open(t.paths.latent, "wb").close()
+        T.update_sidecar(t.paths.sidecar, latent=os.path.basename(t.paths.latent))
+        up = U.plan_upscale(self.root, T.get_take(self.root, "final", "sh040", t.take))
+        self.assertEqual(up.action, "upscale", up.why)
+        self.assertFalse(up.keep_latent)
+        self.assertIsNone(up.held_from)
+        g = self.graph(up)
+        self.assertNotIn("latent_file", g["up_save"]["inputs"])
+        self.assertNotIn("up_chain", g)
+
+    def test_master_queues_the_source_first(self):
+        from types import SimpleNamespace
+        import h3master as M
+
+        def row(shot, src=None):
+            take = SimpleNamespace(shot=shot, take=1)
+            job = SimpleNamespace(take=take, first_from=None, held_from=src, method="latent",
+                                  target=SimpleNamespace(id="minimax_h3_ref2va"),
+                                  then_method="pixel", then_model="", seedvr2_model="",
+                                  pixel_model="")
+            return SimpleNamespace(job=job, shot=shot)
+        a = row("sh070")
+        b = row("sh080", src=a.job.take)
+        self.assertEqual([r.shot for r in M.in_order([b, a], "target")], ["sh070", "sh080"])
 
 
 try:
@@ -263,6 +344,28 @@ class ChainNodeTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.N.chain({"samples": _Nested((v_new, a_new))}, torch.ones(1, 4, 37, 6, 10),
                          None, 39, True)
+
+    def test_an_upscale_holds_or_says_why_not(self):
+        v_new, a_new = torch.zeros(1, 4, 42, 6, 10), torch.zeros(1, 8, 235)
+        with tempfile.TemporaryDirectory() as d:
+            lat = {"samples": _Nested((v_new, a_new))}
+            out, rec = self.N.upscale_hold(lat, d, "sh080", "a.up.latent.safetensors", 39,
+                                           False, 24.0)
+            self.assertIs(out, lat)
+            self.assertEqual((rec["held"], rec["file"]), (False, "a.up.latent.safetensors"))
+            open(os.path.join(d, "a.up.latent.safetensors"), "wb").close()
+            from unittest import mock
+            with mock.patch.object(self.N, "kept_latent",
+                                   return_value=(torch.ones(1, 4, 37, 6, 10), None)):
+                out, rec = self.N.upscale_hold(lat, d, "sh080", "a.up.latent.safetensors", 39,
+                                               False, 24.0)
+                node_out = self.N.H3ChainLatent().chain(lat, d, "sh080", "final", 39, False,
+                                                        previous_latent="a.up.latent.safetensors",
+                                                        missing_ok=True)
+            self.assertEqual(float(out["samples"].unbind()[0][:, :, :12].mean()), 1.0)
+            self.assertEqual((rec["held"], rec["video_steps"]), (True, 12))
+            self.assertTrue(json.loads(node_out[1])["held"])
+            self.assertEqual(os.listdir(d), ["a.up.latent.safetensors"])   # nothing written
 
     def test_the_trim_cuts_the_held_frames_and_their_sound(self):
         images = torch.arange(141, dtype=torch.float32).view(141, 1, 1, 1).expand(141, 2, 2, 3)

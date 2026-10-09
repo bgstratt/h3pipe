@@ -674,6 +674,15 @@ def loaded_refs(info: str) -> list[str]:
     return out
 
 
+def chain_record(text: str) -> dict | None:
+    """H3ChainLatent's `record` (JSON) as a dict, else None."""
+    try:
+        rec = json.loads(text) if text else None
+    except ValueError:
+        return None
+    return rec if isinstance(rec, dict) else None
+
+
 def _write_json_atomic(path: str, data) -> None:
     """Same bytes and atomicity as h3takes.write_json (not importable here):
     temp file in the same folder, then os.replace; LF, indent 2, trailing newline."""
@@ -798,6 +807,9 @@ class H3SaveShot:
                 # the loader's `info`: its reference lines (each picture, how
                 # it was cut, its size, its slot) go into the take's record
                 "ref_info": ("STRING", {"forceInput": True}),
+                # continuous: latent: what H3ChainLatent held (its `record`,
+                # JSON), written into the take's record as `continued_from`
+                "chain": ("STRING", {"forceInput": True}),
             },
         }
 
@@ -836,7 +848,8 @@ class H3SaveShot:
     # -- main --------------------------------------------------------------
 
     def save(self, images, shot_id, audio_policy, project_root, subfolder,
-             take, fps, save_frames, audio=None, sidecar="", latent=None, ref_info=""):
+             take, fps, save_frames, audio=None, sidecar="", latent=None, ref_info="",
+             chain=""):
         from PIL import Image
 
         safe = re.sub(r"[^A-Za-z0-9_.-]", "_", shot_id) or "shot"
@@ -935,7 +948,7 @@ class H3SaveShot:
                     frames=int(images.shape[0]), fps=float(fps),
                     mp4=os.path.basename(mp4) if mp4_ok else None,
                     thumb=thumb, strip=strip, save_ms=ms, latent=latent_file,
-                    loaded_refs=loaded_refs(ref_info))
+                    loaded_refs=loaded_refs(ref_info), continued_from=chain_record(chain))
             except Exception as exc:
                 notes.append(f"sidecar update failed: {exc}")
             else:
@@ -973,7 +986,8 @@ class H3SaveShot:
                         notes: list[str], *, stem: str, status: str, frames: int,
                         mp4, thumb, strip, fps: float | None = None,
                         save_ms: dict | None = None, latent: str | None = None,
-                        loaded_refs: list | None = None) -> None:
+                        loaded_refs: list | None = None,
+                        continued_from: dict | None = None) -> None:
         """Close the take's record: set the saver's fields, leave the rest alone.
 
         Warnings go into `notes` first, so they reach both save_notes and the
@@ -1009,6 +1023,9 @@ class H3SaveShot:
         if loaded_refs:
             # what the loader fed the model: each picture, how it was cut, its size
             data["loaded_refs"] = loaded_refs
+        if continued_from:
+            # continuous: latent: the take whose tail the render held
+            data["continued_from"] = continued_from
         if save_ms:
             # what this node spent, in milliseconds, per step (frames, audio,
             # mp4, thumb, strip, total). ComfyUI only reports the whole graph's

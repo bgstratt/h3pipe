@@ -394,6 +394,11 @@ The series config says how, once, in `upscale.master` (the **recipe**):
   shows as a colour jump at a cut that should be seamless. Every upscale keeps its last
   frame (`<take>.up_last.png`). The master queues a source before the shot that continues
   it, and makes either upscale again when it was made before this (never a Keep).
+- A **`continuous: latent` shot** does the same in latent space: its re-sample holds its
+  first frames on the previous shot's upscaled latent, which that upscale keeps
+  (`<take>.up.latent.safetensors`, about 60 MB for 5 s at 2x) only when the next shot in
+  the cut is such a shot. The master queues the source first and makes an upscale again
+  when the source kept no latent, or the chained shot wasn't held (it ran first).
 - A shot can have its own recipe over its target's (a dialogue close-up kept light, a wide
   given `detail: 1`, a shot SeedVR2 got wrong sent to the pixel method): the editor's
   Upscale dialog, **Choose for this run**, then **Save as sh020's recipe**.
@@ -1554,7 +1559,8 @@ between them:
    `continuous: first` opens the shot on the previous shot's last frame, so nothing
    re-poses (on H3 FL2VA, which the shot moves to by itself; see **Continuous shots**). Its
    upscale starts from the previous shot's upscaled last frame, so the two meet on one
-   picture.
+   picture. When the action itself runs across the cut (someone walking into the next
+   framing), `continuous: latent` carries the motion and sound too, on H3 Ref2VA.
 
 `h3.py check` warns about consecutive shots that do none of the first two and don't continue:
 the same people, the same plate, sizes less than two steps apart, the second not
