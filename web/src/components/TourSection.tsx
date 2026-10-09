@@ -6,11 +6,12 @@
 // a new spot, and its holds are full-size video frames.
 
 import { useMemo, useState } from "react";
-import { generateRef, loadRefs, refLabel, selectRefTake } from "../actions";
+import { generateRef, loadRefs, openImageCompare, refLabel, selectRefTake } from "../actions";
 import { api, host } from "../host";
 import { tn } from "../lib/format";
 import { useApp } from "../store";
-import type { Ref, RefTake } from "../types";
+import { TOUR_VIEW } from "../lib/refs";
+import type { Ref } from "../types";
 import { SHARPEN } from "./RefEdit";
 import { useTargets } from "./Targets";
 
@@ -26,20 +27,12 @@ const MOVES: { label: string; text: string }[] = [
 const SHARPEN_TARGET = "qwen_rapid_aio";
 
 export function TourSection({ ep, r }: { ep: string; r: Ref }) {
-  const refs = useApp((s) => s.refs[ep]);
-  const { list } = useTargets();
   const [move, setMove] = useState("");
   const [seconds, setSeconds] = useState(6);
   const [busy, setBusy] = useState(false);
   const [sel, setSel] = useState<number | null>(null);
   const tours = r.tours ?? [];
   const holds = r.tour_holds ?? [];
-  const master = r.of ?? r.id.replace(/^location:/, "");
-  const places = useMemo(
-    () => (refs ?? []).filter((x) => x.kind === "location" && (x.id === `location:${master}` || x.of === master)),
-    [refs, master],
-  );
-  const [dest, setDest] = useState(r.id);
   const hold = holds.find((t) => t.take === sel);
   const running = tours.filter((t) => t.status === "queued").length;
 
@@ -51,28 +44,6 @@ export function TourSection({ ep, r }: { ep: string; r: Ref }) {
       await loadRefs(ep);
     } catch (e) {
       host().toast("error", "The tour didn't queue", e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const use = async (t: RefTake, sharpen: boolean) => {
-    setBusy(true);
-    try {
-      const made = await api().refsCopyTake({ ep, ref: r.id, view: "tour", take: t.take, to: dest });
-      host().toast("success", `${refLabel(dest, null)}: ${tn(made.take)}`, `from tour hold ${tn(t.take)}; pick it to make it the plate`);
-      await loadRefs(ep);
-      selectRefTake(dest, null, made.take);
-      if (sharpen) {
-        const rapid = list?.targets.some((x) => x.id === SHARPEN_TARGET);
-        await generateRef({
-          ref: dest, view: null, count: 1, seed_mode: "new", seed: null, prompt: SHARPEN, model: null,
-          loras: null, steps: null, note: "sharpen a tour hold", target: rapid ? SHARPEN_TARGET : null,
-          edit: { take: made.take, with: [], wrap: true },
-        });
-      }
-    } catch (e) {
-      host().toast("error", "Couldn't use the hold", e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }
@@ -113,8 +84,9 @@ export function TourSection({ ep, r }: { ep: string; r: Ref }) {
               key={t.take}
               className={`h3-pano-thumb${sel === t.take ? " h3-on" : ""}`}
               disabled={t.status !== "ok" || !t.image}
-              title={`${tn(t.take)}${t.note ? `: ${t.note}` : ""}`}
+              title={`${tn(t.take)}${t.note ? `: ${t.note}` : ""}\nclick: select · double-click: open in the viewer`}
               onClick={() => setSel(sel === t.take ? null : t.take)}
+              onDoubleClick={() => openImageCompare(r.id, TOUR_VIEW, t.take)}
               style={{
                 width: 112, height: 64, padding: 0,
                 border: sel === t.take ? "2px solid var(--h3-accent, #4af)" : "1px solid var(--h3-border, #444)",
@@ -126,20 +98,59 @@ export function TourSection({ ep, r }: { ep: string; r: Ref }) {
           ))}
         </div>
       )}
-      {hold && (
-        <div className="h3-row h3-wrap" style={{ gap: 6 }}>
-          <span className="h3-small h3-muted">Use hold {tn(hold.take)} for</span>
-          <select className="h3-in" value={dest} onChange={(e) => setDest(e.target.value)} title="The location, or an angle of it, the hold becomes a plate candidate of. To make a new angle, add it to series.json with `of` first.">
-            {places.map((x) => <option key={x.id} value={x.id}>{`${x.name}${x.of ? " (angle)" : ""}`}</option>)}
-          </select>
-          <button className="h3-btn" disabled={busy} title="Copy the hold in as a new candidate (not picked)" onClick={() => void use(hold, false)}>
-            <i className="pi pi-copy" /> Use
-          </button>
-          <button className="h3-btn" disabled={busy} title="Copy it in, then queue the Sharpen edit on it (Rapid AIO when installed)" onClick={() => void use(hold, true)}>
-            <i className="pi pi-sparkles" /> Use and sharpen
-          </button>
-        </div>
-      )}
+      {hold && <HoldUseBar ep={ep} r={r} take={hold.take} />}
+    </div>
+  );
+}
+
+/**
+ * Use a tour hold for the location or one of its angles (POST
+ * /h3pipe/refs/copy-take): a new plate candidate, optionally sharpened. Shared
+ * by the Tour section and the viewer (a hold is never picked where it is).
+ */
+export function HoldUseBar({ ep, r, take }: { ep: string; r: Ref; take: number }) {
+  const refs = useApp((s) => s.refs[ep]);
+  const { list } = useTargets();
+  const [busy, setBusy] = useState(false);
+  const master = r.of ?? r.id.replace(/^location:/, "");
+  const places = useMemo(
+    () => (refs ?? []).filter((x) => x.kind === "location" && (x.id === `location:${master}` || x.of === master)),
+    [refs, master],
+  );
+  const [dest, setDest] = useState(r.id);
+  const use = async (sharpen: boolean) => {
+    setBusy(true);
+    try {
+      const made = await api().refsCopyTake({ ep, ref: r.id, view: TOUR_VIEW, take, to: dest });
+      host().toast("success", `${refLabel(dest, null)}: ${tn(made.take)}`, `from tour hold ${tn(take)}; pick it to make it the plate`);
+      await loadRefs(ep);
+      selectRefTake(dest, null, made.take);
+      if (sharpen) {
+        const rapid = list?.targets.some((x) => x.id === SHARPEN_TARGET);
+        await generateRef({
+          ref: dest, view: null, count: 1, seed_mode: "new", seed: null, prompt: SHARPEN, model: null,
+          loras: null, steps: null, note: "sharpen a tour hold", target: rapid ? SHARPEN_TARGET : null,
+          edit: { take: made.take, with: [], wrap: true },
+        });
+      }
+    } catch (e) {
+      host().toast("error", "Couldn't use the hold", e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="h3-row h3-wrap" style={{ gap: 6 }}>
+      <span className="h3-small h3-muted">Use hold {tn(take)} for</span>
+      <select className="h3-in" value={dest} onChange={(e) => setDest(e.target.value)} title="The location, or an angle of it, the hold becomes a plate candidate of. To make a new angle, add it to series.json with `of` first.">
+        {places.map((x) => <option key={x.id} value={x.id}>{`${x.name}${x.of ? " (angle)" : ""}`}</option>)}
+      </select>
+      <button className="h3-btn h3-primary" disabled={busy} title="Copy the hold in as a new candidate (not picked)" onClick={() => void use(false)}>
+        <i className={busy ? "pi pi-spin pi-spinner" : "pi pi-copy"} /> Use
+      </button>
+      <button className="h3-btn" disabled={busy} title="Copy it in, then queue the Sharpen edit on it (Rapid AIO when installed)" onClick={() => void use(true)}>
+        <i className="pi pi-sparkles" /> Use and sharpen
+      </button>
     </div>
   );
 }

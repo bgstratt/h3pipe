@@ -43,3 +43,14 @@ describe("360 view", () => {
     expect(viewDetail({ yaw: 0, pitch: 0, fov: 60 }, 1344, 1536)).toBeCloseTo(256 / 1344, 3);
   });
 });
+
+describe("a location's 360s and tour holds in the viewer", () => {
+  it("takesOf serves them by their pseudo-view, apart from the plate's candidates", async () => {
+    const { takesOf, viewLabel } = await import("../src/lib/refs");
+    const r = { takes: [{ take: 1 }], panos: [{ take: 2 }], tour_holds: [{ take: 3 }, { take: 4 }] } as never;
+    expect(takesOf(r, null).map((t) => t.take)).toEqual([1]);
+    expect(takesOf(r, "pano").map((t) => t.take)).toEqual([2]);
+    expect(takesOf(r, "tour").map((t) => t.take)).toEqual([3, 4]);
+    expect(viewLabel("tour")).toBe("tour holds");
+  });
+});
