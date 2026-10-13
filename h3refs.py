@@ -2113,7 +2113,27 @@ def refresh_continuity(s: Series, pass_: str, shots=None, dry_run: bool = False)
             out["live"].pop(shot, None)
             out["errors"].append({"shot": shot, "error": str(e)})
     chains_before_render(s, pass_, batch, out)
+    hold_behind_held(out)
     return out
+
+
+def hold_behind_held(out: dict) -> None:
+    """A shot waiting on a take to come in this run (`wait` with no `take`)
+    from a shot held here can't start either: it would continue a take that
+    never comes. It's held too, saying so, and so on down the chain."""
+    held = {e["shot"] for e in out["errors"]}
+    changed = True
+    while changed:
+        changed = False
+        for w in list(out["wait"]):
+            if w.get("take") or w["after"] not in held or w["shot"] in held:
+                continue
+            out["wait"].remove(w)
+            out["live"].pop(w["shot"], None)
+            out["errors"].append({"shot": w["shot"], "error": f"it continues {w['after']}, which "
+                                  f"can't render in this run: get {w['after']} going first"})
+            held.add(w["shot"])
+            changed = True
 
 
 def chains_before_render(s: Series, pass_: str, batch: set | None, out: dict) -> None:

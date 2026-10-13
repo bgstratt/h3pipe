@@ -161,6 +161,19 @@ class ChainBuildTest(unittest.TestCase):
         waits = {w["shot"]: w for w in out["wait"] if w.get("chain")}
         self.assertEqual(waits["sh080"]["after"], "sh070")
         self.assertFalse([e for e in out["errors"] if e["shot"] in ("sh080", "sh090")])
+        # queued with sh080 but not sh070: sh080 can't start, so nor can sh090
+        # behind it (it would wait on a take that never comes)
+        out = R.refresh_continuity(s, "proxy", {"sh080", "sh090"}, dry_run=True)
+        self.assertEqual(set(out["live"]), set())
+        why = {e["shot"]: e["error"] for e in out["errors"]}
+        self.assertIn("it continues sh080", why["sh090"])
+        self.assertFalse([w for w in out["wait"] if w["shot"] == "sh090"])
+
+    def test_one_waiting_on_a_take_still_rendering_isnt_held(self):
+        out = {"live": {"b": {"after": "a"}}, "errors": [{"shot": "a", "error": "x"}],
+               "wait": [{"shot": "b", "after": "a", "take": 3}], "cut": []}
+        R.hold_behind_held(out)
+        self.assertEqual([e["shot"] for e in out["errors"]], ["a"])   # a's t03 is coming
 
 
 class _Episode(unittest.TestCase):
